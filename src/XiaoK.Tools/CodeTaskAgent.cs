@@ -80,8 +80,7 @@ public sealed class CodeTaskAgent
                 return await FailAsync(snapshot, "本地模型没有生成可应用的文件修改；原项目未修改。", "NO_PATCH_GENERATED");
 
             var diff = await snapshot.ApplyAndFormatDiffAsync(
-                changes.Select(x => (RelativePath: x.Path, Content: x.Content)).ToArray(),
-                MaximumGeneratedCharacters, MaximumDisplayedDiffCharacters, cancellationToken);
+                changes, MaximumGeneratedCharacters, MaximumDisplayedDiffCharacters, cancellationToken);
             await snapshot.WriteStateAsync("awaiting_approval", CancellationToken.None);
             return new(true,
                 $"隔离编程任务已生成待审阅修改。任务编号：{snapshot.TaskId:N}\n隔离工作区：{snapshot.WorkspacePath}\n原项目未修改；没有运行命令、联网或合并。请检查下方差异，之后再决定是否手动应用。",
@@ -160,7 +159,7 @@ public sealed class CodeTaskAgent
             if (content.Contains('\0')) throw new InvalidDataException("补丁包含空字符；已拒绝。");
             total = checked(total + Encoding.UTF8.GetByteCount(content));
             if (total > MaximumGeneratedCharacters) throw new InvalidDataException("补丁超过大小限制；已拒绝。");
-            if (!string.Equals(content, original.Content, StringComparison.Ordinal)) result.Add(new(path, content));
+            if (!string.Equals(content, original.Content, StringComparison.Ordinal)) result.Add(new(path, content, original.Sha256));
         }
         return result;
     }
@@ -188,7 +187,7 @@ public sealed class CodeTaskAgent
 }
 
 internal sealed record CodeTextCandidate(string RelativePath, int CharacterCount, string Sha256);
-internal sealed record CodeFileContent(string Path, string Content);
+internal sealed record CodeFileContent(string Path, string Content, string Sha256);
 
 internal sealed class CodeWorkspaceSnapshot
 {
@@ -225,13 +224,16 @@ internal sealed class CodeWorkspaceSnapshot
     private const int MaximumRetainedTasks = 5;
     private readonly List<string> _relativeFiles;
 
-    private CodeWorkspaceSnapshot(string taskId, string taskRoot, string baselinePath, string workspacePath, string projectPath, List<string> relativeFiles)
+    private CodeWorkspaceSnapshot(string taskId, string taskRoot, string baselinePath, string workspacePath,
+        string projectPath, string baselineBoundary, string workspaceBoundary, List<string> relativeFiles)
     {
         TaskId = taskId;
         TaskRoot = taskRoot;
         BaselinePath = baselinePath;
         WorkspacePath = workspacePath;
         ProjectPath = projectPath;
+        _baselineBoundary = baselineBoundary;
+        _workspaceBoundary = workspaceBoundary;
         CreatedAtUtc = DateTimeOffset.UtcNow;
         _relativeFiles = relativeFiles;
     }
@@ -242,6 +244,8 @@ internal sealed class CodeWorkspaceSnapshot
     public string WorkspacePath { get; }
     public string ProjectPath { get; }
     public DateTimeOffset CreatedAtUtc { get; }
+    private readonly string _baselineBoundary;
+    private readonly string _workspaceBoundary;
 
     public static CodeWorkspaceSnapshot Create(string projectRoot, string workspaceRoot, string? repositoryRoot, CancellationToken token)
     {
@@ -274,7 +278,8 @@ internal sealed class CodeWorkspaceSnapshot
             if (files.Count == 0) throw new InvalidDataException("所选项目没有可复制的普通文件；请检查目录权限或文件类型。");
             var baselineBoundary = GetCanonicalDirectoryPath(baseline);
             CopyTree(baseline, working, null, token, baselineBoundary);
-            return new(taskId, taskRoot, baseline, working, project, files);
+            var workspaceBoundary = GetCanonicalDirectoryPath(working);
+            return new(taskId, taskRoot, baseline, working, project, baselineBoundary, workspaceBoundary, files);
         }
         catch
         {
@@ -292,10 +297,8 @@ internal sealed class CodeWorkspaceSnapshot
             token.ThrowIfCancellationRequested();
             var extension = Path.GetExtension(relative);
             if (!TextExtensions.Contains(extension)) continue;
-            var path = ResolveWithin(BaselinePath, relative);
-            var info = new FileInfo(path);
-            if (info.Length > MaximumReadableFileBytes) continue;
-            var bytes = File.ReadAllBytes(path);
+            var bytes = ReadSnapshotFile(relative, MaximumReadableFileBytes);
+            if (bytes is null) continue;
             inventoryBytes += bytes.Length;
             if (inventoryBytes > MaximumTextInventoryBytes) throw new InvalidDataException("可读文本文件总量超过首版扫描上限。");
             if (bytes.AsSpan().Contains((byte)0)) continue;
@@ -314,12 +317,13 @@ internal sealed class CodeWorkspaceSnapshot
         {
             token.ThrowIfCancellationRequested();
             if (!byPath.TryGetValue(relative, out var candidate)) throw new InvalidDataException("所选文件不在安全清单内。");
-            var bytes = File.ReadAllBytes(ResolveWithin(BaselinePath, candidate.RelativePath));
+            var bytes = ReadSnapshotFile(candidate.RelativePath, MaximumReadableFileBytes)
+                ?? throw new InvalidDataException("所选基线文件超过读取限制；未发送给模型。");
             if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(candidate.Sha256)))
                 throw new IOException("隔离基线文件在读取期间发生变化；已停止任务。");
             var text = DecodeText(bytes);
             if (text is null || ContainsLikelyCredential(text)) throw new InvalidDataException("选中文件编码不受支持或包含疑似凭证；未发送给模型。");
-            result.Add(new(candidate.RelativePath, text));
+            result.Add(new(candidate.RelativePath, text, candidate.Sha256));
         }
         return result;
     }
@@ -333,33 +337,54 @@ internal sealed class CodeWorkspaceSnapshot
         File.Move(temporary, path, overwrite: true);
     }
 
-    public async Task<string> ApplyAndFormatDiffAsync(IReadOnlyList<(string RelativePath, string Content)> changes, int maximumGeneratedCharacters, int maximumDiffCharacters, CancellationToken token)
+    public async Task<string> ApplyAndFormatDiffAsync(IReadOnlyList<CodeFileContent> changes, int maximumGeneratedCharacters, int maximumDiffCharacters, CancellationToken token)
     {
         var totalBytes = 0;
         var diffs = new List<string>();
         foreach (var change in changes)
         {
             token.ThrowIfCancellationRequested();
-            if (!_relativeFiles.Contains(change.RelativePath, StringComparer.OrdinalIgnoreCase))
+            if (!_relativeFiles.Contains(change.Path, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidDataException("补丁路径不属于初始快照；已拒绝。");
-            var sourcePath = ResolveWithin(BaselinePath, change.RelativePath);
-            var originalBytes = await File.ReadAllBytesAsync(sourcePath, token);
+            var originalBytes = ReadSnapshotFile(change.Path, MaximumReadableFileBytes)
+                ?? throw new InvalidDataException("基线文件超过读取限制；补丁已拒绝。");
+            if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(originalBytes), Convert.FromHexString(change.Sha256)))
+                throw new IOException("生成补丁后基线文件发生变化；没有写入工作区。");
             var source = DecodeText(originalBytes) ?? throw new InvalidDataException("基线文件编码不再受支持。");
             var bytes = EncodeLikeOriginal(originalBytes, source, change.Content);
             totalBytes = checked(totalBytes + bytes.Length);
             if (totalBytes > maximumGeneratedCharacters) throw new InvalidDataException("补丁超过大小限制；已拒绝。");
-            var destination = ResolveWithin(WorkspacePath, change.RelativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            var destination = ResolveWithin(WorkspacePath, change.Path);
+            var parent = Path.GetDirectoryName(destination)!;
+            if (!TryGetCanonicalPath(parent, isDirectory: true, out var parentCanonical)
+                || !IsSameOrChild(parentCanonical, _workspaceBoundary))
+                throw new InvalidDataException("工作区父目录无效或离开隔离目录；已拒绝写入。");
+            if (!TryGetCanonicalPath(destination, isDirectory: false, out var destinationCanonical)
+                || !IsSameOrChild(destinationCanonical, _workspaceBoundary))
+                throw new InvalidDataException("工作区目标文件无效或离开隔离目录；已拒绝写入。");
             var temporary = destination + ".xiaok.tmp";
             await File.WriteAllBytesAsync(temporary, bytes, token);
             File.Move(temporary, destination, overwrite: true);
-            diffs.Add(FormatFileDiff(change.RelativePath, source, change.Content));
+            diffs.Add(FormatFileDiff(change.Path, source, change.Content));
         }
 
         var diff = string.Join("\n\n", diffs);
         if (diff.Length > maximumDiffCharacters)
             return diff[..maximumDiffCharacters] + "\n\n…差异显示已截断；完整修改位于隔离工作区文件中。";
         return diff;
+    }
+
+    private byte[]? ReadSnapshotFile(string relative, int maximumBytes)
+    {
+        var path = ResolveWithin(BaselinePath, relative);
+        using var handle = OpenNoFollow(path, isDirectory: false);
+        if (!TryGetCanonicalPath(handle, out var canonical) || !IsSameOrChild(canonical, _baselineBoundary))
+            throw new InvalidDataException("基线文件不是隔离目录内的普通文件。");
+        using var stream = new FileStream(handle, FileAccess.Read);
+        if (stream.Length > maximumBytes) return null;
+        var content = new byte[checked((int)stream.Length)];
+        stream.ReadExactly(content);
+        return content;
     }
 
     private static void CopyTree(string sourceRoot, string destinationRoot, List<string>? collectedFiles, CancellationToken token, string sourceBoundary)

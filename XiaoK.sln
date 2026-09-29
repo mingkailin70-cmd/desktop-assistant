@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -18,6 +18,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XiaoK.Storage", "src\XiaoK.Storage\XiaoK.Storage.csproj", "{1FE33DC6-00FD-4379-A081-B58227C763B9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XiaoK.Core", "src\XiaoK.Core\XiaoK.Core.csproj", "{7F24F368-F485-4192-AE88-37F129BE8425}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XiaoK.Tools.SafetyChecks", "tests\XiaoK.Tools.SafetyChecks\XiaoK.Tools.SafetyChecks.csproj", "{13A398AE-299B-4EE2-880F-47AD042A1108}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -113,6 +117,18 @@ Global
 		{7F24F368-F485-4192-AE88-37F129BE8425}.Release|x64.Build.0 = Release|Any CPU
 		{7F24F368-F485-4192-AE88-37F129BE8425}.Release|x86.ActiveCfg = Release|Any CPU
 		{7F24F368-F485-4192-AE88-37F129BE8425}.Release|x86.Build.0 = Release|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Debug|x64.Build.0 = Debug|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Debug|x86.Build.0 = Debug|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Release|Any CPU.Build.0 = Release|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Release|x64.ActiveCfg = Release|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Release|x64.Build.0 = Release|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Release|x86.ActiveCfg = Release|Any CPU
+		{13A398AE-299B-4EE2-880F-47AD042A1108}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -125,5 +141,6 @@ Global
 		{790BC036-A864-4F51-B293-C1CD90A54CD5} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{1FE33DC6-00FD-4379-A081-B58227C763B9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{7F24F368-F485-4192-AE88-37F129BE8425} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{13A398AE-299B-4EE2-880F-47AD042A1108} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
