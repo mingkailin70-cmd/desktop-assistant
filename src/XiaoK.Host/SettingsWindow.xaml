@@ -1,0 +1,63 @@
+<Window x:Class="XiaoK.Host.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="小K设置" Width="560" Height="650" MinWidth="520" MinHeight="580"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="#F7F8FC" ShowInTaskbar="False">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="小K设置" FontSize="22" FontWeight="SemiBold" Foreground="#20253A"/>
+            <TextBlock Text="路径保存在当前 Windows 用户配置中；模型推理地址只能使用本机回环地址。"
+                       Margin="0,5,0,0" TextWrapping="Wrap" Foreground="#68728A"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="本地存储" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,8"/>
+                <TextBlock Text="用户数据目录"/>
+                <DockPanel Margin="0,4,0,12">
+                    <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseDataRoot_Click" Margin="8,0,0,0"/>
+                    <TextBox x:Name="DataRootBox" MinHeight="32" Padding="7,5"/>
+                </DockPanel>
+                <TextBlock Text="模型目录（供后续本地推理运行时使用）"/>
+                <DockPanel Margin="0,4,0,12">
+                    <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseModelRoot_Click" Margin="8,0,0,0"/>
+                    <TextBox x:Name="ModelRootBox" MinHeight="32" Padding="7,5"/>
+                </DockPanel>
+
+                <TextBlock Text="本地推理服务地址"/>
+                <TextBox x:Name="InferenceEndpointBox" MinHeight="32" Padding="7,5" Margin="0,4,0,5"/>
+                <TextBlock Text="只允许 localhost / 127.0.0.1 / ::1；远程服务会被拒绝。"
+                           FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                <Separator Margin="0,0,0,14"/>
+                <TextBlock Text="登录与能力状态" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,8"/>
+                <CheckBox x:Name="StartupCheck" Content="登录 Windows 后在托盘启动小K" Margin="0,0,0,4"/>
+                <TextBlock x:Name="StartupStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="22,0,0,12"/>
+                <Border Background="White" BorderBrush="#E7EAF1" BorderThickness="1" CornerRadius="8" Padding="12">
+                    <StackPanel>
+                        <TextBlock Text="麦克风：未接入，当前不会采集" Margin="0,0,0,5"/>
+                        <TextBlock Text="微信 / QQ 通知：监听适配器未接入" Margin="0,0,0,5"/>
+                        <TextBlock Text="GPU / 显存：资源监控尚未接入；此设置页不加载模型"/>
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="数据目录与推理地址保存后需重启小K生效；登录启动设置立即生效。通知、麦克风和 GPU 项目会在相应功能接入并验收后开放。"
+                           FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,10,0,4"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <DockPanel Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#A33A32" TextWrapping="Wrap"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="取消" IsCancel="True" MinWidth="80" Margin="0,0,8,0"/>
+                <Button Content="保存" IsDefault="True" MinWidth="90" Click="Save_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

@@ -36,6 +36,7 @@ internal sealed class AssistantRuntime : IDisposable
 
     public string ModelStatus => "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；未连接时不会转云端）";
     public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
+    public XiaoKSettings CurrentSettings => _settings;
 
     public async Task<string> SubmitAsync(string input)
     {
@@ -207,6 +208,7 @@ internal sealed class AssistantRuntime : IDisposable
 internal sealed record XiaoKSettings
 {
     public string DataRoot { get; init; } = @"D:\XiaoK\Data";
+    public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
     public string InferenceEndpoint { get; init; } = "http://127.0.0.1:8080/";
     public List<AppSetting> Applications { get; init; } = [];
     public List<RootSetting> SearchRoots { get; init; } = [];
@@ -214,7 +216,7 @@ internal sealed record XiaoKSettings
     public static XiaoKSettings Load()
     {
         var defaults = CreateDefaults();
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaoK", "settings.json");
+        var path = GetSettingsPath();
         if (!File.Exists(path)) return defaults;
         try
         {
@@ -224,6 +226,20 @@ internal sealed record XiaoKSettings
         }
         catch (Exception) { return defaults; }
     }
+
+    public void Save()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(GetSettingsPath())!);
+        var path = GetSettingsPath();
+        var temporaryPath = path + ".tmp";
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true };
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(this, options), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        if (File.Exists(path)) File.Replace(temporaryPath, path, destinationBackupFileName: null);
+        else File.Move(temporaryPath, path);
+    }
+
+    private static string GetSettingsPath() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaoK", "settings.json");
 
     private static XiaoKSettings CreateDefaults()
     {
@@ -250,7 +266,7 @@ internal sealed record XiaoKSettings
         SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots
     };
 
-    private static string? FindWorkspace(string start)
+    internal static string? FindWorkspace(string start)
     {
         var current = new DirectoryInfo(start);
         for (var i = 0; current is not null && i < 8; i++, current = current.Parent)

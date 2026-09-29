@@ -103,6 +103,18 @@ public partial class MainWindow : Window, IApprovalPresenter
 
     private void Hide_Click(object sender, RoutedEventArgs e) => Hide();
 
+    private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
+
+    private void ShowSettings()
+    {
+        if (!IsVisible) RestoreFromTray();
+        var dialog = new SettingsWindow(_runtime.CurrentSettings) { Owner = this };
+        if (dialog.ShowDialog() == true)
+        {
+            OutputText.Text = "设置已保存。登录启动立即生效；数据和推理路径将在重启小K后生效。";
+        }
+    }
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         _source = (HwndSource)PresentationSource.FromVisual(this)!;
@@ -138,6 +150,7 @@ public partial class MainWindow : Window, IApprovalPresenter
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("显示小K", null, (_, _) => RestoreFromTray());
+        menu.Items.Add("设置", null, (_, _) => ShowSettings());
         menu.Items.Add("取消当前任务", null, (_, _) => _runtime.CancelCurrent());
         menu.Items.Add("退出", null, (_, _) => { _exiting = true; Close(); });
         return menu;

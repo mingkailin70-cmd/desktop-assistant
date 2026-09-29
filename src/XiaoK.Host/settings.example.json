@@ -1,5 +1,6 @@
 {
   "dataRoot": "D:\\XiaoK\\Data",
+  "modelRoot": "D:\\XiaoK\\Models",
   "inferenceEndpoint": "http://127.0.0.1:8080/",
   "applications": [
     { "id": "vscode", "executable": "D:\\VS Code\\Code.exe", "workingDirectory": "选择你要使用的项目目录" },

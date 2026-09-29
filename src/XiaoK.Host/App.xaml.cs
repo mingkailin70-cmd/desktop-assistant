@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows;
@@ -24,22 +25,29 @@ public partial class App : System.Windows.Application
             var userId = identity.User?.Value ?? Environment.UserName;
             _instanceMutex = new Mutex(initiallyOwned: true, $"Local\\XiaoK.DesktopAssistant.{userId}", out _ownsMutex);
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or SecurityException)
         {
             System.Windows.MessageBox.Show("无法检查小K是否已运行。为避免重复启动，应用将退出。", "小K", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             Shutdown();
             return;
         }
 
+        var startInTray = e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase);
         if (!_ownsMutex)
         {
-            RestoreExistingInstance();
+            if (!startInTray) RestoreExistingInstance();
             Shutdown();
             return;
         }
 
         MainWindow = new MainWindow();
+        if (startInTray) MainWindow.Opacity = 0;
         MainWindow.Show();
+        if (startInTray)
+        {
+            MainWindow.Hide();
+            MainWindow.Opacity = 1;
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
