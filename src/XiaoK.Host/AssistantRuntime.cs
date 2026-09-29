@@ -172,6 +172,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 inner => _inference.CompleteAsync("你是运行在用户本机的小K桌面助手。只回答或提出建议，不声称已操作电脑。没有工具授权时不要声称操作完成。", request, inner), token);
             return new(true, answer);
         }
+        catch (ModelQueueFullException) { return new(false, "本地模型请求过多；当前请求未排队。", "RESOURCE_BUSY"); }
         catch (HttpRequestException) { return new(false, "本地推理服务未运行或不可用；没有云端回退。", "LOCAL_MODEL_OFFLINE"); }
         catch (OperationCanceledException) when (!token.IsCancellationRequested) { return new(false, "本地推理超时；没有调用云端服务。", "LOCAL_MODEL_TIMEOUT"); }
         catch (OperationCanceledException) { throw; }
