@@ -44,7 +44,11 @@
                     <StackPanel>
                         <TextBlock Text="麦克风：未接入，当前不会采集" Margin="0,0,0,5"/>
                         <TextBlock Text="微信 / QQ 通知：监听适配器未接入" Margin="0,0,0,5"/>
-                        <TextBlock Text="GPU / 显存：资源监控尚未接入；此设置页不加载模型"/>
+                        <TextBlock Text="资源读数按需采样；刷新时不会加载模型或启动后台监控。" TextWrapping="Wrap"/>
+                        <Button x:Name="RefreshResourcesButton" Content="刷新 CPU / 内存 / NVIDIA 显存" Click="RefreshResources_Click"
+                                HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="ResourceStatusText" Text="尚未采样。NVIDIA 显存显示系统总量，不代表小K进程占用。"
+                                   FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="数据目录与推理地址保存后需重启小K生效；登录启动设置立即生效。通知、麦克风和 GPU 项目会在相应功能接入并验收后开放。"

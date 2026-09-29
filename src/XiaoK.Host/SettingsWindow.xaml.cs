@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security;
+using System.Diagnostics;
 using System.Windows;
 using Forms = System.Windows.Forms;
 
@@ -9,11 +10,15 @@ public partial class SettingsWindow : Window
 {
     private readonly XiaoKSettings _original;
     private readonly bool _startupWasEnabled;
+    private TimeSpan _previousCpuTime;
+    private long _previousCpuSampleTimestamp;
 
     internal SettingsWindow(XiaoKSettings settings)
     {
         InitializeComponent();
         _original = settings;
+        using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
+        _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
         DataRootBox.Text = settings.DataRoot;
         ModelRootBox.Text = settings.ModelRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
@@ -51,6 +56,23 @@ public partial class SettingsWindow : Window
         };
 
         if (picker.ShowDialog() == Forms.DialogResult.OK) target.Text = picker.SelectedPath;
+    }
+
+    private async void RefreshResources_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshResourcesButton.IsEnabled = false;
+        try
+        {
+            var processLine = LocalResourceReader.GetHostProcessUsage(_previousCpuTime, _previousCpuSampleTimestamp);
+            using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
+            _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
+            var gpuLine = await LocalResourceReader.GetNvidiaMemoryUsageAsync();
+            ResourceStatusText.Text = $"{processLine}\n{gpuLine}\n显存为系统总量；请与启动小K前的同条件读数比较，不能据此归因到小K。";
+        }
+        finally
+        {
+            RefreshResourcesButton.IsEnabled = true;
+        }
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
