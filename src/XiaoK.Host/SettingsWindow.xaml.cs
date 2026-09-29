@@ -69,8 +69,10 @@ public partial class SettingsWindow : Window
             var processLine = LocalResourceReader.GetHostProcessUsage(_previousCpuTime, _previousCpuSampleTimestamp);
             using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
             _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
-            var gpuLine = await LocalResourceReader.GetNvidiaMemoryUsageAsync();
-            ResourceStatusText.Text = $"{processLine}\n{gpuLine}\n显存为系统总量；请与启动小K前的同条件读数比较，不能据此归因到小K。";
+            var gpuLines = await Task.WhenAll(
+                LocalResourceReader.GetNvidiaMemoryUsageAsync(),
+                Task.Run(DxgiProcessMemoryReader.ReadNvidiaHostMemoryUsage));
+            ResourceStatusText.Text = $"{processLine}\n{gpuLines[0]}\n{gpuLines[1]}\nHost 读数不包含独立启动的模型/语音服务进程；驱动与 WDDM 分配会使 DXGI 值与任务管理器略有差异。";
         }
         finally
         {
