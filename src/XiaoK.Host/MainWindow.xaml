@@ -1,0 +1,56 @@
+<Window x:Class="XiaoK.Host.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="小K" Height="590" Width="428" MinHeight="180" MinWidth="330"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="False"
+        ResizeMode="CanResizeWithGrip" ShowInTaskbar="False">
+    <Border CornerRadius="22" Background="#F7F8FC" BorderBrush="#DCE2EF" BorderThickness="1"
+            Padding="18" Margin="5">
+        <Border.Effect><DropShadowEffect BlurRadius="22" ShadowDepth="4" Opacity="0.22"/></Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,12" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="ExpandButton" Content="—" Width="30" Height="28" Click="Expand_Click" ToolTip="收起"/>
+                    <Button Content="×" Width="30" Height="28" Margin="5,0,0,0" Click="Hide_Click" ToolTip="隐藏到托盘"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Border Background="#E8EEFF" CornerRadius="14" Width="46" Height="46">
+                        <TextBlock Text="🐾" FontSize="25" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Margin="11,2,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="小K" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
+                        <TextBlock x:Name="StatusText" Text="待命" FontSize="11" Foreground="#68728A"/>
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
+
+            <StackPanel Grid.Row="1" x:Name="ExpandedPanel" Visibility="Visible">
+                <TextBlock Text="说说你想做什么" FontSize="13" FontWeight="SemiBold" Foreground="#343A50" Margin="2,2,0,7"/>
+                <TextBox x:Name="RequestBox" MinHeight="66" MaxHeight="100" AcceptsReturn="True" TextWrapping="Wrap" KeyDown="RequestBox_KeyDown"
+                         VerticalScrollBarVisibility="Auto" FontSize="13" Padding="10"
+                         ToolTip="例如：打开小K项目 / 查找文件 预算 / 分析消息：…"/>
+                <WrapPanel Margin="0,8,0,0">
+                    <Button x:Name="RunButton" Content="运行" Click="Run_Click" MinWidth="76"/>
+                    <Button Content="打开 VS Code 项目" Click="OpenProject_Click" Margin="7,0,0,0"/>
+                    <Button x:Name="CancelButton" Content="取消任务" Click="Cancel_Click" Margin="7,0,0,0"/>
+                    <Button x:Name="StopMicButton" Content="停麦" Click="StopMic_Click" Margin="7,0,0,0"/>
+                </WrapPanel>
+            </StackPanel>
+
+            <Border Grid.Row="2" Background="White" CornerRadius="12" BorderBrush="#E7EAF1" BorderThickness="1" Margin="0,13,0,10">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="12">
+                    <TextBlock x:Name="OutputText" TextWrapping="Wrap" FontSize="13" Foreground="#293149"
+                               Text="当前能力状态会显示在这里。&#10;本地模型、语音和微信/QQ通知运行时尚未配置。"/>
+                </ScrollViewer>
+            </Border>
+
+            <DockPanel Grid.Row="3">
+                <TextBlock x:Name="FooterText" Text="本地处理 · 无云端回退" FontSize="10" Foreground="#737D92" VerticalAlignment="Center"/>
+                <TextBlock Text="Ctrl+Shift+K" FontSize="10" Foreground="#737D92" HorizontalAlignment="Right"/>
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>

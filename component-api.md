@@ -1,0 +1,318 @@
+# 小K组件接口契约（设计规范）
+
+状态：**接口设计已定，代码部分实现**。下文描述目标接口与安全边界；已编译的 Host、ToolBroker、通知策略与本地推理客户端只是早期骨架，语音采集、模型生命周期、Windows 通知监听、持久化升级、真实消息适配器和完整六场景验收仍未完成。JSON 是协议示例，不代表相应 IPC、通知监听或外发能力已经可用。产品范围、资源和模型候选以 [PLAN.md](PLAN.md) 为准；部署与权限关系见 [architecture.md](architecture.md)。
+
+## 1. 适用范围与所有权
+
+| 组件 | 提供的接口 | 权限 |
+| --- | --- | --- |
+| `XiaoK.Host` | 用户输入、状态呈现、权限预览与决定、取消 | 不能绕过 ToolBroker 直接执行模型提案 |
+| `TaskOrchestrator` | 任务生命周期、步骤、取消传播、事件序列 | 唯一可持久化任务状态的组件 |
+| `XiaoK.Voice` | 唤醒/VAD/ASR/TTS、音频设备状态 | 不执行电脑操作；麦克风音频默认不持久化 |
+| `ModelBroker / XiaoK.Inference` | 模型租约、结构化生成、资源报告 | 只能返回内容/提案，不能调用工具或改变权限 |
+| `DecisionProvider` | 规则或候选模型的固定选项选择 | 只能在预定义可执行选项中选择，不发放确认 |
+| `ToolBroker` | 工具发现、参数校验、权限、执行、独立核验 | 唯一副作用入口；拒绝未知工具/未确认动作 |
+| 适配器 | Windows、文件、Edge、微信通知、QQ通知、隔离CodeAgent | 只接受 ToolBroker 发出的作用域请求
+
+首个切片需要 `app.launch.v1` 与 `window.verify.v1`：`app_id=vscode`、`workspace_id=xiaok` 在本地配置中映射到已知应用和工作区。任何模型输出的任意 exe 路径、shell 命令或坐标均不是此接口的有效参数。
+
+## 2. 传输与通用封套
+
+本地进程通信优先采用限当前用户 SID 的 Windows Named Pipe；控制通道为四字节小端长度前缀加 UTF-8 JSON，单条控制消息上限暂定 1 MiB。音频、截图等大载荷经专用流或受限临时文件能力引用传输。管道端点只由 Host 创建并发布给其启动的工作进程；子进程连接时校验当前登录会话和一次性启动令牌。本地 HTTP 备选必须仅绑定 `127.0.0.1` 并使用会话令牌。
+
+所有时间使用 UTC ISO 8601，ID 是不含个人信息的随机 UUID，`deadline_utc` 由接收方强制执行。每次请求有唯一 `request_id`；重试读取/查询可复用相同语义，但产生副作用的 `action_id` 不能自动重放。任务内事件 `seq` 严格单调递增。
+
+请求封套：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "request",
+  "request_id": "9de10914-9273-41a4-9185-b05466b33496",
+  "operation": "task.create",
+  "task_id": null,
+  "deadline_utc": "2026-09-29T07:00:30Z",
+  "payload": {
+    "source": "text",
+    "input": "打开 VS Code 中的小K项目"
+  }
+}
+```
+
+成功响应使用相同 `request_id`，`result` 仅包含操作结果；失败响应只给 `error`，不提供误导性的部分成功数据：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "response",
+  "request_id": "9de10914-9273-41a4-9185-b05466b33496",
+  "ok": true,
+  "result": {
+    "task_id": "96c36e7c-eec8-4d72-88a4-c42cc225f357",
+    "status": "queued"
+  }
+}
+```
+
+失败例：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "response",
+  "request_id": "9de10914-9273-41a4-9185-b05466b33496",
+  "ok": false,
+  "error": {
+    "code": "USER_SESSION_LOCKED",
+    "message": "当前会话已锁定，桌面操作暂停。",
+    "retryable": true,
+    "retry_after_ms": null
+  }
+}
+```
+
+`message` 是可展示的简短文本，不包含密钥或聊天正文；调用方按 `code` 决定行为，不解析 message 文案。未授权客户端、未知 `operation`、超长消息或不支持的主版本都在解析/调度前拒绝。
+
+## 3. 任务与事件接口
+
+| 操作 | 发起方 → 接收方 | 主要载荷 | 结果 |
+| --- | --- | --- | --- |
+| `task.create` | Host/Voice → Orchestrator | 来源、文本或 ASR 文本引用、选区能力引用 | `task_id`、`queued` |
+| `task.get` | Host → Orchestrator | `task_id` | 持久状态、最近步骤、是否等待用户 |
+| `task.cancel` | Host → Orchestrator | `task_id`、可选原因 | 已受理取消；最终状态由事件/查询确认 |
+| `event.subscribe` | Host → Orchestrator | `task_id`、`after_seq` | 从该序号之后重放事件，再接实时事件 |
+| `approval.decide` | Host → ToolBroker | `approval_id`、`action_digest`、`approved` | 受理/拒绝；不直接表示操作已完成 |
+
+持久状态枚举：`queued`、`planning`、`awaiting_approval`、`running`、`paused`、`completed`、`failed`、`cancelled`、`outcome_uncertain`。呈现态 `idle`、`listening`、`speaking` 不取代持久状态。`completed` 必须由任务完成条件或工具独立核验触发；模型自述不构成完成凭证。
+
+取消请求示例：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "request",
+  "request_id": "bd8bb84e-4c93-434a-845d-bc11936d76ba",
+  "operation": "task.cancel",
+  "task_id": "96c36e7c-eec8-4d72-88a4-c42cc225f357",
+  "deadline_utc": "2026-09-29T07:01:00Z",
+  "payload": {
+    "reason": "user_pressed_stop"
+  }
+}
+```
+
+取消是协作式：Orchestrator 持久化取消意图，停止后续步骤，并将信号传播至 Voice、ModelBroker 和适配器；正在执行的不可中断系统调用可能先返回。对于消息发送、删除、支付等可能已产生外部效果的步骤，若取消时无法核验，结果应为 `outcome_uncertain`，禁止自动补发或重试。
+
+事件封套：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "event",
+  "event_id": "2015fbc9-0ef2-4367-87ae-e6c9dfac02ba",
+  "task_id": "96c36e7c-eec8-4d72-88a4-c42cc225f357",
+  "seq": 3,
+  "at_utc": "2026-09-29T07:00:09Z",
+  "type": "task.state_changed",
+  "payload": {
+    "from": "planning",
+    "to": "running",
+    "step_id": "d8d6bf51-f11d-4a70-9c45-95bd4ae56e9e"
+  }
+}
+```
+
+首版事件类型至少有 `task.state_changed`、`approval.requested`、`approval.resolved`、`tool.started`、`tool.verified`、`tool.failed`、`model.started`、`model.stopped`、`resource.mode_changed`、`voice.device_changed`。订阅重连按 `after_seq` 恢复；事件供展示与诊断，`task.get` 的持久状态仍为最终依据。客户端应容忍未知的新增事件类型。
+
+## 4. 结构化动作与工具接口
+
+模型或规则只可产生 `ActionProposal.v1`。`tool_id` 必须在 ToolBroker 注册表中，`arguments` 必须符合对应 JSON Schema；`target_ref` 只能引用当前选区、搜索结果、已配置应用或当次发现的控件，不接受未经发现的任意目标。`preconditions` 和 `expected_outcome` 是工具可验证条件，不由模型自行宣布通过。
+
+```json
+{
+  "schema": "ActionProposal.v1",
+  "action_id": "5065aeb4-c5f1-4ab7-b259-0655dc5e4743",
+  "task_id": "96c36e7c-eec8-4d72-88a4-c42cc225f357",
+  "step_id": "d8d6bf51-f11d-4a70-9c45-95bd4ae56e9e",
+  "tool_id": "app.launch.v1",
+  "arguments": {
+    "app_id": "vscode",
+    "workspace_id": "xiaok"
+  },
+  "target_ref": {
+    "kind": "configured_app",
+    "id": "vscode"
+  },
+  "preconditions": {
+    "user_session_unlocked": true
+  },
+  "expected_outcome": {
+    "kind": "window_open",
+    "process_name": "Code.exe",
+    "workspace_id": "xiaok"
+  }
+}
+```
+
+ToolBroker 必须按如下顺序执行：schema 校验 → 目标与能力引用解析 → 范围/权限评估 → 必要时生成预览并等待确认 → 执行前重新定位与核对 → 调用适配器 → 独立核验 → 持久化结果。外部网页、OCR、聊天内容和工具返回值只能作为数据，不得注入新的工具注册、系统提示或权限。
+
+工具注册项至少声明 `tool_id`、`argument_schema_version`、`effect`（`read`/`reversible_write`/`external_send`/`destructive`/`payment`/`admin`）、`timeout_ms`、`verification_kind` 和可否安全重试。未知工具默认拒绝。`tool.execute` 由 Orchestrator 向 ToolBroker 发起；适配器不得接受模型进程的直连。返回示例：
+
+```json
+{
+  "action_id": "5065aeb4-c5f1-4ab7-b259-0655dc5e4743",
+  "status": "verified",
+  "verification": {
+    "kind": "window_open",
+    "observed_process_name": "Code.exe",
+    "observed_workspace_id": "xiaok",
+    "observed_at_utc": "2026-09-29T07:00:14Z"
+  },
+  "duration_ms": 2310
+}
+```
+
+`status` 只能为 `verified`、`verification_failed`、`failed`、`cancelled` 或 `outcome_uncertain`。`verified` 要求独立观察，不接受“适配器调用成功”或“模型认为成功”替代。网页元素与 UIA 元素引用须携带发现时的窗口/页面版本；发生导航、窗口切换或超时后先重新发现。
+
+## 5. 权限确认协议
+
+ToolBroker 决定是否需要确认。首版可读取用户明确提供的内容、打开已配置应用；聊天通知只能按系统来源身份过滤后处理可见私聊正文。限范围可逆编辑需保留快照；消息/附件外发、删除、支付、管理员操作必须展示最终目标与内容并确认。DecisionProvider、模型、RSI、网页文本都不能降级此要求。
+
+确认请求由 ToolBroker 生成，`action_digest` 是规范化动作、收件人、最终正文、附件身份/内容摘要、目标与任务 ID 的 SHA-256；如果预览中的任一字段变化，旧确认无效。`approval_id` 一次性使用，默认短时过期；关闭预览等同拒绝。
+
+```json
+{
+  "approval_id": "48479551-ea57-485a-826f-393d6b5fd443",
+  "task_id": "1f9e41ac-b139-4b9d-b53b-c58db5bef48d",
+  "action_id": "7b3f3d92-759a-4740-b8e3-037ff795b40f",
+  "action_digest": "sha256:eb3142734d9d18e15b25cb6c9f368a2cbbe94e234251d58a270e0fe6c16f8d8a",
+  "expires_at_utc": "2026-09-29T07:04:00Z",
+  "effect": "external_send",
+  "preview": {
+    "application": "wechat",
+    "recipient_display_name": "张三",
+    "message_text": "我稍后把文件发给你。",
+    "attachments": [
+      {
+        "display_name": "说明.pdf",
+        "size_bytes": 102400,
+        "sha256": "2d711642b726b04401627ca9fbac32f5da7e5fbe865ad1f2f79a8d9a319a"
+      }
+    ]
+  }
+}
+```
+
+决定由 Host 发送：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "request",
+  "request_id": "a1dc590f-4f03-43c0-b823-9b1283c7b027",
+  "operation": "approval.decide",
+  "task_id": "1f9e41ac-b139-4b9d-b53b-c58db5bef48d",
+  "deadline_utc": "2026-09-29T07:04:00Z",
+  "payload": {
+    "approval_id": "48479551-ea57-485a-826f-393d6b5fd443",
+    "action_digest": "sha256:eb3142734d9d18e15b25cb6c9f368a2cbbe94e234251d58a270e0fe6c16f8d8a",
+    "approved": true
+  }
+}
+```
+
+ToolBroker 在执行前重读实际收件人、正文与附件文件身份。出现 `ACTION_CHANGED`、`APPROVAL_EXPIRED`、会话锁定或旧目标时停止并重新展示；成功受理批准不等于发送成功。外发操作在崩溃后结果未知时进入人工核对，不自动复用批准。
+
+## 6. 模型、决策、语音与资源契约
+
+`model.generate` 只返回符合声明格式的内容或提案；运行时版本、模型文件哈希、量化、上下文、温度与资源模式记入该步骤元数据。例：
+
+```json
+{
+  "protocol_version": "1.0",
+  "kind": "request",
+  "request_id": "ad6408d8-ce84-4b66-a939-3d0dc7646a7e",
+  "operation": "model.generate",
+  "task_id": "96c36e7c-eec8-4d72-88a4-c42cc225f357",
+  "deadline_utc": "2026-09-29T07:00:25Z",
+  "payload": {
+    "model_role": "primary",
+    "input_ref": "task:96c36e7c-eec8-4d72-88a4-c42cc225f357/input",
+    "output_schema": "ActionProposal.v1",
+    "context_limit_tokens": 4096,
+    "max_output_tokens": 512,
+    "resource_profile": "interactive"
+  }
+}
+```
+
+`ModelBroker` 先申请大型 GPU 排他租约，再运行或拒绝；返回 `LOW_VRAM`、`RESOURCE_BUSY` 或可用的 CPU 部分卸载方案，不能自行抢占其他应用。ASR/TTS 若需 GPU，也走相同租约。`model_role` 首版至少支持 `primary`、`complex_candidate`、`vision_candidate`、`asset_generation`；角色只指本机已安装且完成哈希校验的模型，不能通过请求临时下载权重。首版主模型候选为 Qwen3.5-4B；MiMo 9B、Fara 与绘图模型按需实验，Laya 不能管理权限。
+
+`decision.choose` 的输入是带稳定 ID 的固定候选及可观察上下文，输出只能是候选 ID、`abstain` 和版本信息。规则先于候选模型；未通过中文任务评估与校准的 Laya 不进入正式路由。任何决策结果仍需 ToolBroker 审核。
+
+`voice.transcribe` 接受一次明确的音频流能力引用，返回文本、时间段和置信信息；`voice.speak` 接受文本引用、语音配置与取消 ID，返回首音时间和完成/取消状态。麦克风权限拒绝、设备断开和停麦必须反馈到 Host；首版半双工，录音与播报互斥。原始音频仅在短环形缓冲区或本次处理所需临时区存在，默认不写 SQLite。
+
+## 7. 错误码与重试规则
+
+| 错误码 | 含义 | 默认处理 |
+| --- | --- | --- |
+| `INVALID_REQUEST` / `SCHEMA_UNSUPPORTED` | 格式或主版本不支持 | 拒绝；记录最小诊断，不猜测字段 |
+| `UNAUTHORIZED_CLIENT` | IPC 会话/SID/令牌不匹配 | 拒绝并关闭连接 |
+| `PERMISSION_REQUIRED` | 动作需用户确认 | 转 `awaiting_approval`，展示预览 |
+| `APPROVAL_EXPIRED` / `ACTION_CHANGED` | 确认过期或预览已变 | 重新生成预览；不可沿用旧批准 |
+| `STALE_TARGET` / `TARGET_NOT_FOUND` | 页面、窗口、控件或文件身份失效 | 重新发现；涉及副作用时重新检查权限 |
+| `USER_SESSION_LOCKED` / `MICROPHONE_UNAVAILABLE` | 会话或设备不可用 | 暂停，待环境恢复后检查前提 |
+| `RESOURCE_BUSY` / `LOW_VRAM` / `MODEL_UNAVAILABLE` | 资源或权重不可用 | 使用已评估降级路径或告知用户 |
+| `TOOL_TIMEOUT` / `VERIFICATION_FAILED` | 调用超时或独立核验失败 | 读取实际状态；不可盲目重放 |
+| `CANCELLED` | 用户或上层取消 | 停止后续步骤并记录最终状态 |
+| `OUTCOME_UNCERTAIN` | 外部副作用可能已经发生 | 阻止自动重试，交用户核对 |
+| EXTERNAL_OFFLINE | 用户明确启用的外部服务不可用 | 首版不依赖外部模型服务；本地推理故障时明确显示离线，不回退到云端 |
+| `INTERNAL` | 未分类内部错误 | 记录脱敏诊断并安全停止 |
+
+仅纯读取、模型生成和明确幂等的操作可按策略自动重试。外发、删除、支付和不可逆编辑即便客户端超时，也先读取外部状态；无法确定就返回 `OUTCOME_UNCERTAIN`。错误码只能描述已观察到的情况，不得把“调用已发送”写成“对方已收到”。
+
+## 8. 版本、迁移与数据处理规则
+
+`protocol_version` 使用 `major.minor`：同一 major 可新增可选字段、事件类型和独立工具 ID；移除必需字段、改变风险语义、状态含义或默认权限需提升 major。接收端可忽略未知可选字段，但必须拒绝未知工具、未知影响等级、缺失关键字段及无法理解的安全枚举。每个工具和 `ActionProposal` 单独以 `.v1` 标识 schema，变更参数语义创建 `.v2`。
+
+任务事件和审批记录持久化时携带协议/工具/模型版本。SQLite schema 迁移需先备份并能在失败后恢复；旧任务重放时只恢复可安全重试的步骤。对一次性批准、附件摘要和不确定外发步骤，升级过程不得重演。偏好与联系人风格必须有来源、更新时间和删除路径；日志只保留脱敏状态、动作、结果及资源指标，不保存密钥、验证码、默认聊天正文、截图或原始音频。
+
+## 9. 首版通知与本地编程任务
+
+### MessageNotice.v1
+
+Windows 通知监听器只有在包身份安装并取得用户授权后才可启用。事件进入策略组件后先检查系统发布者 AppUserModelID allowlist；只有 WeChat 或 QQ 可进入各自适配器，其他通知的标题、正文、图标和来源细节不落日志。缺少可靠发布者身份、私聊/群聊归属不确定、用户会话锁定或授权撤销时，拒绝自动分析。
+
+示例事件字段：
+
+    {
+      "schema": "MessageNotice.v1",
+      "application_id": "wechat",
+      "source_app_id": "publisher!App",
+      "conversation_id": "ephemeral-local-id",
+      "sender_display_name": "联系人显示名",
+      "is_private_conversation": true,
+      "visible_body": "通知中实际可见的单条消息",
+      "received_at_utc": "2026-09-29T07:00:00Z",
+      "deduplication_key": "ephemeral-dedup-token"
+    }
+
+visible_body 与模型分析只在本次任务的内存中传递。系统通知没有正文时输出“请手动打开会话”，不触发窗口切换。事件记录不得持久化正文、截图或附件。适配器分别负责通知归属、去重和限速；真实客户端支持情况需由 P0 每款至少30条通知验证。
+
+### CodeTask.v1
+
+CodeTask 状态为 queued、planning、awaiting_approval、running、paused、completed、failed、cancelled 或 outcome_uncertain。任务只能引用用户选择的 project_id 和临时 workspace_id；不得接受模型提供的任意根路径。工作区创建器校验真实路径并将所有读写约束在隔离 worktree 内。
+
+动作建议示例：
+
+    {
+      "schema": "CodeTask.v1",
+      "task_id": "随机UUID",
+      "project_id": "用户本次选择的项目",
+      "workspace_id": "隔离工作树的短期ID",
+      "allowed_actions": ["search", "read", "write_patch", "approved_command", "show_diff"],
+      "network_policy": "deny_unless_user_approved",
+      "merge_policy": "explicit_user_approval"
+    }
+
+执行命令需由本机固定命令ID映射到可审阅命令行，不接受自由shell字符串。新依赖下载、新联网命令和安装动作必须逐项批准。最终 diff 必须留在隔离区供用户检查；未获批准不得应用回原项目、提交或推送。修改原项目是用户确认后的独立动作。

@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem without sharing private messages or credentials
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "请勿提交聊天正文、截图、令牌、个人路径或其他隐私内容。"
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and expected behavior.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: XiaoK version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Windows version, app version, local model/runtime versions and resource snapshot if relevant.

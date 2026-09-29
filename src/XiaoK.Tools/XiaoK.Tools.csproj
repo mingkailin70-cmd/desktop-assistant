@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\XiaoK.Core\XiaoK.Core.csproj" />
+    <ProjectReference Include="..\XiaoK.Adapters.Windows\XiaoK.Adapters.Windows.csproj" />
+    <ProjectReference Include="..\XiaoK.Inference\XiaoK.Inference.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

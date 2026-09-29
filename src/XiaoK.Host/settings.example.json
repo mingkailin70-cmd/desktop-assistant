@@ -1,0 +1,16 @@
+{
+  "dataRoot": "D:\\XiaoK\\Data",
+  "inferenceEndpoint": "http://127.0.0.1:8080/",
+  "applications": [
+    { "id": "vscode", "executable": "D:\\VS Code\\Code.exe", "workingDirectory": "选择你要使用的项目目录" },
+    { "id": "edge", "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "workingDirectory": null },
+    { "id": "explorer", "executable": "explorer.exe", "workingDirectory": null },
+    { "id": "wechat", "executable": "D:\\微信\\Weixin\\Weixin.exe", "workingDirectory": null },
+    { "id": "qq", "executable": "D:\\QQ\\QQ.exe", "workingDirectory": null }
+  ],
+  "searchRoots": [
+    { "id": "Desktop", "path": "替换为桌面目录" },
+    { "id": "Documents", "path": "替换为文档目录" },
+    { "id": "Downloads", "path": "替换为下载目录" }
+  ]
+}
