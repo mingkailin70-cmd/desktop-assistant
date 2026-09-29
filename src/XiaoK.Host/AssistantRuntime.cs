@@ -101,9 +101,16 @@ internal sealed class AssistantRuntime : IDisposable
 
     public void CancelCurrent()
     {
-        _voice.StopImmediately();
+        StopMicrophone();
         try { Volatile.Read(ref _active)?.Cancel(); }
         catch (ObjectDisposedException) { }
+    }
+
+    public bool StopMicrophone()
+    {
+        var wasCapturing = _voice.IsCapturing;
+        _voice.StopImmediately();
+        return wasCapturing;
     }
 
     public void Dispose()

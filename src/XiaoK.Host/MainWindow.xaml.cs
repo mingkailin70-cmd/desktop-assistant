@@ -87,9 +87,11 @@ public partial class MainWindow : Window, IApprovalPresenter
 
     private void StopMic_Click(object sender, RoutedEventArgs e)
     {
-        _runtime.CancelCurrent();
+        var wasCapturing = _runtime.StopMicrophone();
         StatusText.Text = _runtime.VoiceStatus;
-        OutputText.Text = "停麦信号已立即发出。当前语音运行时尚未安装，麦克风未采集。";
+        OutputText.Text = wasCapturing
+            ? "麦克风已停止采集；当前桌面任务继续运行。"
+            : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
     }
 
     private void Expand_Click(object sender, RoutedEventArgs e)
