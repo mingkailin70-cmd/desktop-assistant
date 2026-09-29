@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 using XiaoK.Inference;
 using XiaoK.Tools;
@@ -31,6 +32,21 @@ try
 
     await CheckWorkspaceRetentionLimitAsync(tempRoot);
     passed.Add("达到五个任务目录上限后拒绝继续创建副本");
+
+    CheckNoticeSourceIsFilteredBeforeBodyRead();
+    passed.Add("非允许发布者在读取通知正文前被拒绝");
+
+    CheckUnknownNoticeConversationDoesNotReadBody();
+    passed.Add("会话类型未知时不读取通知正文且不自动分析");
+
+    CheckNoticePermissionAndLockState();
+    passed.Add("权限缺失或锁屏时不读取通知正文");
+
+    CheckConfirmedPrivateNoticeReadsOnlyOnceAndDeduplicates();
+    passed.Add("已确认私聊才读取正文，重复通知不会再次读取");
+
+    CheckNoticeWithoutVisibleBodyDoesNotAnalyze();
+    passed.Add("无可见正文或正文超限时不触发分析且不保留正文");
 
     if (!CheckDirectoryJunction(tempRoot, out var linkSkipReason)) skipped.Add("目录联接夹具无法创建，重解析点用例跳过：" + linkSkipReason);
     else passed.Add("目录联接不会被快照复制或读取");
@@ -139,6 +155,76 @@ static async Task CheckWorkspaceRetentionLimitAsync(string root)
     Require(Directory.GetDirectories(workspace).Length == 5, "隔离工作区目录数量越过五个上限。");
     Require(inference.CallCount == 5, "第六个任务在被拒绝前仍调用了模型。");
 }
+
+static void CheckNoticeSourceIsFilteredBeforeBodyRead()
+{
+    var policy = CreateNoticePolicy();
+    var bodyReads = 0;
+    var result = policy.Inspect("wechat", "untrusted.publisher!App", "chat-1", "Alice", true,
+        () => { bodyReads++; return "不得读取这段正文"; }, DateTimeOffset.UtcNow, "notice-source", true, true);
+
+    Require(!result.Accepted && !result.AnalyzeBody && bodyReads == 0,
+        "非允许发布者通知未能在正文读取前被拒绝。");
+}
+
+static void CheckUnknownNoticeConversationDoesNotReadBody()
+{
+    var policy = CreateNoticePolicy();
+    var bodyReads = 0;
+    var result = policy.Inspect("wechat", "wechat.package!Main", null, null, null,
+        () => { bodyReads++; return "不应读到"; }, DateTimeOffset.UtcNow, "notice-unknown-chat", true, true);
+
+    Require(result.Accepted && !result.AnalyzeBody && result.Notice?.Body is null && bodyReads == 0,
+        "会话类型未知时读取了正文或触发了自动分析。");
+}
+
+static void CheckNoticePermissionAndLockState()
+{
+    var lockedPolicy = CreateNoticePolicy();
+    var lockedReads = 0;
+    var locked = lockedPolicy.Inspect("wechat", "wechat.package!Main", "chat-2", "Alice", true,
+        () => { lockedReads++; return "不应读到"; }, DateTimeOffset.UtcNow, "notice-locked", false, true);
+    Require(!locked.Accepted && lockedReads == 0, "锁屏时读取了通知正文。");
+
+    var revokedPolicy = CreateNoticePolicy();
+    var revokedReads = 0;
+    var revoked = revokedPolicy.Inspect("wechat", "wechat.package!Main", "chat-3", "Alice", true,
+        () => { revokedReads++; return "不应读到"; }, DateTimeOffset.UtcNow, "notice-revoked", true, false);
+    Require(!revoked.Accepted && revokedReads == 0, "权限未授予时读取了通知正文。");
+}
+
+static void CheckConfirmedPrivateNoticeReadsOnlyOnceAndDeduplicates()
+{
+    var policy = CreateNoticePolicy();
+    var bodyReads = 0;
+    string? ReadBody() { bodyReads++; return "会议改到三点"; }
+
+    var first = policy.Inspect("wechat", "wechat.package!Main", "chat-4", "Alice", true,
+        ReadBody, DateTimeOffset.UtcNow, "notice-private", true, true);
+    var duplicate = policy.Inspect("wechat", "wechat.package!Main", "chat-4", "Alice", true,
+        ReadBody, DateTimeOffset.UtcNow, "notice-private", true, true);
+
+    Require(first.Accepted && first.AnalyzeBody && first.Notice?.Body == "会议改到三点" && bodyReads == 1,
+        "已确认私聊的可见正文未按预期读取一次并生成分析请求。");
+    Require(!duplicate.Accepted && !duplicate.AnalyzeBody && bodyReads == 1,
+        "重复通知再次读取了正文或触发了分析。");
+}
+
+static void CheckNoticeWithoutVisibleBodyDoesNotAnalyze()
+{
+    var policy = CreateNoticePolicy();
+    var missing = policy.Inspect("qq", "qq.package!Main", "chat-5", "Bob", true,
+        () => null, DateTimeOffset.UtcNow, "notice-no-body", true, true);
+    Require(missing.Accepted && !missing.AnalyzeBody && missing.Notice?.Body is null,
+        "无可见正文的通知触发了分析或保存了正文。");
+
+    var oversized = policy.Inspect("qq", "qq.package!Main", "chat-6", "Bob", true,
+        () => new string('x', 20_001), DateTimeOffset.UtcNow, "notice-large-body", true, true);
+    Require(oversized.Accepted && !oversized.AnalyzeBody && oversized.Notice?.Body is null,
+        "正文超限的通知触发了分析或保留了正文。");
+}
+
+static MessageNoticePolicy CreateNoticePolicy() => new(["wechat.package!Main"], ["qq.package!Main"]);
 
 static bool CheckDirectoryJunction(string root, out string skipReason)
 {
