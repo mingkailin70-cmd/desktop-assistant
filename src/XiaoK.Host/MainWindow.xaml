@@ -34,7 +34,7 @@
                          ToolTip="例如：打开小K项目 / 查找文件 预算 / 分析消息：…"/>
                 <WrapPanel Margin="0,8,0,0">
                     <Button x:Name="RunButton" Content="运行" Click="Run_Click" MinWidth="76"/>
-                    <Button Content="打开 VS Code 项目" Click="OpenProject_Click" Margin="7,0,0,0"/>
+                    <Button x:Name="OpenProjectButton" Content="打开 VS Code 项目" Click="OpenProject_Click" Margin="7,0,0,0"/>
                     <Button x:Name="CancelButton" Content="取消任务" Click="Cancel_Click" Margin="7,0,0,0"/>
                     <Button x:Name="StopMicButton" Content="停麦" Click="StopMic_Click" Margin="7,0,0,0"/>
                 </WrapPanel>

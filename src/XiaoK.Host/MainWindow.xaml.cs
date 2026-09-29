@@ -14,6 +14,7 @@ public partial class MainWindow : Window, IApprovalPresenter
     private HwndSource? _source;
     private bool _exiting;
     private bool _expanded = true;
+    private bool _hotkeyRegistered;
 
     public MainWindow()
     {
@@ -71,7 +72,11 @@ public partial class MainWindow : Window, IApprovalPresenter
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
     {
-        OutputText.Text = await _runtime.SubmitAsync("打开小K项目");
+        OutputText.Text = "正在打开项目；可随时取消。";
+        StatusText.Text = "任务运行中";
+        SetButtonsEnabled(false);
+        try { OutputText.Text = await _runtime.SubmitAsync("打开小K项目"); }
+        finally { StatusText.Text = _runtime.VoiceStatus; SetButtonsEnabled(true); }
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -102,12 +107,18 @@ public partial class MainWindow : Window, IApprovalPresenter
     {
         _source = (HwndSource)PresentationSource.FromVisual(this)!;
         _source.AddHook(HotkeyHook);
-        RegisterHotKey(_source.Handle, 1901, ModControl | ModShift, (uint)System.Windows.Forms.Keys.K);
+        _hotkeyRegistered = RegisterHotKey(_source.Handle, 1901, ModControl | ModShift, (uint)System.Windows.Forms.Keys.K);
+        if (!_hotkeyRegistered) StatusText.Text = "待命 · Ctrl+Shift+K 不可用，可从托盘打开";
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WmHotkey && wParam.ToInt32() == 1901)
+        if (App.RestoreMessageId != 0 && msg == (int)App.RestoreMessageId)
+        {
+            RestoreFromTray();
+            handled = true;
+        }
+        else if (msg == WmHotkey && wParam.ToInt32() == 1901)
         {
             RestoreFromTray();
             handled = true;
@@ -140,7 +151,7 @@ public partial class MainWindow : Window, IApprovalPresenter
         _tray.Dispose();
         if (_source is not null)
         {
-            UnregisterHotKey(_source.Handle, 1901);
+            if (_hotkeyRegistered) UnregisterHotKey(_source.Handle, 1901);
             _source.RemoveHook(HotkeyHook);
         }
     }
@@ -150,6 +161,7 @@ public partial class MainWindow : Window, IApprovalPresenter
         RequestBox.IsEnabled = enabled;
         RunButton.IsEnabled = enabled;
         CancelButton.IsEnabled = !enabled;
+        OpenProjectButton.IsEnabled = enabled;
         StopMicButton.IsEnabled = true;
     }
 

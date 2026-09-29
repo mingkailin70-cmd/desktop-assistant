@@ -20,6 +20,7 @@ internal sealed class AssistantRuntime : IDisposable
     private readonly AudioGateway _voice = new();
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models = new();
+    private readonly SemaphoreSlim _executionGate = new(1, 1);
     private CancellationTokenSource? _active;
 
     public AssistantRuntime(IApprovalPresenter approval)
@@ -40,17 +41,25 @@ internal sealed class AssistantRuntime : IDisposable
     {
         var request = input.Trim();
         if (request.Length == 0) return "先输入一句话，或用 Ctrl+Shift+K 打开小K。";
-        CancelCurrent();
-        _active = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        var token = _active.Token;
-        var id = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
-        var category = Classify(request);
-        var task = new TaskRecord(id, category, CategoryLabel(category), TaskLifecycleState.Planning, now, now);
-        await SaveState(task, token);
+
+        var operation = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        var previous = Interlocked.Exchange(ref _active, operation);
+        try { previous?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        var token = operation.Token;
+        var gateEntered = false;
+        TaskRecord? task = null;
 
         try
         {
+            await _executionGate.WaitAsync(token);
+            gateEntered = true;
+            var now = DateTimeOffset.UtcNow;
+            var category = Classify(request);
+            task = new TaskRecord(Guid.NewGuid(), category, CategoryLabel(category), TaskLifecycleState.Planning, now, now);
+            if (!await TrySaveStateAsync(task, token))
+                return "无法保存本地任务状态，本次操作未执行。请检查 D 盘数据目录。";
+
             var result = await RouteAsync(category, request, token);
             task = task with
             {
@@ -59,36 +68,48 @@ internal sealed class AssistantRuntime : IDisposable
                 // The detailed chat body/result remains transient and is never persisted.
                 ErrorCode = result.ErrorCode
             };
-            await SaveState(task, CancellationToken.None);
-            return result.Success ? result.Data ?? result.Summary : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
+            var saved = await TrySaveStateAsync(task, CancellationToken.None);
+            var output = result.Success ? result.Data ?? result.Summary : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
+            return saved ? output : output + "（任务结果未写入本地历史）";
         }
         catch (OperationCanceledException)
         {
-            task = task with { Status = TaskLifecycleState.Cancelled, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "CANCELLED" };
-            await SaveState(task, CancellationToken.None);
+            if (task is not null)
+            {
+                task = task with { Status = TaskLifecycleState.Cancelled, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "CANCELLED" };
+                await TrySaveStateAsync(task, CancellationToken.None);
+            }
             return "已取消当前任务。";
         }
         catch (Exception)
         {
-            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "INTERNAL" };
-            await SaveState(task, CancellationToken.None);
+            if (task is not null)
+            {
+                task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "INTERNAL" };
+                await TrySaveStateAsync(task, CancellationToken.None);
+            }
             return "任务失败。为保护隐私，故障内容未写入日志。";
+        }
+        finally
+        {
+            if (gateEntered) _executionGate.Release();
+            Interlocked.CompareExchange(ref _active, null, operation);
+            operation.Dispose();
         }
     }
 
     public void CancelCurrent()
     {
         _voice.StopImmediately();
-        try { _active?.Cancel(); } catch (ObjectDisposedException) { }
+        try { Volatile.Read(ref _active)?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     public void Dispose()
     {
         CancelCurrent();
-        _active?.Dispose();
         _inference.Dispose();
     }
-
     private async Task<ToolResult> RouteAsync(string category, string request, CancellationToken token)
     {
         var lower = request.ToLowerInvariant();
@@ -143,10 +164,16 @@ internal sealed class AssistantRuntime : IDisposable
         catch (Exception) { return new(false, "无法读取本地模型响应。", "LOCAL_MODEL_INVALID_RESPONSE"); }
     }
 
-    private async Task SaveState(TaskRecord task, CancellationToken token)
+    private async Task<bool> TrySaveStateAsync(TaskRecord task, CancellationToken token)
     {
         // Category only: never persist user prompts, notification bodies, model replies or attachments.
-        await _store.SaveAsync(task, token);
+        try
+        {
+            await _store.SaveAsync(task, token);
+            return true;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception) { return false; }
     }
 
     private static string Classify(string request)
