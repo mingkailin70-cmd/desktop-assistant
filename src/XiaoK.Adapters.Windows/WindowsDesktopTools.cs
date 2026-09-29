@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security;
 using XiaoK.Core;
 
 namespace XiaoK.Adapters.Windows;
@@ -14,17 +15,44 @@ public sealed class WindowsDesktopTools
 
     public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots)
     {
-        _apps = apps.ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
-        _searchRoots = searchRoots.ToDictionary(x => x.Key, x => Path.GetFullPath(x.Value), StringComparer.OrdinalIgnoreCase);
+        var allowedApps = new Dictionary<string, DesktopApp>(StringComparer.OrdinalIgnoreCase);
+        foreach (var configuredApp in apps ?? [])
+        {
+            if (configuredApp is null || string.IsNullOrWhiteSpace(configuredApp.Id) || configuredApp.Id.Length > 64)
+                continue;
+
+            var executable = configuredApp.Id.Equals("explorer", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(configuredApp.Executable, "explorer.exe", StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine(Environment.SystemDirectory, "explorer.exe")
+                : NormalizeLocalPath(configuredApp.Executable);
+            var workingDirectory = configuredApp.WorkingDirectory is null
+                ? null
+                : NormalizeLocalPath(configuredApp.WorkingDirectory);
+            if (executable is null || (configuredApp.WorkingDirectory is not null && workingDirectory is null)) continue;
+
+            allowedApps.TryAdd(configuredApp.Id, configuredApp with
+            {
+                Executable = executable,
+                WorkingDirectory = workingDirectory
+            });
+        }
+        _apps = allowedApps;
+
+        var allowedRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var configuredRoot in searchRoots ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(configuredRoot.Key) || configuredRoot.Key.Length > 64) continue;
+            var root = NormalizeLocalPath(configuredRoot.Value);
+            if (root is null || IsDriveRoot(root)) continue;
+            allowedRoots.TryAdd(configuredRoot.Key, root);
+        }
+        _searchRoots = allowedRoots;
     }
 
     public async Task<ToolResult> LaunchAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {
         if (!proposal.Arguments.TryGetValue("app_id", out var appId) || !_apps.TryGetValue(appId, out var app))
             return new(false, "这个应用未在本机允许列表中。", "APP_NOT_ALLOWLISTED");
-        if (!Path.IsPathFullyQualified(app.Executable) && !string.Equals(app.Executable, "explorer.exe", StringComparison.OrdinalIgnoreCase))
-            return new(false, "应用路径未配置为明确的本地路径。", "APP_PATH_NOT_CONFIGURED");
-
         try
         {
             var start = new ProcessStartInfo(app.Executable) { UseShellExecute = true };
@@ -74,39 +102,99 @@ public sealed class WindowsDesktopTools
         if (existingRoots.Length == 0)
             return new(false, "搜索目录未配置或不可用。", "SEARCH_ROOT_UNAVAILABLE");
 
+        var safeRoots = existingRoots.Where(IsOrdinaryDirectory).ToArray();
+        if (safeRoots.Length == 0)
+            return new(false, "搜索目录是链接或重解析点，已拒绝遍历。", "SEARCH_ROOT_NOT_LOCAL_DIRECTORY");
+
         var matches = new List<string>(10);
         var scanned = 0;
-        var queue = new Queue<(string Path, int Depth)>();
-        foreach (var root in existingRoots) queue.Enqueue((root, 0));
+        var queue = new Queue<(string Path, string Root, int Depth)>();
+        foreach (var root in safeRoots) queue.Enqueue((root, root, 0));
         while (queue.Count > 0 && scanned < 5000 && matches.Count < 10)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var (current, depth) = queue.Dequeue();
+            var (current, root, depth) = queue.Dequeue();
+            if (!IsWithinRoot(current, root) || !IsOrdinaryDirectory(current)) continue;
             try
             {
                 foreach (var file in Directory.EnumerateFiles(current))
                 {
                     if (++scanned > 5000) break;
-                    if (Path.GetFileName(file).Contains(query, StringComparison.OrdinalIgnoreCase)) matches.Add(file);
+                    if (IsOrdinaryFile(file) && Path.GetFileName(file).Contains(query, StringComparison.OrdinalIgnoreCase)) matches.Add(file);
                     if (matches.Count == 10) break;
                 }
                 if (depth >= 5 || scanned >= 5000) continue;
                 foreach (var child in Directory.EnumerateDirectories(current))
                 {
-                    try
-                    {
-                        if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) queue.Enqueue((child, depth + 1));
-                    }
-                    catch (IOException) { }
-                    catch (UnauthorizedAccessException) { }
+                    if (IsWithinRoot(child, root) && IsOrdinaryDirectory(child)) queue.Enqueue((child, root, depth + 1));
                 }
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
+            catch (SecurityException) { }
         }
 
         var result = matches.Count == 0 ? "没有找到匹配文件。" : string.Join(Environment.NewLine, matches);
         return new(true, matches.Count == 0 ? result : $"找到 {matches.Count} 个结果：", Data: result);
+    }
+
+    private static string? NormalizeLocalPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || path.StartsWith("\\\\", StringComparison.Ordinal))
+            return null;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetPathRoot(fullPath);
+            return root is not null && root.Length >= 3 && root[1] == ':'
+                ? Path.TrimEndingDirectorySeparator(fullPath)
+                : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsDriveRoot(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        return string.Equals(fullPath, Path.GetPathRoot(fullPath), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWithinRoot(string path, string root)
+    {
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return fullPath.Equals(fullRoot, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOrdinaryDirectory(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            return (attributes & FileAttributes.Directory) != 0 && (attributes & FileAttributes.ReparsePoint) == 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsOrdinaryFile(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            return (attributes & FileAttributes.Directory) == 0 && (attributes & FileAttributes.ReparsePoint) == 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static bool FindVisibleWindow(DesktopApp app)
