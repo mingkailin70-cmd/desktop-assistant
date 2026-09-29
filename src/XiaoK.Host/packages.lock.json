@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows10.0.26100": {
+      "xiaok.adapters.windows": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
+      },
+      "xiaok.core": {
+        "type": "Project"
+      },
+      "xiaok.inference": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
+      },
+      "xiaok.storage": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
+      },
+      "xiaok.tools": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Adapters.Windows": "[1.0.0, )",
+          "XiaoK.Core": "[1.0.0, )",
+          "XiaoK.Inference": "[1.0.0, )"
+        }
+      },
+      "xiaok.voice": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,4 @@
-using System.Runtime.InteropServices;
 using System.Security;
-using System.Text;
 using Microsoft.Win32;
 
 namespace XiaoK.Host;
@@ -9,9 +7,6 @@ internal static class LoginStartupRegistration
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "XiaoK.DesktopAssistant";
-    private const int ErrorInsufficientBuffer = 122;
-    private const int AppModelErrorNoPackage = 15700;
-
     public static bool IsSupported => !HasPackageIdentity();
 
     public static bool IsEnabled
@@ -45,18 +40,5 @@ internal static class LoginStartupRegistration
         runKey.SetValue(ValueName, $"\"{executable}\" --background", RegistryValueKind.String);
     }
 
-    private static bool HasPackageIdentity()
-    {
-        uint bufferLength = 0;
-        var result = GetCurrentPackageFullName(ref bufferLength, null);
-        if (result == AppModelErrorNoPackage) return false;
-        if (result is ErrorInsufficientBuffer or 0) return true;
-
-        // Unknown package-identity state fails closed: do not write an autostart entry
-        // that may be virtualized or unsupported by the current deployment type.
-        throw new InvalidOperationException($"无法确认小K的打包状态（Windows 错误 {result}），未更改登录启动设置。");
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetCurrentPackageFullName")]
-    private static extern int GetCurrentPackageFullName(ref uint packageFullNameLength, StringBuilder? packageFullName);
+    private static bool HasPackageIdentity() => WindowsPackageIdentity.IsPresent;
 }

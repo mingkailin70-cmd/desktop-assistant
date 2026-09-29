@@ -9,20 +9,27 @@ namespace XiaoK.Host;
 public partial class SettingsWindow : Window
 {
     private readonly XiaoKSettings _original;
+    private readonly Func<Task<string>> _requestNotificationAccess;
     private readonly bool _startupWasEnabled;
     private TimeSpan _previousCpuTime;
     private long _previousCpuSampleTimestamp;
 
-    internal SettingsWindow(XiaoKSettings settings)
+    internal SettingsWindow(XiaoKSettings settings, WindowsNotificationMonitor notificationMonitor)
     {
         InitializeComponent();
         _original = settings;
+        _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
         DataRootBox.Text = settings.DataRoot;
         ModelRootBox.Text = settings.ModelRoot;
         EvaluationRootBox.Text = settings.EvaluationRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
+        MonitorWeChatCheck.IsChecked = settings.MonitorWeChatNotifications;
+        MonitorQQCheck.IsChecked = settings.MonitorQQNotifications;
+        WeChatAppIdsBox.Text = string.Join(Environment.NewLine, settings.WeChatPublisherAppIds);
+        QQAppIdsBox.Text = string.Join(Environment.NewLine, settings.QQPublisherAppIds);
+        NotificationStatusText.Text = notificationMonitor.Status;
 
         var startupSupported = false;
         var startupStatus = "MSIX 登录启动任务尚未接入；此打包版本不能通过注册表设置自启动。";
@@ -80,6 +87,19 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void RequestNotificationAccess_Click(object sender, RoutedEventArgs e)
+    {
+        RequestNotificationAccessButton.IsEnabled = false;
+        try
+        {
+            NotificationStatusText.Text = await _requestNotificationAccess();
+        }
+        finally
+        {
+            RequestNotificationAccessButton.IsEnabled = true;
+        }
+    }
+
     private async void ClearSamples_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -134,7 +154,11 @@ public partial class SettingsWindow : Window
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
                 ModelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录"),
                 EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
-                InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text)
+                InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text),
+                MonitorWeChatNotifications = MonitorWeChatCheck.IsChecked == true,
+                MonitorQQNotifications = MonitorQQCheck.IsChecked == true,
+                WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
+                QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
             };
             EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot);
 
@@ -155,6 +179,15 @@ public partial class SettingsWindow : Window
         {
             StatusText.Text = ex.Message;
         }
+    }
+
+    private static List<string> ParseAppIds(string value, string application)
+    {
+        var ids = value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (ids.Any(id => id.Length > 256 || !id.Contains('!')))
+            throw new ArgumentException($"{application} 发布者 AUMID 格式无效；每行填写一个完整的 PackageFamily!ApplicationId。", nameof(value));
+        return ids;
     }
 
     private static string ValidateLocalDirectory(string value, string label)

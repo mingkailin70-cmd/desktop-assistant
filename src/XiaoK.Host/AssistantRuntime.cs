@@ -224,6 +224,10 @@ internal sealed record XiaoKSettings
     public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
     public string EvaluationRoot { get; init; } = @"D:\XiaoK\Evaluations";
     public string InferenceEndpoint { get; init; } = "http://127.0.0.1:8080/";
+    public bool MonitorWeChatNotifications { get; init; }
+    public bool MonitorQQNotifications { get; init; }
+    public List<string> WeChatPublisherAppIds { get; init; } = [];
+    public List<string> QQPublisherAppIds { get; init; } = [];
     public List<AppSetting> Applications { get; init; } = [];
     public List<RootSetting> SearchRoots { get; init; } = [];
 
@@ -279,7 +283,9 @@ internal sealed record XiaoKSettings
         ModelRoot = string.IsNullOrWhiteSpace(ModelRoot) ? defaults.ModelRoot : ModelRoot,
         EvaluationRoot = string.IsNullOrWhiteSpace(EvaluationRoot) ? defaults.EvaluationRoot : EvaluationRoot,
         Applications = Applications.Count == 0 ? defaults.Applications : Applications,
-        SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots
+        SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots,
+        WeChatPublisherAppIds = WeChatPublisherAppIds ?? [],
+        QQPublisherAppIds = QQPublisherAppIds ?? []
     };
 
     internal static string? FindWorkspace(string start)

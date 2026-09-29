@@ -3,6 +3,10 @@
   "modelRoot": "D:\\XiaoK\\Models",
   "evaluationRoot": "D:\\XiaoK\\Evaluations",
   "inferenceEndpoint": "http://127.0.0.1:8080/",
+  "monitorWeChatNotifications": false,
+  "monitorQQNotifications": false,
+  "weChatPublisherAppIds": [],
+  "qqPublisherAppIds": [],
   "applications": [
     { "id": "vscode", "executable": "D:\\VS Code\\Code.exe", "workingDirectory": "选择你要使用的项目目录" },
     { "id": "edge", "executable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "workingDirectory": null },

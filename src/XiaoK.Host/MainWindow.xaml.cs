@@ -10,6 +10,7 @@ namespace XiaoK.Host;
 public partial class MainWindow : Window, IApprovalPresenter
 {
     private readonly AssistantRuntime _runtime;
+    private readonly WindowsNotificationMonitor _notificationMonitor;
     private readonly Forms.NotifyIcon _tray;
     private HwndSource? _source;
     private bool _exiting;
@@ -22,6 +23,9 @@ public partial class MainWindow : Window, IApprovalPresenter
     {
         InitializeComponent();
         _runtime = new AssistantRuntime(this);
+        _notificationMonitor = new WindowsNotificationMonitor(Dispatcher);
+        _notificationMonitor.StatusChanged += OnNotificationStatusChanged;
+        _ = _notificationMonitor.ApplySettingsAsync(_runtime.CurrentSettings);
         FooterText.Text = _runtime.ModelStatus;
         StatusText.Text = _runtime.VoiceStatus;
         OutputText.Text = "小K已启动。闲置时不加载模型，也不采集麦克风。输入「打开小K项目」或「查找文件 关键词」试用本地工具。";
@@ -112,11 +116,25 @@ public partial class MainWindow : Window, IApprovalPresenter
     private void ShowSettings()
     {
         if (!IsVisible) RestoreFromTray();
-        var dialog = new SettingsWindow(_runtime.CurrentSettings) { Owner = this };
+        var dialog = new SettingsWindow(XiaoKSettings.Load(), _notificationMonitor) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
-            OutputText.Text = "设置已保存。登录启动立即生效；数据和推理路径将在重启小K后生效。";
+            _ = ApplySettingsAndReportAsync();
         }
+    }
+
+    private async Task ApplySettingsAndReportAsync()
+    {
+        var notificationStatus = await _notificationMonitor.ApplySettingsAsync(XiaoKSettings.Load());
+        OutputText.Text = $"设置已保存。登录启动和通知监听立即生效；数据与推理路径将在重启小K后生效。\n{notificationStatus}";
+    }
+
+    private void OnNotificationStatusChanged(string message)
+    {
+        if (_exiting) return;
+        StatusText.Text = message.StartsWith("微信通知：", StringComparison.Ordinal) ? "收到微信通知" :
+            message.StartsWith("QQ 通知：", StringComparison.Ordinal) ? "收到 QQ 通知" : StatusText.Text;
+        OutputText.Text = message;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -173,6 +191,7 @@ public partial class MainWindow : Window, IApprovalPresenter
             SetButtonsEnabled(false);
             CancelButton.IsEnabled = false;
             _tray.Visible = false;
+            _notificationMonitor.Dispose();
             if (_source is not null && _hotkeyRegistered)
             {
                 UnregisterHotKey(_source.Handle, 1901);
@@ -187,6 +206,7 @@ public partial class MainWindow : Window, IApprovalPresenter
 
         _tray.Visible = false;
         _tray.Dispose();
+        _notificationMonitor.StatusChanged -= OnNotificationStatusChanged;
         if (_source is not null)
         {
             if (_hotkeyRegistered) UnregisterHotKey(_source.Handle, 1901);
