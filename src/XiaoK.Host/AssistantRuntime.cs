@@ -32,7 +32,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _inference = new LocalInferenceClient(_settings.InferenceEndpoint);
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
-        _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval);
+        var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
+        _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
+            codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot);
     }
 
     public string ModelStatus => "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；未连接时不会转云端）";
@@ -67,13 +69,15 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var result = await RouteAsync(category, request, token);
             task = task with
             {
-                Status = result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed,
+                Status = result.FinalState ?? (result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed),
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
                 // The detailed chat body/result remains transient and is never persisted.
                 ErrorCode = result.ErrorCode
             };
             var saved = await TrySaveStateAsync(task, CancellationToken.None);
-            var output = result.Success ? result.Data ?? result.Summary : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
+            var output = result.Success
+                ? result.FinalState == TaskLifecycleState.AwaitingApproval ? $"{result.Summary}{Environment.NewLine}{Environment.NewLine}{result.Data}" : result.Data ?? result.Summary
+                : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
             return saved ? output : output + "（任务结果未写入本地历史）";
         }
         catch (OperationCanceledException)
@@ -164,7 +168,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
         if (category == "code")
             return await _broker.ExecuteAsync(new ToolProposal("code.task.create.v1",
-                ImmutableDictionary<string, string>.Empty, "用户明确选择的项目隔离工作区", "生成可审阅 diff"), token);
+                ImmutableDictionary<string, string>.Empty.Add("instruction", request), "configured-project", "在仓库外隔离副本中生成可审阅 diff"), token);
 
         try
         {
@@ -224,6 +228,8 @@ internal sealed record XiaoKSettings
     public string DataRoot { get; init; } = @"D:\XiaoK\Data";
     public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
     public string EvaluationRoot { get; init; } = @"D:\XiaoK\Evaluations";
+    public string CodeProjectRoot { get; init; } = "";
+    public string CodeWorkspaceRoot { get; init; } = @"D:\XiaoK\Workspaces";
     public string InferenceEndpoint { get; init; } = "http://127.0.0.1:8080/";
     public bool MonitorWeChatNotifications { get; init; }
     public bool MonitorQQNotifications { get; init; }
@@ -283,6 +289,8 @@ internal sealed record XiaoKSettings
         DataRoot = string.IsNullOrWhiteSpace(DataRoot) ? defaults.DataRoot : DataRoot,
         ModelRoot = string.IsNullOrWhiteSpace(ModelRoot) ? defaults.ModelRoot : ModelRoot,
         EvaluationRoot = string.IsNullOrWhiteSpace(EvaluationRoot) ? defaults.EvaluationRoot : EvaluationRoot,
+        CodeProjectRoot = CodeProjectRoot ?? "",
+        CodeWorkspaceRoot = string.IsNullOrWhiteSpace(CodeWorkspaceRoot) ? defaults.CodeWorkspaceRoot : CodeWorkspaceRoot,
         Applications = Applications.Count == 0 ? defaults.Applications : Applications,
         SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots,
         WeChatPublisherAppIds = WeChatPublisherAppIds ?? [],

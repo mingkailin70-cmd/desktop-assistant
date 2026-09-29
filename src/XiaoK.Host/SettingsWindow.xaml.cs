@@ -24,6 +24,8 @@ public partial class SettingsWindow : Window
         DataRootBox.Text = settings.DataRoot;
         ModelRootBox.Text = settings.ModelRoot;
         EvaluationRootBox.Text = settings.EvaluationRoot;
+        CodeProjectRootBox.Text = settings.CodeProjectRoot;
+        CodeWorkspaceRootBox.Text = settings.CodeWorkspaceRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
         MonitorWeChatCheck.IsChecked = settings.MonitorWeChatNotifications;
         MonitorQQCheck.IsChecked = settings.MonitorQQNotifications;
@@ -55,13 +57,17 @@ public partial class SettingsWindow : Window
 
     private void BrowseEvaluationRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(EvaluationRootBox, "选择脱敏评测样本目录");
 
-    private void BrowseInto(System.Windows.Controls.TextBox target, string description)
+    private void BrowseCodeProject_Click(object sender, RoutedEventArgs e) => BrowseInto(CodeProjectRootBox, "选择本地编程项目目录", allowNewFolder: false);
+
+    private void BrowseCodeWorkspace_Click(object sender, RoutedEventArgs e) => BrowseInto(CodeWorkspaceRootBox, "选择隔离编程工作区目录");
+
+    private void BrowseInto(System.Windows.Controls.TextBox target, string description, bool allowNewFolder = true)
     {
         using var picker = new Forms.FolderBrowserDialog
         {
             Description = description,
             UseDescriptionForTitle = true,
-            ShowNewFolderButton = true,
+            ShowNewFolderButton = allowNewFolder,
             SelectedPath = Directory.Exists(target.Text) ? target.Text : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
         };
 
@@ -107,7 +113,8 @@ public partial class SettingsWindow : Window
             var dataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录");
             var modelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录");
             var evaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录");
-            EnsureSeparateRoots(dataRoot, modelRoot, evaluationRoot);
+            var codeWorkspaceRoot = ValidateLocalDirectory(CodeWorkspaceRootBox.Text, "隔离工作区目录");
+            EnsureSeparateRoots(dataRoot, modelRoot, evaluationRoot, codeWorkspaceRoot);
             var preview = EvaluationSampleCleanup.Preview(evaluationRoot);
             if (preview.Files.Count == 0)
             {
@@ -154,13 +161,17 @@ public partial class SettingsWindow : Window
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
                 ModelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录"),
                 EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
+                CodeProjectRoot = ValidateOptionalProjectDirectory(CodeProjectRootBox.Text),
+                CodeWorkspaceRoot = ValidateLocalDirectory(CodeWorkspaceRootBox.Text, "隔离工作区目录"),
                 InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text),
                 MonitorWeChatNotifications = MonitorWeChatCheck.IsChecked == true,
                 MonitorQQNotifications = MonitorQQCheck.IsChecked == true,
                 WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
                 QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
             };
-            EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot);
+            EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot, updated.CodeWorkspaceRoot);
+            if (updated.CodeProjectRoot.Length > 0 && PathsOverlap(updated.CodeProjectRoot, updated.CodeWorkspaceRoot))
+                throw new ArgumentException("隔离工作区目录不能与编程项目目录相同或互相包含。");
 
             if (startupChanged) LoginStartupRegistration.SetEnabled(startupRequested);
             try
@@ -190,7 +201,7 @@ public partial class SettingsWindow : Window
         return ids;
     }
 
-    private static string ValidateLocalDirectory(string value, string label)
+    private static string ValidateLocalDirectory(string value, string label, bool allowRepository = false)
     {
         var trimmed = value.Trim();
         if (!Path.IsPathFullyQualified(trimmed) || trimmed.StartsWith("\\\\", StringComparison.Ordinal))
@@ -202,10 +213,18 @@ public partial class SettingsWindow : Window
             throw new ArgumentException($"{label}不能直接指向磁盘根目录。", nameof(value));
 
         var repository = XiaoKSettings.FindWorkspace(AppContext.BaseDirectory);
-        if (repository is not null && IsSameOrChildPath(fullPath, repository))
+        if (!allowRepository && repository is not null && IsSameOrChildPath(fullPath, repository))
             throw new ArgumentException($"{label}不能放在 Git 仓库内。", nameof(value));
 
         return fullPath;
+    }
+
+    private static string ValidateOptionalProjectDirectory(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        var path = ValidateLocalDirectory(value, "编程项目目录", allowRepository: true);
+        if (!Directory.Exists(path)) throw new DirectoryNotFoundException("所选编程项目目录不存在。");
+        return path;
     }
 
     private static bool IsSameOrChildPath(string path, string root)
@@ -216,10 +235,13 @@ public partial class SettingsWindow : Window
             || path.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void EnsureSeparateRoots(string dataRoot, string modelRoot, string evaluationRoot)
+    private static void EnsureSeparateRoots(string dataRoot, string modelRoot, string evaluationRoot, string codeWorkspaceRoot)
     {
-        if (PathsOverlap(dataRoot, modelRoot) || PathsOverlap(dataRoot, evaluationRoot) || PathsOverlap(modelRoot, evaluationRoot))
-            throw new ArgumentException("数据、模型和评测目录必须互相独立，避免误删任务数据或模型文件。");
+        var roots = new[] { dataRoot, modelRoot, evaluationRoot, codeWorkspaceRoot };
+        for (var i = 0; i < roots.Length; i++)
+        for (var j = i + 1; j < roots.Length; j++)
+            if (PathsOverlap(roots[i], roots[j]))
+                throw new ArgumentException("数据、模型、评测和隔离工作区目录必须互相独立，避免混放或误删。");
     }
 
     private static bool PathsOverlap(string first, string second) => IsSameOrChildPath(first, second) || IsSameOrChildPath(second, first);

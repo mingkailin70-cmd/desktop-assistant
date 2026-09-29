@@ -2,6 +2,8 @@
   "dataRoot": "D:\\XiaoK\\Data",
   "modelRoot": "D:\\XiaoK\\Models",
   "evaluationRoot": "D:\\XiaoK\\Evaluations",
+  "codeProjectRoot": "选择你要让本地编程代理处理的项目目录",
+  "codeWorkspaceRoot": "D:\\XiaoK\\Workspaces",
   "inferenceEndpoint": "http://127.0.0.1:8080/",
   "monitorWeChatNotifications": false,
   "monitorQQNotifications": false,

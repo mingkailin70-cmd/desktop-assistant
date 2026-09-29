@@ -8,7 +8,7 @@ public sealed record TaskRecord(Guid Id, string Kind, string Summary, TaskLifecy
     DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null);
 
 public sealed record ToolProposal(string ToolId, ImmutableDictionary<string, string> Arguments, string Target, string ExpectedOutcome);
-public sealed record ToolResult(bool Success, string Summary, string? ErrorCode = null, string? Data = null);
+public sealed record ToolResult(bool Success, string Summary, string? ErrorCode = null, string? Data = null, TaskLifecycleState? FinalState = null);
 public sealed record MessageNotice(string ApplicationId, string SourceAppId, string? ConversationId, string? SenderDisplayName,
     bool IsPrivateConversation, string? Body, DateTimeOffset ReceivedAtUtc, string DeduplicationKey);
 public sealed record NoticeDecision(bool Accepted, bool AnalyzeBody, string UserMessage, MessageNotice? Notice = null);

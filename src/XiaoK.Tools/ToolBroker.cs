@@ -10,9 +10,21 @@ public sealed class ToolBroker
     private readonly IInferenceClient _inference;
     private readonly ModelBroker _models;
     private readonly IApprovalPresenter _approval;
+    private readonly CodeTaskAgent _codeAgent;
+    private readonly string _codeProjectRoot;
+    private readonly string _codeWorkspaceRoot;
 
-    public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models, IApprovalPresenter approval)
-    { _desktop = desktop; _inference = inference; _models = models; _approval = approval; }
+    public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
+        IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot)
+    {
+        _desktop = desktop;
+        _inference = inference;
+        _models = models;
+        _approval = approval;
+        _codeAgent = codeAgent;
+        _codeProjectRoot = codeProjectRoot;
+        _codeWorkspaceRoot = codeWorkspaceRoot;
+    }
 
     public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {
@@ -27,7 +39,8 @@ public sealed class ToolBroker
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
             "message.send.v1" => await SendAsync(proposal, cancellationToken),
-            "code.task.create.v1" => new ToolResult(false, "隔离编程代理尚未配置；没有修改项目文件。", "LOCAL_AGENT_NOT_CONFIGURED"),
+            "code.task.create.v1" => await _codeAgent.ExecuteAsync(_codeProjectRoot, _codeWorkspaceRoot,
+                proposal.Arguments["instruction"], cancellationToken),
             _ => new ToolResult(false, "未知工具已拒绝。", "UNKNOWN_TOOL")
         };
     }
@@ -50,9 +63,12 @@ public sealed class ToolBroker
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.draft.v1" => ValidateMessage(proposal, "draft"),
             "message.send.v1" => ValidateSend(proposal),
-            "code.task.create.v1" => proposal.Arguments.Count == 0
-                ? null
-                : InvalidProposal("编程任务不接受任意工具参数。"),
+            "code.task.create.v1" => proposal.Arguments.Count == 1
+                && proposal.Arguments.TryGetValue("instruction", out var instruction)
+                && !string.IsNullOrWhiteSpace(instruction) && instruction.Length <= 4_000
+                && proposal.Target == "configured-project"
+                    ? null
+                    : InvalidProposal("编程任务只接受用户输入的说明，并绑定到设置中明确选择的项目。"),
             _ => null // The fixed registry below rejects unknown tool IDs.
         };
     }
