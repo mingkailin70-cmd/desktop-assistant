@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "status": "candidate-only-no-runtimes-downloaded",
+  "lastSourceReviewDate": "2026-09-30",
+  "runtimes": [
+    {
+      "id": "dotnet-sdk",
+      "version": "10.0.401",
+      "source": "https://dotnet.microsoft.com/download/dotnet/10.0",
+      "repositoryPin": "global.json",
+      "artifact": null,
+      "sha256": null,
+      "status": "already-provisioned-local-development-sdk",
+      "notes": "使用仓库忽略的 .tools SDK 副本；不作为MSIX运行时安装依赖。"
+    },
+    {
+      "id": "llama.cpp",
+      "version": "b11256",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/tag/b11256",
+      "sourceCommit": "c85b92c",
+      "target": "windows-x64-cuda13",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "需核验官方资产文件名、提交签名、SHA256和CUDA DLL；再与本机驱动实测。"
+    },
+    {
+      "id": "python-asr",
+      "version": "3.12.x-x64",
+      "source": "https://www.python.org/downloads/windows/",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "选择仍受支持的安全维护版本，并在安装清单中固定补丁号。"
+    },
+    {
+      "id": "python-tts",
+      "version": "3.12.x-x64",
+      "source": "https://www.python.org/downloads/windows/",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "与ASR相同的CPython补丁版本，使用独立虚拟环境。"
+    },
+    {
+      "id": "pytorch-cuda",
+      "version": "2.14.0",
+      "source": "https://download.pytorch.org/whl/cu132/torch/",
+      "target": "windows-amd64-cp312-cu132",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "官方CUDA 13.2轮子候选；锁定torch和torchaudio的完整文件名/散列后进行本机验证。"
+    },
+    {
+      "id": "qwen-asr",
+      "version": "0.0.6",
+      "source": "https://pypi.org/project/qwen-asr/",
+      "target": "CPython-3.12",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "官方pyproject要求transformers==4.57.6、accelerate==1.12.0；传递依赖待锁哈希。"
+    },
+    {
+      "id": "qwen-tts",
+      "version": "0.1.1",
+      "source": "https://pypi.org/project/qwen-tts/",
+      "target": "CPython-3.12",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "官方pyproject要求transformers==4.57.3、accelerate==1.12.0；传递依赖待锁哈希。"
+    }
+  ]
+}

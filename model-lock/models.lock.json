@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "status": "candidate-only-no-model-files-downloaded",
+  "lastSourceReviewDate": "2026-09-30",
+  "models": [
+    {
+      "id": "qwen3.5-4b-q4km",
+      "role": "primary-llm-candidate",
+      "source": "https://huggingface.co/cmp-nct/Qwen3.5-4B-GGUF",
+      "baseModel": "Qwen/Qwen3.5-4B",
+      "revision": null,
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "files": [
+        {
+          "name": "Qwen3.5-4B-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "candidate",
+      "notes": "第三方量化衍生件；下载前复核底模revision、转换版本、chat template及视觉投影文件。"
+    },
+    {
+      "id": "qwen3-asr-0.6b",
+      "role": "asr-candidate",
+      "source": "https://huggingface.co/Qwen/Qwen3-ASR-0.6B",
+      "revision": null,
+      "format": "Transformers Safetensors",
+      "files": [
+        {
+          "name": "model.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea",
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "chat_template.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "generation_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "merges.txt",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "preprocessor_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "tokenizer_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "vocab.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "candidate",
+      "notes": "准备下载时固定仓库40位revision并记录该revision的准确文件名。"
+    },
+    {
+      "id": "qwen3-tts-12hz-0.6b-base",
+      "role": "tts-candidate",
+      "source": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+      "revision": null,
+      "format": "Transformers Safetensors",
+      "files": [
+        {
+          "name": "model.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6",
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "generation_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "merges.txt",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "preprocessor_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "tokenizer_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "vocab.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "speech_tokenizer/config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "speech_tokenizer/configuration.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "speech_tokenizer/model.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "speech_tokenizer/preprocessor_config.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "candidate",
+      "notes": "准备下载时固定仓库40位revision；不含VoiceDesign或VoiceClone额外权重。"
+    },
+    {
+      "id": "sherpa-kws-zh",
+      "role": "wakeword-model-unselected",
+      "source": "https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html",
+      "revision": null,
+      "format": "ONNX",
+      "files": [],
+      "license": "per-model-review-required",
+      "status": "candidate",
+      "notes": "先选定并审查具体中文关键词模型、tokens和许可条件，再登记文件。"
+    },
+    {
+      "id": "mimo-v2.6-distill-qwen-9b",
+      "role": "optional-code-evaluation",
+      "source": "https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",
+      "revision": null,
+      "format": "Transformers Safetensors",
+      "files": [
+        {
+          "name": "model-00001-of-00004.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "model-00002-of-00004.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "model-00003-of-00004.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "model-00004-of-00004.safetensors",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        },
+        {
+          "name": "model.safetensors.index.json",
+          "upstreamReportedSizeBytes": null,
+          "expectedUpstreamSha256": null,
+          "localVerifiedSha256": null
+        }
+      ],
+      "license": "mit",
+      "status": "optional-candidate",
+      "notes": "约18.8 GB权重，独立评估是否下载；不作为常驻模型或P1/P2前置。"
+    }
+  ]
+}
