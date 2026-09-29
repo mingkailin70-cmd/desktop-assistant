@@ -199,25 +199,26 @@ public sealed class WindowsDesktopTools
 
     private static bool FindVisibleWindow(DesktopApp app)
     {
-        var processNames = app.Id.ToLowerInvariant() switch
-        {
-            "vscode" => new[] { "Code" }, "edge" => new[] { "msedge" }, "explorer" => new[] { "explorer" },
-            "wechat" => new[] { "Weixin" }, "qq" => new[] { "QQ" }, _ => Array.Empty<string>()
-        };
+        var processName = Path.GetFileNameWithoutExtension(app.Executable);
+        if (string.IsNullOrWhiteSpace(processName)) return false;
         var expectedProjectName = string.IsNullOrWhiteSpace(app.WorkingDirectory)
             ? null : new DirectoryInfo(Path.TrimEndingDirectorySeparator(app.WorkingDirectory)).Name;
-        foreach (var name in processNames)
-        foreach (var process in Process.GetProcessesByName(name))
+        foreach (var process in Process.GetProcessesByName(processName))
         {
             try
             {
+                var imagePath = process.MainModule?.FileName;
+                if (string.IsNullOrWhiteSpace(imagePath)
+                    || !string.Equals(Path.GetFullPath(imagePath), app.Executable, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 var handle = process.MainWindowHandle;
                 if (handle == IntPtr.Zero || !IsWindowVisible(handle)) continue;
                 if (app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(expectedProjectName))
                     return process.MainWindowTitle.Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase);
                 return true;
             }
-            catch (InvalidOperationException) { }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or UnauthorizedAccessException or NotSupportedException or ArgumentException) { }
             finally { process.Dispose(); }
         }
         return false;
