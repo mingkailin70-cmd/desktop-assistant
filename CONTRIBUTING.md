@@ -1,29 +1,31 @@
-# Contributing
+# 小K贡献指南
 
-小K is a Windows-first local assistant. Please read AGENTS.md, PLAN.md and TODO.md before changing behavior.
+小K是面向 Windows 的本地助手。修改功能前，请先阅读根目录的 [AI 协作者说明](AGENTS.md)、[首版实施计划](docs/产品与进度/实施计划与模型选型.md) 和[开发进度](docs/产品与进度/开发进度与待办.md)。
 
-## Milestones and commits
+## 阶段、差异与提交
 
-Keep each completed phase reviewable and record it as a focused commit. Suggested prefixes:
+每完成一个阶段，都要留下范围明确、便于复核的提交，并附上对应验收证据。建议使用以下提交前缀：
 
-- feat(p1): ... for the resident desktop shell
-- feat(p2): ... for local voice
-- feat(p3): ... for tools and safety
-- feat(p4): ... for first-release scenarios and packaging
-- docs: ..., build: ..., fix: ... for supporting changes
+- `feat(p1): ...`：常驻桌面壳
+- `feat(p2): ...`：本地语音
+- `feat(p3): ...`：工具和安全控制
+- `feat(p4): ...`：首版场景和打包
+- `docs: ...`、`build: ...`、`fix: ...`：文档、构建和修复
 
-Do not force-push main or rewrite published phase history. Do not mark a phase complete without its stated local evidence and acceptance record.
+不得对 `main` 强推或改写已经发布的历史。缺少阶段规定的本机证据或验收记录时，不得将该阶段标记为完成。
 
-## Privacy and dependencies
+## 隐私和依赖
 
-Never commit model weights, caches, databases, notification bodies, screenshots, recordings, credentials, tokens, personal evaluation samples, or local settings. Keep user data outside the checkout.
+不得提交模型权重、缓存、数据库、通知正文、截图、录音、凭证、令牌、个人评测样本或本机设置。用户数据须保存在工作区之外。
 
-Third-party package additions, model/runtime downloads, and new network commands require explicit review before they are run. Pin versions and record license and artifact hashes for runtime/model additions.
+添加第三方包、下载模型或运行时、执行新的联网命令前，必须逐项取得用户确认。新增运行时或模型时固定版本，并记录许可证和制品哈希。
 
-## Local checks
+## 本机检查
 
-The current dependency-free solution can be built with .NET SDK 10.0.401:
+当前不含第三方依赖的解决方案可使用 .NET SDK 10.0.401 构建：
 
-    dotnet build XiaoK.sln --configuration Release
+```powershell
+dotnet build XiaoK.sln --configuration Release
+```
 
-Do not claim WeChat/QQ notification support, voice support, or message sending until tested with their actual Windows permission and application behavior. All sends require an exact preview and user approval.
+在真实 Windows 权限和客户端行为未经验证前，不得宣称微信/QQ通知、语音或消息发送能力已经可用。每次发送都必须展示准确预览并取得用户确认。

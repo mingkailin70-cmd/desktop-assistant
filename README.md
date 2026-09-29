@@ -1,44 +1,48 @@
-# 小K · Local Desktop Assistant
+# 小K本地桌面助手
 
-小K is a Windows desktop pet and assistant being built for a single local PC. Its first release is planned to handle six flows: open applications, find files, run coding tasks in an isolated workspace, analyze visible private-message notifications, draft replies, and send only after the user reviews the recipient, text, and attachments.
+小K是面向单台 Windows 电脑的桌面宠物与本地助手。首版目标覆盖六类任务：打开应用、查找文件、在隔离工作区完成编程任务、分析可见的私聊通知、起草回复，以及在用户检查收件人、正文和附件并确认后发送。
 
-The assistant uses local inference only. It does not route prompts to Codex or silently fall back to a cloud model. WeChat and QQ themselves still need their normal network connection for messaging.
+模型推理仅在本机运行，不会把提示或任务交给 Codex，也不会静默回退到云端模型。微信和 QQ 的消息收发仍依赖各自正常的网络连接。
 
-## Current implementation status
+## 当前工程状态
 
-This repository is in the first engineering slice, not a release:
+仓库处于首轮工程实施阶段，尚未达到发布状态：
 
-- .NET 10.0.401 is pinned in global.json.
-- A WPF floating host, tray menu, Ctrl+Shift+K shortcut, cancel and stop-microphone controls compile.
-- Fixed tools currently cover allowlisted application launch and bounded file-name search.
-- The inference client accepts loopback HTTP only.
-- Message-notice policy and a draft MSIX manifest exist, but Windows notification listening is not yet installed or connected.
-- Audio capture, local model process management, isolated coding agent, browser controls, and WeChat/QQ sending are not yet implemented.
-- Task state temporarily uses a small JSON file outside the repository. SQLite migration is required before release.
-- No model weights, runtime packages, private message content, user data, or local credentials belong in this repository.
+- `global.json` 固定 .NET SDK 版本为 10.0.401。
+- WPF 桌面壳、托盘菜单、`Ctrl+Shift+K` 快捷键、取消和停麦入口可以编译。
+- 固定工具目前包含允许列表内的应用启动和有限范围文件名查找。
+- 本地推理客户端只接受回环 HTTP 地址。
+- 已有消息通知策略和 MSIX 清单草稿；Windows 通知监听尚未安装或接入。
+- 录音、本地模型进程管理、隔离编程代理、浏览器操作及微信/QQ发送尚未实现。
+- 任务状态暂存于仓库外的小型 JSON 文件；首版前需要迁移到 SQLite。
+- 模型权重、运行时包、私聊正文、个人数据和本机凭证不得存入仓库。
 
-P0 gates still need local evidence: at least 30 visible private-chat notifications per app, model/voice latency and VRAM measurements, and the Chinese coding-task evaluation. The app must not be treated as ready for daily use until all six scenarios pass normal, failure, and cancellation paths.
+P0 仍需本机证据：每款客户端至少 30 条正文可见的私聊通知、模型与语音延迟和显存测量，以及中文编程任务评测。六类场景的正常、失败和取消路径全部验收前，不应把应用当作日常可用产品。
 
-## Build
+## 构建
 
-Prerequisite: Windows and .NET SDK 10.0.401. The SDK can be installed from Microsoft's official .NET downloads. No third-party NuGet package is currently used or restored.
+需要 Windows 和 .NET SDK 10.0.401。当前没有使用或还原第三方 NuGet 包。
 
-    dotnet --version
-    dotnet build XiaoK.sln --configuration Release
-    dotnet run --project src/XiaoK.Host/XiaoK.Host.csproj
+```powershell
+dotnet --version
+dotnet build XiaoK.sln --configuration Release
+dotnet run --project src/XiaoK.Host/XiaoK.Host.csproj
+```
 
-The local source configuration is intentionally empty while third-party dependencies await review. The repository pins the SDK with global.json.
+在第三方依赖完成审核前，本地 NuGet 源配置保持为空。仓库通过 `global.json` 固定 SDK 版本。
 
-## Local data and settings
+## 本机数据与设置
 
-- Settings: %LOCALAPPDATA%\XiaoK\settings.json
-- Task state: D:\XiaoK\Data\tasks.json
-- Planned models/cache/evaluation data: D:\XiaoK\Models, D:\XiaoK\Cache, D:\XiaoK\Evaluations
+- 用户设置：`%LOCALAPPDATA%\XiaoK\settings.json`
+- 任务状态：`D:\XiaoK\Data\tasks.json`
+- 规划中的模型、缓存和评测数据：`D:\XiaoK\Models`、`D:\XiaoK\Cache`、`D:\XiaoK\Evaluations`
 
-Copy and adapt src/XiaoK.Host/settings.example.json to the settings path. The default model endpoint is http://127.0.0.1:8080/; only loopback endpoints are accepted. Model downloads and third-party runtime installation are not part of this repository.
+可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。模型下载和第三方运行时安装不属于仓库内容。
 
-## Development
+## 文档导航
 
-See PLAN.md, TODO.md, architecture.md, and development.md. Each completed milestone should be recorded as a focused commit on main. Keep all model files and personal data outside Git.
+项目文档按产品与进度、架构与接口、开发与发布、使用说明、仓库管理分类，入口见[文档索引](docs/README.md)。协作前先读根目录的 [AI 协作者说明](AGENTS.md)、[贡献指南](CONTRIBUTING.md) 和 [安全政策](SECURITY.md)。
 
-This repository currently has no license file. Public visibility does not grant permission to reuse the code; add a license only after the owner chooses one.
+每个完成的里程碑应在 `main` 上形成聚焦提交。模型文件和个人数据须保存在 Git 仓库之外。
+
+仓库目前没有许可证文件。公开可见不代表授予代码复用许可；只有仓库所有者选定许可证后，才会添加相应授权。

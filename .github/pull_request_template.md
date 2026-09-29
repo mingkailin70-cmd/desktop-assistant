@@ -1,18 +1,18 @@
-## Summary
+## 变更摘要
 
-## Milestone
-- [ ] P0 feasibility gate
-- [ ] P1 resident shell
-- [ ] P2 local voice
-- [ ] P3 tools and safety
-- [ ] P4 first release
-- [ ] P5/P6 research
+## 所属阶段
+- [ ] P0 可行性闸门
+- [ ] P1 常驻桌面壳
+- [ ] P2 本地语音
+- [ ] P3 工具与安全控制
+- [ ] P4 首版交付
+- [ ] P5/P6 后续研究
 
-## Evidence
-- Build command and result:
-- Manual scenarios / failure / cancellation paths:
+## 验收证据
+- 构建命令与结果：
+- 手动场景、失败路径和取消路径：
 
-## Safety and data
-- [ ] No model weights, local settings, user data, message bodies, recordings, credentials, or tokens added
-- [ ] External sends still require a final preview and explicit approval
-- [ ] New dependencies/network operations are listed and approved
+## 安全与数据
+- [ ] 未添加模型权重、本机设置、个人数据、消息正文、录音、凭证或令牌
+- [ ] 对外发送仍要求展示最终预览并取得明确确认
+- [ ] 已列出新增依赖和联网操作，并取得所需确认

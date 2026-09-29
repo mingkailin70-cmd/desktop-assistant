@@ -1,15 +1,15 @@
-# Security policy
+# 小K安全政策
 
-小K is intended to keep inference and private user data on the local Windows machine. The currently available source is an early engineering slice and is not ready for unattended message monitoring or sending.
+小K的设计目标是在本地 Windows 电脑上完成推理并保护个人数据。当前代码仍处于早期工程阶段，不适合无人值守地监控或发送消息。
 
-## Reporting
+## 漏洞报告
 
-Do not publish credentials, message contents, screenshots, model access tokens, or exploit details in public issues. For security-sensitive reports, contact the repository owner through GitHub's private vulnerability reporting feature when enabled. If it is unavailable, contact the owner privately before disclosure.
+请勿在公开 Issue 中发布凭证、消息正文、截图、模型访问令牌或可直接利用的漏洞细节。若仓库已启用私密漏洞报告，请通过 GitHub 的私密漏洞报告功能联系所有者；若该功能不可用，请先私下联系所有者，再讨论披露。
 
-## Project safeguards
+## 项目安全措施
 
-- The inference HTTP endpoint must be a loopback address.
-- Tools are selected from a fixed registry; unknown actions are rejected.
-- Message sending must show the final recipient, content, and attachments and require explicit confirmation.
-- Notification bodies and model replies are transient by default; task state stores only a category and status.
-- The draft MSIX manifest does not grant notification access by itself. The user must install a signed package and grant Windows permission.
+- 本地推理 HTTP 端点必须绑定回环地址。
+- 工具只能从固定注册表中选择；未知动作一律拒绝。
+- 发送消息前必须展示最终收件人、正文和附件，并取得明确确认。
+- 通知正文和模型回复默认仅临时处理；任务状态只保存类别和状态。
+- MSIX 清单草稿本身不会授予通知访问权。用户必须安装已签名软件包，并由 Windows 用户授权。
