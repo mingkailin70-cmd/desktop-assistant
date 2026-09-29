@@ -30,6 +30,14 @@
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseModelRoot_Click" Margin="8,0,0,0"/>
                     <TextBox x:Name="ModelRootBox" MinHeight="32" Padding="7,5"/>
                 </DockPanel>
+                <TextBlock Text="脱敏评测样本目录"/>
+                <DockPanel Margin="0,4,0,12">
+                    <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseEvaluationRoot_Click" Margin="8,0,0,0"/>
+                    <TextBox x:Name="EvaluationRootBox" MinHeight="32" Padding="7,5"/>
+                </DockPanel>
+                <Button x:Name="ClearSamplesButton" Content="清理评测样本…" Click="ClearSamples_Click"
+                        HorizontalAlignment="Left" Margin="0,0,0,4"/>
+                <TextBlock x:Name="PrivacyStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                 <TextBlock Text="本地推理服务地址"/>
                 <TextBox x:Name="InferenceEndpointBox" MinHeight="32" Padding="7,5" Margin="0,4,0,5"/>
@@ -51,7 +59,7 @@
                                    FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
-                <TextBlock Text="数据目录与推理地址保存后需重启小K生效；登录启动设置立即生效。通知、麦克风和 GPU 项目会在相应功能接入并验收后开放。"
+                <TextBlock Text="数据、模型、评测目录和推理地址保存后需重启小K生效；登录启动设置立即生效。清理只删除评测目录顶层普通文件，并在执行前再次确认。"
                            FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,10,0,4"/>
             </StackPanel>
         </ScrollViewer>

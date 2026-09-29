@@ -21,6 +21,7 @@ public partial class SettingsWindow : Window
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
         DataRootBox.Text = settings.DataRoot;
         ModelRootBox.Text = settings.ModelRoot;
+        EvaluationRootBox.Text = settings.EvaluationRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
 
         var startupSupported = false;
@@ -44,6 +45,8 @@ public partial class SettingsWindow : Window
     private void BrowseDataRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(DataRootBox, "选择用户数据目录");
 
     private void BrowseModelRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(ModelRootBox, "选择本地模型目录");
+
+    private void BrowseEvaluationRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(EvaluationRootBox, "选择脱敏评测样本目录");
 
     private void BrowseInto(System.Windows.Controls.TextBox target, string description)
     {
@@ -75,6 +78,48 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private async void ClearSamples_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var dataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录");
+            var modelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录");
+            var evaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录");
+            EnsureSeparateRoots(dataRoot, modelRoot, evaluationRoot);
+            var preview = EvaluationSampleCleanup.Preview(evaluationRoot);
+            if (preview.Files.Count == 0)
+            {
+                PrivacyStatusText.Text = preview.IgnoredEntries == 0
+                    ? "评测目录中没有可清理的顶层文件。"
+                    : $"没有可清理的顶层普通文件；{preview.IgnoredEntries} 个子目录、链接或只读文件会保留。";
+                return;
+            }
+
+            var sizeMiB = preview.TotalBytes / (1024d * 1024d);
+            var confirmation = System.Windows.MessageBox.Show(
+                this,
+                $"将从以下目录删除 {preview.Files.Count} 个顶层普通文件（约 {sizeMiB:F1} MiB）：\n\n{preview.RootPath}\n\n子目录、链接、只读文件和任务记录会保留。此操作无法撤销。要继续吗？",
+                "确认清理评测样本",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes) return;
+
+            ClearSamplesButton.IsEnabled = false;
+            PrivacyStatusText.Text = "正在清理已确认的评测样本…";
+            var deleted = await Task.Run(() => EvaluationSampleCleanup.DeleteIfUnchanged(preview));
+            PrivacyStatusText.Text = $"已删除 {deleted} 个评测样本文件；忽略的目录、链接和只读文件仍保留。";
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException or InvalidOperationException or NotSupportedException)
+        {
+            PrivacyStatusText.Text = ex.Message;
+        }
+        finally
+        {
+            ClearSamplesButton.IsEnabled = true;
+        }
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var startupRequested = StartupCheck.IsEnabled && StartupCheck.IsChecked == true;
@@ -86,8 +131,10 @@ public partial class SettingsWindow : Window
             {
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
                 ModelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录"),
+                EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
                 InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text)
             };
+            EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot);
 
             if (startupChanged) LoginStartupRegistration.SetEnabled(startupRequested);
             try
@@ -102,7 +149,7 @@ public partial class SettingsWindow : Window
 
             DialogResult = true;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException or InvalidOperationException or NotSupportedException)
         {
             StatusText.Text = ex.Message;
         }
@@ -133,6 +180,14 @@ public partial class SettingsWindow : Window
             || path.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
             || path.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static void EnsureSeparateRoots(string dataRoot, string modelRoot, string evaluationRoot)
+    {
+        if (PathsOverlap(dataRoot, modelRoot) || PathsOverlap(dataRoot, evaluationRoot) || PathsOverlap(modelRoot, evaluationRoot))
+            throw new ArgumentException("数据、模型和评测目录必须互相独立，避免误删任务数据或模型文件。");
+    }
+
+    private static bool PathsOverlap(string first, string second) => IsSameOrChildPath(first, second) || IsSameOrChildPath(second, first);
 
     private static string ValidateLoopbackEndpoint(string value)
     {

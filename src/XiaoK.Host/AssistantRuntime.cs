@@ -209,6 +209,7 @@ internal sealed record XiaoKSettings
 {
     public string DataRoot { get; init; } = @"D:\XiaoK\Data";
     public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
+    public string EvaluationRoot { get; init; } = @"D:\XiaoK\Evaluations";
     public string InferenceEndpoint { get; init; } = "http://127.0.0.1:8080/";
     public List<AppSetting> Applications { get; init; } = [];
     public List<RootSetting> SearchRoots { get; init; } = [];
@@ -262,6 +263,8 @@ internal sealed record XiaoKSettings
     private XiaoKSettings WithDefaults(XiaoKSettings defaults) => this with
     {
         DataRoot = string.IsNullOrWhiteSpace(DataRoot) ? defaults.DataRoot : DataRoot,
+        ModelRoot = string.IsNullOrWhiteSpace(ModelRoot) ? defaults.ModelRoot : ModelRoot,
+        EvaluationRoot = string.IsNullOrWhiteSpace(EvaluationRoot) ? defaults.EvaluationRoot : EvaluationRoot,
         Applications = Applications.Count == 0 ? defaults.Applications : Applications,
         SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots
     };
