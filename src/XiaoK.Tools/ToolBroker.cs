@@ -16,6 +16,9 @@ public sealed class ToolBroker
 
     public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {
+        var invalidProposal = ValidateProposal(proposal);
+        if (invalidProposal is not null) return invalidProposal;
+
         // Fixed registry: model text never becomes a command, script, arbitrary path, or click target.
         return proposal.ToolId switch
         {
@@ -28,6 +31,84 @@ public sealed class ToolBroker
             _ => new ToolResult(false, "未知工具已拒绝。", "UNKNOWN_TOOL")
         };
     }
+
+    private static ToolResult? ValidateProposal(ToolProposal proposal)
+    {
+        if (proposal is null || proposal.Arguments is null
+            || string.IsNullOrWhiteSpace(proposal.ToolId) || proposal.ToolId.Length > 80
+            || string.IsNullOrWhiteSpace(proposal.Target) || proposal.Target.Length > 512
+            || string.IsNullOrWhiteSpace(proposal.ExpectedOutcome) || proposal.ExpectedOutcome.Length > 300
+            || proposal.Arguments.Count > 8
+            || proposal.Arguments.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 80
+                || pair.Value is null || pair.Value.Length > 20_000))
+            return InvalidProposal();
+
+        return proposal.ToolId switch
+        {
+            "app.launch.v1" => ValidateAppLaunch(proposal),
+            "file.search.v1" => ValidateFileSearch(proposal),
+            "message.analyze.v1" => ValidateMessage(proposal, "message"),
+            "message.draft.v1" => ValidateMessage(proposal, "draft"),
+            "message.send.v1" => ValidateSend(proposal),
+            "code.task.create.v1" => proposal.Arguments.Count == 0
+                ? null
+                : InvalidProposal("编程任务不接受任意工具参数。"),
+            _ => null // The fixed registry below rejects unknown tool IDs.
+        };
+    }
+
+    private static ToolResult? ValidateAppLaunch(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var appId = args.GetValueOrDefault("app_id");
+        if (args.Keys.Any(key => key is not ("app_id" or "workspace_id"))
+            || string.IsNullOrWhiteSpace(appId)
+            || !string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase))
+            return InvalidProposal("启动目标必须与允许列表中的 app_id 一致。");
+
+        if (args.TryGetValue("workspace_id", out var workspaceId)
+            && (!appId.Equals("vscode", StringComparison.OrdinalIgnoreCase) || workspaceId != "xiaok"))
+            return InvalidProposal("工作区只能使用已配置的 VS Code 项目别名。");
+
+        return null;
+    }
+
+    private static ToolResult? ValidateFileSearch(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var query = args.GetValueOrDefault("query");
+        var rootId = args.GetValueOrDefault("root_id");
+        if (args.Count != 2 || string.IsNullOrWhiteSpace(query) || query.Length > 120
+            || string.IsNullOrWhiteSpace(rootId) || rootId != "user-files"
+            || proposal.Target != rootId)
+            return InvalidProposal("文件搜索的目标和范围必须是已配置的 user-files。");
+        return null;
+    }
+
+    private static ToolResult? ValidateMessage(ToolProposal proposal, string key)
+    {
+        if (proposal.Arguments.Count != 1 || !proposal.Arguments.TryGetValue(key, out var body)
+            || string.IsNullOrWhiteSpace(body) || body.Length > 20_000
+            || proposal.Target != "用户本次提供的单条消息")
+            return InvalidProposal("消息分析和草稿只能使用用户本次提供的单条消息。");
+        return null;
+    }
+
+    private static ToolResult? ValidateSend(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var recipient = args.GetValueOrDefault("recipient");
+        var text = args.GetValueOrDefault("text");
+        if (args.Keys.Any(key => key is not ("recipient" or "text" or "attachments"))
+            || args.Count is < 2 or > 3 || string.IsNullOrWhiteSpace(recipient)
+            || string.IsNullOrWhiteSpace(text) || text.Length > 20_000
+            || proposal.Target != recipient)
+            return InvalidProposal("发送目标必须与最终收件人一致，且正文和附件字段必须明确。");
+        return null;
+    }
+
+    private static ToolResult InvalidProposal(string message = "动作提案未通过 ToolBroker 参数和目标校验；未执行。") =>
+        new(false, message, "INVALID_TOOL_PROPOSAL");
 
     private Task<ToolResult> AnalyzeAsync(ToolProposal proposal, CancellationToken token) =>
         CompleteAsync(proposal, "请用中文分析用户提供的单条聊天通知。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "message", token);
