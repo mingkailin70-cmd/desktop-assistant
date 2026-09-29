@@ -12,7 +12,7 @@ using XiaoK.Voice;
 
 namespace XiaoK.Host;
 
-internal sealed class AssistantRuntime : IDisposable
+internal sealed class AssistantRuntime : IAsyncDisposable
 {
     private readonly XiaoKSettings _settings;
     private readonly JsonTaskStore _store;
@@ -22,6 +22,7 @@ internal sealed class AssistantRuntime : IDisposable
     private readonly ModelBroker _models = new();
     private readonly SemaphoreSlim _executionGate = new(1, 1);
     private CancellationTokenSource? _active;
+    private int _stopping;
 
     public AssistantRuntime(IApprovalPresenter approval)
     {
@@ -40,6 +41,7 @@ internal sealed class AssistantRuntime : IDisposable
 
     public async Task<string> SubmitAsync(string input)
     {
+        if (Volatile.Read(ref _stopping) != 0) return "小K正在退出，暂不接受新任务。";
         var request = input.Trim();
         if (request.Length == 0) return "先输入一句话，或用 Ctrl+Shift+K 打开小K。";
 
@@ -55,6 +57,7 @@ internal sealed class AssistantRuntime : IDisposable
         {
             await _executionGate.WaitAsync(token);
             gateEntered = true;
+            if (Volatile.Read(ref _stopping) != 0) return "小K正在退出，暂不接受新任务。";
             var now = DateTimeOffset.UtcNow;
             var category = Classify(request);
             task = new TaskRecord(Guid.NewGuid(), category, CategoryLabel(category), TaskLifecycleState.Planning, now, now);
@@ -113,10 +116,13 @@ internal sealed class AssistantRuntime : IDisposable
         return wasCapturing;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
         CancelCurrent();
-        _inference.Dispose();
+        await _executionGate.WaitAsync();
+        try { _inference.Dispose(); }
+        finally { _executionGate.Release(); }
     }
     private async Task<ToolResult> RouteAsync(string category, string request, CancellationToken token)
     {

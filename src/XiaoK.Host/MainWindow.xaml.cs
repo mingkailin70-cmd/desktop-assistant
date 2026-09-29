@@ -13,6 +13,8 @@ public partial class MainWindow : Window, IApprovalPresenter
     private readonly Forms.NotifyIcon _tray;
     private HwndSource? _source;
     private bool _exiting;
+    private bool _shutdownInProgress;
+    private bool _shutdownComplete;
     private bool _expanded = true;
     private bool _hotkeyRegistered;
 
@@ -142,6 +144,7 @@ public partial class MainWindow : Window, IApprovalPresenter
 
     private void RestoreFromTray()
     {
+        if (_exiting) return;
         Show();
         WindowState = WindowState.Normal;
         Activate();
@@ -158,10 +161,30 @@ public partial class MainWindow : Window, IApprovalPresenter
         return menu;
     }
 
-    private void OnClosing(object? sender, CancelEventArgs e)
+    private async void OnClosing(object? sender, CancelEventArgs e)
     {
         if (!_exiting) { e.Cancel = true; Hide(); return; }
-        _runtime.Dispose();
+        if (!_shutdownComplete)
+        {
+            e.Cancel = true;
+            if (_shutdownInProgress) return;
+            _shutdownInProgress = true;
+            StatusText.Text = "正在停止任务并保存状态…";
+            SetButtonsEnabled(false);
+            CancelButton.IsEnabled = false;
+            _tray.Visible = false;
+            if (_source is not null && _hotkeyRegistered)
+            {
+                UnregisterHotKey(_source.Handle, 1901);
+                _hotkeyRegistered = false;
+            }
+            try { await _runtime.DisposeAsync(); }
+            catch (Exception) { StatusText.Text = "退出清理未能完整确认；任务不会自动重放。"; }
+            _shutdownComplete = true;
+            Close();
+            return;
+        }
+
         _tray.Visible = false;
         _tray.Dispose();
         if (_source is not null)
