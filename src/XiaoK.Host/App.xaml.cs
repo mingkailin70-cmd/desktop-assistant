@@ -12,6 +12,11 @@ public partial class App : System.Windows.Application
     private Mutex? _instanceMutex;
     private bool _ownsMutex;
 
+    static App()
+    {
+        _ = System.Windows.Forms.Application.SetHighDpiMode(System.Windows.Forms.HighDpiMode.PerMonitorV2);
+    }
+
     internal static uint RestoreMessageId { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)

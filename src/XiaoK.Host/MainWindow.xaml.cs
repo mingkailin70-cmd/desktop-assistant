@@ -99,7 +99,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         {
             try { DragMove(); }
             catch (InvalidOperationException) { return; }
-            ClampWindowToVirtualDesktop();
+            ClampWindowToMonitorWorkArea();
             SaveWindowPosition();
         }
     }
@@ -233,6 +233,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             RestoreFromTray();
             handled = true;
         }
+        else if (msg is WmDisplayChange or WmDpiChanged)
+        {
+            _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+                new Action(ClampWindowToMonitorWorkArea));
+        }
         return IntPtr.Zero;
     }
 
@@ -303,7 +308,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             MinHeight = expanded ? 360 : 150;
             Width = expanded ? _expandedWidth : 164;
             Height = expanded ? _expandedHeight : 164;
-            ClampWindowToVirtualDesktop();
+            ClampWindowToMonitorWorkArea();
             if (expanded)
             {
                 ExpandButton.Content = "收起";
@@ -322,6 +327,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         {
             _expandedWidth = Width;
             _expandedHeight = Height;
+            ClampWindowToMonitorWorkArea();
         }
     }
 
@@ -334,7 +340,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             try
             {
                 DragMove();
-                ClampWindowToVirtualDesktop();
+                ClampWindowToMonitorWorkArea();
                 SaveWindowPosition();
             }
             catch (InvalidOperationException) { }
@@ -343,45 +349,81 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void RestoreWindowPosition()
     {
-        var savedLeft = _runtime.CurrentSettings.PetWindowLeft;
-        var savedTop = _runtime.CurrentSettings.PetWindowTop;
-        if (savedLeft is double left && savedTop is double top
-            && double.IsFinite(left) && double.IsFinite(top))
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var current)) return;
+
+        var settings = _runtime.CurrentSettings;
+        if (settings.PetWindowLeftPixels is int savedLeft && settings.PetWindowTopPixels is int savedTop)
         {
-            Left = left;
-            Top = top;
+            SetWindowPosition(handle, savedLeft, savedTop);
+        }
+        else if (settings.PetWindowLeft is double legacyLeft && settings.PetWindowTop is double legacyTop
+            && double.IsFinite(legacyLeft) && double.IsFinite(legacyTop))
+        {
+            var dpi = GetEffectiveDpi(handle);
+            SetWindowPosition(handle, (int)Math.Round(legacyLeft * dpi / 96d),
+                (int)Math.Round(legacyTop * dpi / 96d));
         }
         else
         {
-            var workArea = SystemParameters.WorkArea;
-            Left = Math.Max(workArea.Left, workArea.Right - Width - 24);
-            Top = Math.Max(workArea.Top, workArea.Bottom - Height - 24);
+            if (Forms.Screen.PrimaryScreen is { } primaryScreen)
+            {
+                var workArea = primaryScreen.WorkingArea;
+                var margin = (int)Math.Round(24 * GetEffectiveDpi(handle) / 96d);
+                var width = current.Right - current.Left;
+                var height = current.Bottom - current.Top;
+                SetWindowPosition(handle, Math.Max(workArea.Left, workArea.Right - width - margin),
+                    Math.Max(workArea.Top, workArea.Bottom - height - margin));
+            }
         }
-        ClampWindowToVirtualDesktop();
+
+        ClampWindowToMonitorWorkArea();
     }
 
-    private void ClampWindowToVirtualDesktop()
+    private void ClampWindowToMonitorWorkArea()
     {
-        if (!double.IsFinite(Left) || !double.IsFinite(Top)) return;
-        var desktopLeft = SystemParameters.VirtualScreenLeft;
-        var desktopTop = SystemParameters.VirtualScreenTop;
-        var desktopWidth = SystemParameters.VirtualScreenWidth;
-        var desktopHeight = SystemParameters.VirtualScreenHeight;
-        if (desktopWidth <= 0 || desktopHeight <= 0) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect)) return;
 
-        var rightmostLeft = Math.Max(desktopLeft, desktopLeft + desktopWidth - Width);
-        var bottommostTop = Math.Max(desktopTop, desktopTop + desktopHeight - Height);
-        Left = Math.Clamp(Left, desktopLeft, rightmostLeft);
-        Top = Math.Clamp(Top, desktopTop, bottommostTop);
+        var monitor = MonitorFromRect(ref rect, MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero) return;
+        var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+        if (!GetMonitorInfo(monitor, ref info)) return;
+
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        var rightmostLeft = Math.Max(info.Work.Left, info.Work.Right - width);
+        var bottommostTop = Math.Max(info.Work.Top, info.Work.Bottom - height);
+        var left = Math.Clamp(rect.Left, info.Work.Left, rightmostLeft);
+        var top = Math.Clamp(rect.Top, info.Work.Top, bottommostTop);
+        if (left != rect.Left || top != rect.Top) SetWindowPosition(handle, left, top);
+    }
+
+    private static void SetWindowPosition(IntPtr handle, int left, int top)
+    {
+        _ = SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    private static uint GetEffectiveDpi(IntPtr handle)
+    {
+        var dpi = GetDpiForWindow(handle);
+        return dpi == 0 ? 96u : dpi;
     }
 
     private void SaveWindowPosition()
     {
-        if (!double.IsFinite(Left) || !double.IsFinite(Top)) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect)) return;
         try
         {
             var latest = XiaoKSettings.Load();
-            (latest with { PetWindowLeft = Left, PetWindowTop = Top }).Save();
+            (latest with
+            {
+                PetWindowLeft = null,
+                PetWindowTop = null,
+                PetWindowLeftPixels = rect.Left,
+                PetWindowTopPixels = rect.Top
+            }).Save();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or System.Security.SecurityException or InvalidOperationException or ArgumentException)
@@ -452,8 +494,47 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     }
 
     private const int WmHotkey = 0x0312;
+    private const int WmDisplayChange = 0x007E;
+    private const int WmDpiChanged = 0x02E0;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
+    private const uint MonitorDefaultToNearest = 2;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoZOrder = 0x0004;
+    private const uint SwpNoActivate = 0x0010;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public uint Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
+    }
+
     [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr MonitorFromRect(ref NativeRect rect, uint flags);
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo info);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y,
+        int width, int height, uint flags);
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
 }
