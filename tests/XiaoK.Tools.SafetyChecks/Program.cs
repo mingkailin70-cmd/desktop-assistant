@@ -47,6 +47,9 @@ try
     await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
+    await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
+    passed.Add("联系人偏好迁入 SQLite 并固定来源和风格，支持原子更新、备份及 v1 架构备份迁移");
+
     await CheckCodeVerificationCancellationPersistsAsync(tempRoot);
     passed.Add("取消已批准的隔离验证会持久化 cancelled 且不修改原项目");
 
@@ -345,6 +348,67 @@ static async Task CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(string root)
 
     Require(DatabaseFilesOmitSentinel(databasePath, privateSentinel),
         "旧结果正文哨兵被复制进 SQLite 数据库。");
+}
+
+static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-contact-styles");
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var backupPath = Path.Combine(directory, "preferences-backup.sqlite3");
+    Directory.CreateDirectory(directory);
+    var timestamp = DateTimeOffset.UtcNow.AddMinutes(-5);
+    var legacy = new ContactReplyStylePreference(" Alice ", "warm",
+        ContactReplyStyleCatalog.UserConfirmedSource, timestamp);
+
+    var store = new SqliteTaskStore(databasePath, legacyContactReplyStyles: [legacy]);
+    var imported = await store.GetContactReplyStylesAsync(CancellationToken.None);
+    Require(imported.Count == 1 && imported[0].ContactName == "Alice" && imported[0].StyleId == "warm"
+        && imported[0].Source == ContactReplyStyleCatalog.UserConfirmedSource
+        && imported[0].UpdatedAtUtc == timestamp,
+        "旧设置中的联系人风格没有规范化并迁入 SQLite，或来源/更新时间发生变化。");
+
+    var current = new ContactReplyStylePreference("Bob", "formal",
+        ContactReplyStyleCatalog.UserConfirmedSource, DateTimeOffset.UtcNow);
+    await store.ReplaceContactReplyStylesAsync([current], CancellationToken.None);
+    var duplicateRejected = false;
+    try
+    {
+        await store.ReplaceContactReplyStylesAsync([
+            current,
+            current with { ContactName = " bob " }
+        ], CancellationToken.None);
+    }
+    catch (ArgumentException) { duplicateRejected = true; }
+    var invalidStyleRejected = false;
+    try
+    {
+        await store.ReplaceContactReplyStylesAsync([current with { StyleId = "model-generated" }], CancellationToken.None);
+    }
+    catch (ArgumentException) { invalidStyleRejected = true; }
+    var afterRejectedWrites = await store.GetContactReplyStylesAsync(CancellationToken.None);
+    Require(duplicateRejected && invalidStyleRejected && afterRejectedWrites.Count == 1
+        && afterRejectedWrites[0].ContactName == "Bob" && afterRejectedWrites[0].StyleId == "formal",
+        "重复联系人或模型自定义风格未拒绝，或拒绝后破坏了原有偏好。");
+
+    await store.CreateBackupAsync(backupPath, CancellationToken.None);
+    var backup = new SqliteTaskStore(backupPath);
+    var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
+    Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal",
+        "SQLite 一致性备份没有包含联系人回复风格。");
+
+    SqliteSchemaFixture.RevertToVersionOne(databasePath);
+    var migratedFromV1 = new SqliteTaskStore(databasePath, legacyContactReplyStyles: [legacy]);
+    var afterSchemaMigration = await migratedFromV1.GetContactReplyStylesAsync(CancellationToken.None);
+    var migrationBackups = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").ToArray();
+    Require(afterSchemaMigration.Count == 1 && afterSchemaMigration[0].ContactName == "Alice"
+        && afterSchemaMigration[0].StyleId == "warm" && migrationBackups.Length == 1
+        && new FileInfo(migrationBackups[0]).Length > 0,
+        "v1 到 v2 架构迁移未在修改前创建数据库备份，或未迁入本地设置中的偏好。");
+
+    var reopened = new SqliteTaskStore(databasePath, legacyContactReplyStyles: [legacy]);
+    var afterReopen = await reopened.GetContactReplyStylesAsync(CancellationToken.None);
+    Require(afterReopen.Count == 1 && afterReopen[0].ContactName == "Alice",
+        "用户删除或替换 SQLite 偏好后，重开程序又从旧设置重复导入。");
 }
 
 static bool DatabaseFilesOmitSentinel(string databasePath, string sentinel)
@@ -1225,4 +1289,46 @@ internal static class HardLinkFixture
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateHardLinkW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateHardLinkW(string newFileName, string existingFileName, IntPtr securityAttributes);
+}
+
+internal static class SqliteSchemaFixture
+{
+    public static void RevertToVersionOne(string databasePath)
+    {
+        const int openReadWrite = 0x00000002;
+        const int openFullMutex = 0x00010000;
+        var result = sqlite3_open_v2(databasePath, out var database, openReadWrite | openFullMutex, IntPtr.Zero);
+        if (result != 0) throw new IOException($"无法打开合成 SQLite 测试数据库（错误码 {result}）。");
+        try
+        {
+            const string sql = "BEGIN IMMEDIATE; DROP TABLE contact_reply_styles; "
+                + "DELETE FROM migration_state WHERE name='contact-styles-settings-v1'; "
+                + "PRAGMA user_version=1; COMMIT;";
+            result = sqlite3_exec(database, sql, IntPtr.Zero, IntPtr.Zero, out var error);
+            if (result != 0)
+            {
+                var message = error == IntPtr.Zero ? $"SQLite 错误码 {result}" : Marshal.PtrToStringUTF8(error);
+                if (error != IntPtr.Zero) sqlite3_free(error);
+                throw new IOException("无法构造合成 v1 SQLite 数据库：" + message);
+            }
+        }
+        finally
+        {
+            _ = sqlite3_close_v2(database);
+        }
+    }
+
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_open_v2")]
+    private static extern int sqlite3_open_v2([MarshalAs(UnmanagedType.LPUTF8Str)] string filename,
+        out IntPtr database, int flags, IntPtr vfs);
+
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_exec")]
+    private static extern int sqlite3_exec(IntPtr database, [MarshalAs(UnmanagedType.LPUTF8Str)] string sql,
+        IntPtr callback, IntPtr argument, out IntPtr errorMessage);
+
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_free")]
+    private static extern void sqlite3_free(IntPtr pointer);
+
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_close_v2")]
+    private static extern int sqlite3_close_v2(IntPtr database);
 }

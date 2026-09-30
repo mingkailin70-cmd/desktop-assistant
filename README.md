@@ -14,7 +14,7 @@
 - 本地推理客户端只接受回环 HTTP 地址。
 - Windows `UserNotificationListener` 已接入，但需具有 MSIX 身份并取得用户授权才会启动。当前发布者 AUMID 和私聊/群聊分类尚未实测；会话类型未知时不会读取正文或自动分析。
 - 录音、本地模型进程管理、浏览器操作和微信/QQ实际发送尚未实现。
-- 任务状态已使用 Windows 系统 `winsqlite3.dll` 写入 SQLite；只保存规范任务类别、状态、时间和受限错误码，不保存请求正文、模型回答或附件路径。旧 JSON 迁移保留原文件并丢弃结果/自由文本摘要；偏好数据库化、设置内备份恢复和隐私清理仍待完成。
+- 任务状态和联系人回复风格偏好已使用 Windows 系统 `winsqlite3.dll` 写入 SQLite。任务表只保存规范类别、状态、时间和受限错误码；偏好表只保存本地联系人名称、固定风格 ID、用户确认来源和更新时间。旧任务 JSON 与设置 JSON 均保留为恢复副本，不迁入正文或自由文本摘要；SQLite v1→v2 迁移前备份并经过合成数据检查。应用内恢复、审批存储和隐私清理仍待完成。
 - 桌面窗口和托盘已有“最近任务”入口，可查看脱敏任务状态和隔离编程工作区路径；不会自动续跑任务，实际崩溃恢复仍待验收。
 - 模型权重、运行时包、私聊正文、个人数据和本机凭证不得存入仓库。
 
@@ -39,6 +39,7 @@ $dotnet = if (Test-Path .\.tools\dotnet\dotnet.exe) { Resolve-Path .\.tools\dotn
 
 - 用户设置：`%LOCALAPPDATA%\XiaoK\settings.json`
 - 任务状态：`D:\XiaoK\Data\tasks.sqlite3`；如存在旧版 `tasks.json`，迁移后原文件保留作恢复副本。
+- 联系人回复风格：同一 SQLite 数据库的 `contact_reply_styles` 表；旧设置中的偏好仅在首次迁移时导入，迁移标记防止用户删除后再次导入。迁移本身不改写 `settings.json`，设置页不再把新的偏好写回该文件。
 - 模型、缓存和评测数据目标目录：`D:\XiaoK\Models`、`D:\XiaoK\Cache`、`D:\XiaoK\Evaluations`
 
 可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。模型下载和第三方运行时安装不属于仓库内容。

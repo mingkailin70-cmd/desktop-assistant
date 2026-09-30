@@ -12,17 +12,25 @@ public partial class SettingsWindow : Window
 {
     private readonly XiaoKSettings _original;
     private readonly Func<Task<string>> _requestNotificationAccess;
+    private readonly Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> _loadContactReplyStyles;
+    private readonly Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> _replaceContactReplyStyles;
+    private IReadOnlyList<ContactReplyStylePreference> _loadedContactReplyStyles = [];
     private bool _startupWasEnabled;
     private bool _startupStateLoaded;
+    private bool _contactStylesLoaded;
     private readonly ObservableCollection<ContactReplyStylePreference> _contactReplyStyles;
     private TimeSpan _previousCpuTime;
     private long _previousCpuSampleTimestamp;
 
-    internal SettingsWindow(XiaoKSettings settings, WindowsNotificationMonitor notificationMonitor)
+    internal SettingsWindow(XiaoKSettings settings, WindowsNotificationMonitor notificationMonitor,
+        Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> loadContactReplyStyles,
+        Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> replaceContactReplyStyles)
     {
         InitializeComponent();
         _original = settings;
-        _contactReplyStyles = new ObservableCollection<ContactReplyStylePreference>(settings.ContactReplyStyles);
+        _contactReplyStyles = [];
+        _loadContactReplyStyles = loadContactReplyStyles;
+        _replaceContactReplyStyles = replaceContactReplyStyles;
         _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
@@ -42,6 +50,8 @@ public partial class SettingsWindow : Window
         ContactStyleBox.DisplayMemberPath = nameof(ContactReplyStyleOption.DisplayName);
         ContactStyleBox.SelectedValuePath = nameof(ContactReplyStyleOption.Id);
         ContactStyleBox.SelectedValue = ContactReplyStyleCatalog.DefaultStyleId;
+        SetContactStyleControlsEnabled(false);
+        ContactStyleStatusText.Text = "正在从本机 SQLite 数据库读取联系人回复风格…";
 
         StartupCheck.IsEnabled = false;
         StartupStatusText.Text = "正在读取 Windows 登录启动状态…";
@@ -67,6 +77,33 @@ public partial class SettingsWindow : Window
             StartupStatusText.Text = "无法读取 Windows 登录启动状态；为避免误改系统设置，此项已停用。";
             StatusText.Text = ex.Message;
         }
+
+        try
+        {
+            _loadedContactReplyStyles = await _loadContactReplyStyles(CancellationToken.None);
+            _contactReplyStyles.Clear();
+            foreach (var preference in _loadedContactReplyStyles) _contactReplyStyles.Add(preference);
+            _contactStylesLoaded = true;
+            SetContactStyleControlsEnabled(true);
+            ContactStyleStatusText.Text = "联系人偏好已从本机 SQLite 加载；更改后点击底部“保存”生效。";
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or SecurityException
+            or InvalidOperationException or NotSupportedException)
+        {
+            _contactStylesLoaded = false;
+            SetContactStyleControlsEnabled(false);
+            ContactStyleStatusText.Text = "无法读取 SQLite 联系人偏好；为避免覆盖现有数据，此区域已停用。";
+            StatusText.Text = ex.Message;
+        }
+    }
+
+    private void SetContactStyleControlsEnabled(bool enabled)
+    {
+        ContactStyleNameBox.IsEnabled = enabled;
+        ContactStyleBox.IsEnabled = enabled;
+        AddContactStyleButton.IsEnabled = enabled;
+        RemoveContactStyleButton.IsEnabled = enabled;
+        ContactStylesList.IsEnabled = enabled;
     }
 
     private void BrowseDataRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(DataRootBox, "选择用户数据目录");
@@ -232,8 +269,7 @@ public partial class SettingsWindow : Window
                 MonitorWeChatNotifications = MonitorWeChatCheck.IsChecked == true,
                 MonitorQQNotifications = MonitorQQCheck.IsChecked == true,
                 WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
-                QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ"),
-                ContactReplyStyles = _contactReplyStyles.ToList()
+                QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
             };
             EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot, updated.CodeWorkspaceRoot);
             if (updated.CodeProjectRoot.Length > 0 && PathsOverlap(updated.CodeProjectRoot, updated.CodeWorkspaceRoot))
@@ -252,26 +288,54 @@ public partial class SettingsWindow : Window
                 }
             }
 
+            var contactStylesSaved = false;
             try
             {
+                if (_contactStylesLoaded)
+                {
+                    await _replaceContactReplyStyles(_contactReplyStyles.ToArray(), CancellationToken.None);
+                    contactStylesSaved = true;
+                }
                 updated.Save();
             }
             catch
             {
-                if (startupChanged)
+                if (contactStylesSaved)
                 {
-                    var rollback = await LoginStartupRegistration.SetEnabledAsync(_startupWasEnabled);
-                    StartupStatusText.Text = rollback.Status;
+                    var rollbackFailed = false;
+                    try { await _replaceContactReplyStyles(_loadedContactReplyStyles, CancellationToken.None); }
+                    catch (Exception rollbackError)
+                    {
+                        rollbackFailed = true;
+                        ContactStyleStatusText.Text = "设置文件保存失败，且联系人偏好回滚未完成；请勿继续编辑，先检查本机数据库备份。";
+                        StatusText.Text = rollbackError.Message;
+                    }
+                    if (!rollbackFailed)
+                        ContactStyleStatusText.Text = "设置文件保存失败；联系人偏好已回滚到打开设置页时的内容。";
                 }
                 throw;
             }
 
+            if (_contactStylesLoaded) _loadedContactReplyStyles = _contactReplyStyles.ToArray();
             if (startupChanged) _startupWasEnabled = startupRequested;
             DialogResult = true;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
             or InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException)
         {
+            if (startupChanged)
+            {
+                try
+                {
+                    var rollback = await LoginStartupRegistration.SetEnabledAsync(_startupWasEnabled);
+                    StartupStatusText.Text = rollback.Status;
+                }
+                catch (Exception rollbackError)
+                {
+                    StartupStatusText.Text = "保存失败，且登录启动状态回滚未完成；请手动核对登录启动设置。";
+                    StatusText.Text = rollbackError.Message;
+                }
+            }
             StatusText.Text = ex.Message;
         }
     }

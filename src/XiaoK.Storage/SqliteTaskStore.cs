@@ -12,19 +12,26 @@ namespace XiaoK.Storage;
 /// </summary>
 public sealed class SqliteTaskStore : ITaskStore
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
+    private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private static readonly JsonSerializerOptions LegacyJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _path;
     private readonly string? _legacyJsonPath;
+    private readonly IReadOnlyList<ContactReplyStylePreference> _legacyContactReplyStyles;
+    private readonly bool _legacyContactReplyStylesAvailable;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public SqliteTaskStore(string path, string? legacyJsonPath = null)
+    public SqliteTaskStore(string path, string? legacyJsonPath = null,
+        IEnumerable<ContactReplyStylePreference>? legacyContactReplyStyles = null,
+        bool legacyContactReplyStylesAvailable = true)
     {
         _path = ValidateDatabasePath(path);
         _legacyJsonPath = string.IsNullOrWhiteSpace(legacyJsonPath) ? null : ValidateDatabasePath(legacyJsonPath);
         if (_legacyJsonPath is not null && string.Equals(_legacyJsonPath, _path, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("旧 JSON 文件路径不能与 SQLite 数据库路径相同。", nameof(legacyJsonPath));
+        _legacyContactReplyStyles = legacyContactReplyStyles?.ToArray() ?? [];
+        _legacyContactReplyStylesAvailable = legacyContactReplyStylesAvailable;
         Initialize();
     }
 
@@ -48,6 +55,31 @@ public sealed class SqliteTaskStore : ITaskStore
         {
             cancellationToken.ThrowIfCancellationRequested();
             return await Task.Run(() => ReadRecentCore(Math.Clamp(count, 0, 100)), cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<ContactReplyStylePreference>> GetContactReplyStylesAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await Task.Run(ReadContactReplyStylesCore, cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task ReplaceContactReplyStylesAsync(IEnumerable<ContactReplyStylePreference> preferences,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        var sanitized = ValidateContactReplyStyles(preferences);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Run(() => ReplaceContactReplyStylesCore(sanitized), cancellationToken);
         }
         finally { _gate.Release(); }
     }
@@ -82,7 +114,7 @@ public sealed class SqliteTaskStore : ITaskStore
         if (version > CurrentSchemaVersion)
             throw new InvalidDataException($"SQLite 数据库版本 {version} 高于当前程序支持的版本 {CurrentSchemaVersion}；没有修改数据库。");
 
-        if (version == 0 && hadExistingFile)
+        if (version < CurrentSchemaVersion && hadExistingFile)
             BackupCore(CreateMigrationBackupPath(), CancellationToken.None);
 
         database.Execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;");
@@ -97,7 +129,22 @@ public sealed class SqliteTaskStore : ITaskStore
                     + "created_utc_ticks INTEGER NOT NULL, updated_utc_ticks INTEGER NOT NULL, error_code TEXT NULL);"
                     + "CREATE INDEX IF NOT EXISTS ix_tasks_updated ON tasks(updated_utc_ticks DESC);"
                     + "CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY NOT NULL, completed_utc_ticks INTEGER NOT NULL);"
-                    + "PRAGMA user_version=1;");
+                    + CreateContactReplyStylesTableSql()
+                    + $"PRAGMA user_version={CurrentSchemaVersion};");
+                database.Execute("COMMIT;");
+            }
+            catch
+            {
+                TryRollback(database);
+                throw;
+            }
+        }
+        else if (version == 1)
+        {
+            database.Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                database.Execute(CreateContactReplyStylesTableSql() + "PRAGMA user_version=2;");
                 database.Execute("COMMIT;");
             }
             catch
@@ -108,7 +155,13 @@ public sealed class SqliteTaskStore : ITaskStore
         }
 
         MigrateLegacyJson(database);
+        MigrateLegacyContactReplyStyles(database);
     }
+
+    private static string CreateContactReplyStylesTableSql() => "CREATE TABLE IF NOT EXISTS contact_reply_styles ("
+        + "contact_name_key TEXT PRIMARY KEY NOT NULL, contact_name TEXT NOT NULL, "
+        + "style_id TEXT NOT NULL CHECK(style_id IN ('concise','formal','warm','casual','empathetic')), "
+        + "source TEXT NOT NULL CHECK(source='user-confirmed'), updated_utc_ticks INTEGER NOT NULL);";
 
     private void MigrateLegacyJson(SqliteDatabase database)
     {
@@ -154,6 +207,136 @@ public sealed class SqliteTaskStore : ITaskStore
             throw;
         }
         // The source JSON is deliberately retained unchanged as a user-recoverable migration copy.
+    }
+
+    private void MigrateLegacyContactReplyStyles(SqliteDatabase database)
+    {
+        if (!_legacyContactReplyStylesAvailable) return;
+        if (database.ScalarText("SELECT name FROM migration_state WHERE name='contact-styles-settings-v1' LIMIT 1;") is not null)
+            return;
+
+        var sanitized = SanitizeLegacyContactReplyStyles(_legacyContactReplyStyles);
+        database.Execute("BEGIN IMMEDIATE;");
+        try
+        {
+            foreach (var preference in sanitized) InsertContactReplyStyle(database, preference, ignoreExisting: true);
+            using (var marker = database.Prepare("INSERT INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);"))
+            {
+                marker.BindText(1, "contact-styles-settings-v1");
+                marker.BindInt64(2, DateTimeOffset.UtcNow.UtcTicks);
+                marker.ExpectDone();
+            }
+            database.Execute("COMMIT;");
+        }
+        catch
+        {
+            TryRollback(database);
+            throw;
+        }
+        // settings.json is retained unchanged as a recoverable copy; the marker makes SQLite authoritative.
+    }
+
+    private IReadOnlyList<ContactReplyStylePreference> ReadContactReplyStylesCore()
+    {
+        using var database = SqliteDatabase.Open(_path, create: false);
+        using var statement = database.Prepare("SELECT contact_name_key,contact_name,style_id,source,updated_utc_ticks "
+            + "FROM contact_reply_styles ORDER BY contact_name_key;");
+        var result = new List<ContactReplyStylePreference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (statement.StepRow())
+        {
+            var key = statement.ColumnText(0);
+            var name = statement.ColumnText(1);
+            var styleId = statement.ColumnText(2);
+            var source = statement.ColumnText(3);
+            var updatedTicks = statement.ColumnInt64(4);
+            if (!ContactReplyStyleCatalog.TryNormalizeContactName(name, out var normalized)
+                || !string.Equals(name, normalized, StringComparison.Ordinal)
+                || !string.Equals(key, normalized.ToUpperInvariant(), StringComparison.Ordinal)
+                || !ContactReplyStyleCatalog.IsSupportedStyle(styleId)
+                || !string.Equals(source, ContactReplyStyleCatalog.UserConfirmedSource, StringComparison.Ordinal)
+                || updatedTicks < DateTime.MinValue.Ticks || updatedTicks > DateTime.MaxValue.Ticks
+                || !seen.Add(normalized))
+                throw new InvalidDataException("SQLite 联系人风格偏好包含无效字段；已停止读取偏好。");
+            result.Add(new ContactReplyStylePreference(normalized, styleId, source, new DateTimeOffset(updatedTicks, TimeSpan.Zero)));
+        }
+        return result;
+    }
+
+    private void ReplaceContactReplyStylesCore(IReadOnlyList<ContactReplyStylePreference> preferences)
+    {
+        using var database = SqliteDatabase.Open(_path, create: false);
+        database.Execute("BEGIN IMMEDIATE;");
+        try
+        {
+            database.Execute("DELETE FROM contact_reply_styles;");
+            foreach (var preference in preferences) InsertContactReplyStyle(database, preference, ignoreExisting: false);
+            using (var marker = database.Prepare("INSERT OR IGNORE INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);"))
+            {
+                marker.BindText(1, "contact-styles-settings-v1");
+                marker.BindInt64(2, DateTimeOffset.UtcNow.UtcTicks);
+                marker.ExpectDone();
+            }
+            database.Execute("COMMIT;");
+        }
+        catch
+        {
+            TryRollback(database);
+            throw;
+        }
+    }
+
+    private static void InsertContactReplyStyle(SqliteDatabase database, ContactReplyStylePreference preference, bool ignoreExisting)
+    {
+        var conflict = ignoreExisting ? " OR IGNORE" : string.Empty;
+        using var statement = database.Prepare($"INSERT{conflict} INTO contact_reply_styles "
+            + "(contact_name_key,contact_name,style_id,source,updated_utc_ticks) VALUES(?1,?2,?3,?4,?5);");
+        statement.BindText(1, preference.ContactName.ToUpperInvariant());
+        statement.BindText(2, preference.ContactName);
+        statement.BindText(3, preference.StyleId);
+        statement.BindText(4, ContactReplyStyleCatalog.UserConfirmedSource);
+        statement.BindInt64(5, preference.UpdatedAtUtc.UtcTicks);
+        statement.ExpectDone();
+    }
+
+    private static IReadOnlyList<ContactReplyStylePreference> SanitizeLegacyContactReplyStyles(
+        IEnumerable<ContactReplyStylePreference> preferences)
+    {
+        var result = new List<ContactReplyStylePreference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var preference in preferences)
+        {
+            if (preference is null
+                || !ContactReplyStyleCatalog.TryNormalizeContactName(preference.ContactName, out var name)
+                || !ContactReplyStyleCatalog.IsSupportedStyle(preference.StyleId)
+                || !seen.Add(name)) continue;
+            result.Add(new ContactReplyStylePreference(name, preference.StyleId,
+                ContactReplyStyleCatalog.UserConfirmedSource,
+                preference.UpdatedAtUtc == default ? DateTimeOffset.UtcNow : preference.UpdatedAtUtc.ToUniversalTime()));
+            if (result.Count == MaximumContactReplyStyles) break;
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<ContactReplyStylePreference> ValidateContactReplyStyles(
+        IEnumerable<ContactReplyStylePreference> preferences)
+    {
+        var result = new List<ContactReplyStylePreference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var preference in preferences)
+        {
+            if (preference is null
+                || !ContactReplyStyleCatalog.TryNormalizeContactName(preference.ContactName, out var name)
+                || !ContactReplyStyleCatalog.IsSupportedStyle(preference.StyleId)
+                || !string.Equals(preference.Source, ContactReplyStyleCatalog.UserConfirmedSource, StringComparison.Ordinal)
+                || preference.UpdatedAtUtc == default
+                || !seen.Add(name))
+                throw new ArgumentException("联系人风格偏好必须使用唯一有效名称、固定风格、用户确认来源和有效更新时间。", nameof(preferences));
+            result.Add(preference with { ContactName = name, UpdatedAtUtc = preference.UpdatedAtUtc.ToUniversalTime() });
+            if (result.Count > MaximumContactReplyStyles)
+                throw new ArgumentException($"联系人风格偏好最多保存 {MaximumContactReplyStyles} 条。", nameof(preferences));
+        }
+        return result;
     }
 
     private void SaveCore(TaskRecord task)

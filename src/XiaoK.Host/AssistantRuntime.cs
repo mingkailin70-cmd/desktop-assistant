@@ -31,7 +31,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _settings = XiaoKSettings.Load();
         Directory.CreateDirectory(_settings.DataRoot);
         _store = new SqliteTaskStore(Path.Combine(_settings.DataRoot, "tasks.sqlite3"),
-            Path.Combine(_settings.DataRoot, "tasks.json"));
+            Path.Combine(_settings.DataRoot, "tasks.json"), _settings.ContactReplyStyles,
+            _settings.ContactStylesMigrationSourceAvailable);
         _inference = new LocalInferenceClient(_settings.InferenceEndpoint);
         IManagedModelRuntime? managedRuntime = null;
         try
@@ -216,7 +217,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 {
                     if (!ContactReplyStyleCatalog.TryNormalizeContactName(contactName, out var normalizedContact))
                         return new(false, "联系人名称无效；请使用设置中保存的名称。", "INVALID_DRAFT_CONTACT");
-                    styleId = ContactReplyStyleCatalog.FindStyleForContact(XiaoKSettings.Load().ContactReplyStyles, normalizedContact)
+                    var preferences = await _store.GetContactReplyStylesAsync(token);
+                    styleId = ContactReplyStyleCatalog.FindStyleForContact(preferences, normalizedContact)
                         ?? string.Empty;
                     if (styleId.Length == 0)
                         return new(false, $"没有为“{normalizedContact}”保存回复风格。请先到设置中添加并确认该联系人的风格。", "DRAFT_STYLE_NOT_CONFIGURED");
@@ -304,6 +306,12 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         return string.Empty;
     }
 
+    public Task<IReadOnlyList<ContactReplyStylePreference>> GetContactReplyStylesAsync(CancellationToken cancellationToken) =>
+        _store.GetContactReplyStylesAsync(cancellationToken);
+
+    public Task ReplaceContactReplyStylesAsync(IEnumerable<ContactReplyStylePreference> preferences,
+        CancellationToken cancellationToken) => _store.ReplaceContactReplyStylesAsync(preferences, cancellationToken);
+
     private static bool TryExtractDraftContact(string request, out string? contactName)
     {
         contactName = null;
@@ -322,6 +330,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
 internal sealed record XiaoKSettings
 {
+    internal bool ContactStylesMigrationSourceAvailable { get; init; } = true;
     public string DataRoot { get; init; } = @"D:\XiaoK\Data";
     public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
     public string EvaluationRoot { get; init; } = @"D:\XiaoK\Evaluations";
@@ -344,10 +353,12 @@ internal sealed record XiaoKSettings
         try
         {
             var loaded = JsonSerializer.Deserialize<XiaoKSettings>(File.ReadAllText(path), new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            if (loaded is null || !Uri.TryCreate(loaded.InferenceEndpoint, UriKind.Absolute, out var uri) || !uri.IsLoopback) return defaults;
+            if (loaded is null) return defaults;
+            if (!Uri.TryCreate(loaded.InferenceEndpoint, UriKind.Absolute, out var uri) || !uri.IsLoopback)
+                return defaults with { ContactReplyStyles = SanitizeContactReplyStyles(loaded.ContactReplyStyles) };
             return loaded.WithDefaults(defaults);
         }
-        catch (Exception) { return defaults; }
+        catch (Exception) { return defaults with { ContactStylesMigrationSourceAvailable = false }; }
     }
 
     public void Save()
