@@ -16,6 +16,9 @@ var skipped = new List<string>();
 
 try
 {
+    CheckAppResolverRejectsUnknownApplications();
+    passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
+
     await CheckAppLaunchCancellationIsTruthfulAsync();
     passed.Add("应用启动前取消不产生副作用，启动后取消显示结果待核对");
 
@@ -140,6 +143,23 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
     Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
         && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt),
         "隔离编程任务状态没有区分异常中断与等待审阅。");
+}
+
+static void CheckAppResolverRejectsUnknownApplications()
+{
+    var project = AppLaunchIntentResolver.Resolve("打开小K项目");
+    var wechat = AppLaunchIntentResolver.Resolve("启动应用 微信");
+    var edge = AppLaunchIntentResolver.Resolve("打开 Edge");
+    var fullWidthQq = AppLaunchIntentResolver.Resolve("打开ＱＱ");
+    var unknown = AppLaunchIntentResolver.Resolve("打开记事本");
+    var unsupportedVariant = AppLaunchIntentResolver.Resolve("打开 QQ音乐");
+    Require(project is { AppId: "vscode", WorkspaceId: "xiaok" }
+        && wechat is { AppId: "wechat", WorkspaceId: null }
+        && edge is { AppId: "edge", WorkspaceId: null }
+        && fullWidthQq is { AppId: "qq", WorkspaceId: null },
+        "已支持应用别名没有映射到预期的固定应用 ID。");
+    Require(unknown is null && unsupportedVariant is null,
+        "未知应用名称被错误映射到了某个已允许的应用。");
 }
 
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()

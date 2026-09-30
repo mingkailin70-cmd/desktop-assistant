@@ -182,13 +182,12 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var lower = request.ToLowerInvariant();
         if (category == "app")
         {
-            var appId = lower.Contains("微信") || lower.Contains("wechat") ? "wechat" :
-                        lower.Contains("qq") || request.Contains("ＱＱ", StringComparison.OrdinalIgnoreCase) ? "qq" :
-                        lower.Contains("edge") || lower.Contains("浏览器") ? "edge" :
-                        lower.Contains("资源管理器") || lower.Contains("文件夹") ? "explorer" : "vscode";
-            var args = ImmutableDictionary<string, string>.Empty.Add("app_id", appId);
-            if (appId == "vscode") args = args.Add("workspace_id", "xiaok");
-            return await _broker.ExecuteAsync(new ToolProposal("app.launch.v1", args, appId, "对应应用窗口可见"), token);
+            var intent = AppLaunchIntentResolver.Resolve(request);
+            if (intent is null)
+                return new(false, "无法确定要打开哪个受支持的应用。当前支持 VS Code 小K项目、Edge、资源管理器、微信和 QQ。", "APP_NOT_SUPPORTED");
+            var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
+            if (intent.WorkspaceId is not null) args = args.Add("workspace_id", intent.WorkspaceId);
+            return await _broker.ExecuteAsync(new ToolProposal("app.launch.v1", args, intent.AppId, "对应应用窗口可见"), token);
         }
 
         if (category == "file")
@@ -254,7 +253,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("帮我回复") || lower.StartsWith("起草回复") || lower.StartsWith("回复草稿") || lower.StartsWith("帮我回")) return "draft";
         if (lower.StartsWith("发送") || lower.StartsWith("发给")) return "send";
         if (lower.Contains("写代码") || lower.Contains("改代码") || lower.Contains("开发任务") || lower.Contains("编程任务")) return "code";
-        if (lower.StartsWith("打开") || lower.Contains("打开小k项目") || lower.Contains("启动应用")) return "app";
+        if (lower.StartsWith("打开") || lower.StartsWith("启动")) return "app";
         return "chat";
     }
 
