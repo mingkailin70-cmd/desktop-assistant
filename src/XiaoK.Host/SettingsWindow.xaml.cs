@@ -12,7 +12,8 @@ public partial class SettingsWindow : Window
 {
     private readonly XiaoKSettings _original;
     private readonly Func<Task<string>> _requestNotificationAccess;
-    private readonly bool _startupWasEnabled;
+    private bool _startupWasEnabled;
+    private bool _startupStateLoaded;
     private readonly ObservableCollection<ContactReplyStylePreference> _contactReplyStyles;
     private TimeSpan _previousCpuTime;
     private long _previousCpuSampleTimestamp;
@@ -42,22 +43,30 @@ public partial class SettingsWindow : Window
         ContactStyleBox.SelectedValuePath = nameof(ContactReplyStyleOption.Id);
         ContactStyleBox.SelectedValue = ContactReplyStyleCatalog.DefaultStyleId;
 
-        var startupSupported = false;
-        var startupStatus = "MSIX 登录启动任务尚未接入；此打包版本不能通过注册表设置自启动。";
+        StartupCheck.IsEnabled = false;
+        StartupStatusText.Text = "正在读取 Windows 登录启动状态…";
+    }
+
+    private async void SettingsWindow_Loaded(object sender, RoutedEventArgs e)
+    {
         try
         {
-            startupSupported = LoginStartupRegistration.IsSupported;
-            _startupWasEnabled = startupSupported && LoginStartupRegistration.IsEnabled;
-            if (startupSupported) startupStatus = "仅为当前用户创建或移除登录启动项，不需要管理员权限。";
+            var startup = await LoginStartupRegistration.ReadAsync();
+            _startupWasEnabled = startup.IsEnabled;
+            _startupStateLoaded = true;
+            StartupCheck.IsChecked = startup.IsEnabled;
+            StartupCheck.IsEnabled = startup.IsSupported;
+            StartupStatusText.Text = startup.Status;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or SecurityException)
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or SecurityException
+            or System.Runtime.InteropServices.COMException or NotSupportedException)
         {
-            _startupWasEnabled = false;
-            startupStatus = ex.Message;
+            _startupStateLoaded = false;
+            StartupCheck.IsChecked = false;
+            StartupCheck.IsEnabled = false;
+            StartupStatusText.Text = "无法读取 Windows 登录启动状态；为避免误改系统设置，此项已停用。";
+            StatusText.Text = ex.Message;
         }
-        StartupCheck.IsChecked = _startupWasEnabled;
-        StartupCheck.IsEnabled = startupSupported;
-        StartupStatusText.Text = startupStatus;
     }
 
     private void BrowseDataRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(DataRootBox, "选择用户数据目录");
@@ -199,8 +208,14 @@ public partial class SettingsWindow : Window
         ContactStyleStatusText.Text = "已从待保存列表移除；点击设置底部的“保存”后删除生效。";
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private async void Save_Click(object sender, RoutedEventArgs e)
     {
+        if (!_startupStateLoaded)
+        {
+            StatusText.Text = "Windows 登录启动状态尚未确认；请等待状态读取完成后再保存。";
+            return;
+        }
+
         var startupRequested = StartupCheck.IsEnabled && StartupCheck.IsChecked == true;
         var startupChanged = StartupCheck.IsEnabled && startupRequested != _startupWasEnabled;
 
@@ -224,20 +239,38 @@ public partial class SettingsWindow : Window
             if (updated.CodeProjectRoot.Length > 0 && PathsOverlap(updated.CodeProjectRoot, updated.CodeWorkspaceRoot))
                 throw new ArgumentException("隔离工作区目录不能与编程项目目录相同或互相包含。");
 
-            if (startupChanged) LoginStartupRegistration.SetEnabled(startupRequested);
+            if (startupChanged)
+            {
+                var startup = await LoginStartupRegistration.SetEnabledAsync(startupRequested);
+                StartupStatusText.Text = startup.Status;
+                if (startup.IsEnabled != startupRequested)
+                {
+                    StartupCheck.IsChecked = startup.IsEnabled;
+                    StartupCheck.IsEnabled = startup.IsSupported;
+                    StatusText.Text = "Windows 未应用所请求的登录启动状态；其他设置尚未保存。请按上方说明处理后重试。";
+                    return;
+                }
+            }
+
             try
             {
                 updated.Save();
             }
             catch
             {
-                if (startupChanged) LoginStartupRegistration.SetEnabled(_startupWasEnabled);
+                if (startupChanged)
+                {
+                    var rollback = await LoginStartupRegistration.SetEnabledAsync(_startupWasEnabled);
+                    StartupStatusText.Text = rollback.Status;
+                }
                 throw;
             }
 
+            if (startupChanged) _startupWasEnabled = startupRequested;
             DialogResult = true;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
+            or InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException)
         {
             StatusText.Text = ex.Message;
         }

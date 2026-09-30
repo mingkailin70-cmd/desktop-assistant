@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="小K设置" Width="560" Height="740" MinWidth="520" MinHeight="650"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        Background="#F7F8FC" ShowInTaskbar="False">
+        Background="#F7F8FC" ShowInTaskbar="False" Loaded="SettingsWindow_Loaded">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
