@@ -14,6 +14,7 @@ namespace XiaoK.Host;
 
 internal sealed class AssistantRuntime : IAsyncDisposable
 {
+    private readonly DateTimeOffset _processStartedAtUtc = DateTimeOffset.UtcNow;
     private readonly XiaoKSettings _settings;
     private readonly JsonTaskStore _store;
     private readonly LocalInferenceClient _inference;
@@ -56,17 +57,28 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
     {
-        var records = await _store.GetRecentAsync(30, cancellationToken);
+        var records = (await _store.GetRecentAsync(30, cancellationToken))
+            .Select(record => TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc));
         var history = records.Select(record => new TaskHistoryEntry(
             $"{record.Summary} · {record.Id.ToString("N")[..8]}",
             TaskStateLabel(record.Status), record.UpdatedAtUtc,
-            record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}"))
+            record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
+                ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
+                : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}"))
             .ToList();
 
         var codeTasks = await Task.Run(() => CodeTaskAgent.ReadRetainedTasks(_settings.CodeWorkspaceRoot), cancellationToken);
-        history.AddRange(codeTasks.Select(task => new TaskHistoryEntry(
-            $"隔离编程任务 · {task.TaskId[^8..]}", CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
-            $"隔离工作区：{task.WorkspacePath}")));
+        history.AddRange(codeTasks.Select(task =>
+        {
+            var interrupted = TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(
+                task.State, task.UpdatedAtUtc, _processStartedAtUtc);
+            return new TaskHistoryEntry(
+                $"隔离编程任务 · {task.TaskId[^8..]}",
+                interrupted ? "上次中断，需核对" : CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
+                interrupted
+                    ? $"小K不会自动续跑。请检查隔离工作区后手动决定下一步：{task.WorkspacePath}"
+                    : $"隔离工作区：{task.WorkspacePath}");
+        }));
 
         return history.OrderByDescending(item => item.UpdatedAtUtc).Take(35).ToArray();
     }

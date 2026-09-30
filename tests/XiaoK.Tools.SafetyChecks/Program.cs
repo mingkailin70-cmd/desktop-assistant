@@ -15,6 +15,9 @@ var skipped = new List<string>();
 
 try
 {
+    CheckInterruptedTaskHistoryIsNotReplayed();
+    passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
+
     await CheckValidPatchIsIsolatedAsync(tempRoot);
     passed.Add("有效补丁只写隔离工作区，保留 CRLF，并记录待审阅状态");
 
@@ -111,6 +114,28 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
         && result.Data.Contains("+    int Value = 2;", StringComparison.Ordinal), "返回的差异没有显示修改前后内容。");
     var state = File.ReadAllText(Path.Combine(taskDirectory, "task-state.json"));
     Require(state.Contains("awaiting_approval", StringComparison.Ordinal), "任务状态没有写入 awaiting_approval。");
+}
+
+static void CheckInterruptedTaskHistoryIsNotReplayed()
+{
+    var processStartedAt = DateTimeOffset.UtcNow;
+    var stale = new TaskRecord(Guid.NewGuid(), "app", "应用操作", TaskLifecycleState.Running,
+        processStartedAt.AddMinutes(-1), processStartedAt.AddSeconds(-1), "暂存结果");
+    var staleQueued = stale with { Status = TaskLifecycleState.Queued };
+    var awaitingApproval = stale with { Status = TaskLifecycleState.AwaitingApproval };
+    var current = stale with { UpdatedAtUtc = processStartedAt.AddSeconds(1) };
+
+    var interrupted = TaskHistoryRecoveryPolicy.ForDisplay(stale, processStartedAt);
+    Require(interrupted.Status == TaskLifecycleState.OutcomeUncertain
+        && interrupted.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
+        && interrupted.Result is null, "上次进程中未结束的任务没有被标为待核对，或保留了旧结果内容。");
+    Require(TaskHistoryRecoveryPolicy.ForDisplay(staleQueued, processStartedAt).Status == TaskLifecycleState.OutcomeUncertain
+        && TaskHistoryRecoveryPolicy.ForDisplay(awaitingApproval, processStartedAt) == awaitingApproval
+        && TaskHistoryRecoveryPolicy.ForDisplay(current, processStartedAt) == current,
+        "旧的排队任务、等待审阅任务或当前进程内任务状态投影错误。");
+    Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt),
+        "隔离编程任务状态没有区分异常中断与等待审阅。");
 }
 
 static async Task CheckModelCannotSelectOutsidePathAsync(string root)
