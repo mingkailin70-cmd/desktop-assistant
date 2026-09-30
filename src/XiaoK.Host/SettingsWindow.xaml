@@ -34,6 +34,8 @@
                             <Button x:Name="RestoreDatabaseBackupButton" Content="从备份恢复…" Click="RestoreDatabaseBackup_Click" Margin="0,0,6,4"/>
                             <Button x:Name="ViewApprovalAuditButton" Content="查看审批记录…" Click="ViewApprovalAudit_Click" Margin="0,0,0,4"/>
                         </WrapPanel>
+                        <Button x:Name="ClearLocalDataButton" Content="清理本地历史数据…" Click="ClearLocalData_Click"
+                                HorizontalAlignment="Left" Margin="0,2,0,0"/>
                         <TextBlock x:Name="DatabaseMaintenanceStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,3,0,0"/>
                     </StackPanel>
                 </Border>
@@ -125,7 +127,7 @@
                                    FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
-                <TextBlock Text="数据、模型、评测、编程项目和隔离工作区路径及推理地址保存后需重启小K生效；登录启动设置立即生效。清理只删除评测目录顶层普通文件，并在执行前再次确认。"
+                <TextBlock Text="数据、模型、评测、编程项目和隔离工作区路径及推理地址保存后需重启小K生效；登录启动设置立即生效。历史清理、备份恢复和评测样本清理都会先预览并等待确认。"
                            FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,10,0,4"/>
             </StackPanel>
         </ScrollViewer>

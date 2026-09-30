@@ -15,6 +15,8 @@ public sealed class SqliteTaskStore : ITaskStore
     private const int CurrentSchemaVersion = 3;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
+    private const string TasksJsonMigrationMarker = "tasks-json-v1";
+    private const string ContactStylesMigrationMarker = "contact-styles-settings-v1";
     private static readonly JsonSerializerOptions LegacyJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _path;
     private readonly string? _legacyJsonPath;
@@ -142,6 +144,29 @@ public sealed class SqliteTaskStore : ITaskStore
         finally { _gate.Release(); }
     }
 
+    public async Task<SqlitePersonalDataSummary> GetPersonalDataSummaryAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await Task.Run(ReadPersonalDataSummaryCore, cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Clears persisted personal rows while retaining migration markers to prevent old-source reimport.</summary>
+    public async Task<bool> ClearPersonalDataAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await Task.Run(ClearPersonalDataCore, cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
     private void Initialize()
     {
         var sqliteVersion = NativeSqlite.sqlite3_libversion_number();
@@ -230,7 +255,7 @@ public sealed class SqliteTaskStore : ITaskStore
     private void MigrateLegacyJson(SqliteDatabase database)
     {
         if (_legacyJsonPath is null || !File.Exists(_legacyJsonPath)
-            || database.ScalarText("SELECT name FROM migration_state WHERE name='tasks-json-v1' LIMIT 1;") is not null)
+            || database.ScalarText($"SELECT name FROM migration_state WHERE name='{TasksJsonMigrationMarker}' LIMIT 1;") is not null)
             return;
 
         List<TaskRecord> legacy;
@@ -259,7 +284,7 @@ public sealed class SqliteTaskStore : ITaskStore
             }
             using (var marker = database.Prepare("INSERT INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);"))
             {
-                marker.BindText(1, "tasks-json-v1");
+                marker.BindText(1, TasksJsonMigrationMarker);
                 marker.BindInt64(2, DateTimeOffset.UtcNow.UtcTicks);
                 marker.ExpectDone();
             }
@@ -276,7 +301,7 @@ public sealed class SqliteTaskStore : ITaskStore
     private void MigrateLegacyContactReplyStyles(SqliteDatabase database)
     {
         if (!_legacyContactReplyStylesAvailable) return;
-        if (database.ScalarText("SELECT name FROM migration_state WHERE name='contact-styles-settings-v1' LIMIT 1;") is not null)
+        if (database.ScalarText($"SELECT name FROM migration_state WHERE name='{ContactStylesMigrationMarker}' LIMIT 1;") is not null)
             return;
 
         var sanitized = SanitizeLegacyContactReplyStyles(_legacyContactReplyStyles);
@@ -286,7 +311,7 @@ public sealed class SqliteTaskStore : ITaskStore
             foreach (var preference in sanitized) InsertContactReplyStyle(database, preference, ignoreExisting: true);
             using (var marker = database.Prepare("INSERT INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);"))
             {
-                marker.BindText(1, "contact-styles-settings-v1");
+                marker.BindText(1, ContactStylesMigrationMarker);
                 marker.BindInt64(2, DateTimeOffset.UtcNow.UtcTicks);
                 marker.ExpectDone();
             }
@@ -335,12 +360,7 @@ public sealed class SqliteTaskStore : ITaskStore
         {
             database.Execute("DELETE FROM contact_reply_styles;");
             foreach (var preference in preferences) InsertContactReplyStyle(database, preference, ignoreExisting: false);
-            using (var marker = database.Prepare("INSERT OR IGNORE INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);"))
-            {
-                marker.BindText(1, "contact-styles-settings-v1");
-                marker.BindInt64(2, DateTimeOffset.UtcNow.UtcTicks);
-                marker.ExpectDone();
-            }
+            InsertMigrationMarkerIfMissing(database, ContactStylesMigrationMarker);
             database.Execute("COMMIT;");
         }
         catch
@@ -348,6 +368,14 @@ public sealed class SqliteTaskStore : ITaskStore
             TryRollback(database);
             throw;
         }
+    }
+
+    private static void InsertMigrationMarkerIfMissing(SqliteDatabase database, string markerName)
+    {
+        using var marker = database.Prepare("INSERT OR IGNORE INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);");
+        marker.BindText(1, markerName);
+        marker.BindInt64(2, DateTimeOffset.UtcNow.UtcTicks);
+        marker.ExpectDone();
     }
 
     private static ApprovalAuditRecord CreateApprovalAuditRecord(string actionId, string outcome)
@@ -493,6 +521,54 @@ public sealed class SqliteTaskStore : ITaskStore
                 Result: null, ErrorCode: error));
         }
         return result;
+    }
+
+    private SqlitePersonalDataSummary ReadPersonalDataSummaryCore()
+    {
+        using var database = SqliteDatabase.Open(_path, create: false);
+        var taskCount = database.ScalarInt32("SELECT COUNT(*) FROM tasks;");
+        var contactCount = database.ScalarInt32("SELECT COUNT(*) FROM contact_reply_styles;");
+        var auditCount = database.ScalarInt32("SELECT COUNT(*) FROM approval_audit;");
+        var tasksMarked = database.ScalarInt32($"SELECT COUNT(*) FROM migration_state WHERE name='{TasksJsonMigrationMarker}';") != 0;
+        var contactsMarked = database.ScalarInt32($"SELECT COUNT(*) FROM migration_state WHERE name='{ContactStylesMigrationMarker}';") != 0;
+        return new(taskCount, contactCount, auditCount, tasksMarked, contactsMarked);
+    }
+
+    private bool ClearPersonalDataCore()
+    {
+        using var database = SqliteDatabase.Open(_path, create: false);
+        database.Execute("PRAGMA secure_delete=ON; BEGIN IMMEDIATE;");
+        try
+        {
+            database.Execute("DELETE FROM tasks; DELETE FROM contact_reply_styles; DELETE FROM approval_audit;");
+            InsertMigrationMarkerIfMissing(database, TasksJsonMigrationMarker);
+            InsertMigrationMarkerIfMissing(database, ContactStylesMigrationMarker);
+            database.Execute("COMMIT;");
+        }
+        catch
+        {
+            TryRollback(database);
+            throw;
+        }
+
+        try
+        {
+            if (!TryTruncateWal(database)) return false;
+            database.Execute("VACUUM;");
+            return TryTruncateWal(database);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryTruncateWal(SqliteDatabase database)
+    {
+        using var statement = database.Prepare("PRAGMA wal_checkpoint(TRUNCATE);");
+        return statement.StepRow()
+            && statement.ColumnInt32(0) == 0
+            && statement.ColumnInt32(1) == statement.ColumnInt32(2);
     }
 
     private void BackupCore(string destination, CancellationToken cancellationToken) =>
@@ -778,6 +854,13 @@ public sealed class SqliteTaskStore : ITaskStore
         catch (InvalidOperationException) { }
     }
 }
+
+public sealed record SqlitePersonalDataSummary(
+    int TaskRows,
+    int ContactPreferenceRows,
+    int ApprovalAuditRows,
+    bool TasksMigrationMarked,
+    bool ContactStylesMigrationMarked);
 
 internal sealed class SqliteDatabase : IDisposable
 {

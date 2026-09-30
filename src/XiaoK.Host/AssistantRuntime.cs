@@ -330,6 +330,66 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         finally { _executionGate.Release(); }
     }
 
+    public async Task<LocalDataCleanupPreview> GetLocalDataCleanupPreviewAsync(CancellationToken cancellationToken)
+    {
+        if (!await _executionGate.WaitAsync(0, cancellationToken))
+            throw new InvalidOperationException("当前有任务运行；请等待任务结束后再预览本地数据清理。");
+        try { return await BuildLocalDataCleanupPreviewAsync(cancellationToken); }
+        finally { _executionGate.Release(); }
+    }
+
+    public async Task<LocalDataCleanupResult> ClearLocalDataAsync(LocalDataCleanupPreview approvedPreview,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(approvedPreview);
+        if (!await _executionGate.WaitAsync(0, cancellationToken))
+            throw new InvalidOperationException("当前有任务运行；请等待任务结束后再清理本地数据。");
+        try
+        {
+            var currentPreview = await BuildLocalDataCleanupPreviewAsync(cancellationToken);
+            if (!CleanupPreviewMatches(approvedPreview, currentPreview))
+                throw new InvalidOperationException("本地数据在确认期间发生变化；没有清理，请重新预览。");
+
+            var databaseCompacted = await _store.ClearPersonalDataAsync(cancellationToken);
+            var settingsPropertyRemoved = false;
+            string? settingsCleanupError = null;
+            try
+            {
+                settingsPropertyRemoved = LegacyContactStylesPrivacyCleanup.RemoveIfUnchanged(
+                    XiaoKSettings.GetSettingsPath(), approvedPreview.LegacySettings);
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException
+                or InvalidDataException or InvalidOperationException or NotSupportedException or System.Text.Json.JsonException)
+            {
+                settingsCleanupError = ex.Message;
+            }
+
+            var fileResult = ManagedPrivacyFileCleanup.DeleteIfUnchanged(approvedPreview.ManagedFiles);
+            return new(databaseCompacted, settingsPropertyRemoved,
+                approvedPreview.LegacySettings.HasContactStylesProperty,
+                fileResult.DeletedCount, approvedPreview.ManagedFiles.SkippedEntries,
+                fileResult.FailedFileNames, fileResult.PlanChanged, settingsCleanupError);
+        }
+        finally { _executionGate.Release(); }
+    }
+
+    private async Task<LocalDataCleanupPreview> BuildLocalDataCleanupPreviewAsync(CancellationToken cancellationToken)
+    {
+        var database = await _store.GetPersonalDataSummaryAsync(cancellationToken);
+        var settings = LegacyContactStylesPrivacyCleanup.Preview(XiaoKSettings.GetSettingsPath());
+        var managedFiles = ManagedPrivacyFileCleanup.Preview(_settings.DataRoot,
+            Path.Combine(_settings.DataRoot, "tasks.json"));
+        return new(database, settings, managedFiles);
+    }
+
+    private static bool CleanupPreviewMatches(LocalDataCleanupPreview approved, LocalDataCleanupPreview current) =>
+        approved.Database == current.Database
+        && approved.LegacySettings == current.LegacySettings
+        && string.Equals(approved.ManagedFiles.RootPath, current.ManagedFiles.RootPath, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(approved.ManagedFiles.LegacyTasksJsonPath, current.ManagedFiles.LegacyTasksJsonPath, StringComparison.OrdinalIgnoreCase)
+        && approved.ManagedFiles.SkippedEntries == current.ManagedFiles.SkippedEntries
+        && approved.ManagedFiles.Files.SequenceEqual(current.ManagedFiles.Files);
+
     private static bool TryExtractDraftContact(string request, out string? contactName)
     {
         contactName = null;
@@ -390,7 +450,7 @@ internal sealed record XiaoKSettings
         else File.Move(temporaryPath, path);
     }
 
-    private static string GetSettingsPath() => Path.Combine(
+    internal static string GetSettingsPath() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaoK", "settings.json");
 
     private static XiaoKSettings CreateDefaults()
@@ -453,3 +513,8 @@ internal sealed record XiaoKSettings
 internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory);
 internal sealed record RootSetting(string Id, string Path);
 internal sealed record TaskHistoryEntry(string Title, string State, DateTimeOffset UpdatedAtUtc, string Detail);
+internal sealed record LocalDataCleanupPreview(SqlitePersonalDataSummary Database,
+    LegacyContactStylesCleanupSnapshot LegacySettings, ManagedPrivacyFilesPlan ManagedFiles);
+internal sealed record LocalDataCleanupResult(bool DatabaseCompacted, bool LegacySettingsPropertyRemoved,
+    bool LegacySettingsPropertyWasPresent, int DeletedManagedFiles, int SkippedManagedFiles,
+    IReadOnlyList<string> FailedManagedFileNames, bool ManagedFilePlanChanged, string? LegacySettingsCleanupError);

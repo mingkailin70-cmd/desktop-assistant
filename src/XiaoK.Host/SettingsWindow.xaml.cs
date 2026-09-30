@@ -10,13 +10,15 @@ namespace XiaoK.Host;
 
 public partial class SettingsWindow : Window
 {
-    private readonly XiaoKSettings _original;
+    private XiaoKSettings _original;
     private readonly Func<Task<string>> _requestNotificationAccess;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> _loadContactReplyStyles;
     private readonly Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> _replaceContactReplyStyles;
     private readonly Func<string, CancellationToken, Task<string>> _createDatabaseBackup;
     private readonly Func<string, CancellationToken, Task<string>> _restoreDatabaseBackup;
     private readonly Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> _getRecentApprovalAudit;
+    private readonly Func<CancellationToken, Task<LocalDataCleanupPreview>> _getLocalDataCleanupPreview;
+    private readonly Func<LocalDataCleanupPreview, CancellationToken, Task<LocalDataCleanupResult>> _clearLocalData;
     private readonly string _activeDatabasePath;
     private IReadOnlyList<ContactReplyStylePreference> _loadedContactReplyStyles = [];
     private bool _startupWasEnabled;
@@ -32,7 +34,9 @@ public partial class SettingsWindow : Window
         string activeDatabasePath,
         Func<string, CancellationToken, Task<string>> createDatabaseBackup,
         Func<string, CancellationToken, Task<string>> restoreDatabaseBackup,
-        Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> getRecentApprovalAudit)
+        Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> getRecentApprovalAudit,
+        Func<CancellationToken, Task<LocalDataCleanupPreview>> getLocalDataCleanupPreview,
+        Func<LocalDataCleanupPreview, CancellationToken, Task<LocalDataCleanupResult>> clearLocalData)
     {
         InitializeComponent();
         _original = settings;
@@ -43,6 +47,8 @@ public partial class SettingsWindow : Window
         _createDatabaseBackup = createDatabaseBackup;
         _restoreDatabaseBackup = restoreDatabaseBackup;
         _getRecentApprovalAudit = getRecentApprovalAudit;
+        _getLocalDataCleanupPreview = getLocalDataCleanupPreview;
+        _clearLocalData = clearLocalData;
         _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
@@ -223,11 +229,85 @@ public partial class SettingsWindow : Window
         finally { ViewApprovalAuditButton.IsEnabled = true; }
     }
 
+    private async void ClearLocalData_Click(object sender, RoutedEventArgs e)
+    {
+        SetDatabaseMaintenanceButtonsEnabled(false);
+        try
+        {
+            var preview = await _getLocalDataCleanupPreview(CancellationToken.None);
+            var database = preview.Database;
+            var hasData = database.TaskRows > 0 || database.ContactPreferenceRows > 0 || database.ApprovalAuditRows > 0
+                || preview.LegacySettings.HasContactStylesProperty || preview.ManagedFiles.Files.Count > 0;
+            if (!hasData)
+            {
+                DatabaseMaintenanceStatusText.Text = preview.ManagedFiles.SkippedEntries == 0
+                    ? "没有发现可清理的本地历史记录或小K管理文件。"
+                    : $"没有可清理的数据；{preview.ManagedFiles.SkippedEntries} 个链接或只读文件按安全规则保留。";
+                return;
+            }
+
+            var confirmation = System.Windows.MessageBox.Show(
+                this,
+                $"将清除本地数据库中的任务记录（{database.TaskRows}）、联系人回复偏好（{database.ContactPreferenceRows}）和审批记录（{database.ApprovalAuditRows}）。"
+                    + $"\n旧设置文件中检测到 {preview.LegacySettings.ContactStyleRows} 条联系人偏好副本；数据目录内有 {preview.ManagedFiles.Files.Count} 个小K管理的旧任务/备份/暂存文件（{preview.ManagedFiles.TotalBytes / (1024d * 1024d):F1} MiB）。"
+                    + $"\n当前数据目录：{Path.GetDirectoryName(_activeDatabasePath)}"
+                    + $"\n\n此操作不可撤销。迁移标记会保留，避免重启后从旧文件重新导入。只会从当前设置中移除联系人偏好字段；其他设置、隔离编程工作区、评测样本和用户另存到其他位置或自定义名称的备份不会删除。{(preview.ManagedFiles.SkippedEntries == 0 ? "" : $"\n另有 {preview.ManagedFiles.SkippedEntries} 个链接或只读文件会保留。")}\n\n要继续吗？",
+                "确认清理小K本地历史数据",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes) return;
+
+            DatabaseMaintenanceStatusText.Text = "正在清除数据库记录并清理旧迁移副本…";
+            var result = await _clearLocalData(preview, CancellationToken.None);
+            _original = _original with { ContactReplyStyles = [] };
+            if (_contactStylesLoaded)
+            {
+                try
+                {
+                    _loadedContactReplyStyles = await _loadContactReplyStyles(CancellationToken.None);
+                    _contactReplyStyles.Clear();
+                    foreach (var preference in _loadedContactReplyStyles) _contactReplyStyles.Add(preference);
+                    ContactStyleNameBox.Clear();
+                    ContactStylesList.SelectedItem = null;
+                }
+                catch (Exception refreshError) when (refreshError is IOException or InvalidDataException or InvalidOperationException)
+                {
+                    DatabaseMaintenanceStatusText.Text = $"历史数据已清除，但联系人偏好列表刷新失败；请重新打开设置核对：{refreshError.Message}";
+                    return;
+                }
+            }
+
+            var status = result.DatabaseCompacted
+                ? "数据库记录已清除，WAL已检查点并完成空间整理。"
+                : "数据库逻辑记录已清除，但 WAL 检查点或空间整理未完成；关闭其他数据库查看工具后可重试清理。";
+            status += result.LegacySettingsPropertyWasPresent
+                ? result.LegacySettingsPropertyRemoved ? "旧设置中的联系人偏好副本已移除。"
+                    : $"旧设置偏好副本未能移除：{result.LegacySettingsCleanupError ?? "请检查设置文件后重试。"}"
+                : "没有旧设置联系人偏好副本。";
+            status += $"已删除 {result.DeletedManagedFiles} 个小K管理文件。";
+            if (result.SkippedManagedFiles > 0) status += $"保留了 {result.SkippedManagedFiles} 个只读或链接文件。";
+            if (result.FailedManagedFileNames.Count > 0)
+                status += "未能删除：" + string.Join("、", result.FailedManagedFileNames) + "。可关闭占用程序后重试。";
+            if (result.ManagedFilePlanChanged)
+                status += "数据目录在确认后发生变化；未能按原预览清理部分文件，请重新预览后重试。";
+            status += "用户另存到其他位置的备份不会自动删除。";
+            DatabaseMaintenanceStatusText.Text = status;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
+            or InvalidDataException or InvalidOperationException or NotSupportedException or System.Text.Json.JsonException)
+        {
+            DatabaseMaintenanceStatusText.Text = $"没有完成本地历史清理：{ex.Message}";
+        }
+        finally { SetDatabaseMaintenanceButtonsEnabled(true); }
+    }
+
     private void SetDatabaseMaintenanceButtonsEnabled(bool enabled)
     {
         CreateDatabaseBackupButton.IsEnabled = enabled;
         RestoreDatabaseBackupButton.IsEnabled = enabled;
         ViewApprovalAuditButton.IsEnabled = enabled;
+        ClearLocalDataButton.IsEnabled = enabled;
     }
 
     private void BrowseDataRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(DataRootBox, "选择用户数据目录");

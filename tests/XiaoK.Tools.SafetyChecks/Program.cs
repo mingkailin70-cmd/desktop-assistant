@@ -50,6 +50,12 @@ try
     await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
     passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持原子更新、一致性备份及 v1/v2 到 v3 架构备份迁移");
 
+    await CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(tempRoot);
+    passed.Add("本地历史清理删除 SQLite 个人记录并保留迁移标记，重启后不会从旧源重新导入");
+
+    CheckLegacyAndManagedFilePrivacyCleanup(tempRoot);
+    passed.Add("旧设置仅移除联系人偏好副本，清理计划只删除核准的迁移/备份文件");
+
     await CheckCodeVerificationCancellationPersistsAsync(tempRoot);
     passed.Add("取消已批准的隔离验证会持久化 cancelled 且不修改原项目");
 
@@ -478,6 +484,102 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         && v2UpgradeAudit.Count == 0
         && Directory.EnumerateFiles(v2Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
         "v2 到 v3 升级未保留偏好、建立审批表或在变更前备份。");
+}
+
+static async Task CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-personal-data-cleanup");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var legacyTasksPath = Path.Combine(directory, "tasks.json");
+    var now = DateTimeOffset.UtcNow;
+    var legacyTask = new TaskRecord(Guid.NewGuid(), "chat", "local-only", TaskLifecycleState.Completed,
+        now.AddMinutes(-1), now, Result: "must-not-be-restored");
+    await File.WriteAllTextAsync(legacyTasksPath,
+        System.Text.Json.JsonSerializer.Serialize(new[] { legacyTask }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)),
+        new UTF8Encoding(false));
+    var legacyPreference = new ContactReplyStylePreference("PrivateContact", "warm",
+        ContactReplyStyleCatalog.UserConfirmedSource, now.AddMinutes(-2));
+    var store = new SqliteTaskStore(databasePath, legacyTasksPath, [legacyPreference]);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodeTaskAction,
+        ApprovalAuditCatalog.RunDotNetTests, CancellationToken.None);
+
+    var before = await store.GetPersonalDataSummaryAsync(CancellationToken.None);
+    Require(before.TaskRows == 1 && before.ContactPreferenceRows == 1 && before.ApprovalAuditRows == 1
+        && before.TasksMigrationMarked && before.ContactStylesMigrationMarked,
+        "清理测试未准备出三类个人记录和迁移标记。");
+
+    var compacted = await store.ClearPersonalDataAsync(CancellationToken.None);
+    var after = await store.GetPersonalDataSummaryAsync(CancellationToken.None);
+    var reopened = new SqliteTaskStore(databasePath, legacyTasksPath, [legacyPreference]);
+    var afterReopen = await reopened.GetPersonalDataSummaryAsync(CancellationToken.None);
+    Require(after.TaskRows == 0 && after.ContactPreferenceRows == 0 && after.ApprovalAuditRows == 0
+        && after.TasksMigrationMarked && after.ContactStylesMigrationMarked
+        && afterReopen.TaskRows == 0 && afterReopen.ContactPreferenceRows == 0 && afterReopen.ApprovalAuditRows == 0
+        && compacted && DatabaseFilesOmitSentinel(databasePath, "PrivateContact"),
+        "清理未清除数据库个人记录、未保留迁移标记、重启后重新导入，或 WAL/VACUUM 未完成。");
+}
+
+static void CheckLegacyAndManagedFilePrivacyCleanup(string root)
+{
+    var directory = Path.Combine(root, "managed-privacy-cleanup");
+    Directory.CreateDirectory(directory);
+    var settingsPath = Path.Combine(directory, "settings.json");
+    const string privateName = "PRIVATE_CONTACT_NAME_SENTINEL";
+    File.WriteAllText(settingsPath,
+        "{\"dataRoot\":\"D:\\\\XiaoK\\\\Data\",\"contactReplyStyles\":[{\"contactName\":\"" + privateName
+            + "\",\"styleId\":\"warm\"}],\"unknownSetting\":42}", new UTF8Encoding(false));
+    var settingsSnapshot = LegacyContactStylesPrivacyCleanup.Preview(settingsPath);
+    Require(settingsSnapshot.HasContactStylesProperty && settingsSnapshot.ContactStyleRows == 1,
+        "旧设置清理预览未统计联系人偏好数量。");
+    Require(LegacyContactStylesPrivacyCleanup.RemoveIfUnchanged(settingsPath, settingsSnapshot),
+        "旧联系人偏好字段没有从设置 JSON 中移除。");
+    using (var cleanedSettings = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(settingsPath)))
+    {
+        var rootObject = cleanedSettings.RootElement;
+        Require(!rootObject.EnumerateObject().Any(property => property.Name.Equals("contactReplyStyles", StringComparison.OrdinalIgnoreCase))
+            && rootObject.GetProperty("dataRoot").GetString() == @"D:\XiaoK\Data"
+            && rootObject.GetProperty("unknownSetting").GetInt32() == 42
+            && !File.ReadAllText(settingsPath).Contains(privateName, StringComparison.Ordinal),
+            "旧偏好清理删除了其他设置，或仍保留联系人名称。");
+    }
+
+    var staleSettingsPath = Path.Combine(directory, "stale-settings.json");
+    File.WriteAllText(staleSettingsPath,
+        "{\"contactReplyStyles\":[{\"contactName\":\"" + privateName + "\",\"styleId\":\"warm\"}]}", new UTF8Encoding(false));
+    var staleSnapshot = LegacyContactStylesPrivacyCleanup.Preview(staleSettingsPath);
+    File.AppendAllText(staleSettingsPath, " ");
+    var staleRejected = false;
+    try { _ = LegacyContactStylesPrivacyCleanup.RemoveIfUnchanged(staleSettingsPath, staleSnapshot); }
+    catch (InvalidOperationException) { staleRejected = true; }
+    Require(staleRejected, "设置文件在确认后变化时未拒绝替换。");
+
+    var tasksPath = Path.Combine(directory, "tasks.json");
+    var migrationBackup = Path.Combine(directory, "tasks.sqlite3.before-migration-20260930.bak");
+    var restoreBackup = Path.Combine(directory, "tasks.sqlite3.before-restore-20260930.bak");
+    var userBackup = Path.Combine(directory, "xiaok-backup-20260930.sqlite3");
+    var staging = Path.Combine(directory, "tasks.sqlite3.restore-incomplete.tmp");
+    var unrelated = Path.Combine(directory, "keep-me.txt");
+    var customBackup = Path.Combine(directory, "manual-copy.sqlite3");
+    foreach (var path in new[] { tasksPath, migrationBackup, restoreBackup, userBackup, staging, unrelated, customBackup })
+        File.WriteAllText(path, "synthetic local data", new UTF8Encoding(false));
+
+    var filePlan = ManagedPrivacyFileCleanup.Preview(directory, tasksPath);
+    Require(filePlan.Files.Count == 5 && filePlan.SkippedEntries == 0,
+        "清理预览没有只枚举旧任务文件、小K管理的数据库备份和暂存文件。");
+    var appearedAfterPreview = Path.Combine(directory, "tasks.sqlite3.before-migration-new.bak");
+    File.WriteAllText(appearedAfterPreview, "new synthetic backup", new UTF8Encoding(false));
+    var staleFileResult = ManagedPrivacyFileCleanup.DeleteIfUnchanged(filePlan);
+    Require(staleFileResult.PlanChanged && staleFileResult.DeletedCount == 0 && File.Exists(tasksPath),
+        "清理确认期间出现新文件后仍删除了原预览中的数据。");
+    filePlan = ManagedPrivacyFileCleanup.Preview(directory, tasksPath);
+    Require(filePlan.Files.Count == 6, "重新预览未包括确认期间新增的小K管理备份。");
+    var deleteResult = ManagedPrivacyFileCleanup.DeleteIfUnchanged(filePlan);
+    Require(deleteResult.DeletedCount == 6 && deleteResult.FailedFileNames.Count == 0
+        && !File.Exists(tasksPath) && !File.Exists(migrationBackup) && !File.Exists(restoreBackup)
+        && !File.Exists(userBackup) && !File.Exists(staging) && !File.Exists(appearedAfterPreview)
+        && File.Exists(unrelated) && File.Exists(customBackup),
+        "受管隐私文件清理删除了无关文件/自定义备份或留下计划内文件。");
 }
 
 static bool DatabaseFilesOmitSentinel(string databasePath, string sentinel)

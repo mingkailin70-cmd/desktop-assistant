@@ -176,7 +176,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         var dialog = new SettingsWindow(XiaoKSettings.Load(), _notificationMonitor,
             _runtime.GetContactReplyStylesAsync, _runtime.ReplaceContactReplyStylesAsync, _runtime.ActiveDatabasePath,
             _runtime.CreateDatabaseBackupAsync, _runtime.RestoreDatabaseBackupAsync,
-            _runtime.GetRecentApprovalAuditAsync) { Owner = this };
+            _runtime.GetRecentApprovalAuditAsync, _runtime.GetLocalDataCleanupPreviewAsync,
+            _runtime.ClearLocalDataAsync) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
             _ = ApplySettingsAndReportAsync();
