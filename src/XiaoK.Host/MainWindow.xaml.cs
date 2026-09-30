@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Interop;
 using Forms = System.Windows.Forms;
 using XiaoK.Core;
@@ -19,6 +20,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private bool _shutdownComplete;
     private bool _expanded = true;
     private bool _hotkeyRegistered;
+    private bool _changingWindowMode;
+    private double _expandedWidth = 428;
+    private double _expandedHeight = 590;
 
     public MainWindow()
     {
@@ -28,7 +32,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _notificationMonitor.StatusChanged += OnNotificationStatusChanged;
         _ = _notificationMonitor.ApplySettingsAsync(_runtime.CurrentSettings);
         FooterText.Text = _runtime.ModelStatus;
-        StatusText.Text = _runtime.VoiceStatus;
+        SetStatus(_runtime.VoiceStatus);
         OutputText.Text = "小K已启动。闲置时不加载模型，也不采集麦克风。输入「打开小K项目」或「查找文件 关键词」试用本地工具。";
         _tray = new Forms.NotifyIcon
         {
@@ -40,7 +44,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _tray.DoubleClick += (_, _) => RestoreFromTray();
         SourceInitialized += OnSourceInitialized;
         Closing += OnClosing;
-        MouseLeftButtonDown += (_, e) => { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove(); };
+        SetExpandedView(expanded: false);
     }
 
     public async Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
@@ -108,31 +112,31 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         if (string.IsNullOrWhiteSpace(request)) return;
         RequestBox.Clear();
         OutputText.Text = "正在处理；可随时取消。聊天内容和模型回答仅保留在内存中。";
-        StatusText.Text = "任务运行中";
+        SetStatus("任务运行中");
         SetButtonsEnabled(false);
         try { OutputText.Text = await _runtime.SubmitAsync(request); }
-        finally { StatusText.Text = _runtime.VoiceStatus; SetButtonsEnabled(true); }
+        finally { SetStatus(_runtime.VoiceStatus); SetButtonsEnabled(true); }
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
     {
         OutputText.Text = "正在打开项目；可随时取消。";
-        StatusText.Text = "任务运行中";
+        SetStatus("任务运行中");
         SetButtonsEnabled(false);
         try { OutputText.Text = await _runtime.SubmitAsync("打开小K项目"); }
-        finally { StatusText.Text = _runtime.VoiceStatus; SetButtonsEnabled(true); }
+        finally { SetStatus(_runtime.VoiceStatus); SetButtonsEnabled(true); }
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
         _runtime.CancelCurrent();
-        StatusText.Text = "已请求取消";
+        SetStatus("已请求取消");
     }
 
     private void StopMic_Click(object sender, RoutedEventArgs e)
     {
         var wasCapturing = _runtime.StopMicrophone();
-        StatusText.Text = _runtime.VoiceStatus;
+        SetStatus(_runtime.VoiceStatus);
         OutputText.Text = wasCapturing
             ? "麦克风已停止采集；当前桌面任务继续运行。"
             : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
@@ -140,14 +144,18 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void Expand_Click(object sender, RoutedEventArgs e)
     {
-        _expanded = !_expanded;
-        ExpandedPanel.Visibility = _expanded ? Visibility.Visible : Visibility.Collapsed;
-        Height = _expanded ? 590 : 176;
-        ExpandButton.Content = _expanded ? "—" : "＋";
-        ExpandButton.ToolTip = _expanded ? "收起" : "展开";
+        SetExpandedView(!_expanded);
     }
 
     private void Hide_Click(object sender, RoutedEventArgs e) => Hide();
+
+    private void ShowPanel_Click(object sender, RoutedEventArgs e) => RestoreFromTray();
+
+    private void Exit_Click(object sender, RoutedEventArgs e)
+    {
+        _exiting = true;
+        Close();
+    }
 
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
 
@@ -156,7 +164,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private async Task ShowTaskHistoryAsync()
     {
         if (_exiting) return;
-        if (!IsVisible) RestoreFromTray();
+        if (!IsVisible || !_expanded) RestoreFromTray();
         try
         {
             var history = await _runtime.GetRecentTaskHistoryAsync(CancellationToken.None);
@@ -172,7 +180,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void ShowSettings()
     {
-        if (!IsVisible) RestoreFromTray();
+        if (!IsVisible || !_expanded) RestoreFromTray();
         var dialog = new SettingsWindow(XiaoKSettings.Load(), _notificationMonitor,
             _runtime.GetContactReplyStylesAsync, _runtime.ReplaceContactReplyStylesAsync, _runtime.ActiveDatabasePath,
             _runtime.CreateDatabaseBackupAsync, _runtime.RestoreDatabaseBackupAsync,
@@ -193,8 +201,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private void OnNotificationStatusChanged(string message)
     {
         if (_exiting) return;
-        StatusText.Text = message.StartsWith("微信通知：", StringComparison.Ordinal) ? "收到微信通知" :
-            message.StartsWith("QQ 通知：", StringComparison.Ordinal) ? "收到 QQ 通知" : StatusText.Text;
+        if (message.StartsWith("微信通知：", StringComparison.Ordinal)) SetStatus("收到微信通知");
+        else if (message.StartsWith("QQ 通知：", StringComparison.Ordinal)) SetStatus("收到 QQ 通知");
         OutputText.Text = message;
     }
 
@@ -203,7 +211,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _source = (HwndSource)PresentationSource.FromVisual(this)!;
         _source.AddHook(HotkeyHook);
         _hotkeyRegistered = RegisterHotKey(_source.Handle, 1901, ModControl | ModShift, (uint)System.Windows.Forms.Keys.K);
-        if (!_hotkeyRegistered) StatusText.Text = "待命 · Ctrl+Shift+K 不可用，可从托盘打开";
+        if (!_hotkeyRegistered) SetStatus("快捷键不可用 · 托盘可打开");
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -224,21 +232,117 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private void RestoreFromTray()
     {
         if (_exiting) return;
+        SetExpandedView(expanded: true);
         Show();
         WindowState = WindowState.Normal;
         Activate();
-        if (_expanded) RequestBox.Focus();
+        RequestBox.Focus();
+    }
+
+    private void ShowPet()
+    {
+        if (_exiting) return;
+        SetExpandedView(expanded: false);
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
     }
 
     private Forms.ContextMenuStrip BuildTrayMenu()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("显示小K", null, (_, _) => RestoreFromTray());
+        menu.Items.Add("显示桌宠", null, (_, _) => ShowPet());
+        menu.Items.Add("打开任务面板", null, (_, _) => RestoreFromTray());
         menu.Items.Add("最近任务", null, async (_, _) => await ShowTaskHistoryAsync());
         menu.Items.Add("设置", null, (_, _) => ShowSettings());
-        menu.Items.Add("取消当前任务", null, (_, _) => _runtime.CancelCurrent());
-        menu.Items.Add("退出", null, (_, _) => { _exiting = true; Close(); });
+        menu.Items.Add("取消当前任务", null, (_, _) => CancelFromTray());
+        menu.Items.Add("停麦", null, (_, _) => StopMicrophoneFromTray());
+        menu.Items.Add("退出", null, (_, _) => Exit_Click(this, new RoutedEventArgs()));
         return menu;
+    }
+
+    private void StopMicrophoneFromTray()
+    {
+        var wasCapturing = _runtime.StopMicrophone();
+        SetStatus(_runtime.VoiceStatus);
+        OutputText.Text = wasCapturing
+            ? "麦克风已停止采集；当前桌面任务继续运行。"
+            : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
+    }
+
+    private void CancelFromTray()
+    {
+        _runtime.CancelCurrent();
+        SetStatus("已请求取消");
+    }
+
+    private void SetExpandedView(bool expanded)
+    {
+        if (_expanded == expanded) return;
+        _changingWindowMode = true;
+        try
+        {
+            if (!expanded && _expanded)
+            {
+                _expandedWidth = Math.Max(330, Width);
+                _expandedHeight = Math.Max(360, Height);
+            }
+
+            _expanded = expanded;
+            ExpandedView.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+            PetView.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
+            ResizeMode = expanded ? ResizeMode.CanResizeWithGrip : ResizeMode.NoResize;
+            MinWidth = expanded ? 330 : 150;
+            MinHeight = expanded ? 360 : 150;
+            Width = expanded ? _expandedWidth : 164;
+            Height = expanded ? _expandedHeight : 164;
+            if (expanded)
+            {
+                ExpandButton.Content = "收起";
+                ExpandButton.ToolTip = "收起到桌宠";
+            }
+        }
+        finally
+        {
+            _changingWindowMode = false;
+        }
+    }
+
+    private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_expanded && !_changingWindowMode)
+        {
+            _expandedWidth = Width;
+            _expandedHeight = Height;
+        }
+    }
+
+    private void PetView_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed
+            && e.OriginalSource is FrameworkElement element
+            && element.Name is not ("PetStatusText" or "PetStatusDot"))
+        {
+            try { DragMove(); }
+            catch (InvalidOperationException) { }
+        }
+    }
+
+    private void SetStatus(string status)
+    {
+        StatusText.Text = status;
+        PetStatusText.Text = status;
+        PetView.ToolTip = $"{status} · 单击展开任务面板，右键打开菜单";
+        var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)
+            ? System.Windows.Media.Color.FromRgb(205, 69, 69)
+            : status.Contains("确认", StringComparison.Ordinal) || status.Contains("取消", StringComparison.Ordinal)
+                ? System.Windows.Media.Color.FromRgb(216, 144, 38)
+                : status.Contains("运行", StringComparison.Ordinal) || status.Contains("正在", StringComparison.Ordinal)
+                    ? System.Windows.Media.Color.FromRgb(63, 118, 232)
+                    : status.Contains("未安装", StringComparison.Ordinal) || status.Contains("未采集", StringComparison.Ordinal)
+                        ? System.Windows.Media.Color.FromRgb(123, 132, 152)
+                        : System.Windows.Media.Color.FromRgb(87, 163, 112);
+        PetStatusDot.Fill = new SolidColorBrush(color);
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)
@@ -249,7 +353,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             e.Cancel = true;
             if (_shutdownInProgress) return;
             _shutdownInProgress = true;
-            StatusText.Text = "正在停止任务并保存状态…";
+            SetStatus("正在停止任务…");
             SetButtonsEnabled(false);
             CancelButton.IsEnabled = false;
             _tray.Visible = false;
@@ -260,7 +364,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
                 _hotkeyRegistered = false;
             }
             try { await _runtime.DisposeAsync(); }
-            catch (Exception) { StatusText.Text = "退出清理未能完整确认；任务不会自动重放。"; }
+            catch (Exception) { SetStatus("退出清理未能完整确认"); }
             _shutdownComplete = true;
             Close();
             return;
