@@ -213,6 +213,57 @@
       "license": "mit",
       "status": "optional-candidate",
       "notes": "约18.8 GB权重，独立评估是否下载；不作为常驻模型或P1/P2前置。"
+    },
+    {
+      "id": "jev-9b-boe",
+      "role": "optional-decision-and-code-evaluation",
+      "source": "https://huggingface.co/autotrust/JEV-9B",
+      "baseModel": "Qwen/Qwen3.5-9B",
+      "revision": null,
+      "format": "Transformers Safetensors",
+      "quantization": null,
+      "files": [],
+      "license": "apache-2.0",
+      "status": "optional-candidate",
+      "notes": "第三方独立开源学生模型；9B、约18 GB，合并常规生成与类型化决策头，官方推荐vLLM。基准由作者报告；须审查数据来源、固定revision并用小K任务集复测。8 GB显存不适合作常驻主模型。"
+    },
+    {
+      "id": "jev-27b-boe",
+      "role": "optional-decision-research",
+      "source": "https://huggingface.co/autotrust/JEV-27B",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": null,
+      "format": "Transformers Safetensors BF16",
+      "quantization": null,
+      "files": [],
+      "license": "apache-2.0",
+      "status": "optional-candidate",
+      "notes": "2026-09-27前后发布的独立开源第二代System 1/System 2决策模型；27B、约54.7 GB，Apache-2.0，推荐vLLM。基准为作者报告；规模不适合本机部署。"
+    },
+    {
+      "id": "openjev-27b",
+      "role": "optional-decision-research",
+      "source": "https://huggingface.co/openjev/openjev",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": null,
+      "format": "Transformers Safetensors BF16",
+      "quantization": null,
+      "files": [],
+      "license": "cc-by-nc-4.0",
+      "status": "optional-candidate",
+      "notes": "27B BF16约54 GB；上游主要实测服务方案使用单张80 GB GPU。仅供非商业决策研究，当前笔记本硬件与许可均不适合作为部署候选。"
+    },
+    {
+      "id": "qwen-image-2.1",
+      "role": "optional-image-generation",
+      "source": "https://huggingface.co/Qwen/Qwen-Image-2.1",
+      "revision": null,
+      "format": "Diffusers Safetensors",
+      "quantization": null,
+      "files": [],
+      "license": "qwen-research",
+      "status": "optional-candidate",
+      "notes": "7B视觉生成组件，用于图像生成/编辑，不是对话或动作决策模型；Qwen Research License，是否适用须先审查协议。只作为离线素材研究项，不属于小K首版依赖。"
     }
   ]
 }
