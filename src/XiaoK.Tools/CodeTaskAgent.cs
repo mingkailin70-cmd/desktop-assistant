@@ -380,6 +380,7 @@ internal sealed class CodeWorkspaceSnapshot
         using var handle = OpenNoFollow(path, isDirectory: false);
         if (!TryGetCanonicalPath(handle, out var canonical) || !IsSameOrChild(canonical, _baselineBoundary))
             throw new InvalidDataException("基线文件不是隔离目录内的普通文件。");
+        EnsureSingleLinkFile(handle);
         using var stream = new FileStream(handle, FileAccess.Read);
         if (stream.Length > maximumBytes) return null;
         var content = new byte[checked((int)stream.Length)];
@@ -418,21 +419,20 @@ internal sealed class CodeWorkspaceSnapshot
                 }
 
                 if (ShouldExcludeFile(name)) continue;
-                var info = new FileInfo(entry);
-                var originalLength = info.Length;
-                if (originalLength < 0 || originalLength > MaximumCopiedFileBytes) continue;
-                if (copied >= MaximumCopiedFiles || totalBytes + originalLength > MaximumCopiedTotalBytes)
-                    throw new InvalidDataException("所选项目文件数量或总大小超过隔离快照上限；没有向原项目写入文件。");
-
                 var destination = Path.Combine(destinationRoot, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                long originalLength;
                 using (var inputHandle = OpenNoFollow(entry, isDirectory: false))
                 {
                     if (!TryGetCanonicalPath(inputHandle, out var fileCanonical)
                         || !IsSameOrChild(fileCanonical, sourceBoundary)) continue;
+                    EnsureSingleLinkFile(inputHandle);
 
                     using var input = new FileStream(inputHandle, FileAccess.Read);
-                    if (input.Length != originalLength) throw new IOException("复制期间项目文件发生变化；隔离快照已中止。");
+                    originalLength = input.Length;
+                    if (originalLength < 0 || originalLength > MaximumCopiedFileBytes) continue;
+                    if (copied >= MaximumCopiedFiles || totalBytes + originalLength > MaximumCopiedTotalBytes)
+                        throw new InvalidDataException("所选项目文件数量或总大小超过隔离快照上限；没有向原项目写入文件。");
                     using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                     input.CopyTo(output);
                     output.Flush(flushToDisk: false);
@@ -584,6 +584,14 @@ internal sealed class CodeWorkspaceSnapshot
         return true;
     }
 
+    private static void EnsureSingleLinkFile(SafeFileHandle handle)
+    {
+        if (!GetFileInformationByHandle(handle, out var information))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        if (information.NumberOfLinks != 1)
+            throw new InvalidDataException("项目或隔离基线含有硬链接文件；为避免读取目录边界外的同一文件，已停止编程任务。");
+    }
+
     private static SafeFileHandle OpenNoFollow(string path, bool isDirectory)
     {
         var flags = OpenReparsePoint | (isDirectory ? BackupSemantics : 0u);
@@ -630,6 +638,28 @@ internal sealed class CodeWorkspaceSnapshot
         public uint ReparseTag;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public NativeFileTime CreationTime;
+        public NativeFileTime LastAccessTime;
+        public NativeFileTime LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeFileTime
+    {
+        public uint LowDateTime;
+        public uint HighDateTime;
+    }
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
     private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode,
         IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
@@ -638,6 +668,10 @@ internal sealed class CodeWorkspaceSnapshot
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
         out FileAttributeTagInfo fileInformation, uint bufferSize);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation fileInformation);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetFinalPathNameByHandleW")]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint pathLength, uint flags);

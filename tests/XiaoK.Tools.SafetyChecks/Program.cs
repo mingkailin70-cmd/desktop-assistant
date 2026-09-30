@@ -33,6 +33,10 @@ try
     await CheckWorkspaceRetentionLimitAsync(tempRoot);
     passed.Add("达到五个任务目录上限后拒绝继续创建副本");
 
+    var hardLinkSkip = await CheckHardLinkedSourceIsRejectedAsync(tempRoot);
+    if (hardLinkSkip is null) passed.Add("项目内硬链接不会把目录外文件内容送入模型");
+    else skipped.Add("硬链接夹具无法创建，用例跳过：" + hardLinkSkip);
+
     CheckNoticeSourceIsFilteredBeforeBodyRead();
     passed.Add("非允许发布者在读取通知正文前被拒绝");
 
@@ -226,6 +230,29 @@ static void CheckNoticeWithoutVisibleBodyDoesNotAnalyze()
 
 static MessageNoticePolicy CreateNoticePolicy() => new(["wechat.package!Main"], ["qq.package!Main"]);
 
+static async Task<string?> CheckHardLinkedSourceIsRejectedAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "hard-links");
+    var project = Path.Combine(fixtureRoot, "project");
+    Directory.CreateDirectory(project);
+    var externalFile = Path.Combine(fixtureRoot, "outside-project.txt");
+    var projectAlias = Path.Combine(project, "Sample.cs");
+    const string externalContent = "HARDLINK_SENTINEL_7d63a2fa outside-project content";
+    await File.WriteAllTextAsync(externalFile, externalContent, new UTF8Encoding(false));
+
+    if (!HardLinkFixture.TryCreate(projectAlias, externalFile, out var reason)) return reason;
+
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}");
+    var result = await NewAgent(inference).ExecuteAsync(project, Path.Combine(fixtureRoot, "workspaces"), "读取项目文件", CancellationToken.None);
+    Require(!result.Success && inference.CallCount == 0,
+        "包含硬链接的源项目在拒绝之前仍调用了模型。");
+    Require(inference.Prompts.All(prompt => !prompt.Contains("HARDLINK_SENTINEL_7d63a2fa", StringComparison.Ordinal)),
+        "项目外硬链接内容进入了模型提示。");
+    Require(await File.ReadAllTextAsync(externalFile) == externalContent,
+        "硬链接安全检查改变了项目外原始文件。");
+    return null;
+}
+
 static bool CheckDirectoryJunction(string root, out string skipReason)
 {
     var project = CreateProject(root, "links", "class Sample { int Value = 1; }\n");
@@ -376,4 +403,22 @@ internal static class JunctionFixture
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode, IntPtr inputBuffer,
         uint inputBufferSize, IntPtr outputBuffer, uint outputBufferSize, out uint bytesReturned, IntPtr overlapped);
+}
+
+internal static class HardLinkFixture
+{
+    public static bool TryCreate(string linkPath, string existingPath, out string reason)
+    {
+        if (CreateHardLinkW(linkPath, existingPath, IntPtr.Zero))
+        {
+            reason = "";
+            return true;
+        }
+        reason = $"CreateHardLinkW failed: {Marshal.GetLastWin32Error()}";
+        return false;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateHardLinkW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkW(string newFileName, string existingFileName, IntPtr securityAttributes);
 }
