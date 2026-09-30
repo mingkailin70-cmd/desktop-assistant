@@ -173,7 +173,8 @@ public sealed class ToolBroker
         var attachments = proposal.Arguments.GetValueOrDefault("attachments", "无");
         if (string.IsNullOrWhiteSpace(recipient) || string.IsNullOrWhiteSpace(text))
             return new(false, "发送预览缺少最终收件人或正文。", "INVALID_SEND_PREVIEW");
-        var confirmed = await _approval.ConfirmAsync("确认发送", $"收件人：{recipient}{Environment.NewLine}{Environment.NewLine}正文：{text}{Environment.NewLine}{Environment.NewLine}附件：{attachments}", token);
+        var confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.MessageSendAction, "确认发送",
+            $"收件人：{recipient}{Environment.NewLine}{Environment.NewLine}正文：{text}{Environment.NewLine}{Environment.NewLine}附件：{attachments}", token);
         if (!confirmed) return new(false, "用户取消发送。", "USER_DECLINED");
         // No WeChat/QQ sender is implemented; approval alone must never imply an external side effect.
         return new(false, "预览已确认，但微信/QQ发送适配器尚未接入；未发送任何内容。", "SEND_ADAPTER_UNAVAILABLE");

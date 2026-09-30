@@ -12,7 +12,7 @@ namespace XiaoK.Storage;
 /// </summary>
 public sealed class SqliteTaskStore : ITaskStore
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private static readonly JsonSerializerOptions LegacyJsonOptions = new(JsonSerializerDefaults.Web);
@@ -84,6 +84,30 @@ public sealed class SqliteTaskStore : ITaskStore
         finally { _gate.Release(); }
     }
 
+    public async Task AppendApprovalAuditAsync(string actionId, string outcome, CancellationToken cancellationToken)
+    {
+        var record = CreateApprovalAuditRecord(actionId, outcome);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Run(() => AppendApprovalAuditCore(record), cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<ApprovalAuditRecord>> GetRecentApprovalAuditAsync(int count,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await Task.Run(() => ReadRecentApprovalAuditCore(Math.Clamp(count, 0, 100)), cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
     /// <summary>Creates a consistent SQLite backup without copying a live WAL file directly.</summary>
     public async Task<string> CreateBackupAsync(string backupPath, CancellationToken cancellationToken)
     {
@@ -130,6 +154,7 @@ public sealed class SqliteTaskStore : ITaskStore
                     + "CREATE INDEX IF NOT EXISTS ix_tasks_updated ON tasks(updated_utc_ticks DESC);"
                     + "CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY NOT NULL, completed_utc_ticks INTEGER NOT NULL);"
                     + CreateContactReplyStylesTableSql()
+                    + CreateApprovalAuditTableSql()
                     + $"PRAGMA user_version={CurrentSchemaVersion};");
                 database.Execute("COMMIT;");
             }
@@ -145,6 +170,22 @@ public sealed class SqliteTaskStore : ITaskStore
             try
             {
                 database.Execute(CreateContactReplyStylesTableSql() + "PRAGMA user_version=2;");
+                database.Execute("COMMIT;");
+                version = 2;
+            }
+            catch
+            {
+                TryRollback(database);
+                throw;
+            }
+        }
+
+        if (version == 2)
+        {
+            database.Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                database.Execute(CreateApprovalAuditTableSql() + "PRAGMA user_version=3;");
                 database.Execute("COMMIT;");
             }
             catch
@@ -162,6 +203,12 @@ public sealed class SqliteTaskStore : ITaskStore
         + "contact_name_key TEXT PRIMARY KEY NOT NULL, contact_name TEXT NOT NULL, "
         + "style_id TEXT NOT NULL CHECK(style_id IN ('concise','formal','warm','casual','empathetic')), "
         + "source TEXT NOT NULL CHECK(source='user-confirmed'), updated_utc_ticks INTEGER NOT NULL);";
+
+    private static string CreateApprovalAuditTableSql() => "CREATE TABLE IF NOT EXISTS approval_audit ("
+        + "id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests')));"
+        + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
 
     private void MigrateLegacyJson(SqliteDatabase database)
     {
@@ -285,6 +332,57 @@ public sealed class SqliteTaskStore : ITaskStore
             throw;
         }
     }
+
+    private static ApprovalAuditRecord CreateApprovalAuditRecord(string actionId, string outcome)
+    {
+        var isKnownPair = actionId == ApprovalAuditCatalog.MessageSendAction
+                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+            || actionId == ApprovalAuditCatalog.CodeTaskAction
+                && outcome == ApprovalAuditCatalog.RunDotNetTests;
+        if (!isKnownPair) throw new ArgumentException("审批审计只接受已登记动作及其固定结果。", nameof(actionId));
+        return new ApprovalAuditRecord(Guid.NewGuid(), actionId, outcome, DateTimeOffset.UtcNow);
+    }
+
+    private void AppendApprovalAuditCore(ApprovalAuditRecord record)
+    {
+        using var database = SqliteDatabase.Open(_path, create: false);
+        using var statement = database.Prepare("INSERT INTO approval_audit(id,action_id,outcome,created_utc_ticks) "
+            + "VALUES(?1,?2,?3,?4);");
+        statement.BindText(1, record.Id.ToString("D"));
+        statement.BindText(2, record.ActionId);
+        statement.BindText(3, record.Outcome);
+        statement.BindInt64(4, record.CreatedAtUtc.UtcTicks);
+        statement.ExpectDone();
+    }
+
+    private IReadOnlyList<ApprovalAuditRecord> ReadRecentApprovalAuditCore(int count)
+    {
+        if (count == 0) return [];
+        using var database = SqliteDatabase.Open(_path, create: false);
+        using var statement = database.Prepare("SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit "
+            + "ORDER BY created_utc_ticks DESC LIMIT ?1;");
+        statement.BindInt32(1, count);
+        var result = new List<ApprovalAuditRecord>(count);
+        while (statement.StepRow())
+        {
+            var idText = statement.ColumnText(0);
+            var actionId = statement.ColumnText(1);
+            var outcome = statement.ColumnText(2);
+            var ticks = statement.ColumnInt64(3);
+            if (!Guid.TryParse(idText, out var id) || id == Guid.Empty
+                || !IsValidApprovalAuditPair(actionId, outcome)
+                || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
+                throw new InvalidDataException("SQLite 审批审计表包含无效字段；已停止读取审计记录。");
+            result.Add(new ApprovalAuditRecord(id, actionId, outcome, new DateTimeOffset(ticks, TimeSpan.Zero)));
+        }
+        return result;
+    }
+
+    private static bool IsValidApprovalAuditPair(string actionId, string outcome) =>
+        actionId == ApprovalAuditCatalog.MessageSendAction
+            ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+            : actionId == ApprovalAuditCatalog.CodeTaskAction
+                && outcome == ApprovalAuditCatalog.RunDotNetTests;
 
     private static void InsertContactReplyStyle(SqliteDatabase database, ContactReplyStylePreference preference, bool ignoreExisting)
     {

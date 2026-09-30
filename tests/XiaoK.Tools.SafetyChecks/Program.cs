@@ -48,7 +48,7 @@ try
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
     await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
-    passed.Add("联系人偏好迁入 SQLite 并固定来源和风格，支持原子更新、备份及 v1 架构备份迁移");
+    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持原子更新、一致性备份及 v1/v2 到 v3 架构备份迁移");
 
     await CheckCodeVerificationCancellationPersistsAsync(tempRoot);
     passed.Add("取消已批准的隔离验证会持久化 cancelled 且不修改原项目");
@@ -390,11 +390,30 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         && afterRejectedWrites[0].ContactName == "Bob" && afterRejectedWrites[0].StyleId == "formal",
         "重复联系人或模型自定义风格未拒绝，或拒绝后破坏了原有偏好。");
 
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodeTaskAction,
+        ApprovalAuditCatalog.RunDotNetTests, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    const string untrustedAuditSentinel = "PRIVATE_APPROVAL_DETAILS_MUST_NOT_BE_STORED";
+    var untrustedActionRejected = false;
+    try { await store.AppendApprovalAuditAsync(untrustedAuditSentinel, "confirmed", CancellationToken.None); }
+    catch (ArgumentException) { untrustedActionRejected = true; }
+    var audit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    Require(untrustedActionRejected && audit.Count == 2
+        && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodeTaskAction
+            && row.Outcome == ApprovalAuditCatalog.RunDotNetTests)
+        && audit.Any(row => row.ActionId == ApprovalAuditCatalog.MessageSendAction
+            && row.Outcome == ApprovalAuditCatalog.Declined)
+        && DatabaseFilesOmitSentinel(databasePath, untrustedAuditSentinel),
+        "审批审计接受了自由文本，或没有按固定动作/结果保存审核痕迹。");
+
     await store.CreateBackupAsync(backupPath, CancellationToken.None);
     var backup = new SqliteTaskStore(backupPath);
     var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
-    Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal",
-        "SQLite 一致性备份没有包含联系人回复风格。");
+    var backedUpAudit = await backup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal"
+        && backedUpAudit.Count == 2,
+        "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
     SqliteSchemaFixture.RevertToVersionOne(databasePath);
     var migratedFromV1 = new SqliteTaskStore(databasePath, legacyContactReplyStyles: [legacy]);
@@ -409,6 +428,20 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var afterReopen = await reopened.GetContactReplyStylesAsync(CancellationToken.None);
     Require(afterReopen.Count == 1 && afterReopen[0].ContactName == "Alice",
         "用户删除或替换 SQLite 偏好后，重开程序又从旧设置重复导入。");
+
+    var v2Directory = Path.Combine(directory, "v2-upgrade");
+    Directory.CreateDirectory(v2Directory);
+    var v2DatabasePath = Path.Combine(v2Directory, "tasks.sqlite3");
+    var v2Store = new SqliteTaskStore(v2DatabasePath, legacyContactReplyStyles: [legacy]);
+    await v2Store.ReplaceContactReplyStylesAsync([current], CancellationToken.None);
+    SqliteSchemaFixture.RevertToVersionTwo(v2DatabasePath);
+    var upgradedFromV2 = new SqliteTaskStore(v2DatabasePath, legacyContactReplyStyles: [legacy]);
+    var v2UpgradePreferences = await upgradedFromV2.GetContactReplyStylesAsync(CancellationToken.None);
+    var v2UpgradeAudit = await upgradedFromV2.GetRecentApprovalAuditAsync(10, CancellationToken.None);
+    Require(v2UpgradePreferences.Count == 1 && v2UpgradePreferences[0].ContactName == "Bob"
+        && v2UpgradeAudit.Count == 0
+        && Directory.EnumerateFiles(v2Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
+        "v2 到 v3 升级未保留偏好、建立审批表或在变更前备份。");
 }
 
 static bool DatabaseFilesOmitSentinel(string databasePath, string sentinel)
@@ -1293,7 +1326,18 @@ internal static class HardLinkFixture
 
 internal static class SqliteSchemaFixture
 {
+    public static void RevertToVersionTwo(string databasePath)
+    {
+        Execute(databasePath, "BEGIN IMMEDIATE; DROP TABLE approval_audit; PRAGMA user_version=2; COMMIT;");
+    }
+
     public static void RevertToVersionOne(string databasePath)
+    {
+        Execute(databasePath, "BEGIN IMMEDIATE; DROP TABLE approval_audit; DROP TABLE contact_reply_styles; "
+            + "DELETE FROM migration_state WHERE name='contact-styles-settings-v1'; PRAGMA user_version=1; COMMIT;");
+    }
+
+    private static void Execute(string databasePath, string sql)
     {
         const int openReadWrite = 0x00000002;
         const int openFullMutex = 0x00010000;
@@ -1301,9 +1345,6 @@ internal static class SqliteSchemaFixture
         if (result != 0) throw new IOException($"无法打开合成 SQLite 测试数据库（错误码 {result}）。");
         try
         {
-            const string sql = "BEGIN IMMEDIATE; DROP TABLE contact_reply_styles; "
-                + "DELETE FROM migration_state WHERE name='contact-styles-settings-v1'; "
-                + "PRAGMA user_version=1; COMMIT;";
             result = sqlite3_exec(database, sql, IntPtr.Zero, IntPtr.Zero, out var error);
             if (result != 0)
             {

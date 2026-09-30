@@ -312,6 +312,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public Task ReplaceContactReplyStylesAsync(IEnumerable<ContactReplyStylePreference> preferences,
         CancellationToken cancellationToken) => _store.ReplaceContactReplyStylesAsync(preferences, cancellationToken);
 
+    public Task RecordApprovalAuditAsync(string actionId, string outcome, CancellationToken cancellationToken) =>
+        _store.AppendApprovalAuditAsync(actionId, outcome, cancellationToken);
+
     private static bool TryExtractDraftContact(string request, out string? contactName)
     {
         contactName = null;

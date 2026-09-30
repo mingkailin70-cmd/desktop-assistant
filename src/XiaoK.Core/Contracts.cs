@@ -6,6 +6,16 @@ public enum TaskLifecycleState { Queued, Planning, AwaitingApproval, Running, Ve
 
 public sealed record TaskRecord(Guid Id, string Kind, string Summary, TaskLifecycleState Status, DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null);
+public sealed record ApprovalAuditRecord(Guid Id, string ActionId, string Outcome, DateTimeOffset CreatedAtUtc);
+
+public static class ApprovalAuditCatalog
+{
+    public const string MessageSendAction = "message.send.v1";
+    public const string CodeTaskAction = "code.task.create.v1";
+    public const string Confirmed = "confirmed";
+    public const string Declined = "declined";
+    public const string RunDotNetTests = "run_dotnet_tests";
+}
 
 public sealed record ToolProposal(string ToolId, ImmutableDictionary<string, string> Arguments, string Target, string ExpectedOutcome);
 public sealed record ToolResult(bool Success, string Summary, string? ErrorCode = null, string? Data = null, TaskLifecycleState? FinalState = null);
@@ -29,7 +39,7 @@ public interface ITool
 }
 public interface IApprovalPresenter
 {
-    Task<bool> ConfirmAsync(string title, string details, CancellationToken cancellationToken);
+    Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken);
 }
 
 public enum CodeTaskReviewDecision { KeepPatch, RunDotNetTests }

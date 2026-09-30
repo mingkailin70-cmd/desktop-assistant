@@ -43,21 +43,27 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         MouseLeftButtonDown += (_, e) => { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove(); };
     }
 
-    public Task<bool> ConfirmAsync(string title, string details, CancellationToken cancellationToken)
+    public async Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var answer = System.Windows.MessageBox.Show(this, details, title, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No);
-        return Task.FromResult(answer == System.Windows.MessageBoxResult.Yes);
+        var confirmed = answer == System.Windows.MessageBoxResult.Yes;
+        await _runtime.RecordApprovalAuditAsync(actionId,
+            confirmed ? ApprovalAuditCatalog.Confirmed : ApprovalAuditCatalog.Declined, cancellationToken);
+        return confirmed;
     }
 
-    public Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
+    public async Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
         string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
     {
-        if (!Dispatcher.CheckAccess())
-            return Dispatcher.InvokeAsync(() => ShowCodeTaskReview(projectPath, workspacePath, diff,
-                dotNetTestTarget, commandPreview, cancellationToken)).Task;
-        return Task.FromResult(ShowCodeTaskReview(projectPath, workspacePath, diff,
-            dotNetTestTarget, commandPreview, cancellationToken));
+        var decision = !Dispatcher.CheckAccess()
+            ? await Dispatcher.InvokeAsync(() => ShowCodeTaskReview(projectPath, workspacePath, diff,
+                dotNetTestTarget, commandPreview, cancellationToken)).Task
+            : ShowCodeTaskReview(projectPath, workspacePath, diff, dotNetTestTarget, commandPreview, cancellationToken);
+        if (decision == CodeTaskReviewDecision.RunDotNetTests)
+            await _runtime.RecordApprovalAuditAsync(ApprovalAuditCatalog.CodeTaskAction,
+                ApprovalAuditCatalog.RunDotNetTests, cancellationToken);
+        return decision;
     }
 
     private CodeTaskReviewDecision ShowCodeTaskReview(string projectPath, string workspacePath, string diff,
