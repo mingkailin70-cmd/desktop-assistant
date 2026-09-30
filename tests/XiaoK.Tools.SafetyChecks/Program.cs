@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -15,6 +16,9 @@ var skipped = new List<string>();
 
 try
 {
+    await CheckAppLaunchCancellationIsTruthfulAsync();
+    passed.Add("应用启动前取消不产生副作用，启动后取消显示结果待核对");
+
     CheckInterruptedTaskHistoryIsNotReplayed();
     passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
 
@@ -136,6 +140,33 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
     Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
         && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt),
         "隔离编程任务状态没有区分异常中断与等待审阅。");
+}
+
+static async Task CheckAppLaunchCancellationIsTruthfulAsync()
+{
+    var appId = "test-app";
+    var app = new DesktopApp(appId, Path.Combine(Environment.SystemDirectory, "notepad.exe"));
+    var proposal = ToolBroker.Proposal("app.launch.v1",
+        [new KeyValuePair<string, string>("app_id", appId)], appId, "目标窗口可见");
+
+    using var beforeCancellation = new CancellationTokenSource();
+    beforeCancellation.Cancel();
+    var beforeController = new FakeDesktopAppProcessController(windowVisible: true);
+    var beforeDesktop = new WindowsDesktopTools([app], [], beforeController);
+    var cancelledBeforeLaunch = false;
+    try { _ = await beforeDesktop.LaunchAsync(proposal, beforeCancellation.Token); }
+    catch (OperationCanceledException) when (beforeCancellation.IsCancellationRequested) { cancelledBeforeLaunch = true; }
+    Require(cancelledBeforeLaunch && beforeController.StartCount == 0,
+        "应用启动前取消仍发出了进程启动请求。");
+
+    using var afterCancellation = new CancellationTokenSource();
+    var afterController = new FakeDesktopAppProcessController(() => afterCancellation.Cancel(), windowVisible: true);
+    var afterDesktop = new WindowsDesktopTools([app], [], afterController);
+    var result = await afterDesktop.LaunchAsync(proposal, afterCancellation.Token);
+    Require(!result.Success && result.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        && result.FinalState == TaskLifecycleState.OutcomeUncertain
+        && afterController.StartCount == 1 && afterController.WindowCheckCount == 0,
+        "应用启动请求发出后取消被误报为完全取消，或仍继续了窗口轮询。");
 }
 
 static async Task CheckModelCannotSelectOutsidePathAsync(string root)
@@ -689,6 +720,31 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
             if (current is not null) Interlocked.Decrement(ref current._activeLeases);
             return ValueTask.CompletedTask;
         }
+    }
+}
+
+internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true)
+    : IDesktopAppProcessController
+{
+    public int StartCount { get; private set; }
+    public int WindowCheckCount { get; private set; }
+
+    public IDisposable? Start(ProcessStartInfo startInfo)
+    {
+        StartCount++;
+        onStart?.Invoke();
+        return new EmptyDisposable();
+    }
+
+    public bool HasVisibleWindow(DesktopApp app)
+    {
+        WindowCheckCount++;
+        return windowVisible;
+    }
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        public void Dispose() { }
     }
 }
 

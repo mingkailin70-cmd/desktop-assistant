@@ -10,13 +10,22 @@ namespace XiaoK.Adapters.Windows;
 
 public sealed record DesktopApp(string Id, string Executable, string? WorkingDirectory = null);
 
+public interface IDesktopAppProcessController
+{
+    IDisposable? Start(ProcessStartInfo startInfo);
+    bool HasVisibleWindow(DesktopApp app);
+}
+
 public sealed class WindowsDesktopTools
 {
     private readonly IReadOnlyDictionary<string, DesktopApp> _apps;
     private readonly IReadOnlyDictionary<string, string> _searchRoots;
+    private readonly IDesktopAppProcessController _appProcessController;
 
-    public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots)
+    public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
+        IDesktopAppProcessController? appProcessController = null)
     {
+        _appProcessController = appProcessController ?? new SystemDesktopAppProcessController();
         var allowedApps = new Dictionary<string, DesktopApp>(StringComparer.OrdinalIgnoreCase);
         foreach (var configuredApp in apps ?? [])
         {
@@ -55,8 +64,10 @@ public sealed class WindowsDesktopTools
     {
         if (!proposal.Arguments.TryGetValue("app_id", out var appId) || !_apps.TryGetValue(appId, out var app))
             return new(false, "这个应用未在本机允许列表中。", "APP_NOT_ALLOWLISTED");
+        IDisposable? launchHandle = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var start = new ProcessStartInfo(app.Executable) { UseShellExecute = true };
             if (!string.IsNullOrWhiteSpace(app.WorkingDirectory)) start.WorkingDirectory = app.WorkingDirectory;
             if (app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(app.WorkingDirectory))
@@ -70,23 +81,32 @@ public sealed class WindowsDesktopTools
                 start.ArgumentList.Add(app.WorkingDirectory);
             }
 
-            using var launched = Process.Start(start);
-            if (launched is null) return new(false, "Windows 未返回启动进程。", "APP_LAUNCH_FAILED");
+            launchHandle = _appProcessController.Start(start);
+            if (launchHandle is null)
+                return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但没有返回可核验的进程句柄。");
 
             var until = DateTimeOffset.UtcNow.AddSeconds(8);
             while (DateTimeOffset.UtcNow < until)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (FindVisibleWindow(app))
+                if (_appProcessController.HasVisibleWindow(app))
                     return new(true, $"已启动并检测到 {app.Id} 的窗口。", Data: app.WorkingDirectory);
                 await Task.Delay(250, cancellationToken);
             }
-            return new(false, "已发出启动请求，但没有检测到目标窗口。", "WINDOW_NOT_VERIFIED");
+            return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但暂未检测到目标窗口；请手动核对应用状态。");
+        }
+        catch (OperationCanceledException) when (launchHandle is not null)
+        {
+            return LaunchOutcomeUncertain(app.Id, "启动请求已发出后收到取消；Windows 无法撤销该请求，请手动核对应用状态。");
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or FileNotFoundException)
         { return new(false, "应用启动失败；请检查本地路径设置。", "APP_LAUNCH_FAILED"); }
+        finally { launchHandle?.Dispose(); }
     }
+
+    private static ToolResult LaunchOutcomeUncertain(string appId, string message) =>
+        new(false, message, "APP_LAUNCH_OUTCOME_UNCERTAIN", appId, TaskLifecycleState.OutcomeUncertain);
 
     public Task<ToolResult> SearchFilesAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
         Task.Run(() => SearchFiles(proposal, cancellationToken), cancellationToken);
@@ -386,6 +406,12 @@ public sealed class WindowsDesktopTools
             finally { process.Dispose(); }
         }
         return false;
+    }
+
+    private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController
+    {
+        public IDisposable? Start(ProcessStartInfo startInfo) => Process.Start(startInfo);
+        public bool HasVisibleWindow(DesktopApp app) => FindVisibleWindow(app);
     }
 
     [DllImport("user32.dll")]
