@@ -33,6 +33,12 @@ try
     await CheckWorkspaceRetentionLimitAsync(tempRoot);
     passed.Add("达到五个任务目录上限后拒绝继续创建副本");
 
+    await CheckRetainedCodeTaskHistoryAsync(tempRoot);
+    passed.Add("重启后可安全读取隔离编程任务状态与工作区路径");
+
+    await CheckHistoryRejectsHardLinkedStateAsync(tempRoot);
+    passed.Add("任务历史拒绝读取指向工作区外的硬链接状态文件");
+
     await CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync();
     passed.Add("交互推理在编程代理的后台步骤边界优先执行");
 
@@ -232,6 +238,60 @@ static void CheckNoticeWithoutVisibleBodyDoesNotAnalyze()
 }
 
 static MessageNoticePolicy CreateNoticePolicy() => new(["wechat.package!Main"], ["qq.package!Main"]);
+
+static async Task CheckRetainedCodeTaskHistoryAsync(string root)
+{
+    var workspaceRoot = Path.Combine(root, "history-valid");
+    var taskId = "20260930-123456-" + Guid.NewGuid().ToString("N");
+    var taskRoot = Path.Combine(workspaceRoot, taskId);
+    var workspace = Path.Combine(taskRoot, "workspace");
+    Directory.CreateDirectory(workspace);
+    var statePath = Path.Combine(taskRoot, "task-state.json");
+    var state = new
+    {
+        taskId,
+        createdAtUtc = DateTimeOffset.Parse("2026-09-30T12:34:56Z"),
+        updatedAtUtc = DateTimeOffset.Parse("2026-09-30T12:35:56Z"),
+        state = "awaiting_approval",
+        projectPath = Path.Combine(root, "private-project"),
+        workspacePath = workspace,
+        ignoredBody = "CHAT_BODY_MUST_NOT_BE_EXPOSED_2c7e"
+    };
+    await File.WriteAllTextAsync(statePath, System.Text.Json.JsonSerializer.Serialize(state), new UTF8Encoding(false));
+
+    var history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
+    Require(history.Count == 1 && history[0].TaskId == taskId && history[0].State == "awaiting_approval",
+        "隔离任务历史没有恢复已保存的审批状态。");
+    Require(Path.GetFullPath(history[0].WorkspacePath) == Path.GetFullPath(workspace),
+        "隔离任务历史返回的工作区路径不匹配实际工作区。");
+    Require(!System.Text.Json.JsonSerializer.Serialize(history).Contains("CHAT_BODY_MUST_NOT_BE_EXPOSED_2c7e", StringComparison.Ordinal),
+        "隔离任务历史暴露了状态文件中的非白名单字段。");
+}
+
+static async Task CheckHistoryRejectsHardLinkedStateAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "history-hardlink");
+    var workspaceRoot = Path.Combine(fixtureRoot, "workspaces");
+    var taskId = "20260930-123456-" + Guid.NewGuid().ToString("N");
+    var taskRoot = Path.Combine(workspaceRoot, taskId);
+    Directory.CreateDirectory(Path.Combine(taskRoot, "workspace"));
+    var externalState = Path.Combine(fixtureRoot, "outside-task-state.json");
+    var linkedState = Path.Combine(taskRoot, "task-state.json");
+    var state = new
+    {
+        taskId,
+        createdAtUtc = DateTimeOffset.UtcNow,
+        updatedAtUtc = DateTimeOffset.UtcNow,
+        state = "awaiting_approval",
+        workspacePath = Path.Combine(taskRoot, "workspace")
+    };
+    await File.WriteAllTextAsync(externalState, System.Text.Json.JsonSerializer.Serialize(state), new UTF8Encoding(false));
+    Require(HardLinkFixture.TryCreate(linkedState, externalState, out var reason), "无法创建任务状态硬链接夹具：" + reason);
+
+    var history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
+    Require(history.Count == 0, "任务历史读取了工作区之外的硬链接状态文件。");
+    Require(File.Exists(externalState), "拒绝硬链接任务状态时删除了外部状态文件。");
+}
 
 static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync()
 {

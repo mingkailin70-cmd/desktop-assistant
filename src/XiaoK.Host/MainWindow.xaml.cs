@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -113,6 +114,25 @@ public partial class MainWindow : Window, IApprovalPresenter
 
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
 
+    private async void History_Click(object sender, RoutedEventArgs e) => await ShowTaskHistoryAsync();
+
+    private async Task ShowTaskHistoryAsync()
+    {
+        if (_exiting) return;
+        if (!IsVisible) RestoreFromTray();
+        try
+        {
+            var history = await _runtime.GetRecentTaskHistoryAsync(CancellationToken.None);
+            var dialog = new TaskHistoryWindow(history) { Owner = this };
+            dialog.ShowDialog();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
+            or InvalidOperationException or ArgumentException)
+        {
+            OutputText.Text = "无法读取本地任务记录；未修改或删除任何任务数据。请检查数据目录和隔离工作区。";
+        }
+    }
+
     private void ShowSettings()
     {
         if (!IsVisible) RestoreFromTray();
@@ -173,6 +193,7 @@ public partial class MainWindow : Window, IApprovalPresenter
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("显示小K", null, (_, _) => RestoreFromTray());
+        menu.Items.Add("最近任务", null, async (_, _) => await ShowTaskHistoryAsync());
         menu.Items.Add("设置", null, (_, _) => ShowSettings());
         menu.Items.Add("取消当前任务", null, (_, _) => _runtime.CancelCurrent());
         menu.Items.Add("退出", null, (_, _) => { _exiting = true; Close(); });

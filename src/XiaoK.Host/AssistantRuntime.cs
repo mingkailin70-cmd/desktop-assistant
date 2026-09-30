@@ -41,6 +41,23 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
     public XiaoKSettings CurrentSettings => _settings;
 
+    public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
+    {
+        var records = await _store.GetRecentAsync(30, cancellationToken);
+        var history = records.Select(record => new TaskHistoryEntry(
+            $"{record.Summary} · {record.Id.ToString("N")[..8]}",
+            TaskStateLabel(record.Status), record.UpdatedAtUtc,
+            record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}"))
+            .ToList();
+
+        var codeTasks = await Task.Run(() => CodeTaskAgent.ReadRetainedTasks(_settings.CodeWorkspaceRoot), cancellationToken);
+        history.AddRange(codeTasks.Select(task => new TaskHistoryEntry(
+            $"隔离编程任务 · {task.TaskId[^8..]}", CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
+            $"隔离工作区：{task.WorkspacePath}")));
+
+        return history.OrderByDescending(item => item.UpdatedAtUtc).Take(35).ToArray();
+    }
+
     public async Task<string> SubmitAsync(string input)
     {
         if (Volatile.Read(ref _stopping) != 0) return "小K正在退出，暂不接受新任务。";
@@ -213,6 +230,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         "send" => "发送请求", "code" => "本地编程任务", _ => "本地对话"
     };
 
+    private static string TaskStateLabel(TaskLifecycleState state) => state switch
+    {
+        TaskLifecycleState.Queued => "排队中", TaskLifecycleState.Planning => "规划中",
+        TaskLifecycleState.AwaitingApproval => "等待审阅", TaskLifecycleState.Running => "运行中",
+        TaskLifecycleState.Verifying => "核验中", TaskLifecycleState.Completed => "已完成",
+        TaskLifecycleState.Failed => "失败", TaskLifecycleState.Cancelled => "已取消",
+        TaskLifecycleState.OutcomeUncertain => "结果待核对", _ => "未知状态"
+    };
+
+    private static string CodeTaskStateLabel(string state) => state switch
+    {
+        "planning" => "规划中", "running" => "生成中", "awaiting_approval" => "等待审阅",
+        "failed" => "失败", "cancelled" => "已取消", _ => "未知状态"
+    };
+
     private static string ExtractPayload(string request, IEnumerable<string> prefixes)
     {
         var colon = request.IndexOfAny(['：', ':']);
@@ -308,3 +340,4 @@ internal sealed record XiaoKSettings
 
 internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory);
 internal sealed record RootSetting(string Id, string Path);
+internal sealed record TaskHistoryEntry(string Title, string State, DateTimeOffset UpdatedAtUtc, string Detail);

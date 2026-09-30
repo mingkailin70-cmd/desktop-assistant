@@ -32,6 +32,9 @@ public sealed class CodeTaskAgent
         _repositoryRoot = repositoryRoot;
     }
 
+    public static IReadOnlyList<CodeTaskWorkspaceHistory> ReadRetainedTasks(string workspaceRoot) =>
+        CodeWorkspaceSnapshot.ReadRetainedTasks(workspaceRoot);
+
     public async Task<ToolResult> ExecuteAsync(string projectRoot, string workspaceRoot, string instruction, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(instruction) || instruction.Length > 4_000)
@@ -188,6 +191,8 @@ public sealed class CodeTaskAgent
 
 internal sealed record CodeTextCandidate(string RelativePath, int CharacterCount, string Sha256);
 internal sealed record CodeFileContent(string Path, string Content, string Sha256);
+public sealed record CodeTaskWorkspaceHistory(string TaskId, string State, DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc, string WorkspacePath);
 
 internal sealed class CodeWorkspaceSnapshot
 {
@@ -286,6 +291,73 @@ internal sealed class CodeWorkspaceSnapshot
             if (Directory.Exists(taskRoot)) Directory.Delete(taskRoot, recursive: true);
             throw;
         }
+    }
+
+    public static IReadOnlyList<CodeTaskWorkspaceHistory> ReadRetainedTasks(string workspaceRoot)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceRoot) || !Path.IsPathFullyQualified(workspaceRoot)
+            || workspaceRoot.StartsWith("\\\\", StringComparison.Ordinal) || !Directory.Exists(workspaceRoot)) return [];
+
+        var root = ValidateDirectory(workspaceRoot, "隔离工作区目录");
+        var rootBoundary = GetCanonicalDirectoryPath(root);
+        var result = new List<CodeTaskWorkspaceHistory>();
+        foreach (var taskDirectory in Directory.EnumerateDirectories(root).Take(100))
+        {
+            var taskId = Path.GetFileName(taskDirectory);
+            if (taskId.Length != 8 + 1 + 6 + 1 + 32 || taskId[8] != '-' || taskId[15] != '-'
+                || taskId.Where((character, index) => index is not (8 or 15)).Any(character => !Uri.IsHexDigit(character)))
+                continue;
+
+            try
+            {
+                using var taskHandle = OpenNoFollow(taskDirectory, isDirectory: true);
+                if (!TryGetCanonicalPath(taskHandle, out var taskBoundary) || !IsSameOrChild(taskBoundary, rootBoundary)
+                    || taskBoundary.Equals(rootBoundary, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var statePath = Path.Combine(taskDirectory, "task-state.json");
+                using var stateHandle = OpenNoFollow(statePath, isDirectory: false);
+                if (!TryGetCanonicalPath(stateHandle, out var stateCanonical) || !IsSameOrChild(stateCanonical, taskBoundary)) continue;
+                EnsureSingleLinkFile(stateHandle);
+                using var stateStream = new FileStream(stateHandle, FileAccess.Read);
+                if (stateStream.Length is <= 0 or > 16_384) continue;
+                using var document = JsonDocument.Parse(stateStream, new JsonDocumentOptions { MaxDepth = 8 });
+                var stateRoot = document.RootElement;
+                if (stateRoot.ValueKind != JsonValueKind.Object
+                    || !TryReadStateString(stateRoot, "state", 64, out var state)
+                    || !TryReadStateDate(stateRoot, "createdAtUtc", out var createdAt)
+                    || !TryReadStateDate(stateRoot, "updatedAtUtc", out var updatedAt)) continue;
+
+                var workingPath = Path.Combine(taskDirectory, "workspace");
+                if (!TryGetCanonicalPath(workingPath, isDirectory: true, out var workingCanonical)
+                    || !IsSameOrChild(workingCanonical, taskBoundary)) continue;
+
+                result.Add(new(taskId, state, createdAt, updatedAt, workingCanonical));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                or ArgumentException or System.ComponentModel.Win32Exception or JsonException or InvalidDataException)
+            {
+                // One incomplete, malformed, linked or inaccessible entry must not hide other recoverable tasks.
+            }
+        }
+
+        return result.OrderByDescending(item => item.UpdatedAtUtc).Take(MaximumRetainedTasks).ToArray();
+    }
+
+    private static bool TryReadStateString(JsonElement root, string propertyName, int maximumLength, out string value)
+    {
+        value = "";
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String) return false;
+        var candidate = property.GetString();
+        if (string.IsNullOrWhiteSpace(candidate) || candidate.Length > maximumLength) return false;
+        value = candidate;
+        return true;
+    }
+
+    private static bool TryReadStateDate(JsonElement root, string propertyName, out DateTimeOffset value)
+    {
+        value = default;
+        return root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(property.GetString(), out value);
     }
 
     public IReadOnlyList<CodeTextCandidate> ReadTextCandidates(CancellationToken token)

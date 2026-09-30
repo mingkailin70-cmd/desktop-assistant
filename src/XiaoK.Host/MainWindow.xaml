@@ -13,6 +13,7 @@
             </Grid.RowDefinitions>
             <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,12" MouseLeftButtonDown="Header_MouseLeftButtonDown">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="记录" Width="38" Height="28" Click="History_Click" ToolTip="最近任务与隔离编程任务"/>
                     <Button Content="⚙" Width="30" Height="28" Click="Settings_Click" ToolTip="设置"/>
                     <Button x:Name="ExpandButton" Content="—" Width="30" Height="28" Click="Expand_Click" ToolTip="收起"/>
                     <Button Content="×" Width="30" Height="28" Margin="5,0,0,0" Click="Hide_Click" ToolTip="隐藏到托盘"/>
