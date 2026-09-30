@@ -3,6 +3,8 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 using XiaoK.Adapters.Windows;
@@ -16,6 +18,11 @@ if (args.Length == 3 && args[0] == "--appcontainer-probe")
     Environment.ExitCode = RunAppContainerProbe(args[1], args[2]);
     return;
 }
+if (args.Length == 3 && args[0] == "--appcontainer-hang")
+{
+    Environment.ExitCode = RunAppContainerHangProbe(args[1], args[2]);
+    return;
+}
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
@@ -25,7 +32,13 @@ var skipped = new List<string>();
 try
 {
     await CheckAppContainerFileBoundaryAsync(tempRoot);
-    passed.Add(".NET 探针在 Windows AppContainer 中可写任务工作区、不能覆盖兄弟目录哨兵，且回收临时授权");
+    passed.Add(".NET 探针在 Windows AppContainer 中只可写任务工作区，兄弟目录哨兵不可读写，且临时授权已回收");
+
+    await CheckAppContainerTimeoutAsync(tempRoot);
+    passed.Add("AppContainer 验证命令超时后终止进程并回收临时授权");
+
+    await CheckAppContainerCancellationAsync(tempRoot);
+    passed.Add("AppContainer 验证命令取消后终止进程并回收临时授权");
 
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
@@ -156,16 +169,75 @@ static async Task CheckAppContainerFileBoundaryAsync(string root)
 {
     if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("AppContainer 边界检查只支持 Windows。");
 
-    var writableRoot = Path.Combine(root, "appcontainer-workspace");
+    var fixture = PrepareAppContainerProbe(root, "boundary");
+    var result = await RunAppContainerProbeAsync(fixture, ["--appcontainer-probe", fixture.InsideMarker, fixture.OutsideSentinel],
+        allowInternet: false, TimeSpan.FromSeconds(45), CancellationToken.None);
+
+    Require(result.Started && result.ExitCode == 0 && !result.TimedOut,
+        "Windows AppContainer 文件边界探针未通过：" + result.Output);
+    Require(File.Exists(fixture.InsideMarker), "AppContainer 无法写入批准的任务工作区。");
+    Require(await File.ReadAllTextAsync(fixture.OutsideSentinel) == "outside-sentinel-original",
+        "AppContainer 覆盖了任务工作区外的哨兵文件。");
+    Require(result.Output.Contains("OUTSIDE_READ_DENIED", StringComparison.Ordinal),
+        "AppContainer 读取边界探针没有返回稳定标记：" + result.Output);
+    Require(result.Output.Contains("临时 ACL 和身份已回收", StringComparison.Ordinal),
+        "AppContainer 没有确认临时授权和身份已回收。");
+    Require(result.Output.Contains("测试步骤未授予网络能力", StringComparison.Ordinal),
+        "测试步骤没有报告其 AppContainer 网络能力配置。");
+}
+
+static async Task CheckAppContainerTimeoutAsync(string root)
+{
+    var fixture = PrepareAppContainerProbe(root, "timeout");
+    var startedMarker = Path.Combine(fixture.WorkingDirectory, "timeout-started.txt");
+    var lateMarker = Path.Combine(fixture.WorkingDirectory, "timeout-late-write.txt");
+    var result = await RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker],
+        allowInternet: false, TimeSpan.FromSeconds(1), CancellationToken.None);
+
+    Require(result.Started && result.TimedOut && result.ExitCode.HasValue,
+        "AppContainer 超时没有结束受限命令并返回超时状态：" + result.Output);
+    Require(File.Exists(startedMarker), "超时探针没有进入受限进程。");
+    await Task.Delay(TimeSpan.FromSeconds(2));
+    Require(!File.Exists(lateMarker), "超时后受限进程仍在运行并写入延迟标记。");
+    Require(result.Output.Contains("临时 ACL 和身份已回收", StringComparison.Ordinal),
+        "超时路径没有回收临时授权和身份。");
+}
+
+static async Task CheckAppContainerCancellationAsync(string root)
+{
+    var fixture = PrepareAppContainerProbe(root, "cancel");
+    var startedMarker = Path.Combine(fixture.WorkingDirectory, "cancel-started.txt");
+    var lateMarker = Path.Combine(fixture.WorkingDirectory, "cancel-late-write.txt");
+    using var cancellation = new CancellationTokenSource();
+    var execution = RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker],
+        allowInternet: false, TimeSpan.FromSeconds(15), cancellation.Token);
+    await WaitForFileAsync(startedMarker, TimeSpan.FromSeconds(10));
+    cancellation.Cancel();
+    var cancelled = false;
+    try { _ = await execution; }
+    catch (OperationCanceledException) { cancelled = true; }
+
+    Require(cancelled, "取消 AppContainer 命令没有返回取消状态。");
+    await Task.Delay(TimeSpan.FromSeconds(2));
+    Require(!File.Exists(lateMarker), "取消后受限进程仍在运行并写入延迟标记。");
+}
+
+static (string WritableRoot, string WorkingDirectory, string RuntimeRoot, string ExecutablePath,
+    string ProbeAssembly, string OutsideSentinel, string InsideMarker, IReadOnlyDictionary<string, string> Environment)
+    PrepareAppContainerProbe(string root, string name)
+{
+    var writableRoot = Path.Combine(root, "appcontainer-" + name + "-workspace");
     var workingDirectory = Path.Combine(writableRoot, "work");
-    var outputDirectory = AppContext.BaseDirectory;
     var probeDirectory = Path.Combine(writableRoot, "probe");
-    var outsideSentinel = Path.Combine(root, "outside-sentinel.txt");
-    var insideProbe = Path.Combine(workingDirectory, "inside-probe.txt");
+    var outsideDirectory = Path.Combine(root, "appcontainer-" + name + "-private-outside");
+    var outsideSentinel = Path.Combine(outsideDirectory, "sentinel.txt");
+    var insideMarker = Path.Combine(workingDirectory, "inside-probe.txt");
     var runtimeRoot = FindPinnedDotNetRoot();
     Directory.CreateDirectory(workingDirectory);
     Directory.CreateDirectory(probeDirectory);
-    foreach (var file in Directory.EnumerateFiles(outputDirectory))
+    Directory.CreateDirectory(outsideDirectory);
+    ProtectOutsideProbeDirectory(outsideDirectory);
+    foreach (var file in Directory.EnumerateFiles(AppContext.BaseDirectory))
         File.Copy(file, Path.Combine(probeDirectory, Path.GetFileName(file)));
     File.WriteAllText(outsideSentinel, "outside-sentinel-original");
 
@@ -191,22 +263,41 @@ static async Task CheckAppContainerFileBoundaryAsync(string root)
                  or "USERPROFILE" or "APPDATA" or "LOCALAPPDATA").Select(pair => pair.Value))
         Directory.CreateDirectory(path);
 
-    var executablePath = Path.Combine(runtimeRoot, "dotnet.exe");
-    var probeAssembly = Path.Combine(probeDirectory, Path.GetFileName(Assembly.GetExecutingAssembly().Location));
-    var result = await AppContainerCommandRunner.RunAsync(executablePath,
-        ["exec", probeAssembly, "--appcontainer-probe", insideProbe, outsideSentinel],
-        workingDirectory, writableRoot, runtimeRoot, [], environment,
-        allowInternet: false, TimeSpan.FromSeconds(45), CancellationToken.None);
+    return (writableRoot, workingDirectory, runtimeRoot, Path.Combine(runtimeRoot, "dotnet.exe"),
+        Path.Combine(probeDirectory, Path.GetFileName(Assembly.GetExecutingAssembly().Location)),
+        outsideSentinel, insideMarker, environment);
+}
 
-    Require(result.Started && result.ExitCode == 0 && !result.TimedOut,
-        "Windows AppContainer 文件边界探针未通过：" + result.Output);
-    Require(File.Exists(insideProbe), "AppContainer 无法写入批准的任务工作区。");
-    Require(await File.ReadAllTextAsync(outsideSentinel) == "outside-sentinel-original",
-        "AppContainer 覆盖了任务工作区外的哨兵文件。");
-    Require(result.Output.Contains("临时 ACL 和身份已回收", StringComparison.Ordinal),
-        "AppContainer 没有确认临时授权和身份已回收。");
-    Require(result.Output.Contains("测试步骤未授予网络能力", StringComparison.Ordinal),
-        "测试步骤没有报告其 AppContainer 网络能力配置。");
+static void ProtectOutsideProbeDirectory(string path)
+{
+    var currentUser = WindowsIdentity.GetCurrent().User
+        ?? throw new InvalidOperationException("无法读取本机测试账户 SID。");
+    var security = new DirectorySecurity();
+    security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+    var inheritance = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+    security.AddAccessRule(new FileSystemAccessRule(currentUser, FileSystemRights.FullControl,
+        inheritance, PropagationFlags.None, AccessControlType.Allow));
+    security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+        FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
+    security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+        FileSystemRights.FullControl, inheritance, PropagationFlags.None, AccessControlType.Allow));
+    new DirectoryInfo(path).SetAccessControl(security);
+}
+
+static Task<SandboxedCommandResult> RunAppContainerProbeAsync(
+    (string WritableRoot, string WorkingDirectory, string RuntimeRoot, string ExecutablePath,
+        string ProbeAssembly, string OutsideSentinel, string InsideMarker, IReadOnlyDictionary<string, string> Environment) fixture,
+    IReadOnlyList<string> probeArguments, bool allowInternet, TimeSpan timeout, CancellationToken cancellationToken) =>
+    AppContainerCommandRunner.RunAsync(fixture.ExecutablePath, ["exec", fixture.ProbeAssembly, .. probeArguments],
+        fixture.WorkingDirectory, fixture.WritableRoot, fixture.RuntimeRoot, [], fixture.Environment,
+        allowInternet, timeout, cancellationToken);
+
+static async Task WaitForFileAsync(string path, TimeSpan timeout)
+{
+    var deadline = DateTime.UtcNow + timeout;
+    while (!File.Exists(path) && DateTime.UtcNow < deadline)
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+    Require(File.Exists(path), "受限子进程没有在时限内启动。");
 }
 
 static int RunAppContainerProbe(string insidePath, string outsideSentinel)
@@ -224,15 +315,39 @@ static int RunAppContainerProbe(string insidePath, string outsideSentinel)
 
     try
     {
+        _ = File.ReadAllText(outsideSentinel);
+        Console.Error.WriteLine("OUTSIDE_READ_UNEXPECTED_SUCCESS");
+        return 12;
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+    {
+        Console.WriteLine("OUTSIDE_READ_DENIED:" + ex.GetType().Name);
+    }
+
+    try
+    {
         File.WriteAllText(outsideSentinel, "outside-sentinel-modified");
-        Console.Error.WriteLine("工作区外写入意外成功。");
+        Console.Error.WriteLine("OUTSIDE_WRITE_UNEXPECTED_SUCCESS");
         return 11;
     }
     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
     {
-        Console.WriteLine("工作区外写入被拒绝：" + ex.GetType().Name);
+        Console.WriteLine("OUTSIDE_WRITE_DENIED:" + ex.GetType().Name);
         return 0;
     }
+}
+
+static int RunAppContainerHangProbe(string startedMarker, string lateMarker)
+{
+    File.WriteAllText(startedMarker, "started");
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(1_500));
+        File.WriteAllText(lateMarker, "late-write");
+    });
+    Console.WriteLine("受限进程已启动并等待外部取消。");
+    Thread.Sleep(Timeout.InfiniteTimeSpan);
+    return 0;
 }
 
 static string FindPinnedDotNetRoot()
