@@ -33,7 +33,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _ = _notificationMonitor.ApplySettingsAsync(_runtime.CurrentSettings);
         FooterText.Text = _runtime.ModelStatus;
         SetStatus(_runtime.VoiceStatus);
-        OutputText.Text = "小K已启动。闲置时不加载模型，也不采集麦克风。输入「打开小K项目」或「查找文件 关键词」试用本地工具。";
+        OutputText.Text = (_runtime.StartupIsolationNotice is { } isolationNotice
+                ? isolationNotice + Environment.NewLine + Environment.NewLine
+                : string.Empty)
+            + "小K已启动。闲置时不加载模型，也不采集麦克风。输入「打开小K项目」或「查找文件 关键词」试用本地工具。";
         _tray = new Forms.NotifyIcon
         {
             Text = "小K桌面助手",

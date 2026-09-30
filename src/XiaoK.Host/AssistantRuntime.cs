@@ -19,6 +19,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly SqliteTaskStore _store;
     private readonly LocalInferenceClient _inference;
     private readonly IManagedModelRuntime? _managedModelRuntime;
+    private readonly DotNetTestRunner _dotNetTestRunner;
     private readonly AudioGateway _voice = new();
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models;
@@ -47,7 +48,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _models = new ModelBroker(managedRuntime);
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
-        var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
+        _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
+        var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot);
     }
@@ -55,6 +57,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public string ModelStatus => _managedModelRuntime?.Status
         ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
     public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
+    public string? StartupIsolationNotice => !_dotNetTestRunner.StartupIsolationRecovery.Success
+        || _dotNetTestRunner.StartupIsolationRecovery.RecoveredProfiles > 0
+        ? _dotNetTestRunner.StartupIsolationRecovery.Message
+        : null;
     public XiaoKSettings CurrentSettings => _settings;
     public string ActiveDatabasePath => Path.Combine(_settings.DataRoot, "tasks.sqlite3");
 

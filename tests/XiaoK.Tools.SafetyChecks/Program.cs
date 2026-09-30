@@ -3,9 +3,11 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
@@ -18,9 +20,30 @@ if (args.Length == 3 && args[0] == "--appcontainer-probe")
     Environment.ExitCode = RunAppContainerProbe(args[1], args[2]);
     return;
 }
-if (args.Length == 3 && args[0] == "--appcontainer-hang")
+if (args.Length == 4 && args[0] == "--appcontainer-hang")
 {
-    Environment.ExitCode = RunAppContainerHangProbe(args[1], args[2]);
+    Environment.ExitCode = RunAppContainerHangProbe(args[1], args[2], int.Parse(args[3]));
+    return;
+}
+if (args.Length == 6 && args[0] == "--appcontainer-crash-host")
+{
+    await RunAppContainerCrashHostAsync(args[1], args[2], args[3], args[4], args[5]);
+    return;
+}
+if (args.Length == 1 && args[0] == "--only-appcontainer-recovery")
+{
+    var recoveryTestRoot = Path.Combine(Path.GetTempPath(), "XiaoK-RecoveryProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(recoveryTestRoot);
+    try
+    {
+        await CheckAppContainerHostCrashRecoveryAsync(recoveryTestRoot);
+        CheckAppContainerRecoveryRejectsCorruptManifest(recoveryTestRoot);
+        Console.WriteLine("通过：Host 强制终止恢复与损坏清单失败关闭。");
+    }
+    finally
+    {
+        if (Directory.Exists(recoveryTestRoot)) Directory.Delete(recoveryTestRoot, recursive: true);
+    }
     return;
 }
 
@@ -39,6 +62,12 @@ try
 
     await CheckAppContainerCancellationAsync(tempRoot);
     passed.Add("AppContainer 验证命令取消后终止进程并回收临时授权");
+
+    await CheckAppContainerHostCrashRecoveryAsync(tempRoot);
+    passed.Add("强制结束 Host 后下次启动会回收遗留 ACL、临时身份和恢复记录");
+
+    CheckAppContainerRecoveryRejectsCorruptManifest(tempRoot);
+    passed.Add("隔离恢复记录损坏时失败关闭且保留证据");
 
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
@@ -191,7 +220,7 @@ static async Task CheckAppContainerTimeoutAsync(string root)
     var fixture = PrepareAppContainerProbe(root, "timeout");
     var startedMarker = Path.Combine(fixture.WorkingDirectory, "timeout-started.txt");
     var lateMarker = Path.Combine(fixture.WorkingDirectory, "timeout-late-write.txt");
-    var result = await RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker],
+    var result = await RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker, "1500"],
         allowInternet: false, TimeSpan.FromSeconds(1), CancellationToken.None);
 
     Require(result.Started && result.TimedOut && result.ExitCode.HasValue,
@@ -209,7 +238,7 @@ static async Task CheckAppContainerCancellationAsync(string root)
     var startedMarker = Path.Combine(fixture.WorkingDirectory, "cancel-started.txt");
     var lateMarker = Path.Combine(fixture.WorkingDirectory, "cancel-late-write.txt");
     using var cancellation = new CancellationTokenSource();
-    var execution = RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker],
+    var execution = RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker, "1500"],
         allowInternet: false, TimeSpan.FromSeconds(15), cancellation.Token);
     await WaitForFileAsync(startedMarker, TimeSpan.FromSeconds(10));
     cancellation.Cancel();
@@ -222,9 +251,146 @@ static async Task CheckAppContainerCancellationAsync(string root)
     Require(!File.Exists(lateMarker), "取消后受限进程仍在运行并写入延迟标记。");
 }
 
+static async Task CheckAppContainerHostCrashRecoveryAsync(string root)
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("AppContainer 恢复检查只支持 Windows。");
+    var fixtureRoot = Path.Combine(root, "appcontainer-crash-host-fixture");
+    var recoveryRoot = Path.Combine(root, "appcontainer-crash-host-recovery");
+    var crashWorkspace = Path.Combine(fixtureRoot, "appcontainer-crash-workspace", "work");
+    var startedMarker = Path.Combine(crashWorkspace, "crash-child-started.txt");
+    var lateMarker = Path.Combine(crashWorkspace, "crash-child-late.txt");
+    var hostReadyMarker = Path.Combine(root, "appcontainer-crash-host-ready.txt");
+    var dotNet = Path.Combine(FindPinnedDotNetRoot(), "dotnet.exe");
+    var start = new ProcessStartInfo(dotNet)
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        WorkingDirectory = Environment.CurrentDirectory
+    };
+    start.ArgumentList.Add("exec");
+    start.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+    start.ArgumentList.Add("--appcontainer-crash-host");
+    start.ArgumentList.Add(fixtureRoot);
+    start.ArgumentList.Add(recoveryRoot);
+    start.ArgumentList.Add(startedMarker);
+    start.ArgumentList.Add(lateMarker);
+    start.ArgumentList.Add(hostReadyMarker);
+
+    using var host = Process.Start(start) ?? throw new InvalidOperationException("无法启动 AppContainer 强杀测试 Host。");
+    var hostOutput = host.StandardOutput.ReadToEndAsync();
+    var hostError = host.StandardError.ReadToEndAsync();
+    try
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(90);
+        while (!File.Exists(hostReadyMarker) && !host.HasExited && DateTime.UtcNow < deadline)
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        if (!File.Exists(hostReadyMarker))
+        {
+            if (host.HasExited)
+            {
+                var standardOutput = await hostOutput;
+                var standardError = await hostError;
+                throw new InvalidOperationException($"强杀测试 Host 在启动隔离命令前退出，代码 {host.ExitCode}。{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
+            }
+            throw new InvalidOperationException("强杀测试 Host 没有及时进入 AppContainer 命令。");
+        }
+
+        host.Kill();
+        await host.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        _ = await hostOutput;
+        _ = await hostError;
+        await Task.Delay(TimeSpan.FromMilliseconds(5_500));
+        Require(!File.Exists(lateMarker), "Host 被强制结束后，AppContainer 子进程仍在运行并写入延迟标记。");
+
+        var manifest = Directory.EnumerateFiles(recoveryRoot, "XiaoK.CodeTask.*.json").SingleOrDefault()
+            ?? throw new InvalidOperationException("Host 被强制结束后没有留下持久恢复记录。");
+        var record = JsonSerializer.Deserialize<AppContainerRecoveryRecord>(File.ReadAllBytes(manifest))
+            ?? throw new InvalidOperationException("强杀测试恢复记录无法解析。");
+        var sid = new SecurityIdentifier(record.AppContainerSid
+            ?? throw new InvalidOperationException("强杀测试记录没有持久化 AppContainer SID。"));
+        Require(HasAccessRule(record.PermissionRoots[0], sid)
+            && HasAccessRule(Path.Combine(record.PermissionRoots[1], "dotnet.exe"), sid),
+            "强杀测试没有在结束前真实写入工作区和运行时 ACL。");
+
+        var recovered = new DotNetTestRunner(FindRepositoryRoot(), recoveryRoot).StartupIsolationRecovery;
+        Require(recovered.Success && recovered.RecoveredProfiles == 1,
+            "DotNetTestRunner 启动恢复没有成功回收 AppContainer 权限：" + recovered.Message);
+        Require(!File.Exists(manifest), "成功恢复后仍保留隔离恢复记录。");
+        Require(!HasAccessRule(record.PermissionRoots[0], sid)
+            && !HasAccessRule(Path.Combine(record.PermissionRoots[1], "dotnet.exe"), sid),
+            "Host 重启恢复后仍残留临时 AppContainer ACL。");
+    }
+    finally
+    {
+        if (!host.HasExited)
+        {
+            host.Kill();
+            await host.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        _ = await hostOutput;
+        _ = await hostError;
+        if (Directory.Exists(recoveryRoot))
+        {
+            var pending = AppContainerCommandRunner.RecoverAbandonedRuns(recoveryRoot);
+            if (!pending.Success) throw new InvalidOperationException("清理强杀测试留下的隔离权限失败：" + pending.Message);
+        }
+    }
+}
+
+static void CheckAppContainerRecoveryRejectsCorruptManifest(string root)
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("AppContainer 恢复检查只支持 Windows。");
+    var recoveryRoot = AppContainerRecoveryJournal.PrepareRoot(Path.Combine(root, "appcontainer-corrupt-recovery"));
+    var name = "XiaoK.CodeTask." + Guid.NewGuid().ToString("N");
+    var manifest = AppContainerRecoveryJournal.ManifestPath(recoveryRoot, name);
+    File.WriteAllText(manifest, "{}");
+    var result = AppContainerCommandRunner.RecoverAbandonedRuns(recoveryRoot);
+    Require(!result.Success && File.Exists(manifest), "格式错误的恢复记录没有失败关闭并保留证据。");
+    File.Delete(manifest);
+}
+
+#pragma warning disable CA1416 // Callers guard this synthetic ACL probe with an explicit Windows check.
+static bool HasAccessRule(string path, SecurityIdentifier sid)
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows ACL 只支持 Windows。");
+    FileSystemSecurity security = Directory.Exists(path)
+        ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access)
+        : new FileInfo(path).GetAccessControl(AccessControlSections.Access);
+    return security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier))
+        .OfType<FileSystemAccessRule>()
+        .Any(rule => rule.IdentityReference.Equals(sid));
+}
+#pragma warning restore CA1416
+
+static async Task RunAppContainerCrashHostAsync(string fixtureRoot, string recoveryRoot,
+    string startedMarker, string lateMarker, string hostReadyMarker)
+{
+    var fixture = PrepareAppContainerProbe(fixtureRoot, "crash", recoveryRoot);
+    var execution = RunAppContainerProbeAsync(fixture,
+        ["--appcontainer-hang", startedMarker, lateMarker, "5000"],
+        allowInternet: false, TimeSpan.FromSeconds(45), CancellationToken.None);
+    var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(75);
+    while (!File.Exists(startedMarker) && !execution.IsCompleted && DateTime.UtcNow < deadline)
+        await Task.Delay(TimeSpan.FromMilliseconds(50));
+    if (!File.Exists(startedMarker))
+    {
+        if (execution.IsCompleted)
+        {
+            var result = await execution;
+            throw new InvalidOperationException("AppContainer 探针在写入启动标记前返回：" + result.Output);
+        }
+        throw new InvalidOperationException("AppContainer 探针在准备期超过 75 秒，未写入启动标记。");
+    }
+    File.WriteAllText(hostReadyMarker, "host-and-appcontainer-running");
+    await Task.Delay(Timeout.InfiniteTimeSpan);
+}
+
 static (string WritableRoot, string WorkingDirectory, string RuntimeRoot, string ExecutablePath,
-    string ProbeAssembly, string OutsideSentinel, string InsideMarker, IReadOnlyDictionary<string, string> Environment)
-    PrepareAppContainerProbe(string root, string name)
+    string ProbeAssembly, string OutsideSentinel, string InsideMarker, string RecoveryRoot,
+    IReadOnlyDictionary<string, string> Environment)
+    PrepareAppContainerProbe(string root, string name, string? recoveryRoot = null)
 {
     var writableRoot = Path.Combine(root, "appcontainer-" + name + "-workspace");
     var workingDirectory = Path.Combine(writableRoot, "work");
@@ -232,6 +398,7 @@ static (string WritableRoot, string WorkingDirectory, string RuntimeRoot, string
     var outsideDirectory = Path.Combine(root, "appcontainer-" + name + "-private-outside");
     var outsideSentinel = Path.Combine(outsideDirectory, "sentinel.txt");
     var insideMarker = Path.Combine(workingDirectory, "inside-probe.txt");
+    recoveryRoot ??= Path.Combine(root, "appcontainer-recovery-" + name);
     var runtimeRoot = FindPinnedDotNetRoot();
     Directory.CreateDirectory(workingDirectory);
     Directory.CreateDirectory(probeDirectory);
@@ -265,7 +432,7 @@ static (string WritableRoot, string WorkingDirectory, string RuntimeRoot, string
 
     return (writableRoot, workingDirectory, runtimeRoot, Path.Combine(runtimeRoot, "dotnet.exe"),
         Path.Combine(probeDirectory, Path.GetFileName(Assembly.GetExecutingAssembly().Location)),
-        outsideSentinel, insideMarker, environment);
+        outsideSentinel, insideMarker, recoveryRoot, environment);
 }
 
 static void ProtectOutsideProbeDirectory(string path)
@@ -286,11 +453,12 @@ static void ProtectOutsideProbeDirectory(string path)
 
 static Task<SandboxedCommandResult> RunAppContainerProbeAsync(
     (string WritableRoot, string WorkingDirectory, string RuntimeRoot, string ExecutablePath,
-        string ProbeAssembly, string OutsideSentinel, string InsideMarker, IReadOnlyDictionary<string, string> Environment) fixture,
+        string ProbeAssembly, string OutsideSentinel, string InsideMarker, string RecoveryRoot,
+        IReadOnlyDictionary<string, string> Environment) fixture,
     IReadOnlyList<string> probeArguments, bool allowInternet, TimeSpan timeout, CancellationToken cancellationToken) =>
     AppContainerCommandRunner.RunAsync(fixture.ExecutablePath, ["exec", fixture.ProbeAssembly, .. probeArguments],
         fixture.WorkingDirectory, fixture.WritableRoot, fixture.RuntimeRoot, [], fixture.Environment,
-        allowInternet, timeout, cancellationToken);
+        allowInternet, timeout, cancellationToken, fixture.RecoveryRoot);
 
 static async Task WaitForFileAsync(string path, TimeSpan timeout)
 {
@@ -337,12 +505,12 @@ static int RunAppContainerProbe(string insidePath, string outsideSentinel)
     }
 }
 
-static int RunAppContainerHangProbe(string startedMarker, string lateMarker)
+static int RunAppContainerHangProbe(string startedMarker, string lateMarker, int delayMilliseconds)
 {
     File.WriteAllText(startedMarker, "started");
     _ = Task.Run(async () =>
     {
-        await Task.Delay(TimeSpan.FromMilliseconds(1_500));
+        await Task.Delay(TimeSpan.FromMilliseconds(delayMilliseconds));
         File.WriteAllText(lateMarker, "late-write");
     });
     Console.WriteLine("受限进程已启动并等待外部取消。");
@@ -489,7 +657,9 @@ static async Task CheckDotNetRunnerRejectsEscapingTargetAsync(string root)
     Directory.CreateDirectory(workspace);
     var verificationRoot = Path.Combine(workspace, ".xiaok-verification-synthetic");
     var repositoryRoot = FindRepositoryRoot();
-    var runner = new DotNetTestRunner(repositoryRoot);
+    var runner = new DotNetTestRunner(repositoryRoot, Path.Combine(root, "appcontainer-recovery-dotnet-target-test"));
+    Require(runner.StartupIsolationRecovery.Success && runner.StartupIsolationRecovery.RecoveredProfiles == 0,
+        "无遗留授权时，隔离验证器启动恢复状态异常。");
     var executablePath = runner.ExecutablePath;
     Require(executablePath is not null, "安全检查环境无法定位用于边界拒绝的 dotnet.exe。");
 

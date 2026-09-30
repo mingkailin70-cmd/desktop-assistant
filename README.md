@@ -10,12 +10,12 @@
 
 - `global.json` 固定 .NET SDK 版本为 10.0.401。
 - WPF Host 默认显示紧凑桌宠；单击打开任务面板，桌宠与托盘菜单提供设置、取消和停麦入口，`Ctrl+Shift+K` 可唤起任务面板。桌宠位置以物理像素保存在本机设置，使用 PerMonitorV2 并约束在当前显示器工作区；多屏/DPI与实际交互尚未验收。
-- 固定工具目前包含允许列表内的应用启动、有限范围文件名查找和隔离工作区编程代理；编程代理生成待审阅差异，用户另行批准后可在 Windows AppContainer 中运行固定的 .NET 还原/测试配方。合成离线探针已验证任务区可写、兄弟目录哨兵不可读写，以及超时和取消会终止进程；尚未验证真实项目还原/测试和联网行为，不能据此宣称所有越界副作用为零。
+- 固定工具目前包含允许列表内的应用启动、有限范围文件名查找和隔离工作区编程代理；编程代理生成待审阅差异，用户另行批准后可在 Windows AppContainer 中运行固定的 .NET 还原/测试配方。离线探针验证任务区可写、兄弟目录哨兵不可读写、超时/取消会终止进程，并在模拟 Host 强杀后验证下次启动恢复遗留 ACL 与 AppContainer 身份；损坏恢复清单会使隔离命令失败关闭。真实项目还原/测试、联网行为、断电和文件系统故障仍待验收，不能据此宣称所有越界副作用为零。
 - 本地推理客户端只接受回环 HTTP 地址。
 - Windows `UserNotificationListener` 已接入，但需具有 MSIX 身份并取得用户授权才会启动。当前发布者 AUMID 和私聊/群聊分类尚未实测；会话类型未知时不会读取正文或自动分析。
 - 录音、本地模型进程管理、浏览器操作和微信/QQ实际发送尚未实现。
 - 任务状态、联系人回复风格偏好和有限审批审计已使用 Windows 系统 `winsqlite3.dll` 写入 SQLite。任务表只保存规范类别、状态、时间和受限错误码；偏好表只保存本地联系人名称、固定风格 ID、用户确认来源和更新时间；审计表只保存固定动作 ID、固定结果、随机记录 ID 和时间，不含预览正文、附件、项目路径，也不具备重放能力。SQLite v1→v3 迁移前备份并经过合成数据检查。设置页已提供只读审批历史、v3 数据库备份/恢复和本地历史清理；清理会保留迁移标记、移除设置文件中的旧联系人偏好副本，并清除数据目录内可识别的小K备份。隐私清理和恢复流程尚未用本机真实数据验收。
-- 桌面窗口和托盘已有“最近任务”入口，可查看脱敏任务状态和隔离编程工作区路径；不会自动续跑任务，实际崩溃恢复仍待验收。
+- 桌面窗口和托盘已有“最近任务”入口，可查看脱敏任务状态和隔离编程工作区路径；不会自动续跑任务。AppContainer ACL/身份的 Host 强杀后恢复已通过模拟 Host 探针，任务续跑和断电恢复仍待验收。
 - 模型权重、运行时包、私聊正文、个人数据和本机凭证不得存入仓库。
 
 P0 仍需本机证据：每款客户端至少 30 条正文可见的私聊通知、模型与语音延迟和显存测量，以及中文编程任务评测。六类场景的正常、失败和取消路径全部验收前，不应把应用当作日常可用产品。
@@ -29,7 +29,7 @@ $dotnet = if (Test-Path .\.tools\dotnet\dotnet.exe) { Resolve-Path .\.tools\dotn
 & $dotnet --version
 & $dotnet restore XiaoK.sln
 & $dotnet build XiaoK.sln --configuration Release --no-restore
-& $dotnet run --project tests\XiaoK.Tools.SafetyChecks\XiaoK.Tools.SafetyChecks.csproj --configuration Release --no-build --no-restore
+& $dotnet exec tests\XiaoK.Tools.SafetyChecks\bin\Release\net10.0\XiaoK.Tools.SafetyChecks.dll
 & $dotnet run --project src\XiaoK.Host\XiaoK.Host.csproj --configuration Release --no-build --no-restore
 ```
 

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
+using System.Text.Json;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
 using System.Runtime.CompilerServices;
@@ -14,6 +15,7 @@ using System.Security;
 namespace XiaoK.Tools;
 
 internal sealed record SandboxedCommandResult(bool Started, bool TimedOut, int? ExitCode, string Output);
+public sealed record AppContainerRecoverySummary(bool Success, int RecoveredProfiles, string Message);
 
 /// <summary>
 /// Launches approved commands in a Windows AppContainer. The process receives write access only to
@@ -22,6 +24,7 @@ internal sealed record SandboxedCommandResult(bool Started, bool TimedOut, int? 
 /// </summary>
 internal static class AppContainerCommandRunner
 {
+    private static readonly SemaphoreSlim RunnerGate = new(1, 1);
     private const int MaximumCapturedCharactersPerStream = 8_000;
     private const uint ProcThreadAttributeHandleList = 0x00020002;
     private const uint ProcThreadAttributeSecurityCapabilities = 0x00020009;
@@ -42,11 +45,162 @@ internal static class AppContainerCommandRunner
     private const uint Infinite = 0xFFFFFFFF;
     private const uint TerminatedExitCode = 0xE0000001;
     private const int ErrorAlreadyExistsHResult = unchecked((int)0x800700B7);
+    private const int ErrorFileNotFoundHResult = unchecked((int)0x80070002);
+    private const int ErrorNotFoundHResult = unchecked((int)0x80070490);
 
     public static async Task<SandboxedCommandResult> RunAsync(string executablePath, IReadOnlyList<string> arguments,
         string workingDirectory, string writableRoot, string runtimeRoot, IEnumerable<string> additionalReadOnlyRoots,
         IReadOnlyDictionary<string, string> environment, bool allowInternet, TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? recoveryJournalRoot = null)
+    {
+        if (!OperatingSystem.IsWindows())
+            return new(false, false, null, "Windows AppContainer 不可用；没有以普通用户权限回退。");
+        await RunnerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var recoveryRoot = AppContainerRecoveryJournal.PrepareRoot(recoveryJournalRoot);
+            using var recoveryLock = AppContainerRecoveryJournal.AcquireLock(recoveryRoot);
+            if (!RecoverPendingLocked(recoveryRoot, out var recovered, out var recoveryError))
+                return new(false, false, null, $"无法清理上次遗留的 AppContainer 权限；已拒绝运行隔离命令。{recoveryError}");
+            return await RunCoreAsync(executablePath, arguments, workingDirectory, writableRoot, runtimeRoot,
+                additionalReadOnlyRoots, environment, allowInternet, timeout, cancellationToken,
+                recoveryRoot).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or SecurityException
+            or ArgumentException or NotSupportedException or InvalidOperationException or ExternalException)
+        {
+            return new(false, false, null,
+                $"无法准备 AppContainer 权限恢复记录 ({ex.GetType().Name}, HRESULT 0x{ex.HResult:X8})；没有运行命令，也没有降级到普通进程。");
+        }
+        finally { RunnerGate.Release(); }
+    }
+
+    public static AppContainerRecoverySummary RecoverAbandonedRuns(string? recoveryJournalRoot = null)
+    {
+        if (!OperatingSystem.IsWindows()) return new(true, 0, "当前平台不使用 Windows AppContainer。");
+        RunnerGate.Wait();
+        try
+        {
+            var recoveryRoot = AppContainerRecoveryJournal.PrepareRoot(recoveryJournalRoot);
+            using var recoveryLock = AppContainerRecoveryJournal.AcquireLock(recoveryRoot);
+            if (!RecoverPendingLocked(recoveryRoot, out var recovered, out var error))
+                return new(false, recovered, "存在未完成的 AppContainer 权限清理；隔离命令将保持关闭。" + error);
+            return new(true, recovered, recovered == 0
+                ? "没有上次遗留的 AppContainer 权限。"
+                : $"已清理上次退出后遗留的 {recovered} 项 AppContainer 权限。");
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or SecurityException
+            or ArgumentException or NotSupportedException or InvalidOperationException or ExternalException)
+        {
+            return new(false, 0, "无法检查或清理上次的 AppContainer 权限；隔离命令将保持关闭。");
+        }
+        finally { RunnerGate.Release(); }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool RecoverPendingLocked(string recoveryRoot, out int recovered, out string error)
+    {
+        recovered = 0;
+        error = string.Empty;
+        IReadOnlyList<(string Path, AppContainerRecoveryRecord Record)> pending;
+        try { pending = AppContainerRecoveryJournal.ReadPending(recoveryRoot); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or JsonException or SecurityException)
+        {
+            error = "恢复记录损坏或不可访问。";
+            return false;
+        }
+
+        foreach (var (path, record) in pending)
+        {
+            if (!TryRecoverRecord(path, record, out error)) return false;
+            recovered++;
+        }
+        return true;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool TryRecoverRecord(string journalPath, AppContainerRecoveryRecord record, out string error)
+    {
+        error = string.Empty;
+        var recoveryRoot = Path.GetDirectoryName(Path.GetFullPath(journalPath))!;
+        var roots = record.PermissionRoots.Select(Path.GetFullPath).ToArray();
+        if (roots.Any(root => IsSameOrChild(root, recoveryRoot) || IsSameOrChild(recoveryRoot, root)))
+        {
+            error = "恢复记录中的 ACL 路径与恢复目录重叠；恢复记录已保留。";
+            return false;
+        }
+        for (var index = 0; index < roots.Length; index++)
+            for (var other = index + 1; other < roots.Length; other++)
+                if (IsSameOrChild(roots[index], roots[other]) || IsSameOrChild(roots[other], roots[index]))
+                {
+                    error = "恢复记录中的 ACL 权限范围重叠；恢复记录已保留。";
+                    return false;
+                }
+        SecurityIdentifier? appContainerSecurityId = null;
+        var deriveResult = DeriveAppContainerSidFromAppContainerName(record.ProfileName, out var derivedSid);
+        try
+        {
+            if (deriveResult == 0 && derivedSid != IntPtr.Zero)
+            {
+                appContainerSecurityId = ReadSecurityIdentifier(derivedSid);
+                if (record.AppContainerSid is not null
+                    && !appContainerSecurityId.Equals(new SecurityIdentifier(record.AppContainerSid)))
+                {
+                    error = "恢复记录中的 AppContainer 身份与系统配置不一致。";
+                    return false;
+                }
+            }
+            else if (deriveResult is not ErrorFileNotFoundHResult and not ErrorNotFoundHResult)
+            {
+                error = "无法核对 AppContainer 身份；恢复记录已保留。";
+                return false;
+            }
+            else if (record.AppContainerSid is not null)
+                appContainerSecurityId = new SecurityIdentifier(record.AppContainerSid);
+
+            if (appContainerSecurityId is not null)
+                foreach (var root in record.PermissionRoots) ClearTreeAccess(root, appContainerSecurityId);
+
+            var deleteResult = DeleteAppContainerProfile(record.ProfileName);
+            if (deleteResult != 0 && deleteResult is not ErrorFileNotFoundHResult and not ErrorNotFoundHResult)
+            {
+                error = "Windows 未能删除临时 AppContainer 身份；恢复记录已保留。";
+                return false;
+            }
+
+            AppContainerRecoveryJournal.DeleteRecord(journalPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or SecurityException
+            or ArgumentException or NotSupportedException or InvalidOperationException or ExternalException)
+        {
+            error = "回收临时 ACL 或 AppContainer 身份失败；恢复记录已保留。";
+            return false;
+        }
+        finally
+        {
+            if (derivedSid != IntPtr.Zero) _ = FreeSid(derivedSid);
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static SecurityIdentifier ReadSecurityIdentifier(IntPtr sid)
+    {
+        var subAuthorityCount = Marshal.ReadByte(sid, 1);
+        var bytes = new byte[checked(8 + subAuthorityCount * sizeof(uint))];
+        Marshal.Copy(sid, bytes, 0, bytes.Length);
+        return new SecurityIdentifier(bytes, 0);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static async Task<SandboxedCommandResult> RunCoreAsync(string executablePath, IReadOnlyList<string> arguments,
+        string workingDirectory, string writableRoot, string runtimeRoot, IEnumerable<string> additionalReadOnlyRoots,
+        IReadOnlyDictionary<string, string> environment, bool allowInternet, TimeSpan timeout,
+        CancellationToken cancellationToken, string recoveryRoot)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!OperatingSystem.IsWindows())
@@ -72,8 +226,10 @@ internal static class AppContainerCommandRunner
         var processStarted = false;
         SecurityIdentifier? appContainerSecurityId = null;
         var profileName = "XiaoK.CodeTask." + Guid.NewGuid().ToString("N");
-        var profileCreated = false;
-        var permissionRoots = new List<string>();
+        string? journalPath = null;
+        AppContainerRecoveryRecord? recoveryRecord = null;
+        var journalWritten = false;
+        var cleanupAttempted = false;
         var phase = "参数和路径检查";
 
         try
@@ -86,7 +242,9 @@ internal static class AppContainerCommandRunner
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (!File.Exists(executable) || !Directory.Exists(runtime) || !Directory.Exists(writable)
                 || !Directory.Exists(working) || !IsSameOrChild(working, writable)
-                || IsSameOrChild(writable, runtime) || IsSameOrChild(runtime, writable))
+                || IsSameOrChild(writable, runtime) || IsSameOrChild(runtime, writable)
+                || IsSameOrChild(recoveryRoot, writable) || IsSameOrChild(writable, recoveryRoot)
+                || IsSameOrChild(recoveryRoot, runtime) || IsSameOrChild(runtime, recoveryRoot))
                 return new(false, false, null, "隔离执行路径无效或运行时与可写工作区重叠；没有运行命令。");
             foreach (var root in readOnlyRoots)
                 if (!Directory.Exists(root) || IsSameOrChild(root, writable) || IsSameOrChild(writable, root)
@@ -98,25 +256,31 @@ internal static class AppContainerCommandRunner
                         || IsSameOrChild(readOnlyRoots[other], readOnlyRoots[index]))
                         return new(false, false, null, "隔离执行的附加只读目录彼此重叠；没有运行命令。");
 
+            var recoveryPermissionRoots = new[] { writable, runtime }.Concat(readOnlyRoots).ToArray();
+            if (recoveryPermissionRoots.Any(root => IsSameOrChild(recoveryRoot, root) || IsSameOrChild(root, recoveryRoot)))
+                return new(false, false, null, "隔离恢复目录与命令权限范围重叠；没有运行命令。");
+
+            recoveryRecord = new(1, profileName, null, recoveryPermissionRoots);
+            journalPath = AppContainerRecoveryJournal.ManifestPath(recoveryRoot, profileName);
+            phase = "持久记录隔离恢复范围";
+            AppContainerRecoveryJournal.Write(recoveryRoot, recoveryRecord);
+            journalWritten = true;
+
             phase = "创建临时 AppContainer 身份";
             profileSid = GetOrCreateProfileSid(profileName);
-            profileCreated = true;
             phase = "转换 AppContainer SID";
-            var subAuthorityCount = Marshal.ReadByte(profileSid, 1);
-            var sidBytes = new byte[checked(8 + (subAuthorityCount * sizeof(uint)))];
-            Marshal.Copy(profileSid, sidBytes, 0, sidBytes.Length);
-            appContainerSecurityId = new SecurityIdentifier(sidBytes, 0);
+            appContainerSecurityId = ReadSecurityIdentifier(profileSid);
+            recoveryRecord = recoveryRecord with { AppContainerSid = appContainerSecurityId.Value };
+            phase = "更新隔离恢复身份";
+            AppContainerRecoveryJournal.Write(recoveryRoot, recoveryRecord);
 
             // Apply explicit ACEs to existing descendants as well as inheritable ACEs to new files.
-            permissionRoots.Add(writable);
             phase = "授予任务工作区权限";
             GrantTreeAccess(writable, appContainerSecurityId, FileSystemRights.Modify);
-            permissionRoots.Add(runtime);
             phase = "授予固定 .NET 运行时只读权限";
             GrantTreeAccess(runtime, appContainerSecurityId, FileSystemRights.ReadAndExecute);
             foreach (var root in readOnlyRoots)
             {
-                permissionRoots.Add(root);
                 phase = "授予验证程序集只读权限";
                 GrantTreeAccess(root, appContainerSecurityId, FileSystemRights.ReadAndExecute);
             }
@@ -253,14 +417,11 @@ internal static class AppContainerCommandRunner
             var networkNote = allowInternet
                 ? "还原步骤获得了 AppContainer internetClient 能力；nuget.org 作为唯一 NuGet 源，但 MSBuild 目标仍可能使用该联网权限。"
                 : "测试步骤未授予网络能力。";
-            phase = "回收临时 ACL";
-            foreach (var root in permissionRoots) ClearTreeAccess(root, appContainerSecurityId);
-            permissionRoots.Clear();
-            phase = "回收临时 AppContainer 身份";
-            var deleteResult = DeleteAppContainerProfile(profileName);
-            if (deleteResult != 0)
-                return new(true, timedOut, null, $"AppContainer 配置清理失败 (HRESULT {deleteResult})；验证结果不作为通过。{Environment.NewLine}{output}");
-            profileCreated = false;
+            phase = "回收临时 ACL 和 AppContainer 身份";
+            cleanupAttempted = true;
+            if (!TryRecoverRecord(journalPath!, recoveryRecord!, out var cleanupError))
+                return new(true, timedOut, null, $"{cleanupError}隔离恢复记录已保留，后续启动会重试。{Environment.NewLine}{output}");
+            journalWritten = false;
             return new(true, timedOut, unchecked((int)exitCode), $"已在 Windows AppContainer 中运行；临时 ACL 和身份已回收。{networkNote}{Environment.NewLine}{output}");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -282,16 +443,13 @@ internal static class AppContainerCommandRunner
             job?.Dispose();
             if (threadHandle != IntPtr.Zero) CloseHandle(threadHandle);
             if (processHandle != IntPtr.Zero) CloseHandle(processHandle);
-            if (appContainerSecurityId is not null)
+            if (journalWritten && !cleanupAttempted)
             {
-                foreach (var root in permissionRoots)
-                {
-                    try { ClearTreeAccess(root, appContainerSecurityId); }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
-                        or ArgumentException or InvalidOperationException) { }
-                }
+                cleanupAttempted = true;
+                try { _ = TryRecoverRecord(journalPath!, recoveryRecord!, out _); }
+                catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or SecurityException
+                    or ArgumentException or NotSupportedException or InvalidOperationException or ExternalException) { }
             }
-            if (profileCreated) _ = DeleteAppContainerProfile(profileName);
             if (attributeListInitialized) DeleteProcThreadAttributeList(attributeList);
             if (attributeList != IntPtr.Zero) Marshal.FreeHGlobal(attributeList);
             if (environmentBuffer != IntPtr.Zero) Marshal.FreeHGlobal(environmentBuffer);

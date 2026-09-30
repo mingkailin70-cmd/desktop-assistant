@@ -17,10 +17,17 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(3);
     private readonly string? _repositoryRoot;
+    private readonly string? _recoveryJournalRoot;
 
-    public DotNetTestRunner(string? repositoryRoot) => _repositoryRoot = repositoryRoot;
+    public DotNetTestRunner(string? repositoryRoot, string? recoveryJournalRoot = null)
+    {
+        _repositoryRoot = repositoryRoot;
+        _recoveryJournalRoot = recoveryJournalRoot;
+        StartupIsolationRecovery = AppContainerCommandRunner.RecoverAbandonedRuns(recoveryJournalRoot);
+    }
 
     public string? ExecutablePath => ResolveExecutablePath(_repositoryRoot);
+    public AppContainerRecoverySummary StartupIsolationRecovery { get; }
 
     public async Task<DotNetTestExecutionResult> RunAsync(string workspacePath, string verificationRoot,
         string targetRelativePath, string approvedExecutablePath, CancellationToken cancellationToken)
@@ -163,7 +170,7 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
         return true;
     }
 
-    private static async Task<SingleCommandResult> RunCommandAsync(string executablePath, string workingDirectory,
+    private async Task<SingleCommandResult> RunCommandAsync(string executablePath, string workingDirectory,
         string workspaceRoot, IReadOnlyList<string> arguments, string dotNetHome, string packageCache, string tempRoot,
         string userProfileRoot, string roamingRoot, string localRoot,
         bool allowInternet, CancellationToken cancellationToken)
@@ -174,7 +181,8 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
                 userProfileRoot, roamingRoot, localRoot);
             var runtimeRoot = Path.GetDirectoryName(Path.GetFullPath(executablePath))!;
             var result = await AppContainerCommandRunner.RunAsync(executablePath, arguments, workingDirectory,
-                workspaceRoot, runtimeRoot, [], environment, allowInternet, CommandTimeout, cancellationToken).ConfigureAwait(false);
+                workspaceRoot, runtimeRoot, [], environment, allowInternet, CommandTimeout, cancellationToken,
+                _recoveryJournalRoot).ConfigureAwait(false);
             return new(result.Started, result.TimedOut, result.ExitCode, result.Output);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
