@@ -16,6 +16,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
   </PropertyGroup>
 
 </Project>
