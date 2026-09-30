@@ -42,6 +42,12 @@ try
     await CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync();
     passed.Add("交互推理在编程代理的后台步骤边界优先执行");
 
+    await CheckModelRuntimeLeaseWrapsEachInferenceStepAsync();
+    passed.Add("本地模型进程租约覆盖推理步骤并在成功、异常后释放");
+
+    await CheckManagedRuntimeManifestIsStrictAsync(tempRoot);
+    passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
+
     var hardLinkSkip = await CheckHardLinkedSourceIsRejectedAsync(tempRoot);
     if (hardLinkSkip is null) passed.Add("项目内硬链接不会把目录外文件内容送入模型");
     else skipped.Add("硬链接夹具无法创建，用例跳过：" + hardLinkSkip);
@@ -336,6 +342,82 @@ static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAs
         "后台步骤结束后，交互请求没有优先于下一后台步骤执行。");
 }
 
+static async Task CheckModelRuntimeLeaseWrapsEachInferenceStepAsync()
+{
+    var runtime = new TrackingModelRuntime();
+    var broker = new ModelBroker(runtime);
+    var observedLease = await broker.RunInteractiveAsync(token =>
+        Task.FromResult(runtime.ActiveLeases == 1), CancellationToken.None);
+    Require(observedLease && runtime.Acquisitions == 1 && runtime.ActiveLeases == 0,
+        "模型调用没有在运行时租约内执行，或结束后未释放租约。");
+
+    try
+    {
+        await broker.RunBackgroundStepAsync<bool>(_ => throw new IOException("synthetic"), CancellationToken.None);
+        throw new InvalidOperationException("预期的失败模型步骤没有失败。");
+    }
+    catch (IOException ex) when (ex.Message == "synthetic") { }
+    Require(runtime.ActiveLeases == 0, "失败模型步骤遗留了运行时租约。");
+
+    var disabled = new ModelBroker(new UnavailableModelRuntime("测试配置未锁定"));
+    var operationRan = false;
+    try
+    {
+        await disabled.RunInteractiveAsync(_ => { operationRan = true; return Task.FromResult(true); }, CancellationToken.None);
+        throw new InvalidOperationException("无效托管运行时没有拒绝模型请求。");
+    }
+    catch (ModelRuntimeUnavailableException) { }
+    Require(!operationRan, "托管运行时校验失败后仍把请求发送到了推理端点。");
+}
+
+static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
+{
+    var modelRoot = Path.Combine(root, "managed-model-root");
+    Directory.CreateDirectory(modelRoot);
+    var manifestPath = Path.Combine(modelRoot, "llama-runtime.json");
+    const string validManifest = """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11256",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-4b-q4km",
+          "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "contextTokens": 4096,
+          "gpuLayers": 99
+        }
+        """;
+    await File.WriteAllTextAsync(manifestPath, validManifest);
+    var runtime = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+    if (runtime is null) throw new InvalidOperationException("有效的固定清单未能加载托管运行时。");
+    await runtime.DisposeAsync();
+
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "latest",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-4b-q4km",
+          "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "contextTokens": 4096,
+          "gpuLayers": 99
+        }
+        """);
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("可变运行时版本没有被拒绝。");
+    }
+    catch (InvalidDataException) { }
+
+    await File.WriteAllTextAsync(manifestPath, validManifest);
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://192.168.1.10:8080/");
+        throw new InvalidOperationException("非回环托管端点没有被拒绝。");
+    }
+    catch (InvalidDataException) { }
+}
+
 static async Task<string?> CheckHardLinkedSourceIsRejectedAsync(string root)
 {
     var fixtureRoot = Path.Combine(root, "hard-links");
@@ -503,6 +585,35 @@ internal sealed class ScriptedInference : IInferenceClient
         }
         if (!_responses.TryDequeue(out var response)) throw new InvalidOperationException("No scripted inference response remains.");
         return response;
+    }
+}
+
+internal sealed class TrackingModelRuntime : IManagedModelRuntime
+{
+    private int _activeLeases;
+    public string Status => "测试运行时";
+    public int Acquisitions { get; private set; }
+    public int ActiveLeases => Volatile.Read(ref _activeLeases);
+
+    public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Acquisitions++;
+        Interlocked.Increment(ref _activeLeases);
+        return ValueTask.FromResult<IAsyncDisposable>(new Lease(this));
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private sealed class Lease(TrackingModelRuntime owner) : IAsyncDisposable
+    {
+        private TrackingModelRuntime? _owner = owner;
+        public ValueTask DisposeAsync()
+        {
+            var current = Interlocked.Exchange(ref _owner, null);
+            if (current is not null) Interlocked.Decrement(ref current._activeLeases);
+            return ValueTask.CompletedTask;
+        }
     }
 }
 

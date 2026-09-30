@@ -12,6 +12,9 @@
 # Local models and inference engines
 models/
 **/models/
+**/llama-runtime.json
+**/llama-server.exe
+**/Runtime/
 *.gguf
 *.safetensors
 *.onnx

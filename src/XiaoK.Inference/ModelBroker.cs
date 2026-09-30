@@ -11,8 +11,11 @@ public sealed class ModelBroker
     private readonly object _gate = new();
     private readonly Queue<Waiter> _interactiveWaiters = new();
     private readonly Queue<Waiter> _backgroundWaiters = new();
+    private readonly IManagedModelRuntime? _runtime;
     private bool _modelInUse;
     private long _lastUseUtcTicks;
+
+    public ModelBroker(IManagedModelRuntime? runtime = null) => _runtime = runtime;
 
     public Task<T> RunInteractiveAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) =>
         RunAsync(operation, cancellationToken, interactive: true);
@@ -34,13 +37,17 @@ public sealed class ModelBroker
     {
         ArgumentNullException.ThrowIfNull(operation);
         using var lease = await AcquireAsync(interactive, cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
+        IAsyncDisposable? runtimeLease = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_runtime is not null) runtimeLease = await _runtime.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             return await operation(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
+            if (runtimeLease is not null) await runtimeLease.DisposeAsync().ConfigureAwait(false);
             Interlocked.Exchange(ref _lastUseUtcTicks, DateTimeOffset.UtcNow.UtcDateTime.Ticks);
         }
     }

@@ -106,6 +106,12 @@ public sealed class CodeTaskAgent
                 ? new(false, "本地模型请求过多；当前编程任务未排队。", "RESOURCE_BUSY")
                 : await FailAsync(snapshot, $"隔离工作区已创建：{snapshot.WorkspacePath}。本地模型请求过多；请稍后重新发起任务。", "RESOURCE_BUSY");
         }
+        catch (ModelRuntimeUnavailableException)
+        {
+            return snapshot is null
+                ? new(false, "本地模型清单、程序或权重校验失败；没有向模型发送请求。", "MODEL_RUNTIME_UNAVAILABLE")
+                : await FailAsync(snapshot, $"隔离工作区已创建：{snapshot.WorkspacePath}。本地模型清单、程序或权重校验失败；没有向模型发送请求。", "MODEL_RUNTIME_UNAVAILABLE");
+        }
         catch (HttpRequestException)
         {
             return snapshot is null

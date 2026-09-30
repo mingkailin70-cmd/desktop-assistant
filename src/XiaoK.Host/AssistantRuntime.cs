@@ -17,9 +17,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly XiaoKSettings _settings;
     private readonly JsonTaskStore _store;
     private readonly LocalInferenceClient _inference;
+    private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly AudioGateway _voice = new();
     private readonly ToolBroker _broker;
-    private readonly ModelBroker _models = new();
+    private readonly ModelBroker _models;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
     private CancellationTokenSource? _active;
     private int _stopping;
@@ -30,6 +31,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         Directory.CreateDirectory(_settings.DataRoot);
         _store = new JsonTaskStore(Path.Combine(_settings.DataRoot, "tasks.json"));
         _inference = new LocalInferenceClient(_settings.InferenceEndpoint);
+        IManagedModelRuntime? managedRuntime = null;
+        try
+        {
+            managedRuntime = LlamaCppModelRuntime.TryLoad(_settings.ModelRoot, _settings.InferenceEndpoint);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or InvalidDataException or JsonException or NotSupportedException)
+        {
+            managedRuntime = new UnavailableModelRuntime("托管模型配置无效或版本未锁定；本次模型请求已禁用。请检查模型目录中的 llama-runtime.json。");
+        }
+        _managedModelRuntime = managedRuntime;
+        _models = new ModelBroker(managedRuntime);
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
@@ -37,7 +49,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot);
     }
 
-    public string ModelStatus => "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；未连接时不会转云端）";
+    public string ModelStatus => _managedModelRuntime?.Status
+        ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
     public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
     public XiaoKSettings CurrentSettings => _settings;
 
@@ -142,8 +155,15 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
         CancelCurrent();
         await _executionGate.WaitAsync();
-        try { _inference.Dispose(); }
-        finally { _executionGate.Release(); }
+        try
+        {
+            if (_managedModelRuntime is not null) await _managedModelRuntime.DisposeAsync();
+        }
+        finally
+        {
+            _inference.Dispose();
+            _executionGate.Release();
+        }
     }
     private async Task<ToolResult> RouteAsync(string category, string request, CancellationToken token)
     {
@@ -194,6 +214,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return new(true, answer);
         }
         catch (ModelQueueFullException) { return new(false, "本地模型请求过多；当前请求未排队。", "RESOURCE_BUSY"); }
+        catch (ModelRuntimeUnavailableException) { return new(false, "本地模型清单、程序或权重校验失败；没有向模型发送请求。", "MODEL_RUNTIME_UNAVAILABLE"); }
         catch (HttpRequestException) { return new(false, "本地推理服务未运行或不可用；没有云端回退。", "LOCAL_MODEL_OFFLINE"); }
         catch (OperationCanceledException) when (!token.IsCancellationRequested) { return new(false, "本地推理超时；没有调用云端服务。", "LOCAL_MODEL_TIMEOUT"); }
         catch (OperationCanceledException) { throw; }
