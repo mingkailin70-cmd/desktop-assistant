@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\..\src\XiaoK.Tools\XiaoK.Tools.csproj" />
+    <ProjectReference Include="..\..\src\XiaoK.Storage\XiaoK.Storage.csproj" />
   </ItemGroup>
   <PropertyGroup>
     <OutputType>Exe</OutputType>

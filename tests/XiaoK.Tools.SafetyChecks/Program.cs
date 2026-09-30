@@ -7,6 +7,7 @@ using Microsoft.Win32.SafeHandles;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 using XiaoK.Inference;
+using XiaoK.Storage;
 using XiaoK.Tools;
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
@@ -39,6 +40,12 @@ try
 
     await CheckDotNetRunnerRejectsEscapingTargetAsync(tempRoot);
     passed.Add("实际 .NET 执行器在启动前拒绝越界目标且不创建验证目录");
+
+    await CheckSqliteTaskStoreRoundTripAndBackupAsync(tempRoot);
+    passed.Add("SQLite 任务存储规范化状态字段、丢弃结果正文并可创建一致性备份");
+
+    await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
+    passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
     await CheckCodeVerificationCancellationPersistsAsync(tempRoot);
     passed.Add("取消已批准的隔离验证会持久化 cancelled 且不修改原项目");
@@ -274,6 +281,79 @@ static string FindRepositoryRoot()
         current = current.Parent;
     }
     throw new DirectoryNotFoundException("安全检查无法定位小K仓库根目录。");
+}
+
+static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
+{
+    var databasePath = Path.Combine(root, "sqlite-roundtrip", "tasks.sqlite3");
+    var backupPath = Path.Combine(root, "sqlite-roundtrip", "tasks-backup.sqlite3");
+    var id = Guid.NewGuid();
+    var now = DateTimeOffset.UtcNow;
+    const string privateSentinel = "PRIVATE_CHAT_BODY_SENTINEL_DO_NOT_STORE";
+    var store = new SqliteTaskStore(databasePath);
+    await store.SaveAsync(new TaskRecord(id, "chat", "用户发来的完整私聊正文", TaskLifecycleState.Completed,
+        now.AddMinutes(-1), now, Result: privateSentinel, ErrorCode: "SAFE_TEST"), CancellationToken.None);
+
+    var recent = await store.GetRecentAsync(20, CancellationToken.None);
+    Require(recent.Count == 1 && recent[0].Id == id && recent[0].Kind == "chat"
+        && recent[0].Summary == "本地对话" && recent[0].Result is null && recent[0].ErrorCode == "SAFE_TEST",
+        "SQLite 任务往返写入保留了非规范字段或遗漏了必要状态。");
+
+    await store.CreateBackupAsync(backupPath, CancellationToken.None);
+    var overwriteRejected = false;
+    try { await store.CreateBackupAsync(backupPath, CancellationToken.None); }
+    catch (IOException) { overwriteRejected = true; }
+    var backup = new SqliteTaskStore(backupPath);
+    var backedUp = await backup.GetRecentAsync(20, CancellationToken.None);
+    Require(overwriteRejected && backedUp.Count == 1 && backedUp[0].Id == id && backedUp[0].Result is null,
+        "SQLite 在线备份未保留任务状态、拒绝覆盖已有文件或泄露结果字段。");
+    Require(DatabaseFilesOmitSentinel(databasePath, privateSentinel)
+        && DatabaseFilesOmitSentinel(backupPath, privateSentinel),
+        "任务结果正文哨兵被写入 SQLite 主文件、WAL 或备份。");
+}
+
+static async Task CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-migration");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var legacyPath = Path.Combine(directory, "tasks.json");
+    const string privateSentinel = "PRIVATE_LEGACY_RESULT_SENTINEL_DO_NOT_STORE";
+    var now = DateTimeOffset.UtcNow;
+    var legacy = new[]
+    {
+        new TaskRecord(Guid.NewGuid(), "file", "用户文件路径和查询词", TaskLifecycleState.Failed,
+            now.AddMinutes(-2), now, Result: privateSentinel, ErrorCode: "SEARCH_FAILED"),
+        new TaskRecord(Guid.NewGuid(), "unknown", privateSentinel, TaskLifecycleState.Completed,
+            now.AddMinutes(-1), now, Result: privateSentinel, ErrorCode: null)
+    };
+    var json = System.Text.Json.JsonSerializer.Serialize(legacy, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+    await File.WriteAllTextAsync(legacyPath, json, new UTF8Encoding(false));
+
+    var store = new SqliteTaskStore(databasePath, legacyPath);
+    var migrated = await store.GetRecentAsync(20, CancellationToken.None);
+    Require(migrated.Count == 1 && migrated[0].Kind == "file" && migrated[0].Summary == "文件查找"
+        && migrated[0].Result is null && migrated[0].ErrorCode == "SEARCH_FAILED",
+        "迁移没有限制旧记录类别、摘要或结果字段。");
+    Require(File.ReadAllText(legacyPath) == json,
+        "迁移过程修改或删除了原有 JSON 文件。");
+
+    var reopened = new SqliteTaskStore(databasePath, legacyPath);
+    var reopenedRows = await reopened.GetRecentAsync(20, CancellationToken.None);
+    Require(reopenedRows.Count == 1 && reopenedRows[0].Id == migrated[0].Id,
+        "旧 JSON 迁移在再次打开数据库时重复导入或覆盖了状态。");
+
+    Require(DatabaseFilesOmitSentinel(databasePath, privateSentinel),
+        "旧结果正文哨兵被复制进 SQLite 数据库。");
+}
+
+static bool DatabaseFilesOmitSentinel(string databasePath, string sentinel)
+{
+    var directory = Path.GetDirectoryName(databasePath)!;
+    var prefix = Path.GetFileName(databasePath);
+    var expected = Encoding.UTF8.GetBytes(sentinel);
+    return Directory.EnumerateFiles(directory, prefix + "*")
+        .All(path => File.ReadAllBytes(path).AsSpan().IndexOf(expected) < 0);
 }
 
 static void CheckInterruptedTaskHistoryIsNotReplayed()

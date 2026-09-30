@@ -35,8 +35,14 @@ outputs/
 *.db
 *.db-shm
 *.db-wal
+*.db-*
 *.sqlite
 *.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.sqlite3*.bak
+**/tasks.json
+**/tasks.json.*
 *.log
 *.secret.json
 

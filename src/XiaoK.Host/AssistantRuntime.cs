@@ -16,7 +16,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 {
     private readonly DateTimeOffset _processStartedAtUtc = DateTimeOffset.UtcNow;
     private readonly XiaoKSettings _settings;
-    private readonly JsonTaskStore _store;
+    private readonly SqliteTaskStore _store;
     private readonly LocalInferenceClient _inference;
     private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly AudioGateway _voice = new();
@@ -30,7 +30,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         _settings = XiaoKSettings.Load();
         Directory.CreateDirectory(_settings.DataRoot);
-        _store = new JsonTaskStore(Path.Combine(_settings.DataRoot, "tasks.json"));
+        _store = new SqliteTaskStore(Path.Combine(_settings.DataRoot, "tasks.sqlite3"),
+            Path.Combine(_settings.DataRoot, "tasks.json"));
         _inference = new LocalInferenceClient(_settings.InferenceEndpoint);
         IManagedModelRuntime? managedRuntime = null;
         try
