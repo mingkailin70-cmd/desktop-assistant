@@ -32,7 +32,9 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     private readonly string _modelSha256;
     private readonly int _contextTokens;
     private readonly int _gpuLayers;
+    private readonly long _expectedGpuMemoryMiB;
     private readonly Uri _endpoint;
+    private readonly IGpuMemoryProbe _gpuMemoryProbe;
     private readonly HttpClient _healthClient;
     private Process? _process;
     private SafeJobHandle? _job;
@@ -47,7 +49,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     private string? _lastError;
 
     private LlamaCppModelRuntime(string modelRoot, string runtimePath, string modelPath,
-        string runtimeSha256, string modelSha256, int contextTokens, int gpuLayers, Uri endpoint)
+        string runtimeSha256, string modelSha256, int contextTokens, int gpuLayers,
+        long expectedGpuMemoryMiB, Uri endpoint, IGpuMemoryProbe gpuMemoryProbe)
     {
         _modelRoot = modelRoot;
         _runtimePath = runtimePath;
@@ -56,7 +59,9 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         _modelSha256 = modelSha256;
         _contextTokens = contextTokens;
         _gpuLayers = gpuLayers;
+        _expectedGpuMemoryMiB = expectedGpuMemoryMiB;
         _endpoint = endpoint;
+        _gpuMemoryProbe = gpuMemoryProbe;
         _healthClient = new HttpClient(new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
@@ -70,7 +75,7 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         : "托管 llama.cpp 最近一次卸载未能确认；下次请求会先检查运行进程。";
 
     /// <summary>Returns null only when no manifest is present. An invalid present manifest must not silently fall back.</summary>
-    public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint)
+    public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint, IGpuMemoryProbe? gpuMemoryProbe = null)
     {
         if (!Path.IsPathFullyQualified(modelRoot) || modelRoot.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("模型目录必须是本机绝对路径。");
@@ -99,6 +104,9 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             throw new InvalidDataException("llama.cpp 清单必须包含两个 64 位十六进制 SHA-256。");
         if (manifest.ContextTokens is < 1024 or > 8192 || manifest.GpuLayers is < 0 or > 99)
             throw new InvalidDataException("llama.cpp 上下文长度或 GPU 层数超出首版范围。");
+        if (manifest.GpuLayers == 0 ? manifest.ExpectedGpuMemoryMiB != 0
+                : manifest.ExpectedGpuMemoryMiB is <= 0 or > 16384)
+            throw new InvalidDataException("GPU 层数与已评估的显存预算不匹配。CPU 模式预算必须为 0；GPU 模式必须提供 1–16,384 MiB 预算。");
 
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
             || uri.Scheme != Uri.UriSchemeHttp
@@ -110,7 +118,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         var runtimePath = Path.Combine(root, RuntimeRelativePath);
         var modelPath = Path.Combine(root, ModelFileName);
         return new LlamaCppModelRuntime(root, runtimePath, modelPath,
-            manifest.RuntimeSha256, manifest.ModelSha256, manifest.ContextTokens, manifest.GpuLayers, uri);
+            manifest.RuntimeSha256, manifest.ModelSha256, manifest.ContextTokens, manifest.GpuLayers,
+            manifest.ExpectedGpuMemoryMiB, uri, gpuMemoryProbe ?? new NvidiaSmiGpuMemoryProbe());
     }
 
     public async ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
@@ -177,6 +186,13 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
 
     private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
+        if (_gpuLayers > 0)
+        {
+            var admission = GpuMemoryAdmissionPolicy.Evaluate(
+                await _gpuMemoryProbe.ReadAsync(cancellationToken).ConfigureAwait(false), _expectedGpuMemoryMiB);
+            if (!admission.Allowed) throw new LowGpuMemoryException(admission.Reason);
+        }
+
         EnsureNoReparseComponents(_modelRoot);
         EnsureNoReparseComponents(_runtimePath);
         EnsureNoReparseComponents(_modelPath);
@@ -224,6 +240,10 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             _ = DrainAndDiscardAsync(_process.StandardOutput);
             _ = DrainAndDiscardAsync(_process.StandardError);
             await WaitUntilReadyAsync(cancellationToken).ConfigureAwait(false);
+            if (_gpuLayers > 0
+                && !GpuMemoryAdmissionPolicy.HasMinimumReserve(
+                    await _gpuMemoryProbe.ReadAsync(cancellationToken).ConfigureAwait(false)))
+                throw new LowGpuMemoryException("模型加载后独显可用显存低于 1 GiB；已停止本地模型进程。");
         }
         catch (Win32Exception ex)
         {
@@ -446,7 +466,7 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     }
 
     private sealed record RuntimeManifest(int SchemaVersion, string RuntimeVersion, string RuntimeSha256,
-        string ModelId, string ModelSha256, int ContextTokens, int GpuLayers);
+        string ModelId, string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB);
 
     private static SafeJobHandle CreateKillOnCloseJob()
     {

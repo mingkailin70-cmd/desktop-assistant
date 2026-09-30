@@ -112,6 +112,12 @@ public sealed class CodeTaskAgent
                 ? new(false, "本地模型清单、程序或权重校验失败；没有向模型发送请求。", "MODEL_RUNTIME_UNAVAILABLE")
                 : await FailAsync(snapshot, $"隔离工作区已创建：{snapshot.WorkspacePath}。本地模型清单、程序或权重校验失败；没有向模型发送请求。", "MODEL_RUNTIME_UNAVAILABLE");
         }
+        catch (LowGpuMemoryException)
+        {
+            return snapshot is null
+                ? new(false, "可用独显显存不足或读数不可用；已拒绝启动模型。", "LOW_VRAM")
+                : await FailAsync(snapshot, $"隔离工作区已创建：{snapshot.WorkspacePath}。可用独显显存不足或读数不可用；已拒绝启动模型。", "LOW_VRAM");
+        }
         catch (HttpRequestException)
         {
             return snapshot is null

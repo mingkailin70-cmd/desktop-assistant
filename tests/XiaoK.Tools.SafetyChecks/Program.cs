@@ -48,6 +48,12 @@ try
     await CheckManagedRuntimeManifestIsStrictAsync(tempRoot);
     passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
 
+    CheckGpuMemoryAdmissionRequiresReserve();
+    passed.Add("GPU 推理准入要求模型预算之外保留至少 1 GiB 显存");
+
+    await CheckGpuPreflightBlocksBeforeRuntimeLaunchAsync(tempRoot);
+    passed.Add("GPU 显存预检不足时在读取运行时文件前拒绝启动");
+
     var hardLinkSkip = await CheckHardLinkedSourceIsRejectedAsync(tempRoot);
     if (hardLinkSkip is null) passed.Add("项目内硬链接不会把目录外文件内容送入模型");
     else skipped.Add("硬链接夹具无法创建，用例跳过：" + hardLinkSkip);
@@ -383,7 +389,8 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
           "modelId": "qwen3.5-4b-q4km",
           "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "contextTokens": 4096,
-          "gpuLayers": 99
+          "gpuLayers": 99,
+          "expectedGpuMemoryMiB": 5000
         }
         """;
     await File.WriteAllTextAsync(manifestPath, validManifest);
@@ -399,7 +406,8 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
           "modelId": "qwen3.5-4b-q4km",
           "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "contextTokens": 4096,
-          "gpuLayers": 99
+          "gpuLayers": 99,
+          "expectedGpuMemoryMiB": 5000
         }
         """);
     try
@@ -416,6 +424,48 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
         throw new InvalidOperationException("非回环托管端点没有被拒绝。");
     }
     catch (InvalidDataException) { }
+}
+
+static void CheckGpuMemoryAdmissionRequiresReserve()
+{
+    var fits = GpuMemoryAdmissionPolicy.Evaluate(new GpuMemorySnapshot(6144, 8192), 5120);
+    var reserveMissing = GpuMemoryAdmissionPolicy.Evaluate(new GpuMemorySnapshot(6000, 8192), 5120);
+    var unavailable = GpuMemoryAdmissionPolicy.Evaluate(null, 1000);
+    Require(fits.Allowed, "预算和 1 GiB 余量均满足时未获准启动模型。");
+    Require(!reserveMissing.Allowed && !unavailable.Allowed,
+        "余量不足或显存读数缺失时仍允许启动模型。");
+    Require(!GpuMemoryAdmissionPolicy.HasMinimumReserve(new GpuMemorySnapshot(1023, 8192)),
+        "模型运行后低于 1 GiB 的余量仍通过校验。");
+}
+
+static async Task CheckGpuPreflightBlocksBeforeRuntimeLaunchAsync(string root)
+{
+    var modelRoot = Path.Combine(root, "gpu-preflight-model-root");
+    Directory.CreateDirectory(modelRoot);
+    await File.WriteAllTextAsync(Path.Combine(modelRoot, "llama-runtime.json"), """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11256",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-4b-q4km",
+          "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "contextTokens": 4096,
+          "gpuLayers": 99,
+          "expectedGpuMemoryMiB": 5000
+        }
+        """);
+
+    var runtime = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/",
+        new FixedGpuMemoryProbe(new GpuMemorySnapshot(5500, 8192)));
+    if (runtime is null) throw new InvalidOperationException("托管 GPU 清单未被加载。");
+    var rejected = false;
+    try
+    {
+        await using var lease = await runtime.AcquireAsync(CancellationToken.None);
+    }
+    catch (LowGpuMemoryException) { rejected = true; }
+    finally { await runtime.DisposeAsync(); }
+    Require(rejected, "GPU 显存预算不足时仍通过了托管运行时预检。");
 }
 
 static async Task<string?> CheckHardLinkedSourceIsRejectedAsync(string root)
@@ -614,6 +664,15 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
             if (current is not null) Interlocked.Decrement(ref current._activeLeases);
             return ValueTask.CompletedTask;
         }
+    }
+}
+
+internal sealed class FixedGpuMemoryProbe(GpuMemorySnapshot? snapshot) : IGpuMemoryProbe
+{
+    public Task<GpuMemorySnapshot?> ReadAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(snapshot);
     }
 }
 
