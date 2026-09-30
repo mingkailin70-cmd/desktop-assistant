@@ -8,6 +8,7 @@ public sealed class MessageNoticePolicy
 {
     private const int MaximumRememberedDedupeKeys = 4096;
     private const int MaximumRateLimitedConversations = 512;
+    private static readonly TimeSpan MaximumNoticeAge = TimeSpan.FromHours(24);
     private readonly HashSet<string> _wechatAppIds;
     private readonly HashSet<string> _qqAppIds;
     private readonly Dictionary<string, DateTimeOffset> _recent = new(StringComparer.Ordinal);
@@ -63,23 +64,14 @@ public sealed class MessageNoticePolicy
         var safeSender = LimitMetadata(sender, 256);
         var notice = new MessageNotice(appId, sourceAppId!, safeConversationId, safeSender, isPrivateConversation == true,
             null, receivedAtUtc, HashKey($"{appId}\0{deduplicationKey}"));
+        if (receivedAtUtc < DateTimeOffset.UtcNow - MaximumNoticeAge)
+            return new(true, false, "通知已超过24小时，已跳过自动分析；请手动查看会话。", notice);
         if (isPrivateConversation != true)
             return new(true, false, "无法确定这是私聊，已保留为普通提示，不做自动分析。", notice);
+        if (safeConversationId is null && safeSender is null)
+            return new(true, false, "无法核实通知对应的会话，已跳过自动分析；请手动查看会话。", notice);
 
-        if (visibleBodyReader is null)
-            return new(false, false, "通知正文读取器无效，已跳过自动分析。");
-        string? visibleBody;
-        try { visibleBody = visibleBodyReader(); }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
-        { return new(true, false, "无法读取通知正文，已跳过自动分析。", notice); }
-
-        if (string.IsNullOrWhiteSpace(visibleBody))
-            return new(true, false, "通知没有正文。请手动打开对应会话；小K不会切换窗口。", notice);
-        if (visibleBody.Length > 20_000)
-            return new(true, false, "通知正文超过本地处理长度上限，已跳过自动分析。", notice with { Body = null });
-        notice = notice with { Body = visibleBody };
-
-        var rateIdentity = safeConversationId ?? safeSender ?? "unknown-conversation";
+        var rateIdentity = safeConversationId ?? safeSender!;
         var rateKey = HashKey($"{appId}\0{rateIdentity}");
         lock (_gate)
         {
@@ -95,14 +87,27 @@ public sealed class MessageNoticePolicy
             if (!_conversationRates.TryGetValue(rateKey, out var timestamps))
             {
                 if (_conversationRates.Count >= MaximumRateLimitedConversations)
-                    return new(true, false, "通知涉及的会话过多，已暂缓自动分析；请手动查看会话。", notice with { Body = null });
+                    return new(true, false, "通知涉及的会话过多，已暂缓自动处理；请手动查看会话。", notice);
                 timestamps = new Queue<DateTimeOffset>();
                 _conversationRates.Add(rateKey, timestamps);
             }
             if (timestamps.Count >= _maximumPrivateNoticesPerWindow)
-                return new(true, false, "该会话通知过于频繁，已暂缓自动分析；请手动查看会话。", notice with { Body = null });
+                return new(true, false, "该会话通知过于频繁，已暂缓自动处理；请手动查看会话。", notice);
             timestamps.Enqueue(now);
         }
+
+        if (visibleBodyReader is null)
+            return new(false, false, "通知正文读取器无效，已跳过自动分析。");
+        string? visibleBody;
+        try { visibleBody = visibleBodyReader(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
+        { return new(true, false, "无法读取通知正文，已跳过自动分析。", notice); }
+
+        if (string.IsNullOrWhiteSpace(visibleBody))
+            return new(true, false, "通知没有正文。请手动打开对应会话；小K不会切换窗口。", notice);
+        if (visibleBody.Length > 20_000)
+            return new(true, false, "通知正文超过本地处理长度上限，已跳过自动分析。", notice with { Body = null });
+        notice = notice with { Body = visibleBody };
 
         return new(true, true, "收到微信/QQ私聊通知，正在本地分析可见正文。", notice);
     }

@@ -83,6 +83,12 @@ try
     CheckNoticeWithoutVisibleBodyDoesNotAnalyze();
     passed.Add("无可见正文或正文超限时不触发分析且不保留正文");
 
+    CheckStaleOrUnattributedPrivateNoticeDoesNotReadBody();
+    passed.Add("过期通知或缺少会话身份的私聊在读取正文前被拦截");
+
+    CheckNoticeRateLimitRunsBeforeBodyRead();
+    passed.Add("会话限速在读取通知正文前生效");
+
     if (!CheckFileSearchRejectsReparsePoints(tempRoot, out var searchLinkSkipReason))
         skipped.Add("文件搜索重解析点夹具无法创建，用例跳过：" + searchLinkSkipReason);
     else passed.Add("文件搜索拒绝重解析搜索根并忽略根目录内的外部联接目标");
@@ -330,6 +336,39 @@ static void CheckNoticeWithoutVisibleBodyDoesNotAnalyze()
         () => new string('x', 20_001), DateTimeOffset.UtcNow, "notice-large-body", true, true);
     Require(oversized.Accepted && !oversized.AnalyzeBody && oversized.Notice?.Body is null,
         "正文超限的通知触发了分析或保留了正文。");
+}
+
+static void CheckStaleOrUnattributedPrivateNoticeDoesNotReadBody()
+{
+    var stalePolicy = CreateNoticePolicy();
+    var staleReads = 0;
+    var stale = stalePolicy.Inspect("wechat", "wechat.package!Main", "chat-stale", "Alice", true,
+        () => { staleReads++; return "过期正文"; }, DateTimeOffset.UtcNow.AddHours(-25), "notice-stale", true, true);
+    Require(stale.Accepted && !stale.AnalyzeBody && stale.Notice?.Body is null && staleReads == 0,
+        "过期通知在显式拒绝正文读取前未被拦截。");
+
+    var unattributedPolicy = CreateNoticePolicy();
+    var unattributedReads = 0;
+    var unattributed = unattributedPolicy.Inspect("qq", "qq.package!Main", null, null, true,
+        () => { unattributedReads++; return "无归属正文"; }, DateTimeOffset.UtcNow, "notice-unattributed", true, true);
+    Require(unattributed.Accepted && !unattributed.AnalyzeBody && unattributed.Notice?.Body is null && unattributedReads == 0,
+        "缺少会话ID和发送者的私聊通知读取了正文或触发了分析。");
+}
+
+static void CheckNoticeRateLimitRunsBeforeBodyRead()
+{
+    var policy = new MessageNoticePolicy(["wechat.package!Main"], [], maximumPrivateNoticesPerWindow: 1);
+    var bodyReads = 0;
+    string? ReadBody() { bodyReads++; return "单条可见消息"; }
+
+    var first = policy.Inspect("wechat", "wechat.package!Main", "chat-rate", "Alice", true,
+        ReadBody, DateTimeOffset.UtcNow, "notice-rate-1", true, true);
+    var limited = policy.Inspect("wechat", "wechat.package!Main", "chat-rate", "Alice", true,
+        ReadBody, DateTimeOffset.UtcNow, "notice-rate-2", true, true);
+
+    Require(first.AnalyzeBody && bodyReads == 1, "首条会话通知未按预期读取。");
+    Require(limited.Accepted && !limited.AnalyzeBody && limited.Notice?.Body is null && bodyReads == 1,
+        "限速通知在限速决定之前读取了正文或触发了分析。");
 }
 
 static MessageNoticePolicy CreateNoticePolicy() => new(["wechat.package!Main"], ["qq.package!Main"]);
