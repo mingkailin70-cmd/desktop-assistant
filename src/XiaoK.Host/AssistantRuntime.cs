@@ -414,6 +414,8 @@ internal sealed record XiaoKSettings
     public string EvaluationRoot { get; init; } = @"D:\XiaoK\Evaluations";
     public string CodeProjectRoot { get; init; } = "";
     public string CodeWorkspaceRoot { get; init; } = @"D:\XiaoK\Workspaces";
+    public double? PetWindowLeft { get; init; }
+    public double? PetWindowTop { get; init; }
     public string InferenceEndpoint { get; init; } = "http://127.0.0.1:8080/";
     public bool MonitorWeChatNotifications { get; init; }
     public bool MonitorQQNotifications { get; init; }

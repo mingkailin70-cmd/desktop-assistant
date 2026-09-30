@@ -95,7 +95,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void Header_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove();
+        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed)
+        {
+            try { DragMove(); }
+            catch (InvalidOperationException) { return; }
+            ClampWindowToVirtualDesktop();
+            SaveWindowPosition();
+        }
     }
     private async void RequestBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
@@ -210,6 +216,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     {
         _source = (HwndSource)PresentationSource.FromVisual(this)!;
         _source.AddHook(HotkeyHook);
+        RestoreWindowPosition();
         _hotkeyRegistered = RegisterHotKey(_source.Handle, 1901, ModControl | ModShift, (uint)System.Windows.Forms.Keys.K);
         if (!_hotkeyRegistered) SetStatus("快捷键不可用 · 托盘可打开");
     }
@@ -296,6 +303,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             MinHeight = expanded ? 360 : 150;
             Width = expanded ? _expandedWidth : 164;
             Height = expanded ? _expandedHeight : 164;
+            ClampWindowToVirtualDesktop();
             if (expanded)
             {
                 ExpandButton.Content = "收起";
@@ -323,8 +331,62 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             && e.OriginalSource is FrameworkElement element
             && element.Name is not ("PetStatusText" or "PetStatusDot"))
         {
-            try { DragMove(); }
+            try
+            {
+                DragMove();
+                ClampWindowToVirtualDesktop();
+                SaveWindowPosition();
+            }
             catch (InvalidOperationException) { }
+        }
+    }
+
+    private void RestoreWindowPosition()
+    {
+        var savedLeft = _runtime.CurrentSettings.PetWindowLeft;
+        var savedTop = _runtime.CurrentSettings.PetWindowTop;
+        if (savedLeft is double left && savedTop is double top
+            && double.IsFinite(left) && double.IsFinite(top))
+        {
+            Left = left;
+            Top = top;
+        }
+        else
+        {
+            var workArea = SystemParameters.WorkArea;
+            Left = Math.Max(workArea.Left, workArea.Right - Width - 24);
+            Top = Math.Max(workArea.Top, workArea.Bottom - Height - 24);
+        }
+        ClampWindowToVirtualDesktop();
+    }
+
+    private void ClampWindowToVirtualDesktop()
+    {
+        if (!double.IsFinite(Left) || !double.IsFinite(Top)) return;
+        var desktopLeft = SystemParameters.VirtualScreenLeft;
+        var desktopTop = SystemParameters.VirtualScreenTop;
+        var desktopWidth = SystemParameters.VirtualScreenWidth;
+        var desktopHeight = SystemParameters.VirtualScreenHeight;
+        if (desktopWidth <= 0 || desktopHeight <= 0) return;
+
+        var rightmostLeft = Math.Max(desktopLeft, desktopLeft + desktopWidth - Width);
+        var bottommostTop = Math.Max(desktopTop, desktopTop + desktopHeight - Height);
+        Left = Math.Clamp(Left, desktopLeft, rightmostLeft);
+        Top = Math.Clamp(Top, desktopTop, bottommostTop);
+    }
+
+    private void SaveWindowPosition()
+    {
+        if (!double.IsFinite(Left) || !double.IsFinite(Top)) return;
+        try
+        {
+            var latest = XiaoKSettings.Load();
+            (latest with { PetWindowLeft = Left, PetWindowTop = Top }).Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or System.Security.SecurityException or InvalidOperationException or ArgumentException)
+        {
+            SetStatus("桌宠位置保存失败");
         }
     }
 
