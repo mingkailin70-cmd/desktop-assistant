@@ -10,10 +10,10 @@
 
 - `global.json` 固定 .NET SDK 版本为 10.0.401。
 - WPF 桌面壳、托盘菜单、`Ctrl+Shift+K` 快捷键、取消和停麦入口可以编译。
-- 固定工具目前包含允许列表内的应用启动和有限范围文件名查找。
+- 固定工具目前包含允许列表内的应用启动、有限范围文件名查找和隔离工作区编程代理；编程代理只生成待审阅差异，不运行命令、不改原项目。
 - 本地推理客户端只接受回环 HTTP 地址。
-- 已有消息通知策略和 MSIX 清单草稿；Windows 通知监听尚未安装或接入。
-- 录音、本地模型进程管理、隔离编程代理、浏览器操作及微信/QQ发送尚未实现。
+- Windows `UserNotificationListener` 已接入，但需具有 MSIX 身份并取得用户授权才会启动。当前发布者 AUMID 和私聊/群聊分类尚未实测；会话类型未知时不会读取正文或自动分析。
+- 录音、本地模型进程管理、浏览器操作和微信/QQ实际发送尚未实现。
 - 任务状态暂存于仓库外的小型 JSON 文件；首版前需要迁移到 SQLite。
 - 模型权重、运行时包、私聊正文、个人数据和本机凭证不得存入仓库。
 
@@ -21,21 +21,24 @@ P0 仍需本机证据：每款客户端至少 30 条正文可见的私聊通知�
 
 ## 构建
 
-需要 Windows 和 .NET SDK 10.0.401。当前没有使用或还原第三方 NuGet 包。
+需要 Windows 和本机固定版 .NET SDK 10.0.401。Host 的 Windows SDK targeting pack 固定为 `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87；本机已缓存，NuGet 源映射仅允许这个包。应用目前没有其他 NuGet 依赖。
 
 ```powershell
-dotnet --version
-dotnet build XiaoK.sln --configuration Release
-dotnet run --project src/XiaoK.Host/XiaoK.Host.csproj
+$dotnet = if (Test-Path .\.tools\dotnet\dotnet.exe) { Resolve-Path .\.tools\dotnet\dotnet.exe } else { 'dotnet' }
+& $dotnet --version
+& $dotnet restore XiaoK.sln
+& $dotnet build XiaoK.sln --configuration Release --no-restore
+& $dotnet run --project tests\XiaoK.Tools.SafetyChecks\XiaoK.Tools.SafetyChecks.csproj --configuration Release --no-build --no-restore
+& $dotnet run --project src\XiaoK.Host\XiaoK.Host.csproj --configuration Release --no-build --no-restore
 ```
 
-在第三方依赖完成审核前，本地 NuGet 源配置保持为空。仓库通过 `global.json` 固定 SDK 版本。
+`.tools\dotnet` 是本仓库开发机上的 SDK 副本，已被 Git 忽略；其他电脑可使用已安装的 10.0.401 SDK。首次还原若需下载固定 Windows SDK 引用包，NuGet 配置会将来源限制到该包；其他依赖不会自动获得来源映射。
 
 ## 本机数据与设置
 
 - 用户设置：`%LOCALAPPDATA%\XiaoK\settings.json`
 - 任务状态：`D:\XiaoK\Data\tasks.json`
-- 规划中的模型、缓存和评测数据：`D:\XiaoK\Models`、`D:\XiaoK\Cache`、`D:\XiaoK\Evaluations`
+- 模型、缓存和评测数据目标目录：`D:\XiaoK\Models`、`D:\XiaoK\Cache`、`D:\XiaoK\Evaluations`
 
 可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。模型下载和第三方运行时安装不属于仓库内容。
 

@@ -33,6 +33,9 @@ try
     await CheckWorkspaceRetentionLimitAsync(tempRoot);
     passed.Add("达到五个任务目录上限后拒绝继续创建副本");
 
+    await CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync();
+    passed.Add("交互推理在编程代理的后台步骤边界优先执行");
+
     var hardLinkSkip = await CheckHardLinkedSourceIsRejectedAsync(tempRoot);
     if (hardLinkSkip is null) passed.Add("项目内硬链接不会把目录外文件内容送入模型");
     else skipped.Add("硬链接夹具无法创建，用例跳过：" + hardLinkSkip);
@@ -229,6 +232,42 @@ static void CheckNoticeWithoutVisibleBodyDoesNotAnalyze()
 }
 
 static MessageNoticePolicy CreateNoticePolicy() => new(["wechat.package!Main"], ["qq.package!Main"]);
+
+static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync()
+{
+    var broker = new ModelBroker();
+    var firstStepStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var releaseFirstStep = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var order = new ConcurrentQueue<string>();
+
+    var firstBackgroundStep = broker.RunBackgroundStepAsync(async token =>
+    {
+        order.Enqueue("后台步骤1开始");
+        firstStepStarted.TrySetResult();
+        await releaseFirstStep.Task.WaitAsync(token);
+        order.Enqueue("后台步骤1结束");
+        return "step-1";
+    }, CancellationToken.None);
+
+    await firstStepStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    var secondBackgroundStep = broker.RunBackgroundStepAsync(token =>
+    {
+        order.Enqueue("后台步骤2");
+        return Task.FromResult("step-2");
+    }, CancellationToken.None);
+    var interactive = broker.RunInteractiveAsync(token =>
+    {
+        order.Enqueue("交互请求");
+        return Task.FromResult("interactive");
+    }, CancellationToken.None);
+
+    releaseFirstStep.TrySetResult();
+    await Task.WhenAll(firstBackgroundStep, secondBackgroundStep, interactive).WaitAsync(TimeSpan.FromSeconds(5));
+    var sequence = order.ToArray();
+    Require(Array.IndexOf(sequence, "后台步骤1结束") < Array.IndexOf(sequence, "交互请求")
+        && Array.IndexOf(sequence, "交互请求") < Array.IndexOf(sequence, "后台步骤2"),
+        "后台步骤结束后，交互请求没有优先于下一后台步骤执行。");
+}
 
 static async Task<string?> CheckHardLinkedSourceIsRejectedAsync(string root)
 {
