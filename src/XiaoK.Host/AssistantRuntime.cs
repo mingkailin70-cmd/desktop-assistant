@@ -207,7 +207,23 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (body.Length == 0) return new(false, "请在冒号后粘贴要分析的单条消息。后台通知接入后，小K只会分析可见正文。", "EMPTY_MESSAGE");
             var tool = category == "draft" ? "message.draft.v1" : "message.analyze.v1";
             var key = category == "draft" ? "draft" : "message";
-            return await _broker.ExecuteAsync(new ToolProposal(tool, ImmutableDictionary<string, string>.Empty.Add(key, body),
+            var arguments = ImmutableDictionary<string, string>.Empty.Add(key, body);
+            if (category == "draft")
+            {
+                var styleId = ContactReplyStyleCatalog.DefaultStyleId;
+                if (TryExtractDraftContact(request, out var contactName))
+                {
+                    if (!ContactReplyStyleCatalog.TryNormalizeContactName(contactName, out var normalizedContact))
+                        return new(false, "联系人名称无效；请使用设置中保存的名称。", "INVALID_DRAFT_CONTACT");
+                    styleId = ContactReplyStyleCatalog.FindStyleForContact(XiaoKSettings.Load().ContactReplyStyles, normalizedContact)
+                        ?? string.Empty;
+                    if (styleId.Length == 0)
+                        return new(false, $"没有为“{normalizedContact}”保存回复风格。请先到设置中添加并确认该联系人的风格。", "DRAFT_STYLE_NOT_CONFIGURED");
+                }
+                arguments = arguments.Add("style_id", styleId);
+            }
+
+            return await _broker.ExecuteAsync(new ToolProposal(tool, arguments,
                 "用户本次提供的单条消息", "本地生成分析或草稿；不发送"), token);
         }
 
@@ -286,6 +302,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return request[prefix.Length..].Trim(' ', '，', ',', '：', ':');
         return string.Empty;
     }
+
+    private static bool TryExtractDraftContact(string request, out string? contactName)
+    {
+        contactName = null;
+        var colon = request.IndexOfAny(['：', ':']);
+        if (colon < 0) return false;
+        var header = request[..colon].Trim();
+        foreach (var prefix in new[] { "帮我回复给", "帮我回给", "起草回复给", "回复草稿给" })
+        {
+            if (!header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            contactName = header[prefix.Length..].Trim();
+            return true;
+        }
+        return false;
+    }
 }
 
 internal sealed record XiaoKSettings
@@ -300,6 +331,7 @@ internal sealed record XiaoKSettings
     public bool MonitorQQNotifications { get; init; }
     public List<string> WeChatPublisherAppIds { get; init; } = [];
     public List<string> QQPublisherAppIds { get; init; } = [];
+    public List<ContactReplyStylePreference> ContactReplyStyles { get; init; } = [];
     public List<AppSetting> Applications { get; init; } = [];
     public List<RootSetting> SearchRoots { get; init; } = [];
 
@@ -359,8 +391,25 @@ internal sealed record XiaoKSettings
         Applications = Applications.Count == 0 ? defaults.Applications : Applications,
         SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots,
         WeChatPublisherAppIds = WeChatPublisherAppIds ?? [],
-        QQPublisherAppIds = QQPublisherAppIds ?? []
+        QQPublisherAppIds = QQPublisherAppIds ?? [],
+        ContactReplyStyles = SanitizeContactReplyStyles(ContactReplyStyles)
     };
+
+    private static List<ContactReplyStylePreference> SanitizeContactReplyStyles(IEnumerable<ContactReplyStylePreference>? preferences)
+    {
+        var result = new List<ContactReplyStylePreference>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var preference in preferences ?? [])
+        {
+            if (preference is null
+                || !ContactReplyStyleCatalog.TryNormalizeContactName(preference.ContactName, out var name)
+                || !ContactReplyStyleCatalog.IsSupportedStyle(preference.StyleId)
+                || !seen.Add(name)) continue;
+            result.Add(preference with { ContactName = name, Source = ContactReplyStyleCatalog.UserConfirmedSource });
+            if (result.Count >= 200) break;
+        }
+        return result;
+    }
 
     internal static string? FindWorkspace(string start)
     {

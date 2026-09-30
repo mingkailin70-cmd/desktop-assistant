@@ -1,8 +1,10 @@
 using System.IO;
 using System.Security;
 using System.Diagnostics;
+using System.Collections.ObjectModel;
 using System.Windows;
 using Forms = System.Windows.Forms;
+using XiaoK.Core;
 
 namespace XiaoK.Host;
 
@@ -11,6 +13,7 @@ public partial class SettingsWindow : Window
     private readonly XiaoKSettings _original;
     private readonly Func<Task<string>> _requestNotificationAccess;
     private readonly bool _startupWasEnabled;
+    private readonly ObservableCollection<ContactReplyStylePreference> _contactReplyStyles;
     private TimeSpan _previousCpuTime;
     private long _previousCpuSampleTimestamp;
 
@@ -18,6 +21,7 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         _original = settings;
+        _contactReplyStyles = new ObservableCollection<ContactReplyStylePreference>(settings.ContactReplyStyles);
         _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
@@ -32,6 +36,11 @@ public partial class SettingsWindow : Window
         WeChatAppIdsBox.Text = string.Join(Environment.NewLine, settings.WeChatPublisherAppIds);
         QQAppIdsBox.Text = string.Join(Environment.NewLine, settings.QQPublisherAppIds);
         NotificationStatusText.Text = notificationMonitor.Status;
+        ContactStylesList.ItemsSource = _contactReplyStyles;
+        ContactStyleBox.ItemsSource = ContactReplyStyleCatalog.Options;
+        ContactStyleBox.DisplayMemberPath = nameof(ContactReplyStyleOption.DisplayName);
+        ContactStyleBox.SelectedValuePath = nameof(ContactReplyStyleOption.Id);
+        ContactStyleBox.SelectedValue = ContactReplyStyleCatalog.DefaultStyleId;
 
         var startupSupported = false;
         var startupStatus = "MSIX 登录启动任务尚未接入；此打包版本不能通过注册表设置自启动。";
@@ -149,6 +158,47 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void AddContactStyle_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ContactReplyStyleCatalog.TryNormalizeContactName(ContactStyleNameBox.Text, out var contactName))
+        {
+            ContactStyleStatusText.Text = "名称不能为空，最长80个字符，且不能包含控制字符或冒号。";
+            return;
+        }
+        if (ContactStyleBox.SelectedValue is not string styleId || !ContactReplyStyleCatalog.IsSupportedStyle(styleId))
+        {
+            ContactStyleStatusText.Text = "请选择列表中的固定回复风格。";
+            return;
+        }
+
+        var existing = _contactReplyStyles.FirstOrDefault(item =>
+            string.Equals(item.ContactName, contactName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) _contactReplyStyles.Remove(existing);
+        else if (_contactReplyStyles.Count >= 200)
+        {
+            ContactStyleStatusText.Text = "最多保存200条联系人风格偏好。";
+            return;
+        }
+
+        var preference = new ContactReplyStylePreference(contactName, styleId,
+            ContactReplyStyleCatalog.UserConfirmedSource, DateTimeOffset.UtcNow);
+        _contactReplyStyles.Insert(0, preference);
+        ContactStylesList.SelectedItem = preference;
+        ContactStyleNameBox.Clear();
+        ContactStyleStatusText.Text = "风格已记录在待保存列表中；点击设置底部的“保存”后生效。";
+    }
+
+    private void RemoveContactStyle_Click(object sender, RoutedEventArgs e)
+    {
+        if (ContactStylesList.SelectedItem is not ContactReplyStylePreference preference)
+        {
+            ContactStyleStatusText.Text = "请先选择要删除的联系人风格偏好。";
+            return;
+        }
+        _contactReplyStyles.Remove(preference);
+        ContactStyleStatusText.Text = "已从待保存列表移除；点击设置底部的“保存”后删除生效。";
+    }
+
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var startupRequested = StartupCheck.IsEnabled && StartupCheck.IsChecked == true;
@@ -167,7 +217,8 @@ public partial class SettingsWindow : Window
                 MonitorWeChatNotifications = MonitorWeChatCheck.IsChecked == true,
                 MonitorQQNotifications = MonitorQQCheck.IsChecked == true,
                 WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
-                QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
+                QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ"),
+                ContactReplyStyles = _contactReplyStyles.ToList()
             };
             EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot, updated.CodeWorkspaceRoot);
             if (updated.CodeProjectRoot.Length > 0 && PathsOverlap(updated.CodeProjectRoot, updated.CodeWorkspaceRoot))

@@ -61,7 +61,7 @@ public sealed class ToolBroker
             "app.launch.v1" => ValidateAppLaunch(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
-            "message.draft.v1" => ValidateMessage(proposal, "draft"),
+            "message.draft.v1" => ValidateDraft(proposal),
             "message.send.v1" => ValidateSend(proposal),
             "code.task.create.v1" => proposal.Arguments.Count == 1
                 && proposal.Arguments.TryGetValue("instruction", out var instruction)
@@ -110,6 +110,19 @@ public sealed class ToolBroker
         return null;
     }
 
+    private static ToolResult? ValidateDraft(ToolProposal proposal)
+    {
+        var styleId = proposal.Arguments.GetValueOrDefault("style_id", ContactReplyStyleCatalog.DefaultStyleId);
+        if (proposal.Arguments.Count is < 1 or > 2
+            || proposal.Arguments.Keys.Any(key => key is not ("draft" or "style_id"))
+            || !proposal.Arguments.TryGetValue("draft", out var body)
+            || string.IsNullOrWhiteSpace(body) || body.Length > 20_000
+            || proposal.Target != "用户本次提供的单条消息"
+            || !ContactReplyStyleCatalog.IsSupportedStyle(styleId))
+            return InvalidProposal("回复草稿必须基于本次提供的单条消息，并使用固定风格选项。文案不会自动发送。");
+        return null;
+    }
+
     private static ToolResult? ValidateSend(ToolProposal proposal)
     {
         var args = proposal.Arguments;
@@ -130,7 +143,9 @@ public sealed class ToolBroker
         CompleteAsync(proposal, "请用中文分析用户提供的单条聊天通知。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "message", token);
 
     private Task<ToolResult> DraftAsync(ToolProposal proposal, CancellationToken token) =>
-        CompleteAsync(proposal, "根据用户提供的单条消息起草简洁中文回复。不得声称已发送。只输出草稿正文。", "draft", token);
+        CompleteAsync(proposal,
+            ContactReplyStyleCatalog.CreateSystemPrompt(proposal.Arguments.GetValueOrDefault("style_id", ContactReplyStyleCatalog.DefaultStyleId)),
+            "draft", token);
 
     private async Task<ToolResult> CompleteAsync(ToolProposal proposal, string systemPrompt, string key, CancellationToken token)
     {

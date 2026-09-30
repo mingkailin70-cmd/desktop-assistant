@@ -59,6 +59,37 @@
                 <TextBlock Text="只允许 localhost / 127.0.0.1 / ::1；远程服务会被拒绝。"
                            FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
+                <Separator Margin="0,0,0,12"/>
+                <TextBlock Text="联系人回复风格" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,6"/>
+                <TextBlock Text="只保存你填写的联系人名称、固定风格、确认来源和更新时间；不保存聊天正文。起草时可输入“帮我回复给联系人名：消息内容”。"
+                           FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <TextBlock Text="联系人名称" FontSize="11"/>
+                <TextBox x:Name="ContactStyleNameBox" MinHeight="32" Padding="7,5" Margin="0,0,0,6"
+                         ToolTip="联系人名称，最多80个字符"/>
+                <TextBlock Text="回复风格" FontSize="11"/>
+                <DockPanel Margin="0,0,0,6">
+                    <Button DockPanel.Dock="Right" Content="添加 / 更新" Click="AddContactStyle_Click" Margin="8,0,0,0"/>
+                    <ComboBox x:Name="ContactStyleBox" MinHeight="32" Padding="5"/>
+                </DockPanel>
+                <ListBox x:Name="ContactStylesList" Height="112" SelectionMode="Single">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="2,3">
+                                <TextBlock Text="{Binding ContactName}" FontWeight="SemiBold"/>
+                                <TextBlock FontSize="11" Foreground="#68728A">
+                                    <Run Text="{Binding StyleDisplayName}"/>
+                                    <Run Text=" · 来源："/>
+                                    <Run Text="{Binding SourceDisplayName}"/>
+                                    <Run Text=" · 更新："/>
+                                    <Run Text="{Binding UpdatedAtUtc}"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <Button Content="删除选中的风格偏好" Click="RemoveContactStyle_Click" HorizontalAlignment="Left" Margin="0,5,0,2"/>
+                <TextBlock x:Name="ContactStyleStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,14"/>
+
                 <Separator Margin="0,0,0,14"/>
                 <TextBlock Text="登录与能力状态" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,8"/>
                 <CheckBox x:Name="StartupCheck" Content="登录 Windows 后在托盘启动小K" Margin="0,0,0,4"/>
