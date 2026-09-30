@@ -25,6 +25,18 @@
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseDataRoot_Click" Margin="8,0,0,0"/>
                     <TextBox x:Name="DataRootBox" MinHeight="32" Padding="7,5"/>
                 </DockPanel>
+                <Border Background="White" BorderBrush="#E7EAF1" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="任务、回复偏好与审批记录数据库" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="ActiveDatabasePathText" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,3,0,7"/>
+                        <WrapPanel>
+                            <Button x:Name="CreateDatabaseBackupButton" Content="创建数据库备份…" Click="CreateDatabaseBackup_Click" Margin="0,0,6,4"/>
+                            <Button x:Name="RestoreDatabaseBackupButton" Content="从备份恢复…" Click="RestoreDatabaseBackup_Click" Margin="0,0,6,4"/>
+                            <Button x:Name="ViewApprovalAuditButton" Content="查看审批记录…" Click="ViewApprovalAudit_Click" Margin="0,0,0,4"/>
+                        </WrapPanel>
+                        <TextBlock x:Name="DatabaseMaintenanceStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </Border>
                 <TextBlock Text="模型目录（供后续本地推理运行时使用）"/>
                 <DockPanel Margin="0,4,0,12">
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseModelRoot_Click" Margin="8,0,0,0"/>

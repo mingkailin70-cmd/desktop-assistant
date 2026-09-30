@@ -1,0 +1,30 @@
+<Window x:Class="XiaoK.Host.ApprovalAuditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="本地审批记录" Width="560" Height="400" MinWidth="480" MinHeight="300"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="#F7F8FC" ShowInTaskbar="False">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="最近的本地审批" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
+            <TextBlock Text="最多显示最近100条固定动作和决定；不会保存预览正文，也不会据此恢复或重放操作。"
+                       FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,4,0,0"/>
+        </StackPanel>
+        <ListView Grid.Row="1" ItemsSource="{Binding Records}" Background="White">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="动作" DisplayMemberBinding="{Binding Action}" Width="175"/>
+                    <GridViewColumn Header="决定" DisplayMemberBinding="{Binding Outcome}" Width="115"/>
+                    <GridViewColumn Header="时间（本地）" DisplayMemberBinding="{Binding LocalTime}" Width="205"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+        <TextBlock Grid.Row="2" Text="未显示收件人、消息内容、附件或项目路径。"
+                   FontSize="11" Foreground="#68728A" Margin="0,10,0,0"/>
+    </Grid>
+</Window>

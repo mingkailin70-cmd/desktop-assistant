@@ -415,6 +415,42 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         && backedUpAudit.Count == 2,
         "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
+    var changedAfterBackup = new ContactReplyStylePreference("Charlie", "casual",
+        ContactReplyStyleCatalog.UserConfirmedSource, DateTimeOffset.UtcNow);
+    await store.ReplaceContactReplyStylesAsync([changedAfterBackup], CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    var safetyBackupPath = await store.RestoreBackupAsync(backupPath, CancellationToken.None);
+    var restoredPreferences = await store.GetContactReplyStylesAsync(CancellationToken.None);
+    var restoredAudit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    var safetyBackup = new SqliteTaskStore(safetyBackupPath);
+    var safetyPreferences = await safetyBackup.GetContactReplyStylesAsync(CancellationToken.None);
+    var safetyAudit = await safetyBackup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    Require(restoredPreferences.Count == 1 && restoredPreferences[0].ContactName == "Bob"
+        && restoredAudit.Count == 2 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
+        && safetyAudit.Count == 3,
+        "数据库恢复未恢复所选快照，或恢复前的活动数据库没有留下可用保护副本。");
+
+    var incompatibleBackupPath = Path.Combine(directory, "incompatible.sqlite3");
+    await store.CreateBackupAsync(incompatibleBackupPath, CancellationToken.None);
+    SqliteSchemaFixture.SetUserVersion(incompatibleBackupPath, 99);
+    var incompatibleRejected = false;
+    try { await store.RestoreBackupAsync(incompatibleBackupPath, CancellationToken.None); }
+    catch (InvalidDataException) { incompatibleRejected = true; }
+    var unchangedAfterReject = await store.GetContactReplyStylesAsync(CancellationToken.None);
+    Require(incompatibleRejected && unchangedAfterReject.Count == 1 && unchangedAfterReject[0].ContactName == "Bob",
+        "不兼容的恢复文件未在替换活动数据库前拒绝。");
+
+    var unexpectedSchemaPath = Path.Combine(directory, "unexpected-schema.sqlite3");
+    await store.CreateBackupAsync(unexpectedSchemaPath, CancellationToken.None);
+    SqliteSchemaFixture.AddUnexpectedIndex(unexpectedSchemaPath);
+    var unexpectedSchemaRejected = false;
+    try { await store.RestoreBackupAsync(unexpectedSchemaPath, CancellationToken.None); }
+    catch (InvalidDataException) { unexpectedSchemaRejected = true; }
+    unchangedAfterReject = await store.GetContactReplyStylesAsync(CancellationToken.None);
+    Require(unexpectedSchemaRejected && unchangedAfterReject.Count == 1 && unchangedAfterReject[0].ContactName == "Bob",
+        "包含未知索引的恢复文件未在替换活动数据库前拒绝。");
+
     SqliteSchemaFixture.RevertToVersionOne(databasePath);
     var migratedFromV1 = new SqliteTaskStore(databasePath, legacyContactReplyStyles: [legacy]);
     var afterSchemaMigration = await migratedFromV1.GetContactReplyStylesAsync(CancellationToken.None);
@@ -1326,6 +1362,12 @@ internal static class HardLinkFixture
 
 internal static class SqliteSchemaFixture
 {
+    public static void AddUnexpectedIndex(string databasePath) =>
+        Execute(databasePath, "CREATE INDEX unexpected_restore_index ON tasks(status);");
+
+    public static void SetUserVersion(string databasePath, int version) =>
+        Execute(databasePath, $"PRAGMA user_version={version};");
+
     public static void RevertToVersionTwo(string databasePath)
     {
         Execute(databasePath, "BEGIN IMMEDIATE; DROP TABLE approval_audit; PRAGMA user_version=2; COMMIT;");

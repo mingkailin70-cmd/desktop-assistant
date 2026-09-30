@@ -56,6 +56,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
     public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
     public XiaoKSettings CurrentSettings => _settings;
+    public string ActiveDatabasePath => Path.Combine(_settings.DataRoot, "tasks.sqlite3");
 
     public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
     {
@@ -314,6 +315,20 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public Task RecordApprovalAuditAsync(string actionId, string outcome, CancellationToken cancellationToken) =>
         _store.AppendApprovalAuditAsync(actionId, outcome, cancellationToken);
+
+    public Task<IReadOnlyList<ApprovalAuditRecord>> GetRecentApprovalAuditAsync(int count, CancellationToken cancellationToken) =>
+        _store.GetRecentApprovalAuditAsync(count, cancellationToken);
+
+    public Task<string> CreateDatabaseBackupAsync(string backupPath, CancellationToken cancellationToken) =>
+        _store.CreateBackupAsync(backupPath, cancellationToken);
+
+    public async Task<string> RestoreDatabaseBackupAsync(string backupPath, CancellationToken cancellationToken)
+    {
+        if (!await _executionGate.WaitAsync(0, cancellationToken))
+            throw new InvalidOperationException("当前有任务运行；请等待任务结束后再恢复数据库。");
+        try { return await _store.RestoreBackupAsync(backupPath, cancellationToken); }
+        finally { _executionGate.Release(); }
+    }
 
     private static bool TryExtractDraftContact(string request, out string? contactName)
     {

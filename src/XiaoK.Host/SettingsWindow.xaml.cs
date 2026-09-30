@@ -14,6 +14,10 @@ public partial class SettingsWindow : Window
     private readonly Func<Task<string>> _requestNotificationAccess;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> _loadContactReplyStyles;
     private readonly Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> _replaceContactReplyStyles;
+    private readonly Func<string, CancellationToken, Task<string>> _createDatabaseBackup;
+    private readonly Func<string, CancellationToken, Task<string>> _restoreDatabaseBackup;
+    private readonly Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> _getRecentApprovalAudit;
+    private readonly string _activeDatabasePath;
     private IReadOnlyList<ContactReplyStylePreference> _loadedContactReplyStyles = [];
     private bool _startupWasEnabled;
     private bool _startupStateLoaded;
@@ -24,17 +28,26 @@ public partial class SettingsWindow : Window
 
     internal SettingsWindow(XiaoKSettings settings, WindowsNotificationMonitor notificationMonitor,
         Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> loadContactReplyStyles,
-        Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> replaceContactReplyStyles)
+        Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> replaceContactReplyStyles,
+        string activeDatabasePath,
+        Func<string, CancellationToken, Task<string>> createDatabaseBackup,
+        Func<string, CancellationToken, Task<string>> restoreDatabaseBackup,
+        Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> getRecentApprovalAudit)
     {
         InitializeComponent();
         _original = settings;
         _contactReplyStyles = [];
         _loadContactReplyStyles = loadContactReplyStyles;
         _replaceContactReplyStyles = replaceContactReplyStyles;
+        _activeDatabasePath = activeDatabasePath;
+        _createDatabaseBackup = createDatabaseBackup;
+        _restoreDatabaseBackup = restoreDatabaseBackup;
+        _getRecentApprovalAudit = getRecentApprovalAudit;
         _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
         DataRootBox.Text = settings.DataRoot;
+        ActiveDatabasePathText.Text = activeDatabasePath;
         ModelRootBox.Text = settings.ModelRoot;
         EvaluationRootBox.Text = settings.EvaluationRoot;
         CodeProjectRootBox.Text = settings.CodeProjectRoot;
@@ -104,6 +117,117 @@ public partial class SettingsWindow : Window
         AddContactStyleButton.IsEnabled = enabled;
         RemoveContactStyleButton.IsEnabled = enabled;
         ContactStylesList.IsEnabled = enabled;
+    }
+
+    private async void CreateDatabaseBackup_Click(object sender, RoutedEventArgs e)
+    {
+        var initialDirectory = Path.GetDirectoryName(_activeDatabasePath)!;
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "选择数据库备份位置",
+            Filter = "小K SQLite 备份 (*.sqlite3)|*.sqlite3",
+            DefaultExt = ".sqlite3",
+            AddExtension = true,
+            OverwritePrompt = false,
+            InitialDirectory = Directory.Exists(initialDirectory) ? initialDirectory : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            FileName = $"xiaok-backup-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.sqlite3"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        SetDatabaseMaintenanceButtonsEnabled(false);
+        try
+        {
+            var backupPath = Path.GetFullPath(dialog.FileName);
+            _ = ValidateLocalDirectory(Path.GetDirectoryName(backupPath)!, "数据库备份目录");
+            var createdPath = await _createDatabaseBackup(backupPath, CancellationToken.None);
+            DatabaseMaintenanceStatusText.Text = $"已创建包含任务状态、联系人偏好和审批审计的一致性备份：\n{createdPath}";
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
+            or InvalidOperationException or NotSupportedException)
+        {
+            DatabaseMaintenanceStatusText.Text = $"备份失败；未覆盖现有备份：{ex.Message}";
+        }
+        finally { SetDatabaseMaintenanceButtonsEnabled(true); }
+    }
+
+    private async void RestoreDatabaseBackup_Click(object sender, RoutedEventArgs e)
+    {
+        var initialDirectory = Path.GetDirectoryName(_activeDatabasePath)!;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择小K SQLite 备份（仅支持 v3）",
+            Filter = "SQLite 备份 (*.sqlite3;*.bak)|*.sqlite3;*.bak",
+            CheckFileExists = true,
+            Multiselect = false,
+            InitialDirectory = Directory.Exists(initialDirectory) ? initialDirectory : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        var selectedPath = Path.GetFullPath(dialog.FileName);
+        if (string.Equals(selectedPath, Path.GetFullPath(_activeDatabasePath), StringComparison.OrdinalIgnoreCase))
+        {
+            DatabaseMaintenanceStatusText.Text = "请选择单独的 v3 备份文件；不能把活动数据库自身作为恢复源。";
+            return;
+        }
+        var confirmation = System.Windows.MessageBox.Show(
+            this,
+            $"将用以下 SQLite v3 备份替换当前本地数据库：\n\n{selectedPath}\n\n当前数据库会先生成一个旁置保护备份。恢复后只恢复脱敏任务状态、联系人回复风格和审批审计；不会恢复或重放运行中的任务、命令或外发操作。操作期间不能有其他任务运行。要继续吗？",
+            "确认恢复本地数据库",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmation != MessageBoxResult.Yes) return;
+
+        SetDatabaseMaintenanceButtonsEnabled(false);
+        try
+        {
+            DatabaseMaintenanceStatusText.Text = "正在验证备份并创建当前数据库保护副本…";
+            var recoveryPath = await _restoreDatabaseBackup(selectedPath, CancellationToken.None);
+            if (_contactStylesLoaded)
+            {
+                try
+                {
+                    _loadedContactReplyStyles = await _loadContactReplyStyles(CancellationToken.None);
+                    _contactReplyStyles.Clear();
+                    foreach (var preference in _loadedContactReplyStyles) _contactReplyStyles.Add(preference);
+                }
+                catch (Exception refreshError) when (refreshError is IOException or InvalidDataException or InvalidOperationException)
+                {
+                    DatabaseMaintenanceStatusText.Text = $"数据库已恢复，保护副本在 {recoveryPath}；但偏好列表刷新失败，请重新打开设置核对：{refreshError.Message}";
+                    return;
+                }
+            }
+            DatabaseMaintenanceStatusText.Text = $"数据库已恢复。恢复前的活动数据库保护副本保存在：\n{recoveryPath}\n没有执行或重放任何旧任务。";
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or SecurityException
+            or InvalidOperationException or NotSupportedException)
+        {
+            DatabaseMaintenanceStatusText.Text = $"恢复未完成：{ex.Message}";
+        }
+        finally { SetDatabaseMaintenanceButtonsEnabled(true); }
+    }
+
+    private async void ViewApprovalAudit_Click(object sender, RoutedEventArgs e)
+    {
+        ViewApprovalAuditButton.IsEnabled = false;
+        try
+        {
+            var records = await _getRecentApprovalAudit(100, CancellationToken.None);
+            new ApprovalAuditWindow(records) { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or SecurityException
+            or InvalidOperationException or NotSupportedException)
+        {
+            DatabaseMaintenanceStatusText.Text = $"无法读取审批审计记录：{ex.Message}";
+        }
+        finally { ViewApprovalAuditButton.IsEnabled = true; }
+    }
+
+    private void SetDatabaseMaintenanceButtonsEnabled(bool enabled)
+    {
+        CreateDatabaseBackupButton.IsEnabled = enabled;
+        RestoreDatabaseBackupButton.IsEnabled = enabled;
+        ViewApprovalAuditButton.IsEnabled = enabled;
     }
 
     private void BrowseDataRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(DataRootBox, "选择用户数据目录");

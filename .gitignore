@@ -41,6 +41,7 @@ outputs/
 *.sqlite-*
 *.sqlite3-*
 *.sqlite3*.bak
+*.sqlite3.restore-*
 **/tasks.json
 **/tasks.json.*
 *.log

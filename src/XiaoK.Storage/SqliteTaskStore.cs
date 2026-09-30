@@ -125,6 +125,23 @@ public sealed class SqliteTaskStore : ITaskStore
         finally { _gate.Release(); }
     }
 
+    /// <summary>Restores a validated v3 snapshot and retains the current database as a rollback copy.</summary>
+    public async Task<string> RestoreBackupAsync(string backupPath, CancellationToken cancellationToken)
+    {
+        var source = ValidateDatabasePath(backupPath);
+        if (string.Equals(source, _path, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("不能把活动数据库自身当作恢复备份。", nameof(backupPath));
+        if (!File.Exists(source)) throw new FileNotFoundException("找不到所选 SQLite 备份。", source);
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return await Task.Run(() => RestoreBackupCore(source, cancellationToken), cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
     private void Initialize()
     {
         var sqliteVersion = NativeSqlite.sqlite3_libversion_number();
@@ -478,7 +495,10 @@ public sealed class SqliteTaskStore : ITaskStore
         return result;
     }
 
-    private void BackupCore(string destination, CancellationToken cancellationToken)
+    private void BackupCore(string destination, CancellationToken cancellationToken) =>
+        BackupDatabase(_path, destination, cancellationToken);
+
+    private static void BackupDatabase(string sourcePath, string destination, CancellationToken cancellationToken)
     {
         if (File.Exists(destination)) throw new IOException("备份目标已存在；为防止覆盖，已停止备份。");
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -487,7 +507,7 @@ public sealed class SqliteTaskStore : ITaskStore
         {
             using (new FileStream(destination, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None)) { }
             reserved = true;
-            using var source = SqliteDatabase.Open(_path, create: false);
+            using var source = SqliteDatabase.Open(sourcePath, create: false);
             using var backup = SqliteDatabase.Open(destination, create: true);
             CopyDatabase(source, backup, cancellationToken);
         }
@@ -499,6 +519,129 @@ public sealed class SqliteTaskStore : ITaskStore
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             }
             throw;
+        }
+    }
+
+    private string RestoreBackupCore(string sourcePath, CancellationToken cancellationToken)
+    {
+        var stagingPath = _path + ".restore-" + Guid.NewGuid().ToString("N") + ".tmp";
+        var recoveryPath = CreateRestoreSafetyBackupPath();
+        try
+        {
+            using (var source = SqliteDatabase.Open(sourcePath, create: false))
+            {
+                ValidateRestorableDatabase(source);
+                BackupDatabaseFromOpenDatabase(source, stagingPath, cancellationToken);
+            }
+
+            using (var staged = SqliteDatabase.Open(stagingPath, create: false))
+                ValidateRestorableDatabase(staged);
+
+            BackupCore(recoveryPath, cancellationToken);
+            CheckpointActiveDatabase();
+            RemoveCheckpointedSidecars(_path);
+            RemoveCheckpointedSidecars(stagingPath);
+            File.Replace(stagingPath, _path, destinationBackupFileName: null);
+            return recoveryPath;
+        }
+        catch (Exception ex)
+        {
+            TryDeleteStagingFiles(stagingPath);
+            if (File.Exists(recoveryPath))
+            {
+                if (ex is OperationCanceledException)
+                    throw new OperationCanceledException(
+                        $"恢复已取消；恢复前的活动数据库保护副本保存在：{recoveryPath}", ex, cancellationToken);
+                throw new IOException($"数据库恢复未完成；恢复前的活动数据库保护副本保存在：{recoveryPath}", ex);
+            }
+            throw;
+        }
+    }
+
+    private static void BackupDatabaseFromOpenDatabase(SqliteDatabase source, string destination,
+        CancellationToken cancellationToken)
+    {
+        if (File.Exists(destination)) throw new IOException("恢复暂存目标已存在；为防止覆盖，已停止恢复。");
+        using (new FileStream(destination, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None)) { }
+        try
+        {
+            using var staging = SqliteDatabase.Open(destination, create: true);
+            CopyDatabase(source, staging, cancellationToken);
+        }
+        catch
+        {
+            TryDeleteStagingFiles(destination);
+            throw;
+        }
+    }
+
+    private static void ValidateRestorableDatabase(SqliteDatabase database)
+    {
+        if (database.ScalarInt32("PRAGMA user_version;") != CurrentSchemaVersion
+            || !string.Equals(database.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal))
+            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v3 备份；活动数据库未替换。");
+
+        if (database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';") != 4
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger','view');") != 0
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL;") != 2
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name IN "
+                + "('ix_tasks_updated','ix_approval_audit_created') AND sql IS NOT NULL;") != 2
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN "
+                + "('tasks','migration_state','contact_reply_styles','approval_audit');") != 4)
+            throw new InvalidDataException("恢复文件含有未知数据库结构；活动数据库未替换。");
+
+        ValidateColumnLayout(database, "tasks", "id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code");
+        ValidateColumnLayout(database, "migration_state", "name,completed_utc_ticks");
+        ValidateColumnLayout(database, "contact_reply_styles", "contact_name_key,contact_name,style_id,source,updated_utc_ticks");
+        ValidateColumnLayout(database, "approval_audit", "id,action_id,outcome,created_utc_ticks");
+    }
+
+    private static void ValidateColumnLayout(SqliteDatabase database, string table, string expectedColumns)
+    {
+        var columns = database.ScalarText($"SELECT group_concat(name,',') FROM "
+            + $"(SELECT name FROM pragma_table_info('{table}') ORDER BY cid);");
+        if (!string.Equals(columns, expectedColumns, StringComparison.Ordinal))
+            throw new InvalidDataException("恢复文件的表结构与当前版本不兼容；活动数据库未替换。");
+    }
+
+    private void CheckpointActiveDatabase()
+    {
+        using var database = SqliteDatabase.Open(_path, create: false);
+        using var statement = database.Prepare("PRAGMA wal_checkpoint(TRUNCATE);");
+        if (!statement.StepRow() || statement.ColumnInt32(0) != 0 || statement.ColumnInt32(1) != 0)
+            throw new IOException("活动数据库仍有未检查点 WAL 内容；恢复已停止，原数据库仍可用。");
+    }
+
+    private static void RemoveCheckpointedSidecars(string databasePath)
+    {
+        var walPath = databasePath + "-wal";
+        if (File.Exists(walPath))
+        {
+            if (new FileInfo(walPath).Length != 0)
+                throw new IOException("SQLite WAL 文件在检查点后仍有内容；为保护数据库，恢复已停止。");
+            File.Delete(walPath);
+        }
+        var sharedMemoryPath = databasePath + "-shm";
+        if (File.Exists(sharedMemoryPath)) File.Delete(sharedMemoryPath);
+    }
+
+    private string CreateRestoreSafetyBackupPath()
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var suffix = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + "-" + Guid.NewGuid().ToString("N")[..8];
+            var candidate = _path + ".before-restore-" + suffix + ".bak";
+            if (!File.Exists(candidate)) return candidate;
+        }
+        throw new IOException("无法为恢复操作生成不冲突的活动数据库保护备份路径。");
+    }
+
+    private static void TryDeleteStagingFiles(string path)
+    {
+        foreach (var candidate in new[] { path, path + "-wal", path + "-shm" })
+        {
+            try { if (File.Exists(candidate)) File.Delete(candidate); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
 
