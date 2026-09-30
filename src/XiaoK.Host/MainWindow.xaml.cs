@@ -21,8 +21,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private bool _expanded = true;
     private bool _hotkeyRegistered;
     private bool _changingWindowMode;
-    private double _expandedWidth = 428;
-    private double _expandedHeight = 590;
+    private double _expandedWidth = 500;
+    private double _expandedHeight = 650;
 
     public MainWindow()
     {
@@ -113,6 +113,15 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             e.Handled = true;
             await RunRequestAsync();
         }
+    }
+
+    private void QuickPrompt_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string prefix } || string.IsNullOrWhiteSpace(prefix)) return;
+        RequestBox.Text = prefix;
+        RequestBox.CaretIndex = RequestBox.Text.Length;
+        RequestBox.Focus();
+        RequestBox.ScrollToEnd();
     }
 
     private async Task RunRequestAsync()
@@ -299,16 +308,16 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         {
             if (!expanded && _expanded)
             {
-                _expandedWidth = Math.Max(330, Width);
-                _expandedHeight = Math.Max(360, Height);
+                _expandedWidth = Math.Max(440, Width);
+                _expandedHeight = Math.Max(560, Height);
             }
 
             _expanded = expanded;
             ExpandedView.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
             PetView.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
             ResizeMode = expanded ? ResizeMode.CanResizeWithGrip : ResizeMode.NoResize;
-            MinWidth = expanded ? 330 : 150;
-            MinHeight = expanded ? 360 : 150;
+            MinWidth = expanded ? 440 : 150;
+            MinHeight = expanded ? 560 : 150;
             Width = expanded ? _expandedWidth : 164;
             Height = expanded ? _expandedHeight : 164;
             ClampWindowToMonitorWorkArea();
