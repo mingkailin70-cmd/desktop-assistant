@@ -10,8 +10,9 @@ using XiaoK.Inference;
 namespace XiaoK.Tools;
 
 /// <summary>
-/// Produces a reviewable patch in a private snapshot. It never launches a command,
-/// writes to the selected source project, or merges the result back.
+/// Produces a reviewable patch in a private snapshot. A single fixed .NET test
+/// command can run only after the user reviews the diff and explicitly approves it.
+/// The selected source project is never written or merged back.
 /// </summary>
 public sealed class CodeTaskAgent
 {
@@ -24,18 +25,22 @@ public sealed class CodeTaskAgent
     private readonly IInferenceClient _inference;
     private readonly ModelBroker _models;
     private readonly string? _repositoryRoot;
+    private readonly IDotNetTestRunner _dotNetTestRunner;
 
-    public CodeTaskAgent(IInferenceClient inference, ModelBroker models, string? repositoryRoot)
+    public CodeTaskAgent(IInferenceClient inference, ModelBroker models, string? repositoryRoot,
+        IDotNetTestRunner? dotNetTestRunner = null)
     {
         _inference = inference;
         _models = models;
         _repositoryRoot = repositoryRoot;
+        _dotNetTestRunner = dotNetTestRunner ?? new DotNetTestRunner(repositoryRoot);
     }
 
     public static IReadOnlyList<CodeTaskWorkspaceHistory> ReadRetainedTasks(string workspaceRoot) =>
         CodeWorkspaceSnapshot.ReadRetainedTasks(workspaceRoot);
 
-    public async Task<ToolResult> ExecuteAsync(string projectRoot, string workspaceRoot, string instruction, CancellationToken cancellationToken)
+    public async Task<ToolResult> ExecuteAsync(string projectRoot, string workspaceRoot, string instruction,
+        CancellationToken cancellationToken, ICodeTaskReviewPresenter? reviewPresenter = null)
     {
         if (string.IsNullOrWhiteSpace(instruction) || instruction.Length > 4_000)
             return new(false, "编程任务说明为空或超过 4000 个字符。", "INVALID_CODE_TASK");
@@ -85,8 +90,36 @@ public sealed class CodeTaskAgent
             var diff = await snapshot.ApplyAndFormatDiffAsync(
                 changes, MaximumGeneratedCharacters, MaximumDisplayedDiffCharacters, cancellationToken);
             await snapshot.WriteStateAsync("awaiting_approval", CancellationToken.None);
+
+            var testTarget = snapshot.GetDotNetTestTarget();
+            var dotNetExecutablePath = _dotNetTestRunner.ExecutablePath;
+            var verificationRoot = snapshot.GetVerificationRoot();
+            var commandPreview = testTarget is not null && dotNetExecutablePath is not null
+                ? DotNetTestRunner.CreateCommandPreview(snapshot.WorkspacePath, verificationRoot, testTarget, dotNetExecutablePath)
+                : null;
+            var decision = reviewPresenter is null
+                ? CodeTaskReviewDecision.KeepPatch
+                : await reviewPresenter.ReviewAsync(snapshot.ProjectPath, snapshot.WorkspacePath, diff,
+                    testTarget, commandPreview, cancellationToken);
+
+            if (decision == CodeTaskReviewDecision.RunDotNetTests && testTarget is not null
+                && dotNetExecutablePath is not null)
+            {
+                await snapshot.WriteStateAsync("verifying", CancellationToken.None);
+                var execution = await _dotNetTestRunner.RunAsync(snapshot.WorkspacePath, verificationRoot,
+                    testTarget, dotNetExecutablePath, cancellationToken);
+                await snapshot.WriteStateAsync("awaiting_approval", CancellationToken.None);
+                var verification = DescribeTestExecution(execution);
+                var data = string.IsNullOrWhiteSpace(execution.Output)
+                    ? diff + Environment.NewLine + Environment.NewLine + verification
+                    : diff + Environment.NewLine + Environment.NewLine + verification + Environment.NewLine + execution.Output;
+                return new(true,
+                    $"隔离补丁已生成，已按你的确认运行固定验证命令。{verification}{Environment.NewLine}原项目未修改；补丁仍需你审阅并手动应用。",
+                    Data: data, FinalState: TaskLifecycleState.AwaitingApproval);
+            }
+
             return new(true,
-                $"隔离编程任务已生成待审阅修改。任务编号：{snapshot.TaskId:N}\n隔离工作区：{snapshot.WorkspacePath}\n原项目未修改；没有运行命令、联网或合并。请检查下方差异，之后再决定是否手动应用。",
+                $"隔离编程任务已生成待审阅修改。任务编号：{snapshot.TaskId:N}\n隔离工作区：{snapshot.WorkspacePath}\n原项目未修改；没有自动运行命令、联网或合并。请检查下方差异，之后再决定是否手动应用。",
                 Data: diff, FinalState: TaskLifecycleState.AwaitingApproval);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -199,6 +232,19 @@ public sealed class CodeTaskAgent
         return new(false, message, errorCode);
     }
 
+    private static string DescribeTestExecution(DotNetTestExecutionResult execution)
+    {
+        if (!execution.RestoreStarted) return "获批的 NuGet 依赖还原命令未能启动。";
+        if (execution.TimedOutCommand is not null)
+            return $"命令“{execution.TimedOutCommand}”超时，已请求终止进程树。";
+        if (execution.RestoreExitCode != 0)
+            return $"NuGet 依赖还原未成功，退出码为 {execution.RestoreExitCode?.ToString() ?? "未知"}；未运行测试。";
+        if (!execution.TestStarted) return "测试命令未能启动。";
+        return execution.TestExitCode == 0
+            ? "NuGet 依赖还原及测试已完成，测试退出码为 0。"
+            : $"NuGet 依赖还原已完成，测试退出码为 {execution.TestExitCode?.ToString() ?? "未知"}。";
+    }
+
 }
 
 internal sealed record CodeTextCandidate(string RelativePath, int CharacterCount, string Sha256);
@@ -263,6 +309,21 @@ internal sealed class CodeWorkspaceSnapshot
     public DateTimeOffset CreatedAtUtc { get; }
     private readonly string _baselineBoundary;
     private readonly string _workspaceBoundary;
+
+    public string? GetDotNetTestTarget()
+    {
+        var rootSolutions = _relativeFiles.Where(path => !path.Contains('/') && !path.Contains('\\')
+            && (string.Equals(Path.GetExtension(path), ".sln", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetExtension(path), ".slnx", StringComparison.OrdinalIgnoreCase))).ToArray();
+        if (rootSolutions.Length == 1) return rootSolutions[0];
+        if (rootSolutions.Length > 1) return null;
+
+        var rootProjects = _relativeFiles.Where(path => !path.Contains('/') && !path.Contains('\\')
+            && string.Equals(Path.GetExtension(path), ".csproj", StringComparison.OrdinalIgnoreCase)).ToArray();
+        return rootProjects.Length == 1 ? rootProjects[0] : null;
+    }
+
+    public string GetVerificationRoot() => Path.Combine(WorkspacePath, ".xiaok-verification-" + TaskId);
 
     public static CodeWorkspaceSnapshot Create(string projectRoot, string workspaceRoot, string? repositoryRoot, CancellationToken token)
     {

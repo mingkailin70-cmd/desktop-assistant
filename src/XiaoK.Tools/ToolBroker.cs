@@ -40,7 +40,7 @@ public sealed class ToolBroker
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
             "message.send.v1" => await SendAsync(proposal, cancellationToken),
             "code.task.create.v1" => await _codeAgent.ExecuteAsync(_codeProjectRoot, _codeWorkspaceRoot,
-                proposal.Arguments["instruction"], cancellationToken),
+                proposal.Arguments["instruction"], cancellationToken, _approval as ICodeTaskReviewPresenter),
             _ => new ToolResult(false, "未知工具已拒绝。", "UNKNOWN_TOOL")
         };
     }

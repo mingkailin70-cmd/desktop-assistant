@@ -51,7 +51,7 @@
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseCodeWorkspace_Click" Margin="8,0,0,0"/>
                     <TextBox x:Name="CodeWorkspaceRootBox" MinHeight="32" Padding="7,5"/>
                 </DockPanel>
-                <TextBlock Text="首版仅读取受支持文本文件，最多选择4个文件生成补丁；不运行命令、不联网、不自动合并。工作区保存在任务目录供你检查。"
+                <TextBlock Text="最多选择4个文本文件生成隔离补丁。你可先审阅差异；只有单独批准时，才会对唯一 .NET 解决方案/项目执行固定依赖还原与测试命令。"
                            FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,14"/>
 
                 <TextBlock Text="本地推理服务地址"/>

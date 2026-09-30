@@ -28,6 +28,21 @@ try
     await CheckValidPatchIsIsolatedAsync(tempRoot);
     passed.Add("有效补丁只写隔离工作区，保留 CRLF，并记录待审阅状态");
 
+    await CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(tempRoot);
+    passed.Add("代码审阅默认只保留补丁，不运行命令");
+
+    await CheckApprovedDotNetVerificationUsesCapturedTargetAsync(tempRoot);
+    passed.Add("用户确认后只对唯一快照目标请求固定 .NET 还原和测试命令");
+
+    await CheckAmbiguousDotNetTargetFailsClosedAsync(tempRoot);
+    passed.Add("解决方案目标不唯一时隐藏命令并拒绝执行器调用");
+
+    await CheckDotNetRunnerRejectsEscapingTargetAsync(tempRoot);
+    passed.Add("实际 .NET 执行器在启动前拒绝越界目标且不创建验证目录");
+
+    await CheckCodeVerificationCancellationPersistsAsync(tempRoot);
+    passed.Add("取消已批准的隔离验证会持久化 cancelled 且不修改原项目");
+
     await CheckModelCannotSelectOutsidePathAsync(tempRoot);
     passed.Add("文件选择阶段拒绝项目清单之外的路径");
 
@@ -130,6 +145,135 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
         && result.Data.Contains("+    int Value = 2;", StringComparison.Ordinal), "返回的差异没有显示修改前后内容。");
     var state = File.ReadAllText(Path.Combine(taskDirectory, "task-state.json"));
     Require(state.Contains("awaiting_approval", StringComparison.Ordinal), "任务状态没有写入 awaiting_approval。");
+}
+
+static async Task CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(string root)
+{
+    var project = CreateProject(root, "review-keep", "class Sample { int Value = 1; }\n");
+    File.WriteAllText(Path.Combine(project, "Sample.csproj"), "<Project />", new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "review-keep-workspaces");
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
+        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+    var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "synthetic success"));
+    var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+
+    var result = await NewAgent(inference, runner).ExecuteAsync(project, workspaces, "把 Value 改为 2",
+        CancellationToken.None, presenter);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval,
+        "只保留补丁的审阅没有进入等待人工应用状态。");
+    Require(presenter.CallCount == 1 && presenter.TestTarget == "Sample.csproj"
+        && presenter.Diff?.Contains("Value = 2", StringComparison.Ordinal) == true,
+        "审阅界面没有收到固定目标与完整差异。");
+    Require(runner.CallCount == 0, "用户选择只保留补丁时仍运行了命令。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample { int Value = 1; }\n",
+        "只保留补丁路径修改了原项目。");
+}
+
+static async Task CheckApprovedDotNetVerificationUsesCapturedTargetAsync(string root)
+{
+    var project = CreateProject(root, "review-run", "class Sample { int Value = 1; }\n");
+    File.WriteAllText(Path.Combine(project, "Sample.sln"), "synthetic solution", new UTF8Encoding(false));
+    File.WriteAllText(Path.Combine(project, "Sample.csproj"), "<Project />", new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "review-run-workspaces");
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
+        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+    var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "synthetic tests passed"));
+    var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
+
+    var result = await NewAgent(inference, runner).ExecuteAsync(project, workspaces, "把 Value 改为 2",
+        CancellationToken.None, presenter);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval,
+        "已批准验证后补丁未保留在等待人工应用状态。");
+    Require(presenter.TestTarget == "Sample.sln" && presenter.CommandPreview?.Contains("restore", StringComparison.Ordinal) == true
+        && presenter.CommandPreview.Contains("--no-restore", StringComparison.Ordinal),
+        "用户批准时没有看到唯一解决方案目标、依赖还原和测试命令。");
+    Require(runner.CallCount == 1 && runner.TargetRelativePath == "Sample.sln"
+        && runner.ApprovedExecutablePath == runner.ExecutablePath
+        && runner.WorkspacePath?.StartsWith(workspaces, StringComparison.OrdinalIgnoreCase) == true,
+        "验证执行器收到模型可控参数，或工作目录超出隔离工作区。");
+    Require(result.Data?.Contains("synthetic tests passed", StringComparison.Ordinal) == true,
+        "测试结果没有显示给用户。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample { int Value = 1; }\n",
+        "获批的隔离测试修改了原项目。");
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("awaiting_approval", StringComparison.Ordinal),
+        "隔离验证结束后没有恢复为等待人工应用状态。");
+}
+
+static async Task CheckCodeVerificationCancellationPersistsAsync(string root)
+{
+    var project = CreateProject(root, "review-cancel", "class Sample { int Value = 1; }\n");
+    File.WriteAllText(Path.Combine(project, "Sample.csproj"), "<Project />", new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "review-cancel-workspaces");
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
+        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+    var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "unused"), blockUntilCancelled: true);
+    var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
+    using var cancellation = new CancellationTokenSource();
+    var operation = NewAgent(inference, runner).ExecuteAsync(project, workspaces, "把 Value 改为 2",
+        cancellation.Token, presenter);
+
+    await runner.RunStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await operation; }
+    catch (OperationCanceledException) { cancelled = true; }
+
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(cancelled && runner.CancellationObserved,
+        "取消请求没有传递到隔离验证进程。");
+    Require(File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("cancelled", StringComparison.Ordinal),
+        "取消验证后任务状态未写成 cancelled。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample { int Value = 1; }\n",
+        "取消验证时修改了原项目。");
+}
+
+static async Task CheckAmbiguousDotNetTargetFailsClosedAsync(string root)
+{
+    var project = CreateProject(root, "review-ambiguous", "class Sample { int Value = 1; }\n");
+    File.WriteAllText(Path.Combine(project, "A.sln"), "synthetic A", new UTF8Encoding(false));
+    File.WriteAllText(Path.Combine(project, "B.sln"), "synthetic B", new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "review-ambiguous-workspaces");
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
+        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+    var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "unused"));
+    var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
+
+    var result = await NewAgent(inference, runner).ExecuteAsync(project, workspaces, "把 Value 改为 2",
+        CancellationToken.None, presenter);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+        && presenter.TestTarget is null && presenter.CommandPreview is null && runner.CallCount == 0,
+        "目标不唯一时仍向审阅者显示或调用了验证命令。");
+}
+
+static async Task CheckDotNetRunnerRejectsEscapingTargetAsync(string root)
+{
+    var workspace = Path.Combine(root, "dotnet-target-boundary", "workspace");
+    Directory.CreateDirectory(workspace);
+    var verificationRoot = Path.Combine(workspace, ".xiaok-verification-synthetic");
+    var repositoryRoot = FindRepositoryRoot();
+    var runner = new DotNetTestRunner(repositoryRoot);
+    var executablePath = runner.ExecutablePath;
+    Require(executablePath is not null, "安全检查环境无法定位用于边界拒绝的 dotnet.exe。");
+
+    var result = await runner.RunAsync(workspace, verificationRoot, @"..\outside.sln", executablePath!, CancellationToken.None);
+    Require(!result.RestoreStarted && !Directory.Exists(verificationRoot),
+        "越界解决方案目标在路径校验前启动命令或创建了验证目录。");
+}
+
+static string FindRepositoryRoot()
+{
+    var current = new DirectoryInfo(AppContext.BaseDirectory);
+    while (current is not null)
+    {
+        if (File.Exists(Path.Combine(current.FullName, "global.json"))
+            && Directory.Exists(Path.Combine(current.FullName, "src"))) return current.FullName;
+        current = current.Parent;
+    }
+    throw new DirectoryNotFoundException("安全检查无法定位小K仓库根目录。");
 }
 
 static void CheckInterruptedTaskHistoryIsNotReplayed()
@@ -740,7 +884,8 @@ static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string r
         "目录句柄枚举没有继续读取后续文件批次。");
 }
 
-static CodeTaskAgent NewAgent(IInferenceClient inference) => new(inference, new ModelBroker(), repositoryRoot: null);
+static CodeTaskAgent NewAgent(IInferenceClient inference, IDotNetTestRunner? testRunner = null) =>
+    new(inference, new ModelBroker(), repositoryRoot: null, testRunner);
 
 static string CreateProject(string root, string name, string content)
 {
@@ -787,6 +932,63 @@ internal sealed class ScriptedInference : IInferenceClient
         }
         if (!_responses.TryDequeue(out var response)) throw new InvalidOperationException("No scripted inference response remains.");
         return response;
+    }
+}
+
+internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decision) : ICodeTaskReviewPresenter
+{
+    public int CallCount { get; private set; }
+    public string? ProjectPath { get; private set; }
+    public string? WorkspacePath { get; private set; }
+    public string? Diff { get; private set; }
+    public string? TestTarget { get; private set; }
+    public string? CommandPreview { get; private set; }
+
+    public Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        ProjectPath = projectPath;
+        WorkspacePath = workspacePath;
+        Diff = diff;
+        TestTarget = dotNetTestTarget;
+        CommandPreview = commandPreview;
+        return Task.FromResult(decision);
+    }
+}
+
+internal sealed class FakeDotNetTestRunner(DotNetTestExecutionResult result, bool blockUntilCancelled = false)
+    : IDotNetTestRunner
+{
+    public string? ExecutablePath { get; } = @"C:\Synthetic\dotnet.exe";
+    public int CallCount { get; private set; }
+    public string? WorkspacePath { get; private set; }
+    public string? TargetRelativePath { get; private set; }
+    public string? VerificationRoot { get; private set; }
+    public string? ApprovedExecutablePath { get; private set; }
+    public bool CancellationObserved { get; private set; }
+    public TaskCompletionSource RunStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<DotNetTestExecutionResult> RunAsync(string workspacePath, string verificationRoot,
+        string targetRelativePath, string approvedExecutablePath, CancellationToken cancellationToken)
+    {
+        CallCount++;
+        WorkspacePath = workspacePath;
+        VerificationRoot = verificationRoot;
+        TargetRelativePath = targetRelativePath;
+        ApprovedExecutablePath = approvedExecutablePath;
+        RunStarted.TrySetResult();
+        if (blockUntilCancelled)
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+        }
+        return result;
     }
 }
 

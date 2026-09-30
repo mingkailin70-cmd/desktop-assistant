@@ -8,7 +8,7 @@ using XiaoK.Core;
 
 namespace XiaoK.Host;
 
-public partial class MainWindow : Window, IApprovalPresenter
+public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter
 {
     private readonly AssistantRuntime _runtime;
     private readonly WindowsNotificationMonitor _notificationMonitor;
@@ -48,6 +48,37 @@ public partial class MainWindow : Window, IApprovalPresenter
         cancellationToken.ThrowIfCancellationRequested();
         var answer = System.Windows.MessageBox.Show(this, details, title, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No);
         return Task.FromResult(answer == System.Windows.MessageBoxResult.Yes);
+    }
+
+    public Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
+    {
+        if (!Dispatcher.CheckAccess())
+            return Dispatcher.InvokeAsync(() => ShowCodeTaskReview(projectPath, workspacePath, diff,
+                dotNetTestTarget, commandPreview, cancellationToken)).Task;
+        return Task.FromResult(ShowCodeTaskReview(projectPath, workspacePath, diff,
+            dotNetTestTarget, commandPreview, cancellationToken));
+    }
+
+    private CodeTaskReviewDecision ShowCodeTaskReview(string projectPath, string workspacePath, string diff,
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dialog = new CodeTaskReviewWindow(projectPath, workspacePath, diff, dotNetTestTarget, commandPreview)
+        {
+            Owner = this
+        };
+        using var registration = cancellationToken.Register(() => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (dialog.IsVisible) dialog.Close();
+        })));
+        dialog.Loaded += (_, _) =>
+        {
+            if (cancellationToken.IsCancellationRequested) dialog.Close();
+        };
+        dialog.ShowDialog();
+        cancellationToken.ThrowIfCancellationRequested();
+        return dialog.Decision;
     }
 
     private async void Run_Click(object sender, RoutedEventArgs e) => await RunRequestAsync();

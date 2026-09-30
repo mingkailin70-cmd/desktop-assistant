@@ -31,3 +31,11 @@ public interface IApprovalPresenter
 {
     Task<bool> ConfirmAsync(string title, string details, CancellationToken cancellationToken);
 }
+
+public enum CodeTaskReviewDecision { KeepPatch, RunDotNetTests }
+
+public interface ICodeTaskReviewPresenter
+{
+    Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken);
+}
