@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
@@ -10,6 +11,12 @@ using XiaoK.Inference;
 using XiaoK.Storage;
 using XiaoK.Tools;
 
+if (args.Length == 3 && args[0] == "--appcontainer-probe")
+{
+    Environment.ExitCode = RunAppContainerProbe(args[1], args[2]);
+    return;
+}
+
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
 var passed = new List<string>();
@@ -17,6 +24,9 @@ var skipped = new List<string>();
 
 try
 {
+    await CheckAppContainerFileBoundaryAsync(tempRoot);
+    passed.Add(".NET 探针在 Windows AppContainer 中可写任务工作区、不能覆盖兄弟目录哨兵，且回收临时授权");
+
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
 
@@ -140,6 +150,99 @@ try
 finally
 {
     if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+}
+
+static async Task CheckAppContainerFileBoundaryAsync(string root)
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("AppContainer 边界检查只支持 Windows。");
+
+    var writableRoot = Path.Combine(root, "appcontainer-workspace");
+    var workingDirectory = Path.Combine(writableRoot, "work");
+    var outputDirectory = AppContext.BaseDirectory;
+    var probeDirectory = Path.Combine(writableRoot, "probe");
+    var outsideSentinel = Path.Combine(root, "outside-sentinel.txt");
+    var insideProbe = Path.Combine(workingDirectory, "inside-probe.txt");
+    var runtimeRoot = FindPinnedDotNetRoot();
+    Directory.CreateDirectory(workingDirectory);
+    Directory.CreateDirectory(probeDirectory);
+    foreach (var file in Directory.EnumerateFiles(outputDirectory))
+        File.Copy(file, Path.Combine(probeDirectory, Path.GetFileName(file)));
+    File.WriteAllText(outsideSentinel, "outside-sentinel-original");
+
+    var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SystemRoot"] = Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+        ["WINDIR"] = Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+        ["PATH"] = Path.Combine(runtimeRoot, "dotnet.exe") + Path.PathSeparator
+            + Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32"),
+        ["DOTNET_ROOT"] = runtimeRoot,
+        ["DOTNET_ROOT_X64"] = runtimeRoot,
+        ["DOTNET_NOLOGO"] = "1",
+        ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
+        ["DOTNET_CLI_HOME"] = Path.Combine(writableRoot, "dotnet-home"),
+        ["NUGET_PACKAGES"] = Path.Combine(writableRoot, "packages"),
+        ["TEMP"] = Path.Combine(writableRoot, "temp"),
+        ["TMP"] = Path.Combine(writableRoot, "temp"),
+        ["USERPROFILE"] = Path.Combine(writableRoot, "profile"),
+        ["APPDATA"] = Path.Combine(writableRoot, "profile", "roaming"),
+        ["LOCALAPPDATA"] = Path.Combine(writableRoot, "profile", "local")
+    };
+    foreach (var path in environment.Where(pair => pair.Key is "DOTNET_CLI_HOME" or "NUGET_PACKAGES" or "TEMP"
+                 or "USERPROFILE" or "APPDATA" or "LOCALAPPDATA").Select(pair => pair.Value))
+        Directory.CreateDirectory(path);
+
+    var executablePath = Path.Combine(runtimeRoot, "dotnet.exe");
+    var probeAssembly = Path.Combine(probeDirectory, Path.GetFileName(Assembly.GetExecutingAssembly().Location));
+    var result = await AppContainerCommandRunner.RunAsync(executablePath,
+        ["exec", probeAssembly, "--appcontainer-probe", insideProbe, outsideSentinel],
+        workingDirectory, writableRoot, runtimeRoot, [], environment,
+        allowInternet: false, TimeSpan.FromSeconds(45), CancellationToken.None);
+
+    Require(result.Started && result.ExitCode == 0 && !result.TimedOut,
+        "Windows AppContainer 文件边界探针未通过：" + result.Output);
+    Require(File.Exists(insideProbe), "AppContainer 无法写入批准的任务工作区。");
+    Require(await File.ReadAllTextAsync(outsideSentinel) == "outside-sentinel-original",
+        "AppContainer 覆盖了任务工作区外的哨兵文件。");
+    Require(result.Output.Contains("临时 ACL 和身份已回收", StringComparison.Ordinal),
+        "AppContainer 没有确认临时授权和身份已回收。");
+    Require(result.Output.Contains("测试步骤未授予网络能力", StringComparison.Ordinal),
+        "测试步骤没有报告其 AppContainer 网络能力配置。");
+}
+
+static int RunAppContainerProbe(string insidePath, string outsideSentinel)
+{
+    try
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(insidePath)!);
+        File.WriteAllText(insidePath, "inside-workspace-write");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("工作区写入失败：" + ex.GetType().Name);
+        return 10;
+    }
+
+    try
+    {
+        File.WriteAllText(outsideSentinel, "outside-sentinel-modified");
+        Console.Error.WriteLine("工作区外写入意外成功。");
+        return 11;
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+    {
+        Console.WriteLine("工作区外写入被拒绝：" + ex.GetType().Name);
+        return 0;
+    }
+}
+
+static string FindPinnedDotNetRoot()
+{
+    for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+    {
+        var candidate = Path.Combine(directory.FullName, ".tools", "dotnet");
+        if (File.Exists(Path.Combine(candidate, "dotnet.exe"))) return candidate;
+    }
+    throw new FileNotFoundException("未找到仓库固定的 .tools\\dotnet\\dotnet.exe，拒绝改用其他运行时。");
 }
 
 static async Task CheckValidPatchIsIsolatedAsync(string root)

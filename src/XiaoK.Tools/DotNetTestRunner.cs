@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Text;
 
 namespace XiaoK.Tools;
@@ -17,7 +15,6 @@ public interface IDotNetTestRunner
 /// <summary>Runs fixed restore and test argument lists for one captured target; it has no shell or user-supplied arguments.</summary>
 public sealed class DotNetTestRunner : IDotNetTestRunner
 {
-    private const int MaximumCapturedCharactersPerStream = 8_000;
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(3);
     private readonly string? _repositoryRoot;
 
@@ -69,17 +66,17 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
         }
 
         var dotNetHome = Path.Combine(resolvedVerificationRoot, "dotnet-home");
-        var restore = await RunCommandAsync(approvedExecutablePath, workingDirectory,
+        var restore = await RunCommandAsync(approvedExecutablePath, workingDirectory, workspacePath,
             ["restore", targetFile, "--configfile", nugetConfig, "--source", "https://api.nuget.org/v3/index.json",
                 "--packages", packageCache],
-            dotNetHome, packageCache, tempRoot, userProfileRoot, roamingRoot, localRoot, cancellationToken);
+            dotNetHome, packageCache, tempRoot, userProfileRoot, roamingRoot, localRoot, allowInternet: true, cancellationToken);
         if (!restore.Started || restore.TimedOut || restore.ExitCode != 0)
             return new(restore.Started, restore.ExitCode, false, null,
                 restore.TimedOut ? "dotnet restore" : null, "依赖还原输出：\n" + restore.Output);
 
-        var test = await RunCommandAsync(approvedExecutablePath, workingDirectory,
+        var test = await RunCommandAsync(approvedExecutablePath, workingDirectory, workspacePath,
             ["test", targetFile, "--no-restore"], dotNetHome, packageCache, tempRoot,
-            userProfileRoot, roamingRoot, localRoot, cancellationToken);
+            userProfileRoot, roamingRoot, localRoot, allowInternet: false, cancellationToken);
         return new(true, restore.ExitCode, test.Started, test.ExitCode,
             test.TimedOut ? "dotnet test" : null,
             "依赖还原输出：\n" + restore.Output + "\n测试输出：\n" + test.Output);
@@ -118,7 +115,7 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
         var config = Path.Combine(verificationRoot, "NuGet.Config");
         var packages = Path.Combine(verificationRoot, "packages");
         return $"1. \"{executablePath}\" restore \"{targetName}\" --configfile \"{config}\" --source https://api.nuget.org/v3/index.json --packages \"{packages}\"\n"
-            + $"2. \"{executablePath}\" test \"{targetName}\" --no-restore\n工作目录：{targetDirectory}\nNuGet 源：仅 nuget.org；包缓存：隔离工作区内。";
+            + $"2. \"{executablePath}\" test \"{targetName}\" --no-restore\n工作目录：{targetDirectory}\nWindows AppContainer：只允许写入此隔离工作区，dotnet 运行时只读；还原步骤需要互联网能力且 NuGet 源限定为 nuget.org，测试步骤不授予网络能力。还原期间项目目标仍可能使用已批准的联网权限。";
     }
 
     private static bool TryResolveTarget(string workspacePath, string targetRelativePath,
@@ -167,113 +164,54 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
     }
 
     private static async Task<SingleCommandResult> RunCommandAsync(string executablePath, string workingDirectory,
-        IReadOnlyList<string> arguments, string dotNetHome, string packageCache, string tempRoot,
+        string workspaceRoot, IReadOnlyList<string> arguments, string dotNetHome, string packageCache, string tempRoot,
         string userProfileRoot, string roamingRoot, string localRoot,
-        CancellationToken cancellationToken)
+        bool allowInternet, CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executablePath,
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true
-        };
-        foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
-        SetRestrictedEnvironment(startInfo, executablePath, dotNetHome, packageCache, tempRoot,
-            userProfileRoot, roamingRoot, localRoot);
-        startInfo.Environment["DOTNET_NOLOGO"] = "1";
-        startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
-        startInfo.Environment["DOTNET_CLI_HOME"] = dotNetHome;
-        startInfo.Environment["NUGET_PACKAGES"] = packageCache;
-
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         try
         {
-            if (!process.Start()) return new(false, false, null, "dotnet.exe 未启动。");
-            process.StandardInput.Close();
+            var environment = CreateRestrictedEnvironment(executablePath, dotNetHome, packageCache, tempRoot,
+                userProfileRoot, roamingRoot, localRoot);
+            var runtimeRoot = Path.GetDirectoryName(Path.GetFullPath(executablePath))!;
+            var result = await AppContainerCommandRunner.RunAsync(executablePath, arguments, workingDirectory,
+                workspaceRoot, runtimeRoot, [], environment, allowInternet, CommandTimeout, cancellationToken).ConfigureAwait(false);
+            return new(result.Started, result.TimedOut, result.ExitCode, result.Output);
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return new(false, false, null, "无法启动本机 dotnet.exe。");
+            throw;
         }
-
-        var stdoutTask = ReadBoundedAsync(process.StandardOutput, MaximumCapturedCharactersPerStream);
-        var stderrTask = ReadBoundedAsync(process.StandardError, MaximumCapturedCharactersPerStream);
-        using var timeout = new CancellationTokenSource(CommandTimeout);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-        var timedOut = false;
-        try { await process.WaitForExitAsync(linked.Token); }
-        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
-            TryKillProcessTree(process);
-            try { await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)); }
-            catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or Win32Exception) { }
-            if (cancellationToken.IsCancellationRequested) throw new OperationCanceledException(cancellationToken);
-            timedOut = true;
+            return new(false, false, null, "无法准备 Windows AppContainer 隔离；没有以普通用户权限回退。");
         }
-
-        var output = await CombineOutputAsync(stdoutTask, stderrTask);
-        return new(true, timedOut, process.HasExited ? process.ExitCode : null, output);
     }
 
     private sealed record SingleCommandResult(bool Started, bool TimedOut, int? ExitCode, string Output);
 
-    private static void SetRestrictedEnvironment(ProcessStartInfo startInfo, string executablePath,
+    private static Dictionary<string, string> CreateRestrictedEnvironment(string executablePath,
         string dotNetHome, string packageCache, string tempRoot, string userProfileRoot,
         string roamingRoot, string localRoot)
     {
-        startInfo.Environment.Clear();
+        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var systemRoot = Environment.GetEnvironmentVariable("SystemRoot") ?? Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var system32 = Path.Combine(systemRoot, "System32");
         var dotNetRoot = Path.GetDirectoryName(Path.GetFullPath(executablePath))!;
-        startInfo.Environment["SystemRoot"] = systemRoot;
-        startInfo.Environment["WINDIR"] = systemRoot;
-        startInfo.Environment["PATH"] = dotNetRoot + Path.PathSeparator + system32;
-        startInfo.Environment["DOTNET_ROOT"] = dotNetRoot;
-        startInfo.Environment["DOTNET_ROOT_X64"] = dotNetRoot;
-        startInfo.Environment["DOTNET_CLI_HOME"] = dotNetHome;
-        startInfo.Environment["NUGET_PACKAGES"] = packageCache;
-        startInfo.Environment["TEMP"] = tempRoot;
-        startInfo.Environment["TMP"] = tempRoot;
-        startInfo.Environment["USERPROFILE"] = userProfileRoot;
-        startInfo.Environment["APPDATA"] = roamingRoot;
-        startInfo.Environment["LOCALAPPDATA"] = localRoot;
-        startInfo.Environment["DOTNET_NOLOGO"] = "1";
-        startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
-        startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
-    }
-
-    private static async Task<string> ReadBoundedAsync(StreamReader reader, int maximumCharacters)
-    {
-        var output = new StringBuilder(Math.Min(maximumCharacters, 2_048));
-        var buffer = new char[2_048];
-        var truncated = false;
-        while (true)
-        {
-            var count = await reader.ReadAsync(buffer.AsMemory());
-            if (count == 0) break;
-            var remaining = maximumCharacters - output.Length;
-            if (remaining > 0) output.Append(buffer, 0, Math.Min(remaining, count));
-            if (count > remaining) truncated = true;
-        }
-        if (truncated) output.Append("\n[输出已截断]");
-        return output.ToString();
-    }
-
-    private static async Task<string> CombineOutputAsync(Task<string> stdoutTask, Task<string> stderrTask)
-    {
-        var output = await stdoutTask;
-        var error = await stderrTask;
-        if (string.IsNullOrWhiteSpace(error)) return output;
-        return string.IsNullOrWhiteSpace(output) ? "标准错误：\n" + error : output + "\n标准错误：\n" + error;
-    }
-
-    private static void TryKillProcessTree(Process process)
-    {
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { }
+        environment["SystemRoot"] = systemRoot;
+        environment["WINDIR"] = systemRoot;
+        environment["PATH"] = dotNetRoot + Path.PathSeparator + system32;
+        environment["DOTNET_ROOT"] = dotNetRoot;
+        environment["DOTNET_ROOT_X64"] = dotNetRoot;
+        environment["DOTNET_CLI_HOME"] = dotNetHome;
+        environment["NUGET_PACKAGES"] = packageCache;
+        environment["TEMP"] = tempRoot;
+        environment["TMP"] = tempRoot;
+        environment["USERPROFILE"] = userProfileRoot;
+        environment["APPDATA"] = roamingRoot;
+        environment["LOCALAPPDATA"] = localRoot;
+        environment["DOTNET_NOLOGO"] = "1";
+        environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        environment["MSBUILDDISABLENODEREUSE"] = "1";
+        return environment;
     }
 }
