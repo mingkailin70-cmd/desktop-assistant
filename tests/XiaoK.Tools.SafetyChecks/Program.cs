@@ -61,6 +61,13 @@ try
     CheckNoticeWithoutVisibleBodyDoesNotAnalyze();
     passed.Add("无可见正文或正文超限时不触发分析且不保留正文");
 
+    if (!CheckFileSearchRejectsReparsePoints(tempRoot, out var searchLinkSkipReason))
+        skipped.Add("文件搜索重解析点夹具无法创建，用例跳过：" + searchLinkSkipReason);
+    else passed.Add("文件搜索拒绝重解析搜索根并忽略根目录内的外部联接目标");
+
+    await CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(tempRoot);
+    passed.Add("文件搜索通过稳定目录句柄读取多个枚举批次");
+
     if (!CheckDirectoryJunction(tempRoot, out var linkSkipReason)) skipped.Add("目录联接夹具无法创建，重解析点用例跳过：" + linkSkipReason);
     else passed.Add("目录联接不会被快照复制或读取");
 
@@ -380,6 +387,75 @@ static bool CheckDirectoryJunction(string root, out string skipReason)
     {
         Directory.Delete(junctionPath, recursive: false);
     }
+}
+
+static bool CheckFileSearchRejectsReparsePoints(string root, out string skipReason)
+{
+    var fixtureRoot = Path.Combine(root, "file-search-links");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    Directory.CreateDirectory(allowedRoot);
+    Directory.CreateDirectory(outsideRoot);
+    File.WriteAllText(Path.Combine(allowedRoot, "allowed-query-result.txt"), "inside allowed search root");
+    File.WriteAllText(Path.Combine(outsideRoot, "external-query-secret.txt"), "outside allowed search root");
+
+    var nestedJunction = Path.Combine(allowedRoot, "external-link");
+    if (!JunctionFixture.TryCreate(outsideRoot, nestedJunction, out skipReason)) return false;
+    var linkedSearchRoot = Path.Combine(fixtureRoot, "linked-root");
+    if (!JunctionFixture.TryCreate(outsideRoot, linkedSearchRoot, out skipReason))
+    {
+        Directory.Delete(nestedJunction, recursive: false);
+        return false;
+    }
+
+    try
+    {
+        var desktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+            [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+        var search = ToolBroker.Proposal("file.search.v1",
+            [new("query", "query-"), new("root_id", "user-files")], "user-files", "返回允许目录内的文件名匹配项");
+        var result = desktop.SearchFilesAsync(search, CancellationToken.None).GetAwaiter().GetResult();
+        var resultData = result.Data ?? "";
+        Require(result.Success && resultData.Contains("allowed-query-result.txt", StringComparison.Ordinal),
+            "文件搜索没有返回普通范围内的匹配文件。");
+        Require(!resultData.Contains("external-query-secret.txt", StringComparison.Ordinal),
+            "文件搜索通过目录联接返回了允许范围外的文件。");
+
+        var linkedDesktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+            [new KeyValuePair<string, string>("user-files", linkedSearchRoot)]);
+        var linkedResult = linkedDesktop.SearchFilesAsync(search, CancellationToken.None).GetAwaiter().GetResult();
+        Require(!linkedResult.Success && linkedResult.ErrorCode == "SEARCH_ROOT_NOT_LOCAL_DIRECTORY",
+            "文件搜索接受了指向范围外的重解析搜索根。");
+
+        skipReason = "";
+        return true;
+    }
+    finally
+    {
+        Directory.Delete(nestedJunction, recursive: false);
+        Directory.Delete(linkedSearchRoot, recursive: false);
+    }
+}
+
+static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
+{
+    var searchRoot = Path.Combine(root, "file-search-batches");
+    Directory.CreateDirectory(searchRoot);
+    for (var index = 0; index < 1_200; index++)
+    {
+        var file = Path.Combine(searchRoot, $"filler-{index:D4}-directory-enumeration-batch-check.txt");
+        await File.WriteAllTextAsync(file, "synthetic filename search fixture", new UTF8Encoding(false));
+    }
+    var targetName = "unique-target-result.txt";
+    await File.WriteAllTextAsync(Path.Combine(searchRoot, targetName), "synthetic target", new UTF8Encoding(false));
+
+    var desktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+        [new KeyValuePair<string, string>("user-files", searchRoot)]);
+    var proposal = ToolBroker.Proposal("file.search.v1",
+        [new("query", targetName), new("root_id", "user-files")], "user-files", "返回精确名称匹配项");
+    var result = await desktop.SearchFilesAsync(proposal, CancellationToken.None);
+    Require(result.Success && result.Data?.Contains(targetName, StringComparison.Ordinal) == true,
+        "目录句柄枚举没有继续读取后续文件批次。");
 }
 
 static CodeTaskAgent NewAgent(IInferenceClient inference) => new(inference, new ModelBroker(), repositoryRoot: null);
