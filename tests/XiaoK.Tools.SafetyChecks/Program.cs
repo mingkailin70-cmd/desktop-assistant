@@ -19,11 +19,15 @@ using XiaoK.Tools;
 
 try
 {
+if (OperatingSystem.IsWindows())
+    TestProcessErrorMode.SuppressWindowsErrorDialogsForProcessTree();
+
 if (args.Length == 3 && args[0] == "--appcontainer-probe")
 {
     Environment.ExitCode = RunAppContainerProbe(args[1], args[2]);
     return;
 }
+
 if (args.Length == 4 && args[0] == "--appcontainer-hang")
 {
     Environment.ExitCode = RunAppContainerHangProbe(args[1], args[2], int.Parse(args[3]));
@@ -3171,4 +3175,25 @@ internal static class SqliteSchemaFixture
 
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_close_v2")]
     private static extern int sqlite3_close_v2(IntPtr database);
+}
+
+static class TestProcessErrorMode
+{
+    private const uint SemFailCriticalErrors = 0x0001;
+    private const uint SemNoGpFaultErrorBox = 0x0002;
+
+    public static void SuppressWindowsErrorDialogsForProcessTree()
+    {
+        _ = SetErrorMode(SemFailCriticalErrors | SemNoGpFaultErrorBox);
+        var activeMode = GetErrorMode();
+        if ((activeMode & (SemFailCriticalErrors | SemNoGpFaultErrorBox))
+            != (SemFailCriticalErrors | SemNoGpFaultErrorBox))
+            throw new InvalidOperationException("无法为安全检查及其子进程关闭 Windows 崩溃弹窗。");
+    }
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern uint SetErrorMode(uint mode);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern uint GetErrorMode();
 }
