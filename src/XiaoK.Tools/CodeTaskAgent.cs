@@ -168,6 +168,7 @@ public sealed class CodeTaskAgent
     private static List<string> ParseSelectedPaths(string json, IReadOnlyList<CodeTextCandidate> candidates)
     {
         using var document = ParseJsonObject(json);
+        RequireExactObjectProperties(document.RootElement, "paths");
         if (!document.RootElement.TryGetProperty("paths", out var paths) || paths.ValueKind != JsonValueKind.Array || paths.GetArrayLength() > MaximumSelectedFiles)
             throw new InvalidDataException("模型返回的文件选择格式无效。");
 
@@ -187,6 +188,7 @@ public sealed class CodeTaskAgent
     private static List<CodeFileContent> ParseChanges(string json, IReadOnlyList<CodeFileContent> selected)
     {
         using var document = ParseJsonObject(json);
+        RequireExactObjectProperties(document.RootElement, "files");
         if (!document.RootElement.TryGetProperty("files", out var files) || files.ValueKind != JsonValueKind.Array || files.GetArrayLength() > MaximumSelectedFiles)
             throw new InvalidDataException("模型返回的补丁格式无效。");
 
@@ -195,7 +197,8 @@ public sealed class CodeTaskAgent
         var total = 0;
         foreach (var file in files.EnumerateArray())
         {
-            if (file.ValueKind != JsonValueKind.Object || !file.TryGetProperty("path", out var pathElement)
+            RequireExactObjectProperties(file, "path", "content");
+            if (!file.TryGetProperty("path", out var pathElement)
                 || pathElement.ValueKind != JsonValueKind.String || !file.TryGetProperty("content", out var contentElement)
                 || contentElement.ValueKind != JsonValueKind.String)
                 throw new InvalidDataException("模型返回了无效补丁项。");
@@ -214,16 +217,30 @@ public sealed class CodeTaskAgent
 
     private static JsonDocument ParseJsonObject(string response)
     {
-        var firstBrace = response.IndexOf('{');
-        var lastBrace = response.LastIndexOf('}');
-        if (firstBrace < 0 || lastBrace < firstBrace) throw new InvalidDataException("模型没有返回JSON对象。");
-        var document = JsonDocument.Parse(response.AsMemory(firstBrace, lastBrace - firstBrace + 1), new JsonDocumentOptions { MaxDepth = 8 });
+        if (string.IsNullOrWhiteSpace(response)) throw new InvalidDataException("模型没有返回JSON对象。");
+        var document = JsonDocument.Parse(response.Trim(), new JsonDocumentOptions { MaxDepth = 8 });
         if (document.RootElement.ValueKind != JsonValueKind.Object)
         {
             document.Dispose();
             throw new InvalidDataException("模型返回的JSON顶层不是对象。");
         }
         return document;
+    }
+
+    private static void RequireExactObjectProperties(JsonElement value, params string[] expectedProperties)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("模型返回的JSON对象层级无效。");
+
+        var remaining = new HashSet<string>(expectedProperties, StringComparer.Ordinal);
+        foreach (var property in value.EnumerateObject())
+        {
+            if (!remaining.Remove(property.Name))
+                throw new InvalidDataException("模型返回了未知或重复的JSON字段；已拒绝。");
+        }
+
+        if (remaining.Count != 0)
+            throw new InvalidDataException("模型返回的JSON缺少必需字段；已拒绝。");
     }
 
     private static async Task<ToolResult> FailAsync(CodeWorkspaceSnapshot snapshot, string message, string errorCode)

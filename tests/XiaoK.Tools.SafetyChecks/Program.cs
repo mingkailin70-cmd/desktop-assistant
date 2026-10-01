@@ -143,6 +143,9 @@ try
     await CheckValidPatchIsIsolatedAsync(tempRoot);
     passed.Add("有效补丁只写隔离工作区，保留 CRLF，并记录待审阅状态");
 
+    await CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(tempRoot);
+    passed.Add("编程代理拒绝代码围栏、额外文本、未知字段和重复JSON字段，原项目保持不变");
+
     await CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(tempRoot);
     passed.Add("代码审阅默认只保留补丁，不运行命令");
 
@@ -621,6 +624,48 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
         && result.Data.Contains("+    int Value = 2;", StringComparison.Ordinal), "返回的差异没有显示修改前后内容。");
     var state = File.ReadAllText(Path.Combine(taskDirectory, "task-state.json"));
     Require(state.Contains("awaiting_approval", StringComparison.Ordinal), "任务状态没有写入 awaiting_approval。");
+}
+
+static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string root)
+{
+    const string source = "class Sample { int Value = 1; }\n";
+    const string validSelection = "{\"paths\":[\"Sample.cs\"]}";
+    const string validPatch = "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}";
+    var cases = new (string Name, string Selection, string Patch, int ExpectedCalls)[]
+    {
+        ("selection markdown", "```json\n{\"paths\":[\"Sample.cs\"]}\n```", validPatch, 1),
+        ("selection trailing text", validSelection + " chosen", validPatch, 1),
+        ("selection unknown field", "{\"paths\":[\"Sample.cs\"],\"note\":\"ignored\"}", validPatch, 1),
+        ("selection duplicate field", "{\"paths\":[],\"paths\":[\"Sample.cs\"]}", validPatch, 1),
+        ("patch extra text", validSelection, validPatch + " done", 2),
+        ("patch unknown root field", validSelection, "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}],\"note\":\"ignored\"}", 2),
+        ("patch unknown item field", validSelection, "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\",\"mode\":\"write\"}]}", 2),
+        ("patch duplicate item field", validSelection, "{\"files\":[{\"path\":\"Sample.cs\",\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}", 2)
+    };
+
+    for (var index = 0; index < cases.Length; index++)
+    {
+        var testCase = cases[index];
+        var caseName = "strict-json-" + index;
+        var project = CreateProject(root, caseName, source);
+        var workspaceRoot = Path.Combine(root, caseName + "-workspaces");
+        var inference = new ScriptedInference(testCase.Selection, testCase.Patch);
+        var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+        var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Value 改为 2",
+            CancellationToken.None, review);
+
+        Require(!result.Success && result.ErrorCode == "CODE_TASK_FAILED",
+            $"模型输出 {testCase.Name} 未按严格 JSON 架构失败关闭。");
+        Require(inference.CallCount == testCase.ExpectedCalls && review.CallCount == 0,
+            $"模型输出 {testCase.Name} 在拒绝前继续了推理步骤或展示了待审阅补丁。");
+        Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
+            $"模型输出 {testCase.Name} 修改了原项目。");
+
+        var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+        Require(File.ReadAllText(Path.Combine(taskRoot, "task-state.json"))
+                .Contains("failed", StringComparison.Ordinal),
+            $"模型输出 {testCase.Name} 没有留下失败状态。");
+    }
 }
 
 static async Task CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(string root)
