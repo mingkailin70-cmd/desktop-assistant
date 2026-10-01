@@ -124,6 +124,9 @@ try
     CheckFileSearchResultSummaryReportsLimits();
     passed.Add("文件搜索达到扫描/显示上限时明确标记结果可能不完整");
 
+    await CheckFileSearchFailureAndCancellationAsync(tempRoot);
+    passed.Add("文件搜索根缺失和查询无效时失败关闭，预取消不执行搜索");
+
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
 
@@ -2450,6 +2453,34 @@ static void CheckFileSearchResultSummaryReportsLimits()
         LocalFileSearchResultPolicy.MaximumScannedEntries, scanLimitReached: true);
     Require(cappedScan.Contains("结果可能不完整", StringComparison.Ordinal),
         "达到扫描上限且已有结果时没有提示结果可能不完整。");
+}
+
+static async Task CheckFileSearchFailureAndCancellationAsync(string root)
+{
+    var missingRoot = Path.Combine(root, "file-search-missing-root");
+    var desktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+        [new KeyValuePair<string, string>("user-files", missingRoot)]);
+    var validProposal = ToolBroker.Proposal("file.search.v1",
+        [new("query", "report"), new("root_id", "user-files")], "user-files",
+        ToolExpectedOutcome.MatchingFilesListed);
+
+    var unavailable = await desktop.SearchFilesAsync(validProposal, CancellationToken.None);
+    Require(!unavailable.Success && unavailable.ErrorCode == "SEARCH_ROOT_UNAVAILABLE",
+        "缺失的搜索根目录没有返回明确失败状态。");
+
+    var invalidQuery = await desktop.SearchFilesAsync(validProposal with
+    {
+        Arguments = validProposal.Arguments.SetItem("query", "  ")
+    }, CancellationToken.None);
+    Require(!invalidQuery.Success && invalidQuery.ErrorCode == "INVALID_QUERY",
+        "空白文件名查询没有在搜索前被拒绝。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await desktop.SearchFilesAsync(validProposal, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled, "已经取消的文件搜索仍继续返回结果。");
 }
 
 static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
