@@ -42,7 +42,11 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
             stream = false,
             messages = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
         };
-        using var response = await _http.PostAsJsonAsync("v1/chat/completions", payload, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "v1/chat/completions")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         if (!string.Equals(response.Content.Headers.ContentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Local inference returned a non-JSON response.");

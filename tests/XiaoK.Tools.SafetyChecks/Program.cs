@@ -255,6 +255,9 @@ try
     await CheckLocalInferenceClientRequestAndRedirectBoundaryAsync();
     passed.Add("本地推理只向回环端点发送固定接口请求，并拒绝跟随重定向");
 
+    await CheckLocalInferenceClientRejectsInvalidResponsesAsync();
+    passed.Add("本地推理拒绝错误媒体类型、损坏 JSON 和超大响应");
+
     await CheckManagedRuntimeManifestIsStrictAsync(tempRoot);
     passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
 
@@ -2321,8 +2324,46 @@ static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
     }
 }
 
+static async Task CheckLocalInferenceClientRejectsInvalidResponsesAsync()
+{
+    async Task<Exception?> RunResponseCaseAsync(string responseBody, string contentType = "application/json",
+        int? declaredContentLength = null, bool sendResponseBody = true)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var server = ServeOneLoopbackHttpRequestAsync(listener, HttpStatusCode.OK, responseBody, null,
+                timeout.Token, contentType, declaredContentLength, sendResponseBody);
+            using var client = new LocalInferenceClient($"http://127.0.0.1:{port}/");
+            Exception? failure = null;
+            try { _ = await client.CompleteAsync("system", "user", timeout.Token); }
+            catch (Exception ex) { failure = ex; }
+            await server.WaitAsync(TimeSpan.FromSeconds(3));
+            return failure;
+        }
+        finally { listener.Stop(); }
+    }
+
+    var wrongMediaType = await RunResponseCaseAsync("<html/>", "text/html");
+    Require(wrongMediaType is InvalidDataException,
+        "本地推理客户端接受了非 JSON 响应媒体类型。");
+
+    var malformedJson = await RunResponseCaseAsync("not-json");
+    Require(malformedJson is JsonException,
+        "本地推理客户端没有拒绝损坏的 JSON 响应。");
+
+    var oversized = await RunResponseCaseAsync("", declaredContentLength: 2 * 1024 * 1024 + 1,
+        sendResponseBody: false);
+    Require(oversized is InvalidDataException,
+        "本地推理客户端没有在读取响应正文前拒绝超过大小上限的响应。");
+}
+
 static async Task<(string Headers, string Body)> ServeOneLoopbackHttpRequestAsync(TcpListener listener,
-    HttpStatusCode statusCode, string responseBody, string? location, CancellationToken cancellationToken)
+    HttpStatusCode statusCode, string responseBody, string? location, CancellationToken cancellationToken,
+    string contentType = "application/json", int? declaredContentLength = null, bool sendResponseBody = true)
 {
     using var connection = await listener.AcceptTcpClientAsync(cancellationToken);
     await using var stream = connection.GetStream();
@@ -2365,10 +2406,10 @@ static async Task<(string Headers, string Body)> ServeOneLoopbackHttpRequestAsyn
     };
     var locationHeader = location is null ? "" : $"Location: {location}\r\n";
     var responseHeaders = Encoding.ASCII.GetBytes(
-        $"HTTP/1.1 {(int)statusCode} {reason}\r\nContent-Type: application/json\r\n"
-        + $"Content-Length: {responseBytes.Length}\r\nConnection: close\r\n{locationHeader}\r\n");
+        $"HTTP/1.1 {(int)statusCode} {reason}\r\nContent-Type: {contentType}\r\n"
+        + $"Content-Length: {declaredContentLength ?? responseBytes.Length}\r\nConnection: close\r\n{locationHeader}\r\n");
     await stream.WriteAsync(responseHeaders, cancellationToken);
-    if (responseBytes.Length > 0) await stream.WriteAsync(responseBytes, cancellationToken);
+    if (sendResponseBody && responseBytes.Length > 0) await stream.WriteAsync(responseBytes, cancellationToken);
     await stream.FlushAsync(cancellationToken);
     return (headers, Encoding.UTF8.GetString(requestBody));
 }
