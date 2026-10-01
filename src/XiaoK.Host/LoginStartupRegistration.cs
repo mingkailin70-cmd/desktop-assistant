@@ -1,4 +1,6 @@
 using System.Security;
+using System.IO;
+using System.Reflection;
 using Microsoft.Win32;
 using Windows.ApplicationModel;
 
@@ -60,11 +62,61 @@ internal static class LoginStartupRegistration
             return;
         }
 
-        var executable = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(executable))
+        runKey.SetValue(ValueName, BuildDevelopmentCommandLine(), RegistryValueKind.String);
+    }
+
+    private static string BuildDevelopmentCommandLine()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
             throw new InvalidOperationException("无法确定小K程序路径，未创建登录启动项。");
 
-        runKey.SetValue(ValueName, $"\"{executable}\" --background", RegistryValueKind.String);
+        var processName = Path.GetFileNameWithoutExtension(processPath);
+        if (string.Equals(processName, "dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            var entryAssemblyPath = Assembly.GetEntryAssembly()?.Location
+                ?? throw new InvalidOperationException("无法确定小K程序集路径，未创建登录启动项。");
+            if (string.IsNullOrWhiteSpace(entryAssemblyPath) || !File.Exists(entryAssemblyPath))
+                throw new InvalidOperationException("无法确定小K程序集路径，未创建登录启动项。");
+
+            return $"{QuoteCommandArgument(processPath)} {QuoteCommandArgument(entryAssemblyPath)} --background";
+        }
+
+        return $"{QuoteCommandArgument(processPath)} --background";
+    }
+
+    private static string QuoteCommandArgument(string argument)
+    {
+        if (argument.Length == 0) return "\"\"";
+        if (!argument.Any(char.IsWhiteSpace) && !argument.Contains('"')) return argument;
+
+        var builder = new System.Text.StringBuilder(argument.Length + 2);
+        builder.Append('"');
+        var backslashes = 0;
+        foreach (var character in argument)
+        {
+            if (character == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            if (character == '"')
+            {
+                builder.Append('\\', (backslashes * 2) + 1);
+                builder.Append('"');
+                backslashes = 0;
+                continue;
+            }
+
+            builder.Append('\\', backslashes);
+            builder.Append(character);
+            backslashes = 0;
+        }
+
+        builder.Append('\\', backslashes * 2);
+        builder.Append('"');
+        return builder.ToString();
     }
 
     private static LoginStartupSnapshot Describe(StartupTaskState state) => state switch
