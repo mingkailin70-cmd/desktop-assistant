@@ -85,6 +85,7 @@
                     <TextBlock Text="快捷入口 · 点一下后补充内容" FontSize="10" Foreground="#7A8299" Margin="2,9,0,6"/>
                     <WrapPanel>
                         <Button Style="{StaticResource QuickPromptButton}" Content="查找文件" Tag="查找文件 " Click="QuickPrompt_Click"/>
+                        <Button Style="{StaticResource QuickPromptButton}" Content="解释代码" Tag="解释代码：" Click="QuickPrompt_Click"/>
                         <Button Style="{StaticResource QuickPromptButton}" Content="分析消息" Tag="分析消息：" Click="QuickPrompt_Click"/>
                         <Button Style="{StaticResource QuickPromptButton}" Content="起草回复" Tag="帮我回复：" Click="QuickPrompt_Click"/>
                     </WrapPanel>

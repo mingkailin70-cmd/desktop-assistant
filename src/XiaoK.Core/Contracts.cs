@@ -30,7 +30,8 @@ public enum ToolExpectedOutcome
     LocalMessageAnalysis = 4,
     ReplyDraftOnly = 5,
     PreviewConfirmedBeforeSend = 6,
-    ReviewablePatchCreated = 7
+    ReviewablePatchCreated = 7,
+    CodeExplanationReturned = 8
 }
 
 public static class ApprovalAuditCatalog

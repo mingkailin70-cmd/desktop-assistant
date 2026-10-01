@@ -146,6 +146,9 @@ try
     await CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(tempRoot);
     passed.Add("编程代理拒绝代码围栏、额外文本、未知字段和重复JSON字段，原项目保持不变");
 
+    await CheckCodeTaskInspectionIsReadOnlyAsync(tempRoot);
+    passed.Add("只读代码检索经 ToolBroker 选择并解释项目文件，不改写、审阅或测试原项目");
+
     await CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(tempRoot);
     passed.Add("代码审阅默认只保留补丁，不运行命令");
 
@@ -668,6 +671,38 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
     }
 }
 
+static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
+{
+    const string original = "class Sample { int Value = 7; }\n";
+    const string explanation = "入口位于 Sample.Value；这个字段当前初始化为 7。";
+    var project = CreateProject(root, "code-inspection", original);
+    var workspaces = Path.Combine(root, "code-inspection-workspaces");
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}", explanation);
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
+    var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "should not run"));
+    var agent = NewAgent(inference, runner);
+    var broker = new ToolBroker(new WindowsDesktopTools([], []), inference, new ModelBroker(), null!, agent,
+        project, workspaces);
+    var proposal = ToolBroker.Proposal("code.inspect.v1",
+        [new KeyValuePair<string, string>("instruction", "说明 Value 当前在哪里定义")], "configured-project",
+        ToolExpectedOutcome.CodeExplanationReturned);
+
+    var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.Completed && result.Data == explanation,
+        "只读检索没有返回本地说明和完成状态。");
+    Require(inference.CallCount == 2 && inference.Prompts.Any(prompt => prompt.Contains("Value = 7", StringComparison.Ordinal)),
+        "只读检索没有按模型选择的项目文件提供本地上下文。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
+        "只读代码检索修改了用户所选的原项目。");
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")) == original
+        && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("completed", StringComparison.Ordinal),
+        "只读检索未保留只读快照或没有记录完成状态。");
+    Require(review.CallCount == 0 && runner.CallCount == 0,
+        "只读检索意外进入补丁审阅或执行验证命令。");
+}
+
 static async Task CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(string root)
 {
     var project = CreateProject(root, "review-keep", "class Sample { int Value = 1; }\n");
@@ -1161,6 +1196,14 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
             && result.Summary.Contains("固定前置条件或可观察结果", StringComparison.Ordinal),
             "缺失或错配的固定条件通过了 ToolBroker。");
     }
+
+    var inspection = ToolBroker.Proposal("code.inspect.v1",
+        [new KeyValuePair<string, string>("instruction", "解释入口")], "configured-project",
+        ToolExpectedOutcome.CodeExplanationReturned);
+    var wrongInspectionOutcome = await broker.ExecuteAsync(
+        inspection with { ExpectedOutcome = ToolExpectedOutcome.ReviewablePatchCreated }, CancellationToken.None);
+    Require(!wrongInspectionOutcome.Success && wrongInspectionOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "只读代码检索提案未绑定固定的说明返回结果。");
 }
 
 static void CheckWindowMatchSelection()

@@ -41,6 +41,8 @@ public sealed class ToolBroker
             "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
             "message.send.v1" => await SendAsync(proposal, cancellationToken),
+            "code.inspect.v1" => await _codeAgent.InspectAsync(_codeProjectRoot, _codeWorkspaceRoot,
+                proposal.Arguments["instruction"], cancellationToken),
             "code.task.create.v1" => await _codeAgent.ExecuteAsync(_codeProjectRoot, _codeWorkspaceRoot,
                 proposal.Arguments["instruction"], cancellationToken, _approval as ICodeTaskReviewPresenter),
             _ => new ToolResult(false, "未知工具已拒绝。", "UNKNOWN_TOOL")
@@ -73,9 +75,9 @@ public sealed class ToolBroker
             "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
             "message.draft.v1" => ValidateDraft(proposal),
             "message.send.v1" => ValidateSend(proposal),
-            "code.task.create.v1" => proposal.Arguments.Count == 1
-                && proposal.Arguments.TryGetValue("instruction", out var instruction)
-                && !string.IsNullOrWhiteSpace(instruction) && instruction.Length <= 4_000
+            "code.inspect.v1" or "code.task.create.v1" => proposal.Arguments.Count == 1
+                && proposal.Arguments.TryGetValue("instruction", out var codeInstruction)
+                && !string.IsNullOrWhiteSpace(codeInstruction) && codeInstruction.Length <= 4_000
                 && proposal.Target == "configured-project"
                     ? null
                     : InvalidProposal("编程任务只接受用户输入的说明，并绑定到设置中明确选择的项目。"),
@@ -236,7 +238,7 @@ public sealed class ToolBroker
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
         "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
         "message.send.v1" => ToolPrecondition.CompleteMessagePreview,
-        "code.task.create.v1" => ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
+        "code.inspect.v1" or "code.task.create.v1" => ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
         _ => ToolPrecondition.None
     };
 
@@ -249,6 +251,7 @@ public sealed class ToolBroker
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,
         "message.send.v1" => ToolExpectedOutcome.PreviewConfirmedBeforeSend,
+        "code.inspect.v1" => ToolExpectedOutcome.CodeExplanationReturned,
         "code.task.create.v1" => ToolExpectedOutcome.ReviewablePatchCreated,
         _ => ToolExpectedOutcome.None
     };

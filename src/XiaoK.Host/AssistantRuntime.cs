@@ -359,6 +359,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (category == "send")
             return new(false, "发送必须经过最终预览，列出收件人、正文和附件并确认。微信/QQ发送适配器尚未接入，因此当前不会发送。", "SEND_ADAPTER_UNAVAILABLE");
 
+        if (category == "code-inspect")
+        {
+            var instruction = ExtractPayload(request, new[] { "查找代码", "搜索代码", "解释代码", "分析代码", "读代码" });
+            if (instruction.Length == 0)
+                return new(false, "请补充要在所选项目中查找或解释的内容。", "EMPTY_CODE_QUERY");
+            return await _broker.ExecuteAsync(new ToolProposal("code.inspect.v1",
+                ImmutableDictionary<string, string>.Empty.Add("instruction", instruction), "configured-project",
+                ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
+                ToolExpectedOutcome.CodeExplanationReturned), token);
+        }
+
         if (category == "code")
             return await _broker.ExecuteAsync(new ToolProposal("code.task.create.v1",
                 ImmutableDictionary<string, string>.Empty.Add("instruction", request), "configured-project",
@@ -400,6 +411,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("分析消息") || lower.StartsWith("分析聊天") || lower.StartsWith("理解聊天") || lower.StartsWith("解释这条消息") || lower.StartsWith("分析：") || lower.StartsWith("分析:")) return "analyze";
         if (lower.StartsWith("帮我回复") || lower.StartsWith("起草回复") || lower.StartsWith("回复草稿") || lower.StartsWith("帮我回")) return "draft";
         if (lower.StartsWith("发送") || lower.StartsWith("发给")) return "send";
+        if (lower.StartsWith("查找代码") || lower.StartsWith("搜索代码") || lower.StartsWith("解释代码")
+            || lower.StartsWith("分析代码") || lower.StartsWith("读代码")) return "code-inspect";
         if (lower.Contains("写代码") || lower.Contains("改代码") || lower.Contains("开发任务") || lower.Contains("编程任务")) return "code";
         if (lower.StartsWith("打开") || lower.StartsWith("启动")) return "app";
         return "chat";
@@ -408,7 +421,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string CategoryLabel(string category) => category switch
     {
         "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "analyze" => "消息分析", "draft" => "回复草稿",
-        "send" => "发送请求", "code" => "本地编程任务", _ => "本地对话"
+        "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
     private sealed record NoticeAnalysisWork(string ApplicationId, ToolProposal Proposal,
@@ -426,6 +439,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string CodeTaskStateLabel(string state) => state switch
     {
         "planning" => "规划中", "running" => "生成中", "awaiting_approval" => "等待审阅",
+        "completed" => "已完成",
         "failed" => "失败", "cancelled" => "已取消", _ => "未知状态"
     };
 
