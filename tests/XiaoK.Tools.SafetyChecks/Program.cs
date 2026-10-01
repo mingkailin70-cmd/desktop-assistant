@@ -64,6 +64,11 @@ if (args.Length == 1 && args[0] == "--only-window-selection")
     Console.WriteLine("通过：窗口目标选择只接受唯一且非零的句柄。");
     return;
 }
+if (args.Length == 3 && args[0] == "--verify-live-vscode-window")
+{
+    await VerifyLiveVscodeWindowAsync(args[1], args[2]);
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-app-launch")
 {
     await CheckAppLaunchRoutingAndFailureAsync();
@@ -1091,6 +1096,37 @@ static void CheckWindowMatchSelection()
         "重复出现的同一窗口句柄没有去重为唯一目标。");
     Require(ambiguousTarget.Status == WindowMatchStatus.Ambiguous && ambiguousTarget.Handle == IntPtr.Zero,
         "多个不同窗口句柄没有失败关闭并要求用户手动选择。");
+}
+
+static async Task VerifyLiveVscodeWindowAsync(string executablePath, string workspacePath)
+{
+    if (!Path.IsPathFullyQualified(executablePath) || !File.Exists(executablePath)
+        || !string.Equals(Path.GetFileName(executablePath), "Code.exe", StringComparison.OrdinalIgnoreCase)
+        || !Path.IsPathFullyQualified(workspacePath) || !Directory.Exists(workspacePath)
+        || !File.Exists(Path.Combine(workspacePath, "XiaoK.sln")))
+    {
+        Console.Error.WriteLine("实机验收只接受已存在的 Code.exe 和包含 XiaoK.sln 的本地项目目录；未触碰窗口。");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    var intent = AppLaunchIntentResolver.ResolveWindowActivation("切换到小K项目");
+    if (intent is not { AppId: "vscode" })
+    {
+        Console.Error.WriteLine("固定的小K项目窗口意图解析失败；未触碰窗口。");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    var app = new DesktopApp(intent.AppId, executablePath, workspacePath);
+    var proposal = ToolBroker.Proposal("window.activate.v1",
+        [new KeyValuePair<string, string>("app_id", intent.AppId)], intent.AppId,
+        ToolExpectedOutcome.TargetWindowInForeground);
+    var broker = new ToolBroker(new WindowsDesktopTools([app], []), null!, new ModelBroker(), null!, null!, "", "");
+    var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
+    Console.WriteLine($"实机窗口验收：{result.Summary}");
+    if (result.ErrorCode is not null) Console.WriteLine($"状态码：{result.ErrorCode}");
+    Environment.ExitCode = result.Success ? 0 : 1;
 }
 
 static async Task CheckWindowActivationOutcomesAsync()
