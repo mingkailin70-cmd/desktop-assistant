@@ -58,6 +58,12 @@ if (args.Length == 1 && args[0] == "--only-window-activation")
     Console.WriteLine("通过：窗口切换成功、未找到、被拒绝和取消路径。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-app-launch")
+{
+    await CheckAppLaunchRoutingAndFailureAsync();
+    Console.WriteLine("通过：白名单应用启动参数及启动失败状态。");
+    return;
+}
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
@@ -86,6 +92,9 @@ try
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
+
+    await CheckAppLaunchRoutingAndFailureAsync();
+    passed.Add("应用启动使用固定白名单路径和项目参数，启动失败状态准确");
 
     await CheckToolProposalPreconditionsAreTypedAsync();
     passed.Add("ToolBroker 拒绝缺失或错配的固定前置条件与预期结果");
@@ -1125,6 +1134,36 @@ static async Task CheckWindowActivationOutcomesAsync()
         "窗口切换请求发出后取消被误报为失败，而未等待独立核验结果。");
 }
 
+static async Task CheckAppLaunchRoutingAndFailureAsync()
+{
+    const string appId = "vscode";
+    const string executable = @"C:\Synthetic\Code.exe";
+    const string projectRoot = @"D:\Desktop\learn\siri";
+    var app = new DesktopApp(appId, executable, projectRoot);
+    var proposal = ToolBroker.Proposal("app.launch.v1",
+        [new KeyValuePair<string, string>("app_id", appId), new KeyValuePair<string, string>("workspace_id", "xiaok")],
+        appId, ToolExpectedOutcome.ApplicationWindowVisible);
+
+    var processController = new FakeDesktopAppProcessController(windowVisible: true);
+    var desktop = new WindowsDesktopTools([app], [], processController);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
+    var startInfo = processController.LastStartInfo;
+    Require(result.Success && result.Data == projectRoot && processController.StartCount == 1
+        && processController.WindowCheckCount == 1
+        && startInfo is { FileName: executable, WorkingDirectory: projectRoot, UseShellExecute: true }
+        && startInfo.ArgumentList.SequenceEqual(["--new-window", projectRoot]),
+        "打开 VS Code 项目没有使用固定程序路径、工作目录和新窗口项目参数，或未核验窗口。");
+
+    var failingProcessController = new FakeDesktopAppProcessController(startFailure: new FileNotFoundException());
+    var failingDesktop = new WindowsDesktopTools([app], [], failingProcessController);
+    var failureBroker = new ToolBroker(failingDesktop, null!, new ModelBroker(), null!, null!, "", "");
+    var failure = await failureBroker.ExecuteAsync(proposal, CancellationToken.None);
+    Require(!failure.Success && failure.ErrorCode == "APP_LAUNCH_FAILED"
+        && failingProcessController.StartCount == 1 && failingProcessController.WindowCheckCount == 0,
+        "固定应用启动器路径失效时没有如实返回启动失败。");
+}
+
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()
 {
     var appId = "test-app";
@@ -1831,16 +1870,20 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
     }
 }
 
-internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true)
+internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true,
+    Exception? startFailure = null)
     : IDesktopAppProcessController
 {
     public int StartCount { get; private set; }
     public int WindowCheckCount { get; private set; }
+    public ProcessStartInfo? LastStartInfo { get; private set; }
 
     public IDisposable? Start(ProcessStartInfo startInfo)
     {
         StartCount++;
+        LastStartInfo = startInfo;
         onStart?.Invoke();
+        if (startFailure is not null) throw startFailure;
         return new EmptyDisposable();
     }
 
