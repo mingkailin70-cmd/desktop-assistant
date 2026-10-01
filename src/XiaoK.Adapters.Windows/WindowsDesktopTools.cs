@@ -200,11 +200,12 @@ public sealed class WindowsDesktopTools
         if (safeRoots.Count == 0)
             return new(false, "搜索目录是链接或重解析点，已拒绝遍历。", "SEARCH_ROOT_NOT_LOCAL_DIRECTORY");
 
-        var matches = new List<string>(10);
+        var matches = new List<string>(LocalFileSearchResultPolicy.MaximumResults);
         var scanned = 0;
         var queue = new Queue<(string Path, string Root, int Depth, FileIdentity? ExpectedIdentity)>();
         foreach (var root in safeRoots) queue.Enqueue((root.Path, root.Path, 0, root.Identity));
-        while (queue.Count > 0 && scanned < 5000 && matches.Count < 10)
+        while (queue.Count > 0 && scanned < LocalFileSearchResultPolicy.MaximumScannedEntries
+            && matches.Count < LocalFileSearchResultPolicy.MaximumResults)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var (current, root, depth, expectedIdentity) = queue.Dequeue();
@@ -214,7 +215,8 @@ public sealed class WindowsDesktopTools
             {
                 if ((expectedIdentity.HasValue && expectedIdentity.Value != directoryIdentity)
                     || !IsWithinRoot(verifiedDirectory, root)) continue;
-                if (!TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity, 5000 - scanned, out var entries)) continue;
+                if (!TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity,
+                        LocalFileSearchResultPolicy.MaximumScannedEntries - scanned, out var entries)) continue;
 
                 foreach (var entry in entries)
                 {
@@ -244,13 +246,16 @@ public sealed class WindowsDesktopTools
                             matches.Add(ToDisplayPath(filePath));
                     }
 
-                    if (matches.Count == 10 || scanned >= 5000) break;
+                    if (matches.Count == LocalFileSearchResultPolicy.MaximumResults
+                        || scanned >= LocalFileSearchResultPolicy.MaximumScannedEntries) break;
                 }
             }
         }
 
-        var result = matches.Count == 0 ? "没有找到匹配文件。" : string.Join(Environment.NewLine, matches);
-        return new(true, matches.Count == 0 ? result : $"找到 {matches.Count} 个结果：", Data: result);
+        var scanLimitReached = scanned >= LocalFileSearchResultPolicy.MaximumScannedEntries;
+        var summary = LocalFileSearchResultPolicy.CreateSummary(matches.Count, scanned, scanLimitReached);
+        var response = LocalFileSearchResultPolicy.CreateResponse(matches, scanned, scanLimitReached);
+        return new(true, summary, Data: response);
     }
 
     private static string? NormalizeLocalPath(string? path)

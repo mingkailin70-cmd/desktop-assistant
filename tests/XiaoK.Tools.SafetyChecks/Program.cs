@@ -121,6 +121,9 @@ try
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
 
+    CheckFileSearchResultSummaryReportsLimits();
+    passed.Add("文件搜索达到扫描/显示上限时明确标记结果可能不完整");
+
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
 
@@ -2295,6 +2298,35 @@ static bool CheckFileSearchRejectsReparsePoints(string root, out string skipReas
         Directory.Delete(nestedJunction, recursive: false);
         Directory.Delete(linkedSearchRoot, recursive: false);
     }
+}
+
+static void CheckFileSearchResultSummaryReportsLimits()
+{
+    var completeEmpty = LocalFileSearchResultPolicy.CreateSummary(0, 123, scanLimitReached: false);
+    Require(completeEmpty == "没有找到匹配文件。", "完整搜索的空结果摘要不正确。");
+    Require(LocalFileSearchResultPolicy.CreateResponse([], 123, scanLimitReached: false) == completeEmpty,
+        "没有匹配文件时，实际显示文本必须包含空结果说明。");
+
+    var incompleteEmpty = LocalFileSearchResultPolicy.CreateSummary(0,
+        LocalFileSearchResultPolicy.MaximumScannedEntries, scanLimitReached: true);
+    Require(incompleteEmpty.Contains("仍有内容未检查", StringComparison.Ordinal),
+        "达到扫描上限但没有匹配项时，摘要仍声称已完整搜索。");
+
+    var cappedResults = LocalFileSearchResultPolicy.CreateSummary(LocalFileSearchResultPolicy.MaximumResults,
+        1_200, scanLimitReached: false);
+    Require(cappedResults.Contains("可能还有更多结果", StringComparison.Ordinal),
+        "达到显示上限时没有提示可能存在更多结果。");
+    var cappedResponse = LocalFileSearchResultPolicy.CreateResponse(
+        Enumerable.Range(1, LocalFileSearchResultPolicy.MaximumResults).Select(index => $"C:\\files\\match-{index}.txt").ToArray(),
+        1_200, scanLimitReached: false);
+    Require(cappedResponse.Contains("可能还有更多结果", StringComparison.Ordinal)
+        && cappedResponse.Contains("C:\\files\\match-1.txt", StringComparison.Ordinal),
+        "搜索结果实际显示文本没有同时包含上限提示和路径。");
+
+    var cappedScan = LocalFileSearchResultPolicy.CreateSummary(2,
+        LocalFileSearchResultPolicy.MaximumScannedEntries, scanLimitReached: true);
+    Require(cappedScan.Contains("结果可能不完整", StringComparison.Ordinal),
+        "达到扫描上限且已有结果时没有提示结果可能不完整。");
 }
 
 static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
