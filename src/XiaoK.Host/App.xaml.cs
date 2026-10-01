@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Principal;
@@ -43,6 +44,23 @@ public partial class App : System.Windows.Application
             if (!startInTray) RestoreExistingInstance();
             Shutdown();
             return;
+        }
+
+        if (e.Args.Contains("--diagnostics-profile", StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var profileRoot = Path.Combine(Path.GetTempPath(), "XiaoK-Diagnostics-" + Guid.NewGuid().ToString("N"));
+                XiaoKSettings.EnableDiagnosticsProfile(profileRoot);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                System.Windows.MessageBox.Show(
+                    $"无法创建隔离诊断配置。小K不会读取常规设置或数据目录。{Environment.NewLine}{ex.Message}",
+                    "小K诊断模式", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                Shutdown();
+                return;
+            }
         }
 
         MainWindow = new MainWindow();

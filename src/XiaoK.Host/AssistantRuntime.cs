@@ -55,7 +55,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _models = new ModelBroker(managedRuntime);
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
-        _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
+        var recoveryRoot = XiaoKSettings.IsDiagnosticsMode
+            ? Path.Combine(_settings.DataRoot, "AppContainerRecovery")
+            : null;
+        _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), recoveryRoot);
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
@@ -63,8 +66,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
 
-    public string ModelStatus => _managedModelRuntime?.Status
-        ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
+    public string ModelStatus => XiaoKSettings.IsDiagnosticsMode
+        ? "诊断模式：临时设置与数据库；通知、语音采集和模型推理均关闭"
+        : _managedModelRuntime?.Status
+            ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
     public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
     public string? StartupIsolationNotice => !_dotNetTestRunner.StartupIsolationRecovery.Success
         || _dotNetTestRunner.StartupIsolationRecovery.RecoveredProfiles > 0
@@ -168,6 +173,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public async Task<string> SubmitAsync(string input)
     {
+        if (XiaoKSettings.IsDiagnosticsMode) return "诊断模式只用于界面检查；桌面操作、文件访问和模型推理均未执行。";
         if (Volatile.Read(ref _stopping) != 0) return "小K正在退出，暂不接受新任务。";
         var request = input.Trim();
         if (request.Length == 0) return "先输入一句话，或用 Ctrl+Shift+K 打开小K。";
@@ -573,6 +579,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
 internal sealed record XiaoKSettings
 {
+    private static XiaoKSettings? _diagnosticsSettings;
+    private static string? _diagnosticsSettingsPath;
+
+    internal static bool IsDiagnosticsMode => _diagnosticsSettings is not null;
+
     internal bool ContactStylesMigrationSourceAvailable { get; init; } = true;
     public string DataRoot { get; init; } = @"D:\XiaoK\Data";
     public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
@@ -592,8 +603,47 @@ internal sealed record XiaoKSettings
     public List<AppSetting> Applications { get; init; } = [];
     public List<RootSetting> SearchRoots { get; init; } = [];
 
+    internal static void EnableDiagnosticsProfile(string root)
+    {
+        if (IsDiagnosticsMode) throw new InvalidOperationException("诊断配置已经启用。");
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        var tempRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        var tempPrefix = tempRoot + Path.DirectorySeparatorChar;
+        const string profilePrefix = "XiaoK-Diagnostics-";
+        var profileName = Path.GetFileName(fullRoot);
+        if (!fullRoot.StartsWith(tempPrefix, StringComparison.OrdinalIgnoreCase)
+            || !profileName.StartsWith(profilePrefix, StringComparison.Ordinal)
+            || !Guid.TryParseExact(profileName[profilePrefix.Length..], "N", out _)
+            || Directory.Exists(fullRoot) || File.Exists(fullRoot))
+            throw new ArgumentException("诊断配置必须位于临时目录中新建的唯一小K目录。", nameof(root));
+
+        Directory.CreateDirectory(fullRoot);
+        if ((File.GetAttributes(fullRoot) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("诊断配置目录不能是重解析点。");
+
+        _diagnosticsSettingsPath = Path.Combine(fullRoot, "settings.json");
+        _diagnosticsSettings = new XiaoKSettings
+        {
+            DataRoot = Path.Combine(fullRoot, "Data"),
+            ModelRoot = Path.Combine(fullRoot, "Models"),
+            EvaluationRoot = Path.Combine(fullRoot, "Evaluations"),
+            CodeProjectRoot = "",
+            CodeWorkspaceRoot = Path.Combine(fullRoot, "Workspaces"),
+            InferenceEndpoint = "http://127.0.0.1:0/",
+            MonitorWeChatNotifications = false,
+            MonitorQQNotifications = false,
+            WeChatPublisherAppIds = [],
+            QQPublisherAppIds = [],
+            ContactReplyStyles = [],
+            Applications = [],
+            SearchRoots = []
+        };
+        _diagnosticsSettings.Save();
+    }
+
     public static XiaoKSettings Load()
     {
+        if (_diagnosticsSettings is { } diagnosticsSettings) return diagnosticsSettings;
         var defaults = CreateDefaults();
         var path = GetSettingsPath();
         if (!File.Exists(path)) return defaults;
@@ -610,8 +660,9 @@ internal sealed record XiaoKSettings
 
     public void Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(GetSettingsPath())!);
         var path = GetSettingsPath();
+        if (IsDiagnosticsMode) _diagnosticsSettings = this;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporaryPath = path + ".tmp";
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(this, options), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -619,7 +670,7 @@ internal sealed record XiaoKSettings
         else File.Move(temporaryPath, path);
     }
 
-    internal static string GetSettingsPath() => Path.Combine(
+    internal static string GetSettingsPath() => _diagnosticsSettingsPath ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "XiaoK", "settings.json");
 
     private static XiaoKSettings CreateDefaults()
@@ -656,7 +707,15 @@ internal sealed record XiaoKSettings
         if (qq.Length > 0) apps.Add(new AppSetting("qq", qq, null));
         var roots = new[] { ("Desktop", desktop), ("Documents", documents), ("Downloads", downloads) }
             .Where(x => !string.IsNullOrWhiteSpace(x.Item2)).Select(x => new RootSetting(x.Item1, x.Item2)).ToList();
-        return new XiaoKSettings { Applications = apps, SearchRoots = roots };
+        var workspaceModelRoot = FindWorkspace(AppContext.BaseDirectory);
+        return new XiaoKSettings
+        {
+            ModelRoot = workspaceModelRoot is null
+                ? @"D:\XiaoK\Models"
+                : Path.Combine(workspaceModelRoot, "models", "llm", "qwen3.5-4b", "f9f88ac3e234be915e23811a6d28ea287bdb927e"),
+            Applications = apps,
+            SearchRoots = roots
+        };
     }
 
     private static string FindExistingLocalExecutable(params string[] candidates) => candidates

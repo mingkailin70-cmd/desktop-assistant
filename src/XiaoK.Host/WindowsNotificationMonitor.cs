@@ -42,6 +42,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         if (!_dispatcher.CheckAccess())
             return "通知权限请求必须从小K的界面线程发起。";
         if (_disposed) return "小K正在退出。";
+        if (XiaoKSettings.IsDiagnosticsMode)
+            return SetStatus("诊断模式关闭通知监控和系统通知授权。");
 
         try
         {
@@ -65,6 +67,13 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         if (!_dispatcher.CheckAccess())
             throw new InvalidOperationException("通知监听配置必须在小K界面线程应用。");
         if (_disposed) return SetStatus("通知监听已停止。");
+
+        if (XiaoKSettings.IsDiagnosticsMode)
+        {
+            StopListening();
+            _allowedAppIds.Clear();
+            return SetStatus("诊断模式关闭微信 / QQ 通知监听。");
+        }
 
         StopListening();
         var wechatIds = settings.MonitorWeChatNotifications ? settings.WeChatPublisherAppIds : [];
