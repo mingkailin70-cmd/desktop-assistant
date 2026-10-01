@@ -232,6 +232,9 @@ try
     await CheckMessageAnalysisNormalFailureTimeoutAndCancellationAsync();
     passed.Add("聊天理解覆盖正常、模型离线、超时和用户取消路径，且不回退云端");
 
+    await CheckReplyDraftFailureTimeoutAndCancellationAsync();
+    passed.Add("回复起草覆盖正常、模型离线、超时和用户取消路径，且不自动发送");
+
     CheckMessageSendIntentResolver();
     passed.Add("发送意图必须明确指定微信或 QQ、收件人和正文，并拒绝未接入的附件语法");
 
@@ -2021,6 +2024,53 @@ static async Task CheckMessageAnalysisNormalFailureTimeoutAndCancellationAsync()
     catch (OperationCanceledException) { cancellationObserved = true; }
     Require(cancellationObserved && cancelledInference.CallCount == 1,
         "用户取消聊天理解后未终止当前本地推理调用。");
+}
+
+static async Task CheckReplyDraftFailureTimeoutAndCancellationAsync()
+{
+    static ToolProposal CreateProposal(string body) => ToolBroker.Proposal("message.draft.v1",
+        [new KeyValuePair<string, string>("draft", body),
+         new KeyValuePair<string, string>("style_id", ContactReplyStyleCatalog.DefaultStyleId)],
+        "用户本次提供的单条消息", ToolExpectedOutcome.ReplyDraftOnly);
+
+    var normalInference = new ScriptedInference("可以回复：好的，我明天确认后告诉你。");
+    var normalBroker = new ToolBroker(new WindowsDesktopTools([], []), normalInference, new ModelBroker(),
+        null!, null!, "", "");
+    var normal = await normalBroker.ExecuteAsync(CreateProposal("明天的时间我晚点确认。"), CancellationToken.None);
+    Require(normal.Success && normal.ErrorCode is null
+        && normalInference.Prompts.Single() == "明天的时间我晚点确认。"
+        && normal.Summary == "可以回复：好的，我明天确认后告诉你。",
+        "回复草稿正常路径没有返回草稿，或消息正文被改写。");
+
+    var offlineInference = new ThrowingInference(new HttpRequestException("local endpoint unavailable"));
+    var offlineBroker = new ToolBroker(new WindowsDesktopTools([], []), offlineInference, new ModelBroker(),
+        null!, null!, "", "");
+    var offline = await offlineBroker.ExecuteAsync(CreateProposal("明天的时间我晚点确认。"), CancellationToken.None);
+    Require(!offline.Success && offline.ErrorCode == "LOCAL_MODEL_OFFLINE"
+        && offline.Summary.Contains("不会回退到云端", StringComparison.Ordinal)
+        && offlineInference.CallCount == 1,
+        "本地模型离线时回复草稿没有失败关闭，或发生了额外/云端推理调用。");
+
+    var timeoutInference = new ThrowingInference(new OperationCanceledException("simulated local timeout"));
+    var timeoutBroker = new ToolBroker(new WindowsDesktopTools([], []), timeoutInference, new ModelBroker(),
+        null!, null!, "", "");
+    var timeout = await timeoutBroker.ExecuteAsync(CreateProposal("明天的时间我晚点确认。"), CancellationToken.None);
+    Require(!timeout.Success && timeout.ErrorCode == "LOCAL_MODEL_TIMEOUT"
+        && timeoutInference.CallCount == 1,
+        "回复草稿本地推理超时没有如实返回超时状态。");
+
+    var cancelledInference = new ScriptedInference(blockOnFirstCall: true);
+    var cancelledBroker = new ToolBroker(new WindowsDesktopTools([], []), cancelledInference, new ModelBroker(),
+        null!, null!, "", "");
+    using var cancellation = new CancellationTokenSource();
+    var pending = cancelledBroker.ExecuteAsync(CreateProposal("明天的时间我晚点确认。"), cancellation.Token);
+    await cancelledInference.FirstCallStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    cancellation.Cancel();
+    var cancellationObserved = false;
+    try { await pending; }
+    catch (OperationCanceledException) { cancellationObserved = true; }
+    Require(cancellationObserved && cancelledInference.CallCount == 1,
+        "用户取消回复草稿后未中断当前本地推理。");
 }
 
 static async Task CheckSendPreviewNeverConfirmsWithoutSenderAsync()
