@@ -19,7 +19,7 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
 {
     private const string ManifestName = "llama-runtime.json";
     private const string RuntimeRelativePath = "Runtime\\llama-server.exe";
-    private const string RuntimeVersion = "b11256";
+    private const string RuntimeVersion = "b11259";
     private const string ModelId = "qwen3.5-4b-q4km";
     private const string ModelFileName = "Qwen3.5-4B-Q4_K_M.gguf";
     private static readonly TimeSpan IdleUnloadDelay = TimeSpan.FromMinutes(4);

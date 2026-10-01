@@ -2115,7 +2115,7 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
     const string validManifest = """
         {
           "schemaVersion": 1,
-          "runtimeVersion": "b11256",
+          "runtimeVersion": "b11259",
           "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "modelId": "qwen3.5-4b-q4km",
           "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -2176,7 +2176,7 @@ static async Task CheckGpuPreflightBlocksBeforeRuntimeLaunchAsync(string root)
     await File.WriteAllTextAsync(Path.Combine(modelRoot, "llama-runtime.json"), """
         {
           "schemaVersion": 1,
-          "runtimeVersion": "b11256",
+          "runtimeVersion": "b11259",
           "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "modelId": "qwen3.5-4b-q4km",
           "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",

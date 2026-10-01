@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "candidate-only-no-runtimes-downloaded",
-  "lastSourceReviewDate": "2026-09-30",
+  "lastSourceReviewDate": "2026-10-02",
   "runtimes": [
     {
       "id": "dotnet-sdk",
@@ -15,14 +15,25 @@
     },
     {
       "id": "llama.cpp",
-      "version": "b11256",
-      "source": "https://github.com/ggml-org/llama.cpp/releases/tag/b11256",
-      "sourceCommit": "c85b92c69c955961621193cd51da194f3cbcedf3",
+      "version": "b11259",
+      "source": "https://github.com/ggml-org/llama.cpp/releases/tag/b11259",
+      "sourceCommit": "d280808f5d82fcc3142b53f94ea5f594250cd765",
+      "license": "MIT; inspect packaged third-party notices after extraction",
       "target": "windows-x64-cuda13.4",
-      "artifact": "llama-b11256-bin-win-cuda-13.4-x64.zip + cudart-llama-bin-win-cuda-13.4-x64.zip",
-      "sha256": null,
+      "artifacts": [
+        {
+          "name": "llama-b11259-bin-win-cuda-13.4-x64.zip",
+          "sha256": "7e93d79ed0dfacb67a7a5448eab38b60511ec3ad623022259b08490d5cf01404",
+          "attestation": "https://github.com/ggml-org/llama.cpp/attestations/51199980"
+        },
+        {
+          "name": "cudart-llama-bin-win-cuda-13.4-x64.zip",
+          "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
+          "attestation": "https://github.com/ggml-org/llama.cpp/attestations/51199980"
+        }
+      ],
       "status": "candidate",
-      "notes": "官方 b11256 预发布资产；Release 页面列出 CUDA 13.4 Windows x64 主程序与配套 DLL 包，源提交 c85b92c69c955961621193cd51da194f3cbcedf3 已签名。官方资产证明的 SHA256 和本机文件散列尚未核对。本机只读快照驱动为 596.49；NVIDIA CUDA 13.x minor compatibility 最低驱动为 580，仍须启动与负载实测。"
+      "notes": "官方 b11259 预发布资产；源提交 d280808f5d82fcc3142b53f94ea5f594250cd765 已验证签名，两个 Windows x64 CUDA 13.4 ZIP 的预期 SHA-256 来自 GitHub 官方构建证明 51199980。本机文件仍未下载或校验。当前只读驱动快照为 596.49；须实测进程启动、推理、显存和卸载行为。"
     },
     {
       "id": "python-asr",
