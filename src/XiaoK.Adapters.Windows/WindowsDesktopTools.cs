@@ -16,7 +16,7 @@ public interface IDesktopAppProcessController
     bool HasVisibleWindow(DesktopApp app);
 }
 
-public enum WindowActivationOutcome { Activated, NotFound, ActivationDenied }
+public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
 
 public interface IDesktopWindowController
 {
@@ -131,6 +131,7 @@ public sealed class WindowsDesktopTools
         {
             WindowActivationOutcome.Activated => new(true, $"已切换到 {app.Id} 窗口，并核验该窗口在前台。"),
             WindowActivationOutcome.NotFound => new(false, $"没有找到已打开且匹配白名单的 {app.Id} 窗口；小K没有启动应用。", "WINDOW_NOT_FOUND"),
+            WindowActivationOutcome.Ambiguous => new(false, $"找到多个匹配的 {app.Id} 窗口；请手动选择目标窗口。", "WINDOW_TARGET_AMBIGUOUS"),
             _ => new(false, "Windows 未允许切换到该窗口，或前台窗口核验失败；请手动切换。", "WINDOW_ACTIVATION_DENIED")
         };
     }
@@ -411,12 +412,13 @@ public sealed class WindowsDesktopTools
             ? path[4..]
             : path;
 
-    private static IntPtr FindMatchingWindow(DesktopApp app)
+    private static IReadOnlyList<IntPtr> FindMatchingWindows(DesktopApp app)
     {
         var processName = Path.GetFileNameWithoutExtension(app.Executable);
-        if (string.IsNullOrWhiteSpace(processName)) return IntPtr.Zero;
+        if (string.IsNullOrWhiteSpace(processName)) return [];
         var expectedProjectName = string.IsNullOrWhiteSpace(app.WorkingDirectory)
             ? null : new DirectoryInfo(Path.TrimEndingDirectorySeparator(app.WorkingDirectory)).Name;
+        var allowedProcessIds = new HashSet<int>();
         foreach (var process in Process.GetProcessesByName(processName))
         {
             try
@@ -425,26 +427,43 @@ public sealed class WindowsDesktopTools
                 if (string.IsNullOrWhiteSpace(imagePath)
                     || !string.Equals(Path.GetFullPath(imagePath), app.Executable, StringComparison.OrdinalIgnoreCase))
                     continue;
-
-                var handle = process.MainWindowHandle;
-                if (handle == IntPtr.Zero || !IsWindowVisible(handle)) continue;
-                if (app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(expectedProjectName))
-                {
-                    if (!process.MainWindowTitle.Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase)) continue;
-                }
-                return handle;
+                allowedProcessIds.Add(process.Id);
             }
             catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or UnauthorizedAccessException
                 or SecurityException or NotSupportedException or ArgumentException) { }
             finally { process.Dispose(); }
         }
-        return IntPtr.Zero;
+
+        if (allowedProcessIds.Count == 0) return [];
+
+        var matchingHandles = new HashSet<IntPtr>();
+        EnumWindowsProc callback = (handle, lParam) =>
+        {
+            if (handle == IntPtr.Zero || !IsWindowVisible(handle)) return true;
+            var threadId = GetWindowThreadProcessId(handle, out var processId);
+            if (threadId == 0 || processId == 0 || !allowedProcessIds.Contains(unchecked((int)processId))) return true;
+
+            if (app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(expectedProjectName))
+            {
+                var titleLength = GetWindowTextLengthW(handle);
+                if (titleLength <= 0 || titleLength > 32_768) return true;
+                var title = new StringBuilder(titleLength + 1);
+                if (GetWindowTextW(handle, title, title.Capacity) <= 0
+                    || !title.ToString().Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            matchingHandles.Add(handle);
+            return true;
+        };
+
+        if (!EnumWindows(callback, IntPtr.Zero)) return [];
+        return matchingHandles.ToArray();
     }
 
     private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController
     {
         public IDisposable? Start(ProcessStartInfo startInfo) => Process.Start(startInfo);
-        public bool HasVisibleWindow(DesktopApp app) => FindMatchingWindow(app) != IntPtr.Zero;
+        public bool HasVisibleWindow(DesktopApp app) => FindMatchingWindows(app).Count > 0;
     }
 
     private sealed class SystemDesktopWindowController : IDesktopWindowController
@@ -453,8 +472,10 @@ public sealed class WindowsDesktopTools
 
         public WindowActivationOutcome ActivateWindow(DesktopApp app)
         {
-            var handle = FindMatchingWindow(app);
-            if (handle == IntPtr.Zero) return WindowActivationOutcome.NotFound;
+            var matchingHandles = FindMatchingWindows(app);
+            if (matchingHandles.Count == 0) return WindowActivationOutcome.NotFound;
+            if (matchingHandles.Count > 1) return WindowActivationOutcome.Ambiguous;
+            var handle = matchingHandles[0];
             if (!IsWindow(handle) || !IsWindowVisible(handle)) return WindowActivationOutcome.NotFound;
 
             if (IsIconic(handle)) ShowWindowAsync(handle, SwRestore);
@@ -469,6 +490,20 @@ public sealed class WindowsDesktopTools
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextLengthW", SetLastError = true)]
+    private static extern int GetWindowTextLengthW(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetWindowTextW", SetLastError = true)]
+    private static extern int GetWindowTextW(IntPtr hWnd, StringBuilder text, int maximumCount);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);

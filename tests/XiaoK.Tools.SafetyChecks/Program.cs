@@ -1103,6 +1103,14 @@ static async Task CheckWindowActivationOutcomesAsync()
         && deniedController.CallCount == 1,
         "Windows 拒绝切换时没有提示用户手动处理。");
 
+    var ambiguousController = new FakeDesktopWindowController(WindowActivationOutcome.Ambiguous);
+    var ambiguousResult = await new WindowsDesktopTools([app], [], windowController: ambiguousController)
+        .ActivateWindowAsync(proposal, CancellationToken.None);
+    Require(!ambiguousResult.Success && ambiguousResult.ErrorCode == "WINDOW_TARGET_AMBIGUOUS"
+        && ambiguousResult.Summary.Contains("多个", StringComparison.Ordinal)
+        && ambiguousController.CallCount == 1,
+        "多个匹配窗口时没有要求用户手动选择目标。");
+
     var unknownController = new FakeDesktopWindowController(WindowActivationOutcome.Activated);
     var unknownDesktop = new WindowsDesktopTools([app], [], windowController: unknownController);
     var unknownProposal = ToolBroker.Proposal("window.activate.v1",
