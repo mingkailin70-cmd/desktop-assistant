@@ -2,12 +2,12 @@
 
 此目录只保存版本、来源、许可与校验记录，不保存模型、wheel、凭证或用户数据。
 
-- models.lock.json 是模型候选登记表。未下载的文件保持 candidate 状态；上游 revision、准确文件清单和预期散列需在准备阶段再次核验。
+- models.lock.json 是模型来源、固定 revision、文件清单和校验状态登记表。使用 `tools/download_locked_models.py` 前后都会查询固定 revision 的上游文件元数据；支持断点续传、校验大小和 SHA-256，并记录每个本机散列。部分完成标为 `partially_downloaded`；全部校验通过才标为 `downloaded_and_verified`，仍不代表推理效果或资源验收通过。
 - runtimes.lock.json 是系统运行时与 Python 入口依赖登记表。运行包 asset 名、实际散列及安装状态必须从官方发布页和本机文件确认。
-- 托管 llama.cpp 使用配置的仓库外模型目录中的 `llama-runtime.json`（默认 `D:\XiaoK\Models`）；仅登记清单不代表官方资产来源已复核。清单必须和仓库锁中的版本、资产 SHA、模型 revision 及本机 SHA 对应；运行时固定放在 `Runtime\llama-server.exe`，Qwen GGUF 固定放在模型目录顶层。
-- 托管 llama.cpp 使用仓库外 `D:\XiaoK\Models\llama-runtime.json`；仅登记清单不代表官方资产来源已复核。该清单必须和仓库锁中的版本、资产 SHA、模型 revision 及本机 SHA 对应，且运行时固定放在 `Runtime\llama-server.exe`，Qwen GGUF 固定放在模型目录顶层。
+- 开发阶段主模型目录位于仓库忽略的 `models\llm\qwen3.5-4b\<40位revision>`；正式安装目标为 `D:\XiaoK\Models\<模型类别>\<模型ID>\<revision>`。托管 llama.cpp 清单 `llama-runtime.json` 与固定运行时 `Runtime\llama-server.exe` 放在对应模型版本目录；Qwen GGUF 文件名及 revision 必须与锁清单一致。
+- 运行时及依赖仍须单独获准下载；登记清单不代表资产来源已复核或本机已安装。提交前确认权重均被 Git 忽略、`git status` 不列出模型文件。
 - requirements-asr.in 和 requirements-tts.in 是顶层依赖输入，分别对应独立 Python 3.12 环境。传递依赖解析为固定版本和 wheel SHA256 后，才生成对应的 requirements-*.lock.txt。
-- 本机文件 SHA256 必须由本机计算；上游网页给出的 SHA 只能记作预期值，不能标记为本机已验证。
+- 本机文件 SHA256 必须由本机计算；上游文件树中 LFS SHA 作为预期值。固定 revision 中没有 LFS SHA 的小型配置文件，会在 TLS 下载并核对固定 revision/字节数后以首次本机散列建立后续校验基线。
 - 版本或文件变化时新增候选记录；新版本通过同一离线评测后再切换，不覆盖已验收版本。
 
-状态：candidate → approved_for_download → downloaded_and_verified → locally_evaluated → accepted。提交代码不代表批准下载。
+状态：candidate → partially_downloaded → downloaded_and_verified → locally_evaluated → accepted。当前三组 P0 模型权重下载已由用户授权；下载运行时、Python 环境、依赖包和可选研究模型仍要分别获得确认。

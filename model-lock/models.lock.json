@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "candidate-only-no-model-files-downloaded",
+  "status": "p0-models-downloaded-and-verified-not-evaluated",
   "lastSourceReviewDate": "2026-10-02",
   "models": [
     {
@@ -19,150 +19,156 @@
           "name": "Qwen3.5-4B-Q4_K_M.gguf",
           "upstreamReportedSizeBytes": 2707513696,
           "expectedUpstreamSha256": "25082a7dd3776cc3c741c6347d3bd04523f05796607b3fbc32fa3a25dfa1418c",
-          "localVerifiedSha256": null
+          "localVerifiedSha256": "25082a7dd3776cc3c741c6347d3bd04523f05796607b3fbc32fa3a25dfa1418c"
         }
       ],
       "license": "apache-2.0",
-      "status": "candidate",
-      "notes": "Qwen 官方权重的第三方 GGUF 量化。Canfield 镜像卡报告此文件与 LM Studio Community 在固定 revision 上的文件逐字节相同，并给出 2,707,513,696 字节和 SHA256；下载前仍须读取固定 revision 的源文件元数据，下载后本机校验。LM Studio Community 使用 llama.cpp b8185 量化。此文件为纯文本权重，不含 mmproj，不能据此承诺图像理解。"
+      "status": "downloaded_and_verified",
+      "notes": "Qwen 官方权重的第三方 GGUF 量化。LM Studio Community 使用 llama.cpp b8185 量化。Hugging Face 固定 revision 文件树报告文件大小 2,707,513,696 字节和 LFS SHA256；已通过本机 TLS 下载，并经本机 SHA256 复核匹配。此文件为纯文本权重，不含 mmproj，不能据此承诺图像理解。",
+      "localDirectory": "llm/qwen3.5-4b/f9f88ac3e234be915e23811a6d28ea287bdb927e",
+      "requiredForP0": true
     },
     {
       "id": "qwen3-asr-0.6b",
       "role": "asr-candidate",
       "source": "https://huggingface.co/Qwen/Qwen3-ASR-0.6B",
-      "revision": null,
+      "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
       "format": "Transformers Safetensors",
       "files": [
         {
-          "name": "model.safetensors",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea",
-          "localVerifiedSha256": null
-        },
-        {
           "name": "chat_template.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 1161,
+          "expectedUpstreamSha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+          "localVerifiedSha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"
         },
         {
           "name": "config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 6193,
+          "expectedUpstreamSha256": "76d3ae4601ce939830b2517f4a6cadb86cc51316c3900af6b020b051c21a478c",
+          "localVerifiedSha256": "76d3ae4601ce939830b2517f4a6cadb86cc51316c3900af6b020b051c21a478c"
         },
         {
           "name": "generation_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 142,
+          "expectedUpstreamSha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+          "localVerifiedSha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"
         },
         {
           "name": "merges.txt",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 1671853,
+          "expectedUpstreamSha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "localVerifiedSha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "name": "model.safetensors",
+          "upstreamReportedSizeBytes": 1876091704,
+          "expectedUpstreamSha256": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea",
+          "localVerifiedSha256": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea"
         },
         {
           "name": "preprocessor_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 330,
+          "expectedUpstreamSha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+          "localVerifiedSha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"
         },
         {
           "name": "tokenizer_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 12487,
+          "expectedUpstreamSha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+          "localVerifiedSha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"
         },
         {
           "name": "vocab.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 2776833,
+          "expectedUpstreamSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "localVerifiedSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
         }
       ],
       "license": "apache-2.0",
-      "status": "candidate",
-      "notes": "准备下载时固定仓库40位revision并记录该revision的准确文件名。"
+      "status": "downloaded_and_verified",
+      "notes": "已从 Hugging Face 固定 revision 文件树取得完整配置/分词器/权重清单及字节数；全部8个文件已从固定 revision 下载，并逐文件核验上游字节数及本机 SHA-256。",
+      "localDirectory": "speech/asr/qwen3-asr-0.6b/5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+      "requiredForP0": true
     },
     {
       "id": "qwen3-tts-12hz-0.6b-base",
       "role": "tts-candidate",
       "source": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-      "revision": null,
+      "revision": "5d83992436eae1d760afd27aff78a71d676296fc",
       "format": "Transformers Safetensors",
       "files": [
         {
-          "name": "model.safetensors",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6",
-          "localVerifiedSha256": null
-        },
-        {
           "name": "config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 4494,
+          "expectedUpstreamSha256": "2e714c787c8edb98b05432685cddb634add2de4d4e645f653d68251ef72ba011",
+          "localVerifiedSha256": "2e714c787c8edb98b05432685cddb634add2de4d4e645f653d68251ef72ba011"
         },
         {
           "name": "generation_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 245,
+          "expectedUpstreamSha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+          "localVerifiedSha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa"
         },
         {
           "name": "merges.txt",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 1671839,
+          "expectedUpstreamSha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+          "localVerifiedSha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+        },
+        {
+          "name": "model.safetensors",
+          "upstreamReportedSizeBytes": 1829344272,
+          "expectedUpstreamSha256": "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6",
+          "localVerifiedSha256": "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6"
         },
         {
           "name": "preprocessor_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
-        },
-        {
-          "name": "tokenizer_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
-        },
-        {
-          "name": "vocab.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 127,
+          "expectedUpstreamSha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+          "localVerifiedSha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119"
         },
         {
           "name": "speech_tokenizer/config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 2336,
+          "expectedUpstreamSha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+          "localVerifiedSha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167"
         },
         {
           "name": "speech_tokenizer/configuration.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 76,
+          "expectedUpstreamSha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+          "localVerifiedSha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd"
         },
         {
           "name": "speech_tokenizer/model.safetensors",
-          "upstreamReportedSizeBytes": null,
+          "upstreamReportedSizeBytes": 682293092,
           "expectedUpstreamSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
-          "localVerifiedSha256": null
+          "localVerifiedSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
         },
         {
           "name": "speech_tokenizer/preprocessor_config.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 234,
+          "expectedUpstreamSha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+          "localVerifiedSha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "upstreamReportedSizeBytes": 7344,
+          "expectedUpstreamSha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+          "localVerifiedSha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670"
+        },
+        {
+          "name": "vocab.json",
+          "upstreamReportedSizeBytes": 2776833,
+          "expectedUpstreamSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "localVerifiedSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
         }
       ],
       "license": "apache-2.0",
-      "status": "candidate",
-      "notes": "准备下载时固定仓库40位revision；不含VoiceDesign或VoiceClone额外权重。"
+      "status": "downloaded_and_verified",
+      "notes": "已从 Hugging Face 固定 revision 文件树取得完整配置/分词器/权重清单及字节数；全部11个文件（含 speech tokenizer）已从固定 revision 下载，并逐文件核验上游字节数及本机 SHA-256。",
+      "localDirectory": "speech/tts/qwen3-tts-12hz-0.6b-base/5d83992436eae1d760afd27aff78a71d676296fc",
+      "requiredForP0": true
     },
     {
       "id": "sherpa-kws-zh",
