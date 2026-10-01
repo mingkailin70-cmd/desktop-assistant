@@ -247,6 +247,9 @@ try
     await CheckModelRuntimeLeaseWrapsEachInferenceStepAsync();
     passed.Add("本地模型进程租约覆盖推理步骤并在成功、异常后释放");
 
+    CheckLocalInferenceClientRejectsNonLoopbackEndpoints();
+    passed.Add("本地推理端点仅接受回环地址，拒绝外网地址、凭据、查询和片段");
+
     await CheckManagedRuntimeManifestIsStrictAsync(tempRoot);
     passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
 
@@ -2231,6 +2234,30 @@ static async Task CheckModelRuntimeLeaseWrapsEachInferenceStepAsync()
     }
     catch (ModelRuntimeUnavailableException) { }
     Require(!operationRan, "托管运行时校验失败后仍把请求发送到了推理端点。");
+}
+
+static void CheckLocalInferenceClientRejectsNonLoopbackEndpoints()
+{
+    var rejectedEndpoints = new[]
+    {
+        "http://model.invalid/v1/",
+        "https://model.invalid/v1/",
+        "http://user@127.0.0.1:8080/",
+        "http://127.0.0.1:8080/?token=fixture",
+        "http://127.0.0.1:8080/#fragment",
+        "ftp://127.0.0.1:8080/"
+    };
+
+    foreach (var endpoint in rejectedEndpoints)
+    {
+        var rejected = false;
+        try { using var client = new LocalInferenceClient(endpoint); }
+        catch (ArgumentException) { rejected = true; }
+        Require(rejected, $"本地推理客户端接受了不安全端点：{endpoint}");
+    }
+
+    using var ipv4Loopback = new LocalInferenceClient("http://127.0.0.1:8080/");
+    using var ipv6Loopback = new LocalInferenceClient("http://[::1]:8080/");
 }
 
 static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
