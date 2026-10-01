@@ -12,7 +12,7 @@ namespace XiaoK.Storage;
 /// </summary>
 public sealed class SqliteTaskStore : ITaskStore
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private const string TasksJsonMigrationMarker = "tasks-json-v1";
@@ -127,7 +127,7 @@ public sealed class SqliteTaskStore : ITaskStore
         finally { _gate.Release(); }
     }
 
-    /// <summary>Restores a validated v3 snapshot and retains the current database as a rollback copy.</summary>
+    /// <summary>Restores a validated v4 snapshot and retains the current database as a rollback copy.</summary>
     public async Task<string> RestoreBackupAsync(string backupPath, CancellationToken cancellationToken)
     {
         var source = ValidateDatabasePath(backupPath);
@@ -196,7 +196,7 @@ public sealed class SqliteTaskStore : ITaskStore
                     + "CREATE INDEX IF NOT EXISTS ix_tasks_updated ON tasks(updated_utc_ticks DESC);"
                     + "CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY NOT NULL, completed_utc_ticks INTEGER NOT NULL);"
                     + CreateContactReplyStylesTableSql()
-                    + CreateApprovalAuditTableSql()
+                    + CreateApprovalAuditTableV4Sql()
                     + $"PRAGMA user_version={CurrentSchemaVersion};");
                 database.Execute("COMMIT;");
             }
@@ -229,6 +229,29 @@ public sealed class SqliteTaskStore : ITaskStore
             {
                 database.Execute(CreateApprovalAuditTableSql() + "PRAGMA user_version=3;");
                 database.Execute("COMMIT;");
+                version = 3;
+            }
+            catch
+            {
+                TryRollback(database);
+                throw;
+            }
+        }
+
+        if (version == 3)
+        {
+            database.Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                database.Execute("DROP INDEX IF EXISTS ix_approval_audit_created;"
+                    + "ALTER TABLE approval_audit RENAME TO approval_audit_v3;"
+                    + CreateApprovalAuditTableV4Sql()
+                    + "INSERT INTO approval_audit(id,action_id,outcome,created_utc_ticks) "
+                    + "SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v3;"
+                    + "DROP TABLE approval_audit_v3;"
+                    + "PRAGMA user_version=4;");
+                database.Execute("COMMIT;");
+                version = 4;
             }
             catch
             {
@@ -250,6 +273,13 @@ public sealed class SqliteTaskStore : ITaskStore
         + "id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
         + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
         + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests')));"
+        + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
+
+    private static string CreateApprovalAuditTableV4Sql() => "CREATE TABLE IF NOT EXISTS approval_audit ("
+        + "id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+        + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed')));"
         + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
 
     private void MigrateLegacyJson(SqliteDatabase database)
@@ -383,7 +413,9 @@ public sealed class SqliteTaskStore : ITaskStore
         var isKnownPair = actionId == ApprovalAuditCatalog.MessageSendAction
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
             || actionId == ApprovalAuditCatalog.CodeTaskAction
-                && outcome == ApprovalAuditCatalog.RunDotNetTests;
+                && outcome == ApprovalAuditCatalog.RunDotNetTests
+            || actionId == ApprovalAuditCatalog.CodePatchApplyAction
+                && outcome == ApprovalAuditCatalog.Confirmed;
         if (!isKnownPair) throw new ArgumentException("审批审计只接受已登记动作及其固定结果。", nameof(actionId));
         return new ApprovalAuditRecord(Guid.NewGuid(), actionId, outcome, DateTimeOffset.UtcNow);
     }
@@ -427,7 +459,9 @@ public sealed class SqliteTaskStore : ITaskStore
         actionId == ApprovalAuditCatalog.MessageSendAction
             ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
             : actionId == ApprovalAuditCatalog.CodeTaskAction
-                && outcome == ApprovalAuditCatalog.RunDotNetTests;
+                ? outcome == ApprovalAuditCatalog.RunDotNetTests
+                : actionId == ApprovalAuditCatalog.CodePatchApplyAction
+                    && outcome == ApprovalAuditCatalog.Confirmed;
 
     private static void InsertContactReplyStyle(SqliteDatabase database, ContactReplyStylePreference preference, bool ignoreExisting)
     {
@@ -655,7 +689,7 @@ public sealed class SqliteTaskStore : ITaskStore
     {
         if (database.ScalarInt32("PRAGMA user_version;") != CurrentSchemaVersion
             || !string.Equals(database.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v3 备份；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v4 备份；活动数据库未替换。");
 
         if (database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';") != 4
             || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger','view');") != 0
@@ -670,6 +704,9 @@ public sealed class SqliteTaskStore : ITaskStore
         ValidateColumnLayout(database, "migration_state", "name,completed_utc_ticks");
         ValidateColumnLayout(database, "contact_reply_styles", "contact_name_key,contact_name,style_id,source,updated_utc_ticks");
         ValidateColumnLayout(database, "approval_audit", "id,action_id,outcome,created_utc_ticks");
+        var auditSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='approval_audit';");
+        if (auditSql is null || !auditSql.Contains("'code.patch.apply.v1' AND outcome='confirmed'", StringComparison.Ordinal))
+            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v4 不匹配；活动数据库未替换。");
     }
 
     private static void ValidateColumnLayout(SqliteDatabase database, string table, string expectedColumns)

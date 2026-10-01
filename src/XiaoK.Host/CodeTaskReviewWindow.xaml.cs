@@ -39,4 +39,10 @@ public partial class CodeTaskReviewWindow : Window
         Decision = CodeTaskReviewDecision.RunDotNetTests;
         DialogResult = true;
     }
+
+    private void ApplyPatch_Click(object sender, RoutedEventArgs e)
+    {
+        Decision = CodeTaskReviewDecision.ApplyPatchToProject;
+        DialogResult = true;
+    }
 }

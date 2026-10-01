@@ -20,7 +20,7 @@ public static class TaskHistoryRecoveryPolicy
     public static bool IsInterruptedCodeTask(string state, DateTimeOffset updatedAtUtc,
         DateTimeOffset currentProcessStartedAtUtc) =>
         updatedAtUtc < currentProcessStartedAtUtc
-        && (state is "planning" or "running");
+        && (state is "planning" or "running" or "applying");
 
     private static bool IsInFlight(TaskLifecycleState state) =>
         state is TaskLifecycleState.Queued or TaskLifecycleState.Planning

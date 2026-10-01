@@ -74,6 +74,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         if (decision == CodeTaskReviewDecision.RunDotNetTests)
             await _runtime.RecordApprovalAuditAsync(ApprovalAuditCatalog.CodeTaskAction,
                 ApprovalAuditCatalog.RunDotNetTests, cancellationToken);
+        else if (decision == CodeTaskReviewDecision.ApplyPatchToProject)
+            await _runtime.RecordApprovalAuditAsync(ApprovalAuditCatalog.CodePatchApplyAction,
+                ApprovalAuditCatalog.Confirmed, cancellationToken);
         return decision;
     }
 

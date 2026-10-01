@@ -9,10 +9,22 @@ using XiaoK.Inference;
 
 namespace XiaoK.Tools;
 
+internal interface ICodePatchFileReplacer
+{
+    void Replace(string replacementPath, string destinationPath, string backupPath);
+}
+
+internal sealed class WindowsCodePatchFileReplacer : ICodePatchFileReplacer
+{
+    public void Replace(string replacementPath, string destinationPath, string backupPath) =>
+        File.Replace(replacementPath, destinationPath, backupPath, ignoreMetadataErrors: true);
+}
+
+internal sealed record CodePatchApplyResult(bool Applied, bool OutcomeUncertain, string Summary);
+
 /// <summary>
-/// Produces a reviewable patch in a private snapshot. A single fixed .NET test
-/// command can run only after the user reviews the diff and explicitly approves it.
-/// The selected source project is never written or merged back.
+/// Produces a reviewable patch in a private snapshot. The original project is
+/// changed only after the user reviews the complete diff and explicitly approves it.
 /// </summary>
 public sealed class CodeTaskAgent
 {
@@ -21,20 +33,28 @@ public sealed class CodeTaskAgent
     private const int MaximumManifestCharacters = 12_000;
     private const int MaximumSourceCharacters = 10_000;
     private const int MaximumGeneratedCharacters = 40_000;
-    private const int MaximumDisplayedDiffCharacters = 30_000;
+    private const int MaximumDisplayedDiffCharacters = 100_000;
     private const int MaximumExplanationCharacters = 20_000;
     private readonly IInferenceClient _inference;
     private readonly ModelBroker _models;
     private readonly string? _repositoryRoot;
     private readonly IDotNetTestRunner _dotNetTestRunner;
+    private readonly ICodePatchFileReplacer _patchFileReplacer;
 
     public CodeTaskAgent(IInferenceClient inference, ModelBroker models, string? repositoryRoot,
         IDotNetTestRunner? dotNetTestRunner = null)
+        : this(inference, models, repositoryRoot, dotNetTestRunner, new WindowsCodePatchFileReplacer())
+    {
+    }
+
+    internal CodeTaskAgent(IInferenceClient inference, ModelBroker models, string? repositoryRoot,
+        IDotNetTestRunner? dotNetTestRunner, ICodePatchFileReplacer patchFileReplacer)
     {
         _inference = inference;
         _models = models;
         _repositoryRoot = repositoryRoot;
         _dotNetTestRunner = dotNetTestRunner ?? new DotNetTestRunner(repositoryRoot);
+        _patchFileReplacer = patchFileReplacer ?? throw new ArgumentNullException(nameof(patchFileReplacer));
     }
 
     public static IReadOnlyList<CodeTaskWorkspaceHistory> ReadRetainedTasks(string workspaceRoot) =>
@@ -119,8 +139,41 @@ public sealed class CodeTaskAgent
                     Data: data, FinalState: TaskLifecycleState.AwaitingApproval);
             }
 
+            if (decision == CodeTaskReviewDecision.ApplyPatchToProject)
+            {
+                await snapshot.WriteStateAsync("applying", CancellationToken.None);
+                var application = snapshot.ApplyReviewedPatch(changes, _patchFileReplacer, cancellationToken);
+                if (application.OutcomeUncertain)
+                {
+                    try { await snapshot.WriteStateAsync("outcome_uncertain", CancellationToken.None); }
+                    catch (Exception) { /* The persisted applying state is recovered as manual verification after restart. */ }
+                    return new(false, application.Summary, "CODE_PATCH_OUTCOME_UNCERTAIN",
+                        Data: diff, FinalState: TaskLifecycleState.OutcomeUncertain);
+                }
+
+                if (!application.Applied)
+                {
+                    await snapshot.WriteStateAsync("failed", CancellationToken.None);
+                    return new(false, application.Summary, "CODE_PATCH_APPLY_FAILED",
+                        Data: diff, FinalState: TaskLifecycleState.Failed);
+                }
+
+                try
+                {
+                    await snapshot.WriteStateAsync("completed", CancellationToken.None);
+                    return new(true, application.Summary, Data: diff, FinalState: TaskLifecycleState.Completed);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                    or ArgumentException or System.ComponentModel.Win32Exception)
+                {
+                    return new(false,
+                        "补丁已写入原项目，但无法保存完成状态；请人工核对项目文件和隔离工作区。不会自动重试。",
+                        "CODE_PATCH_OUTCOME_UNCERTAIN", Data: diff, FinalState: TaskLifecycleState.OutcomeUncertain);
+                }
+            }
+
             return new(true,
-                $"隔离编程任务已生成待审阅修改。任务编号：{snapshot.TaskId:N}\n隔离工作区：{snapshot.WorkspacePath}\n原项目未修改；没有自动运行命令、联网或合并。请检查下方差异，之后再决定是否手动应用。",
+                $"隔离编程任务已生成待审阅修改。任务编号：{snapshot.TaskId:N}\n隔离工作区：{snapshot.WorkspacePath}\n原项目未修改。请审阅完整差异，再选择保留补丁、单独批准验证或批准应用。",
                 Data: diff, FinalState: TaskLifecycleState.AwaitingApproval);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -402,13 +455,15 @@ internal sealed class CodeWorkspaceSnapshot
     private readonly List<string> _relativeFiles;
 
     private CodeWorkspaceSnapshot(string taskId, string taskRoot, string baselinePath, string workspacePath,
-        string projectPath, string baselineBoundary, string workspaceBoundary, List<string> relativeFiles)
+        string projectPath, string projectBoundary, string baselineBoundary, string workspaceBoundary,
+        List<string> relativeFiles)
     {
         TaskId = taskId;
         TaskRoot = taskRoot;
         BaselinePath = baselinePath;
         WorkspacePath = workspacePath;
         ProjectPath = projectPath;
+        _projectBoundary = projectBoundary;
         _baselineBoundary = baselineBoundary;
         _workspaceBoundary = workspaceBoundary;
         CreatedAtUtc = DateTimeOffset.UtcNow;
@@ -421,6 +476,7 @@ internal sealed class CodeWorkspaceSnapshot
     public string WorkspacePath { get; }
     public string ProjectPath { get; }
     public DateTimeOffset CreatedAtUtc { get; }
+    private readonly string _projectBoundary;
     private readonly string _baselineBoundary;
     private readonly string _workspaceBoundary;
 
@@ -471,7 +527,8 @@ internal sealed class CodeWorkspaceSnapshot
             var baselineBoundary = GetCanonicalDirectoryPath(baseline);
             CopyTree(baseline, working, null, token, baselineBoundary);
             var workspaceBoundary = GetCanonicalDirectoryPath(working);
-            return new(taskId, taskRoot, baseline, working, project, baselineBoundary, workspaceBoundary, files);
+            return new(taskId, taskRoot, baseline, working, project, projectBoundary,
+                baselineBoundary, workspaceBoundary, files);
         }
         catch
         {
@@ -629,9 +686,323 @@ internal sealed class CodeWorkspaceSnapshot
 
         var diff = string.Join("\n\n", diffs);
         if (diff.Length > maximumDiffCharacters)
-            return diff[..maximumDiffCharacters] + "\n\n…差异显示已截断；完整修改位于隔离工作区文件中。";
+            throw new InvalidDataException("补丁差异超过审阅窗口的完整显示上限；为避免确认被截断的内容，已拒绝继续。");
         return diff;
     }
+
+    public CodePatchApplyResult ApplyReviewedPatch(IReadOnlyList<CodeFileContent> changes,
+        ICodePatchFileReplacer fileReplacer, CancellationToken token)
+    {
+        if (changes.Count is < 1 or > 4)
+            throw new InvalidDataException("待应用补丁的文件数量无效；已拒绝。");
+
+        var prepared = new List<PreparedCodePatch>(changes.Count);
+        var journalPath = Path.Combine(TaskRoot, "apply-journal.json");
+        var journalWritten = false;
+        var commitStarted = false;
+        try
+        {
+            ValidateProjectRootAndWorkspace();
+            var taskBoundary = GetCanonicalDirectoryPath(TaskRoot);
+            if (!IsSameOrChild(_workspaceBoundary, taskBoundary)
+                || !IsSameOrChild(_baselineBoundary, taskBoundary))
+                throw new InvalidDataException("隔离任务目录边界已变化；已拒绝应用补丁。");
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < changes.Count; index++)
+            {
+                token.ThrowIfCancellationRequested();
+                var change = changes[index];
+                if (!_relativeFiles.Contains(change.Path, StringComparer.OrdinalIgnoreCase)
+                    || !seen.Add(change.Path))
+                    throw new InvalidDataException("补丁包含未选择或重复的路径；已拒绝。");
+
+                var baselineBytes = ReadSnapshotFile(change.Path, MaximumReadableFileBytes)
+                    ?? throw new InvalidDataException("补丁基线文件超过读取限制；已拒绝。");
+                if (!CryptographicOperations.FixedTimeEquals(
+                        SHA256.HashData(baselineBytes), Convert.FromHexString(change.Sha256)))
+                    throw new IOException("隔离基线已变化；没有写入原项目。");
+
+                var baselineText = DecodeText(baselineBytes)
+                    ?? throw new InvalidDataException("补丁基线编码不再受支持；已拒绝。");
+                var patchBytes = EncodeLikeOriginal(baselineBytes, baselineText, change.Content);
+                var workspaceBytes = ReadRootedFile(WorkspacePath, _workspaceBoundary, change.Path);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(workspaceBytes), SHA256.HashData(patchBytes)))
+                    throw new IOException("隔离工作区内容与已审阅补丁不一致；请重新生成并审阅。");
+
+                var destination = ResolveWithin(ProjectPath, change.Path);
+                var parent = Path.GetDirectoryName(destination)!;
+                ValidateProjectParent(parent);
+                var suffix = ".xiaok-" + TaskId + "-" + index + "-" + Guid.NewGuid().ToString("N");
+                var temporaryPath = destination + suffix + ".tmp";
+                var backupPath = destination + suffix + ".bak";
+                var rollbackPath = destination + suffix + ".rollback";
+                if (File.Exists(temporaryPath) || Directory.Exists(temporaryPath)
+                    || File.Exists(backupPath) || Directory.Exists(backupPath)
+                    || File.Exists(rollbackPath) || Directory.Exists(rollbackPath))
+                    throw new IOException("补丁暂存文件名冲突；已拒绝。");
+
+                prepared.Add(new PreparedCodePatch(change.Path, destination, temporaryPath, backupPath,
+                    rollbackPath, SHA256.HashData(baselineBytes), SHA256.HashData(patchBytes), patchBytes));
+            }
+
+            foreach (var file in prepared)
+            {
+                token.ThrowIfCancellationRequested();
+                EnsureDestinationMatchesBaseline(file);
+                WriteDurableNewFile(file.TemporaryPath, file.PatchBytes);
+                var stagedBytes = ReadProjectArtifact(file.TemporaryPath);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(stagedBytes), file.PatchSha256))
+                    throw new IOException("补丁暂存文件校验失败；原项目未修改。");
+            }
+
+            ValidateProjectRootAndWorkspace();
+            foreach (var file in prepared)
+            {
+                token.ThrowIfCancellationRequested();
+                EnsureDestinationMatchesBaseline(file);
+                var reviewedBytes = ReadRootedFile(WorkspacePath, _workspaceBoundary, file.RelativePath);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(reviewedBytes), file.PatchSha256))
+                    throw new IOException("审阅后隔离补丁发生变化；原项目未修改。");
+            }
+
+            WriteApplyJournal(journalPath, prepared);
+            journalWritten = true;
+            token.ThrowIfCancellationRequested();
+            commitStarted = true;
+
+            foreach (var file in prepared)
+            {
+                EnsureDestinationMatchesBaseline(file);
+                fileReplacer.Replace(file.TemporaryPath, file.DestinationPath, file.BackupPath);
+
+                var appliedBytes = ReadProjectFile(file.RelativePath);
+                var backupBytes = ReadProjectArtifact(file.BackupPath);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(appliedBytes), file.PatchSha256)
+                    || !CryptographicOperations.FixedTimeEquals(SHA256.HashData(backupBytes), file.BaselineSha256))
+                    throw new IOException("原子替换后的内容校验失败。");
+            }
+
+            foreach (var file in prepared)
+            {
+                var appliedBytes = ReadProjectFile(file.RelativePath);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(appliedBytes), file.PatchSha256))
+                    throw new IOException("补丁应用期间原项目文件再次变化。");
+            }
+
+            var cleanupWarning = CleanupPatchArtifacts(prepared, journalPath);
+            return new(true, false, cleanupWarning
+                ? "已按审阅内容将补丁应用到原项目。部分恢复暂存文件无法清理，任务目录中的 apply-journal.json 保留供人工核对。"
+                : "已按审阅内容将补丁应用到原项目；每个目标文件均已核验。");
+        }
+        catch (OperationCanceledException) when (!commitStarted)
+        {
+            CleanupPatchArtifacts(prepared, journalWritten ? journalPath : null);
+            throw;
+        }
+        catch (Exception)
+        {
+            if (!commitStarted)
+            {
+                CleanupPatchArtifacts(prepared, journalWritten ? journalPath : null);
+                throw;
+            }
+
+            if (RollbackPatch(prepared, fileReplacer))
+            {
+                CleanupPatchArtifacts(prepared, journalPath);
+                return new(false, false,
+                    "应用补丁时发生错误；已核验并恢复所有已替换文件，原项目内容保持不变。请重新审阅后再决定是否重试。");
+            }
+
+            return new(false, true,
+                "应用补丁时发生错误，当前文件状态无法安全确认。小K没有自动重试；请核对原项目、隔离工作区和 apply-journal.json 后再处理。");
+        }
+    }
+
+    private void ValidateProjectRootAndWorkspace()
+    {
+        EnsureNoReparsePointsInPath(ProjectPath);
+        EnsureNoReparsePointsInPath(WorkspacePath);
+        if (!string.Equals(GetCanonicalDirectoryPath(ProjectPath), _projectBoundary, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(GetCanonicalDirectoryPath(WorkspacePath), _workspaceBoundary, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("原项目或隔离工作区根目录已变化；已拒绝应用补丁。");
+    }
+
+    private void ValidateProjectParent(string parent)
+    {
+        EnsureNoReparsePointsInPath(parent);
+        var canonical = GetCanonicalDirectoryPath(parent);
+        if (!IsSameOrChild(canonical, _projectBoundary)
+            || !string.Equals(canonical, Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar,
+                Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("补丁父目录离开原项目或经过重解析点；已拒绝。");
+    }
+
+    private void EnsureDestinationMatchesBaseline(PreparedCodePatch file)
+    {
+        ValidateProjectRootAndWorkspace();
+        ValidateProjectParent(Path.GetDirectoryName(file.DestinationPath)!);
+        var current = ReadProjectFile(file.RelativePath);
+        if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(current), file.BaselineSha256))
+            throw new IOException("审阅期间原项目文件已变化；整批补丁已拒绝，未写入任何文件。");
+    }
+
+    private byte[] ReadProjectFile(string relative) => ReadRootedFile(ProjectPath, _projectBoundary, relative);
+
+    private byte[] ReadProjectArtifact(string path)
+    {
+        var relative = Path.GetRelativePath(ProjectPath, path);
+        if (relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || relative == ".." || Path.IsPathRooted(relative))
+            throw new InvalidDataException("补丁暂存文件离开原项目边界；已拒绝。");
+        return ReadRootedFile(ProjectPath, _projectBoundary, relative);
+    }
+
+    private static byte[] ReadRootedFile(string root, string boundary, string relative)
+    {
+        var path = ResolveWithin(root, relative);
+        var parent = Path.GetDirectoryName(path)!;
+        EnsureNoReparsePointsInPath(parent);
+        var parentCanonical = GetCanonicalDirectoryPath(parent);
+        if (!IsSameOrChild(parentCanonical, boundary))
+            throw new InvalidDataException("目标文件父目录离开允许边界；已拒绝。");
+
+        using var handle = OpenNoFollow(path, isDirectory: false);
+        if (!TryGetCanonicalPath(handle, out var canonical)
+            || !IsSameOrChild(canonical, boundary)
+            || !string.Equals(canonical, path, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("目标文件不是允许边界内的普通文件；已拒绝。");
+        EnsureSingleLinkFile(handle);
+        using var stream = new FileStream(handle, FileAccess.Read);
+        if (stream.Length < 0 || stream.Length > MaximumReadableFileBytes)
+            throw new InvalidDataException("目标文件超过安全读取上限；已拒绝。");
+        var bytes = new byte[checked((int)stream.Length)];
+        stream.ReadExactly(bytes);
+        return bytes;
+    }
+
+    private static void WriteDurableNewFile(string path, byte[] bytes)
+    {
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+            4096, FileOptions.WriteThrough);
+        stream.Write(bytes);
+        stream.Flush(flushToDisk: true);
+    }
+
+    private void WriteApplyJournal(string journalPath, IReadOnlyList<PreparedCodePatch> prepared)
+    {
+        if (File.Exists(journalPath) || Directory.Exists(journalPath))
+            throw new IOException("已有补丁应用日志；为避免重放旧事务，已拒绝应用。");
+        EnsureNoReparsePointsInPath(TaskRoot);
+        var temporary = Path.Combine(TaskRoot, ".xiaok-apply-journal-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                4096, FileOptions.WriteThrough))
+            {
+                JsonSerializer.Serialize(stream, new
+                {
+                    schemaVersion = 1,
+                    taskId = TaskId,
+                    state = "applying",
+                    files = prepared.Select(file => new
+                    {
+                        path = file.RelativePath,
+                        baselineSha256 = Convert.ToHexString(file.BaselineSha256),
+                        patchSha256 = Convert.ToHexString(file.PatchSha256),
+                        backupFile = Path.GetFileName(file.BackupPath)
+                    })
+                });
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, journalPath);
+        }
+        finally
+        {
+            TryDeleteFile(temporary);
+        }
+    }
+
+    private bool RollbackPatch(IReadOnlyList<PreparedCodePatch> prepared, ICodePatchFileReplacer fileReplacer)
+    {
+        var restored = true;
+        foreach (var file in prepared.Reverse())
+        {
+            try
+            {
+                var current = ReadProjectFile(file.RelativePath);
+                var currentHash = SHA256.HashData(current);
+                var backupExists = File.Exists(file.BackupPath);
+                if (CryptographicOperations.FixedTimeEquals(currentHash, file.BaselineSha256))
+                {
+                    if (backupExists)
+                    {
+                        var spareBackup = ReadProjectArtifact(file.BackupPath);
+                        if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(spareBackup), file.BaselineSha256))
+                            restored = false;
+                        else
+                            TryDeleteFile(file.BackupPath);
+                    }
+                    continue;
+                }
+
+                if (!CryptographicOperations.FixedTimeEquals(currentHash, file.PatchSha256) || !backupExists)
+                {
+                    restored = false;
+                    continue;
+                }
+
+                var backup = ReadProjectArtifact(file.BackupPath);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(backup), file.BaselineSha256)
+                    || File.Exists(file.RollbackPath) || Directory.Exists(file.RollbackPath))
+                {
+                    restored = false;
+                    continue;
+                }
+
+                fileReplacer.Replace(file.BackupPath, file.DestinationPath, file.RollbackPath);
+                var recovered = ReadProjectFile(file.RelativePath);
+                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(recovered), file.BaselineSha256))
+                    restored = false;
+                TryDeleteFile(file.RollbackPath);
+            }
+            catch (Exception)
+            {
+                restored = false;
+            }
+        }
+        return restored;
+    }
+
+    private static bool CleanupPatchArtifacts(IReadOnlyList<PreparedCodePatch> prepared, string? journalPath)
+    {
+        var cleanupFailed = false;
+        foreach (var file in prepared)
+        {
+            cleanupFailed |= !TryDeleteFile(file.TemporaryPath);
+            cleanupFailed |= !TryDeleteFile(file.BackupPath);
+            cleanupFailed |= !TryDeleteFile(file.RollbackPath);
+        }
+        if (journalPath is not null && !cleanupFailed) cleanupFailed = !TryDeleteFile(journalPath);
+        return cleanupFailed;
+    }
+
+    private static bool TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+            return !File.Exists(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private sealed record PreparedCodePatch(string RelativePath, string DestinationPath, string TemporaryPath,
+        string BackupPath, string RollbackPath, byte[] BaselineSha256, byte[] PatchSha256, byte[] PatchBytes);
 
     private byte[]? ReadSnapshotFile(string relative, int maximumBytes)
     {

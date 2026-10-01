@@ -38,6 +38,7 @@ public static class ApprovalAuditCatalog
 {
     public const string MessageSendAction = "message.send.v1";
     public const string CodeTaskAction = "code.task.create.v1";
+    public const string CodePatchApplyAction = "code.patch.apply.v1";
     public const string Confirmed = "confirmed";
     public const string Declined = "declined";
     public const string RunDotNetTests = "run_dotnet_tests";
@@ -70,7 +71,7 @@ public interface IApprovalPresenter
     Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken);
 }
 
-public enum CodeTaskReviewDecision { KeepPatch, RunDotNetTests }
+public enum CodeTaskReviewDecision { KeepPatch, RunDotNetTests, ApplyPatchToProject }
 
 public interface ICodeTaskReviewPresenter
 {

@@ -152,6 +152,18 @@ try
     await CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(tempRoot);
     passed.Add("代码审阅默认只保留补丁，不运行命令");
 
+    await CheckApprovedPatchIsAppliedAndVerifiedAsync(tempRoot);
+    passed.Add("多文件补丁仅在用户明确批准后应用，并核验每个目标文件");
+
+    await CheckStaleProjectFileRejectsWholePatchAsync(tempRoot);
+    passed.Add("审阅期间原项目文件变化时整批补丁拒绝写入");
+
+    await CheckPatchApplyFailureRollsBackAsync(tempRoot);
+    passed.Add("多文件补丁中途失败时回滚已替换文件且不自动重试");
+
+    await CheckPatchApplyUncertaintyRetainsJournalAsync(tempRoot);
+    passed.Add("补丁回滚无法确认时保留应用日志并转人工核对");
+
     await CheckApprovedDotNetVerificationUsesCapturedTargetAsync(tempRoot);
     passed.Add("用户确认后只对唯一快照目标请求固定 .NET 还原和测试命令");
 
@@ -168,7 +180,7 @@ try
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
     await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
-    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持原子更新、一致性备份及 v1/v2 到 v3 架构备份迁移");
+    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1/v2/v3 到 v4 架构备份迁移");
 
     await CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(tempRoot);
     passed.Add("本地历史清理删除 SQLite 个人记录并保留迁移标记，重启后不会从旧源重新导入");
@@ -726,6 +738,109 @@ static async Task CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(string 
         "只保留补丁路径修改了原项目。");
 }
 
+static async Task CheckApprovedPatchIsAppliedAndVerifiedAsync(string root)
+{
+    var project = CreateProject(root, "patch-apply-success", "class Sample { int Value = 1; }\n");
+    var secondOriginal = "class Second { int Value = 10; }\n";
+    File.WriteAllText(Path.Combine(project, "Second.cs"), secondOriginal, new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "patch-apply-success-workspaces");
+    var inference = TwoFilePatchInference();
+    var replacer = new CountingCodePatchFileReplacer();
+    var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.ApplyPatchToProject);
+
+    var result = await NewAgent(inference, patchFileReplacer: replacer).ExecuteAsync(project, workspaces,
+        "更新两个文件", CancellationToken.None, presenter);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.Completed,
+        "用户批准的多文件补丁没有完成。" + result.Summary);
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample { int Value = 2; }\n"
+        && File.ReadAllText(Path.Combine(project, "Second.cs")) == "class Second { int Value = 20; }\n",
+        "用户批准后没有把全部审阅内容准确应用到原项目。");
+    Require(replacer.CallCount == 2 && presenter.CallCount == 1
+        && presenter.Diff?.Contains("Second.cs", StringComparison.Ordinal) == true,
+        "补丁应用没有先显示完整多文件差异，或文件替换次数不符。");
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(!File.Exists(Path.Combine(taskRoot, "apply-journal.json"))
+        && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("completed", StringComparison.Ordinal)
+        && !Directory.EnumerateFiles(project, ".xiaok-*", SearchOption.TopDirectoryOnly).Any(),
+        "成功应用后未清理事务日志/暂存文件，或没有记录完成状态。");
+}
+
+static async Task CheckStaleProjectFileRejectsWholePatchAsync(string root)
+{
+    var project = CreateProject(root, "patch-apply-stale", "class Sample { int Value = 1; }\n");
+    var secondPath = Path.Combine(project, "Second.cs");
+    File.WriteAllText(secondPath, "class Second { int Value = 10; }\n", new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "patch-apply-stale-workspaces");
+    var replacer = new CountingCodePatchFileReplacer();
+    var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.ApplyPatchToProject,
+        beforeReturn: () => File.WriteAllText(secondPath, "class Second { int Value = 99; }\n", new UTF8Encoding(false)));
+
+    var result = await NewAgent(TwoFilePatchInference(), patchFileReplacer: replacer).ExecuteAsync(project,
+        workspaces, "更新两个文件", CancellationToken.None, presenter);
+
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(!result.Success && result.ErrorCode == "CODE_TASK_FAILED"
+        && replacer.CallCount == 0
+        && File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample { int Value = 1; }\n"
+        && File.ReadAllText(secondPath) == "class Second { int Value = 99; }\n"
+        && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
+        "审阅后原项目发生变化时未在任何替换前拒绝整批补丁。");
+}
+
+static async Task CheckPatchApplyFailureRollsBackAsync(string root)
+{
+    var project = CreateProject(root, "patch-apply-rollback", "class Sample { int Value = 1; }\n");
+    var secondOriginal = "class Second { int Value = 10; }\n";
+    File.WriteAllText(Path.Combine(project, "Second.cs"), secondOriginal, new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "patch-apply-rollback-workspaces");
+    var replacer = new FailOnceCodePatchFileReplacer(failOnCall: 2);
+
+    var result = await NewAgent(TwoFilePatchInference(), patchFileReplacer: replacer).ExecuteAsync(project,
+        workspaces, "更新两个文件", CancellationToken.None,
+        new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.ApplyPatchToProject));
+
+    Require(!result.Success && result.FinalState == TaskLifecycleState.Failed && replacer.CallCount == 3
+        && File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample { int Value = 1; }\n"
+        && File.ReadAllText(Path.Combine(project, "Second.cs")) == secondOriginal,
+        "中途替换失败后没有恢复所有原始文件，或发生了意外重试。");
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(!File.Exists(Path.Combine(taskRoot, "apply-journal.json")),
+        "回滚成功后仍遗留应用日志。");
+}
+
+static async Task CheckPatchApplyUncertaintyRetainsJournalAsync(string root)
+{
+    var project = CreateProject(root, "patch-apply-uncertain", "class Sample { int Value = 1; }\n");
+    File.WriteAllText(Path.Combine(project, "Second.cs"), "class Second { int Value = 10; }\n", new UTF8Encoding(false));
+    var workspaces = Path.Combine(root, "patch-apply-uncertain-workspaces");
+    var replacer = new FailOnCallsCodePatchFileReplacer(2, 3);
+
+    var result = await NewAgent(TwoFilePatchInference(), patchFileReplacer: replacer).ExecuteAsync(project,
+        workspaces, "更新两个文件", CancellationToken.None,
+        new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.ApplyPatchToProject));
+
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+    Require(!result.Success && result.FinalState == TaskLifecycleState.OutcomeUncertain
+        && result.ErrorCode == "CODE_PATCH_OUTCOME_UNCERTAIN"
+        && File.Exists(Path.Combine(taskRoot, "apply-journal.json"))
+        && replacer.CallCount == 3,
+        "无法确认回滚时没有保留日志、转为人工核对，或触发自动重试。");
+    Require(File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("outcome_uncertain", StringComparison.Ordinal),
+        "不确定应用结果没有持久化为待人工核对状态。");
+}
+
+static ScriptedInference TwoFilePatchInference() => new(
+    "{\"paths\":[\"Sample.cs\",\"Second.cs\"]}",
+    System.Text.Json.JsonSerializer.Serialize(new
+    {
+        files = new[]
+        {
+            new { path = "Sample.cs", content = "class Sample { int Value = 2; }\n" },
+            new { path = "Second.cs", content = "class Second { int Value = 20; }\n" }
+        }
+    }));
+
 static async Task CheckApprovedDotNetVerificationUsesCapturedTargetAsync(string root)
 {
     var project = CreateProject(root, "review-run", "class Sample { int Value = 1; }\n");
@@ -942,16 +1057,20 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         ApprovalAuditCatalog.RunDotNetTests, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
         ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodePatchApplyAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     const string untrustedAuditSentinel = "PRIVATE_APPROVAL_DETAILS_MUST_NOT_BE_STORED";
     var untrustedActionRejected = false;
     try { await store.AppendApprovalAuditAsync(untrustedAuditSentinel, "confirmed", CancellationToken.None); }
     catch (ArgumentException) { untrustedActionRejected = true; }
     var audit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
-    Require(untrustedActionRejected && audit.Count == 2
+    Require(untrustedActionRejected && audit.Count == 3
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodeTaskAction
             && row.Outcome == ApprovalAuditCatalog.RunDotNetTests)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.MessageSendAction
             && row.Outcome == ApprovalAuditCatalog.Declined)
+        && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodePatchApplyAction
+            && row.Outcome == ApprovalAuditCatalog.Confirmed)
         && DatabaseFilesOmitSentinel(databasePath, untrustedAuditSentinel),
         "审批审计接受了自由文本，或没有按固定动作/结果保存审核痕迹。");
 
@@ -960,7 +1079,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
     var backedUpAudit = await backup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal"
-        && backedUpAudit.Count == 2,
+        && backedUpAudit.Count == 3,
         "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
     var changedAfterBackup = new ContactReplyStylePreference("Charlie", "casual",
@@ -975,8 +1094,8 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var safetyPreferences = await safetyBackup.GetContactReplyStylesAsync(CancellationToken.None);
     var safetyAudit = await safetyBackup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(restoredPreferences.Count == 1 && restoredPreferences[0].ContactName == "Bob"
-        && restoredAudit.Count == 2 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
-        && safetyAudit.Count == 3,
+        && restoredAudit.Count == 3 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
+        && safetyAudit.Count == 4,
         "数据库恢复未恢复所选快照，或恢复前的活动数据库没有留下可用保护副本。");
 
     var incompatibleBackupPath = Path.Combine(directory, "incompatible.sqlite3");
@@ -1025,7 +1144,27 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     Require(v2UpgradePreferences.Count == 1 && v2UpgradePreferences[0].ContactName == "Bob"
         && v2UpgradeAudit.Count == 0
         && Directory.EnumerateFiles(v2Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
-        "v2 到 v3 升级未保留偏好、建立审批表或在变更前备份。");
+        "v2 到 v4 升级未保留偏好、建立审批表或在变更前备份。");
+
+    var v3Directory = Path.Combine(directory, "v3-upgrade");
+    Directory.CreateDirectory(v3Directory);
+    var v3DatabasePath = Path.Combine(v3Directory, "tasks.sqlite3");
+    var v3Seed = new SqliteTaskStore(v3DatabasePath);
+    await v3Seed.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodeTaskAction,
+        ApprovalAuditCatalog.RunDotNetTests, CancellationToken.None);
+    await v3Seed.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    SqliteSchemaFixture.RevertToVersionThree(v3DatabasePath);
+    var upgradedFromV3 = new SqliteTaskStore(v3DatabasePath);
+    var v3UpgradeAudit = await upgradedFromV3.GetRecentApprovalAuditAsync(10, CancellationToken.None);
+    await upgradedFromV3.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodePatchApplyAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    var v3AuditAfterAppend = await upgradedFromV3.GetRecentApprovalAuditAsync(10, CancellationToken.None);
+    Require(v3UpgradeAudit.Count == 2 && v3AuditAfterAppend.Count == 3
+        && v3AuditAfterAppend.Any(row => row.ActionId == ApprovalAuditCatalog.CodePatchApplyAction
+            && row.Outcome == ApprovalAuditCatalog.Confirmed)
+        && Directory.EnumerateFiles(v3Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
+        "v3 到 v4 升级没有保留既有审计、加入固定补丁批准事件或先建立迁移备份。");
 }
 
 static async Task CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(string root)
@@ -2036,8 +2175,10 @@ static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string r
         "目录句柄枚举没有继续读取后续文件批次。");
 }
 
-static CodeTaskAgent NewAgent(IInferenceClient inference, IDotNetTestRunner? testRunner = null) =>
-    new(inference, new ModelBroker(), repositoryRoot: null, testRunner);
+static CodeTaskAgent NewAgent(IInferenceClient inference, IDotNetTestRunner? testRunner = null,
+    ICodePatchFileReplacer? patchFileReplacer = null) =>
+    new(inference, new ModelBroker(), repositoryRoot: null, testRunner,
+        patchFileReplacer ?? new WindowsCodePatchFileReplacer());
 
 static string CreateProject(string root, string name, string content)
 {
@@ -2087,7 +2228,7 @@ internal sealed class ScriptedInference : IInferenceClient
     }
 }
 
-internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decision) : ICodeTaskReviewPresenter
+internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decision, Action? beforeReturn = null) : ICodeTaskReviewPresenter
 {
     public int CallCount { get; private set; }
     public string? ProjectPath { get; private set; }
@@ -2106,7 +2247,49 @@ internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decisio
         Diff = diff;
         TestTarget = dotNetTestTarget;
         CommandPreview = commandPreview;
+        beforeReturn?.Invoke();
         return Task.FromResult(decision);
+    }
+}
+
+internal class CountingCodePatchFileReplacer : ICodePatchFileReplacer
+{
+    private int _callCount;
+    public int CallCount => Volatile.Read(ref _callCount);
+    protected int StartCall() => Interlocked.Increment(ref _callCount);
+
+    public virtual void Replace(string replacementPath, string destinationPath, string backupPath)
+    {
+        StartCall();
+        File.Replace(replacementPath, destinationPath, backupPath, ignoreMetadataErrors: true);
+    }
+}
+
+internal sealed class FailOnceCodePatchFileReplacer(int failOnCall) : CountingCodePatchFileReplacer
+{
+    private bool _failed;
+
+    public override void Replace(string replacementPath, string destinationPath, string backupPath)
+    {
+        var call = StartCall();
+        if (!_failed && call == failOnCall)
+        {
+            _failed = true;
+            throw new IOException("Synthetic replacement failure.");
+        }
+        File.Replace(replacementPath, destinationPath, backupPath, ignoreMetadataErrors: true);
+    }
+}
+
+internal sealed class FailOnCallsCodePatchFileReplacer(params int[] failOnCalls) : CountingCodePatchFileReplacer
+{
+    private readonly HashSet<int> _failOnCalls = failOnCalls.ToHashSet();
+
+    public override void Replace(string replacementPath, string destinationPath, string backupPath)
+    {
+        var call = StartCall();
+        if (_failOnCalls.Contains(call)) throw new IOException("Synthetic replacement failure.");
+        File.Replace(replacementPath, destinationPath, backupPath, ignoreMetadataErrors: true);
     }
 }
 
@@ -2329,6 +2512,19 @@ internal static class SqliteSchemaFixture
     public static void RevertToVersionTwo(string databasePath)
     {
         Execute(databasePath, "BEGIN IMMEDIATE; DROP TABLE approval_audit; PRAGMA user_version=2; COMMIT;");
+    }
+
+    public static void RevertToVersionThree(string databasePath)
+    {
+        Execute(databasePath, "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
+            + "ALTER TABLE approval_audit RENAME TO approval_audit_v4; "
+            + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
+            + "outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+            + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+            + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests'))); "
+            + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
+            + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v4; "
+            + "DROP TABLE approval_audit_v4; PRAGMA user_version=3; COMMIT;");
     }
 
     public static void RevertToVersionOne(string databasePath)
