@@ -81,13 +81,20 @@
                     <TextBlock Text="你想做什么？" FontSize="13" FontWeight="SemiBold" Foreground="#343A50" Margin="2,0,0,7"/>
                     <TextBox x:Name="RequestBox" MinHeight="74" MaxHeight="110" AcceptsReturn="True" TextWrapping="Wrap"
                              KeyDown="RequestBox_KeyDown" VerticalScrollBarVisibility="Auto" FontSize="13" Padding="11"
-                             Background="White" BorderBrush="#DCE2EF" ToolTip="例如：打开小K项目 / 查找文件 预算"/>
+                             Background="White" BorderBrush="#DCE2EF"
+                             ToolTip="例如：打开小K项目 / 查找文件 预算 / 发送微信给张三：正文（仅预览，不发送）"/>
                     <TextBlock Text="快捷入口 · 点一下后补充内容" FontSize="10" Foreground="#7A8299" Margin="2,9,0,6"/>
                     <WrapPanel>
                         <Button Style="{StaticResource QuickPromptButton}" Content="查找文件" Tag="查找文件 " Click="QuickPrompt_Click"/>
                         <Button Style="{StaticResource QuickPromptButton}" Content="解释代码" Tag="解释代码：" Click="QuickPrompt_Click"/>
                         <Button Style="{StaticResource QuickPromptButton}" Content="分析消息" Tag="分析消息：" Click="QuickPrompt_Click"/>
                         <Button Style="{StaticResource QuickPromptButton}" Content="起草回复" Tag="帮我回复：" Click="QuickPrompt_Click"/>
+                    </WrapPanel>
+                    <WrapPanel Margin="0,1,0,6">
+                        <Button Style="{StaticResource QuickPromptButton}" Content="微信发送预览" Tag="发送微信给 "
+                                ToolTip="补充收件人和正文；只显示预览，不会发送" Click="QuickPrompt_Click"/>
+                        <Button Style="{StaticResource QuickPromptButton}" Content="QQ发送预览" Tag="发送QQ给 "
+                                ToolTip="补充收件人和正文；只显示预览，不会发送" Click="QuickPrompt_Click"/>
                     </WrapPanel>
                     <WrapPanel Margin="0,1,0,0">
                         <Button x:Name="RunButton" Content="运行任务" MinWidth="82" Click="Run_Click"

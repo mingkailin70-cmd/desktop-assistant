@@ -10,17 +10,20 @@ public sealed class ToolBroker
     private readonly IInferenceClient _inference;
     private readonly ModelBroker _models;
     private readonly IApprovalPresenter _approval;
+    private readonly IMessageSendPreviewPresenter? _messageSendPreview;
     private readonly CodeTaskAgent _codeAgent;
     private readonly string _codeProjectRoot;
     private readonly string _codeWorkspaceRoot;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
-        IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot)
+        IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot,
+        IMessageSendPreviewPresenter? messageSendPreview = null)
     {
         _desktop = desktop;
         _inference = inference;
         _models = models;
         _approval = approval;
+        _messageSendPreview = messageSendPreview;
         _codeAgent = codeAgent;
         _codeProjectRoot = codeProjectRoot;
         _codeWorkspaceRoot = codeWorkspaceRoot;
@@ -171,13 +174,19 @@ public sealed class ToolBroker
     private static ToolResult? ValidateSend(ToolProposal proposal)
     {
         var args = proposal.Arguments;
+        var applicationId = args.GetValueOrDefault("application_id");
         var recipient = args.GetValueOrDefault("recipient");
         var text = args.GetValueOrDefault("text");
-        if (args.Keys.Any(key => key is not ("recipient" or "text" or "attachments"))
-            || args.Count is < 2 or > 3 || string.IsNullOrWhiteSpace(recipient)
-            || string.IsNullOrWhiteSpace(text) || text.Length > 20_000
-            || proposal.Target != recipient)
-            return InvalidProposal("发送目标必须与最终收件人一致，且正文和附件字段必须明确。");
+        var attachments = args.GetValueOrDefault("attachments");
+        if (args.Keys.Any(key => key is not ("application_id" or "recipient" or "text" or "attachments"))
+            || args.Count != 4 || applicationId is not ("wechat" or "qq")
+            || string.IsNullOrWhiteSpace(recipient) || recipient.Length > 256 || recipient.Any(char.IsControl)
+            || string.IsNullOrWhiteSpace(text) || text.Length > 20_000 || text.Contains('\0')
+            || attachments is null
+            || proposal.Target != $"{applicationId}:{recipient}")
+            return InvalidProposal("发送预览必须绑定明确的微信或 QQ、最终收件人、正文和附件清单。");
+        if (attachments != "none")
+            return new(false, "当前版本不支持附件；没有显示或发送任何文件。", "SEND_ATTACHMENTS_UNSUPPORTED");
         return null;
     }
 
@@ -218,16 +227,19 @@ public sealed class ToolBroker
 
     private async Task<ToolResult> SendAsync(ToolProposal proposal, CancellationToken token)
     {
+        if (_messageSendPreview is null)
+            return new(false, "发送预览界面不可用；没有显示或发送任何内容。", "SEND_PREVIEW_UNAVAILABLE");
+
+        var applicationId = proposal.Arguments["application_id"];
         var recipient = proposal.Arguments.GetValueOrDefault("recipient");
         var text = proposal.Arguments.GetValueOrDefault("text");
-        var attachments = proposal.Arguments.GetValueOrDefault("attachments", "无");
         if (string.IsNullOrWhiteSpace(recipient) || string.IsNullOrWhiteSpace(text))
             return new(false, "发送预览缺少最终收件人或正文。", "INVALID_SEND_PREVIEW");
-        var confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.MessageSendAction, "确认发送",
-            $"收件人：{recipient}{Environment.NewLine}{Environment.NewLine}正文：{text}{Environment.NewLine}{Environment.NewLine}附件：{attachments}", token);
-        if (!confirmed) return new(false, "用户取消发送。", "USER_DECLINED");
-        // No WeChat/QQ sender is implemented; approval alone must never imply an external side effect.
-        return new(false, "预览已确认，但微信/QQ发送适配器尚未接入；未发送任何内容。", "SEND_ADAPTER_UNAVAILABLE");
+        var preview = new MessageSendPreview(applicationId, recipient, text, []);
+        await _messageSendPreview.ShowMessageSendPreviewAsync(preview, token);
+
+        // Preview-only mode deliberately does not request approval: no sender is available to carry out the action.
+        return new(false, "已显示最终发送预览。本版本尚未接入微信/QQ发送适配器；没有发送任何内容。", "SEND_ADAPTER_UNAVAILABLE");
     }
 
     private static ToolPrecondition GetRequiredPreconditions(string toolId) => toolId switch
@@ -250,7 +262,7 @@ public sealed class ToolBroker
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,
-        "message.send.v1" => ToolExpectedOutcome.PreviewConfirmedBeforeSend,
+        "message.send.v1" => ToolExpectedOutcome.MessageSendPreviewShown,
         "code.inspect.v1" => ToolExpectedOutcome.CodeExplanationReturned,
         "code.task.create.v1" => ToolExpectedOutcome.ReviewablePatchCreated,
         _ => ToolExpectedOutcome.None

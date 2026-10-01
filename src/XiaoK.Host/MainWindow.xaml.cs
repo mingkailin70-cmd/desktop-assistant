@@ -9,7 +9,7 @@ using XiaoK.Core;
 
 namespace XiaoK.Host;
 
-public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter
+public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
     private readonly AssistantRuntime _runtime;
     private readonly WindowsNotificationMonitor _notificationMonitor;
@@ -62,6 +62,30 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         await _runtime.RecordApprovalAuditAsync(actionId,
             confirmed ? ApprovalAuditCatalog.Confirmed : ApprovalAuditCatalog.Declined, cancellationToken);
         return confirmed;
+    }
+
+    public async Task ShowMessageSendPreviewAsync(MessageSendPreview preview, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (Dispatcher.CheckAccess()) ShowMessageSendPreview(preview, cancellationToken);
+        else await Dispatcher.InvokeAsync(() => ShowMessageSendPreview(preview, cancellationToken)).Task;
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private void ShowMessageSendPreview(MessageSendPreview preview, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var dialog = new MessageSendPreviewWindow(preview) { Owner = this };
+        using var registration = cancellationToken.Register(() => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (dialog.IsVisible) dialog.Close();
+        })));
+        dialog.Loaded += (_, _) =>
+        {
+            if (cancellationToken.IsCancellationRequested) dialog.Close();
+        };
+        dialog.ShowDialog();
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     public async Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,

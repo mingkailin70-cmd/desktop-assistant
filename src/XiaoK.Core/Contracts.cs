@@ -31,7 +31,8 @@ public enum ToolExpectedOutcome
     ReplyDraftOnly = 5,
     PreviewConfirmedBeforeSend = 6,
     ReviewablePatchCreated = 7,
-    CodeExplanationReturned = 8
+    CodeExplanationReturned = 8,
+    MessageSendPreviewShown = 9
 }
 
 public static class ApprovalAuditCatalog
@@ -51,6 +52,10 @@ public sealed record MessageNotice(string ApplicationId, string SourceAppId, str
     bool IsPrivateConversation, string? Body, DateTimeOffset ReceivedAtUtc, string DeduplicationKey);
 public sealed record NoticeDecision(bool Accepted, bool AnalyzeBody, string UserMessage, MessageNotice? Notice = null);
 public sealed record PrivateNoticeAnalysisResult(string ApplicationId, bool Success, string Text);
+public sealed record MessageSendIntent(string ApplicationId, string Recipient, string Text);
+public sealed record MessageAttachmentPreview(string DisplayName, long SizeBytes, string Sha256);
+public sealed record MessageSendPreview(string ApplicationId, string Recipient, string Text,
+    IReadOnlyList<MessageAttachmentPreview> Attachments);
 
 public interface ITaskStore
 {
@@ -69,6 +74,11 @@ public interface ITool
 public interface IApprovalPresenter
 {
     Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken);
+}
+
+public interface IMessageSendPreviewPresenter
+{
+    Task ShowMessageSendPreviewAsync(MessageSendPreview preview, CancellationToken cancellationToken);
 }
 
 public enum CodeTaskReviewDecision { KeepPatch, RunDotNetTests, ApplyPatchToProject }

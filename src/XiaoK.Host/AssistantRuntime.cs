@@ -58,7 +58,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
-            codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot);
+            codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
+            approval as IMessageSendPreviewPresenter);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
 
@@ -357,7 +358,24 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         }
 
         if (category == "send")
-            return new(false, "发送必须经过最终预览，列出收件人、正文和附件并确认。微信/QQ发送适配器尚未接入，因此当前不会发送。", "SEND_ADAPTER_UNAVAILABLE");
+        {
+            if (!MessageSendIntentResolver.TryResolve(request, out var intent, out var errorCode) || intent is null)
+            {
+                var message = errorCode == "SEND_ATTACHMENTS_UNSUPPORTED"
+                    ? "当前只支持无附件的发送预览；附件选择与身份核验尚未接入，本次没有读取或发送文件。"
+                    : "请按“发送微信给张三：正文”或“发送QQ给张三：正文”提供明确平台、收件人和正文。当前只显示预览，不会发送。";
+                return new(false, message, errorCode ?? "SEND_FORMAT_INVALID");
+            }
+
+            var arguments = ImmutableDictionary<string, string>.Empty
+                .Add("application_id", intent.ApplicationId)
+                .Add("recipient", intent.Recipient)
+                .Add("text", intent.Text)
+                .Add("attachments", "none");
+            return await _broker.ExecuteAsync(new ToolProposal("message.send.v1", arguments,
+                $"{intent.ApplicationId}:{intent.Recipient}", ToolPrecondition.CompleteMessagePreview,
+                ToolExpectedOutcome.MessageSendPreviewShown), token);
+        }
 
         if (category == "code-inspect")
         {
@@ -410,7 +428,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("找文件") || lower.StartsWith("查找文件") || lower.StartsWith("搜索文件") || lower.StartsWith("搜索") || lower.StartsWith("帮我找文件")) return "file";
         if (lower.StartsWith("分析消息") || lower.StartsWith("分析聊天") || lower.StartsWith("理解聊天") || lower.StartsWith("解释这条消息") || lower.StartsWith("分析：") || lower.StartsWith("分析:")) return "analyze";
         if (lower.StartsWith("帮我回复") || lower.StartsWith("起草回复") || lower.StartsWith("回复草稿") || lower.StartsWith("帮我回")) return "draft";
-        if (lower.StartsWith("发送") || lower.StartsWith("发给")) return "send";
+        if (lower.StartsWith("发送") || lower.StartsWith("发给")
+            || lower.StartsWith("发微信给") || lower.StartsWith("发qq给")) return "send";
         if (lower.StartsWith("查找代码") || lower.StartsWith("搜索代码") || lower.StartsWith("解释代码")
             || lower.StartsWith("分析代码") || lower.StartsWith("读代码")) return "code-inspect";
         if (lower.Contains("写代码") || lower.Contains("改代码") || lower.Contains("开发任务") || lower.Contains("编程任务")) return "code";

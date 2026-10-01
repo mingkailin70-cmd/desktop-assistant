@@ -218,6 +218,12 @@ try
     await CheckContactReplyStylesUseFixedUserPreferencesAsync();
     passed.Add("回复草稿仅使用用户确认的固定风格，且联系人名称不进入模型请求");
 
+    CheckMessageSendIntentResolver();
+    passed.Add("发送意图必须明确指定微信或 QQ、收件人和正文，并拒绝未接入的附件语法");
+
+    await CheckSendPreviewNeverConfirmsWithoutSenderAsync();
+    passed.Add("发送预览绑定应用和收件人；无发送适配器时只展示预览且不请求发送批准");
+
     await CheckModelRuntimeLeaseWrapsEachInferenceStepAsync();
     passed.Add("本地模型进程租约覆盖推理步骤并在成功、异常后释放");
 
@@ -1841,6 +1847,69 @@ static async Task CheckContactReplyStylesUseFixedUserPreferencesAsync()
         "未知回复风格未在推理前拒绝。");
 }
 
+static void CheckMessageSendIntentResolver()
+{
+    Require(MessageSendIntentResolver.TryResolve("发送微信给 张三：我们改到下午三点：收到请回复。",
+            out var wechat, out var wechatError)
+        && wechatError is null && wechat is { ApplicationId: "wechat", Recipient: "张三" }
+        && wechat.Text == "我们改到下午三点：收到请回复。",
+        "微信发送预览解析没有保留完整正文或绑定明确收件人。");
+    Require(MessageSendIntentResolver.TryResolve("发QQ给 Alice: hello",
+            out var qq, out var qqError)
+        && qqError is null && qq is { ApplicationId: "qq", Recipient: "Alice", Text: "hello" },
+        "QQ 发送预览解析错误。");
+    Require(!MessageSendIntentResolver.TryResolve("发送给张三：你好", out var noApp, out var noAppError)
+        && noApp is null && noAppError == "SEND_FORMAT_INVALID",
+        "未指定发送应用时没有失败关闭。");
+    Require(!MessageSendIntentResolver.TryResolve("发送微信给张三：你好；附件：D:\\秘密.pdf",
+            out var withAttachment, out var attachmentError)
+        && withAttachment is null && attachmentError == "SEND_ATTACHMENTS_UNSUPPORTED",
+        "未接入附件能力时仍接受了附件发送请求。");
+    Require(!MessageSendIntentResolver.TryResolve("发送QQ给：你好", out var noRecipient, out _)
+        && noRecipient is null,
+        "缺少收件人时仍接受了发送请求。");
+    Require(!MessageSendIntentResolver.TryResolve("发送QQ给 Alice：", out var noText, out _)
+        && noText is null,
+        "缺少正文时仍接受了发送请求。");
+}
+
+static async Task CheckSendPreviewNeverConfirmsWithoutSenderAsync()
+{
+    var previewPresenter = new CapturingMessageSendPreviewPresenter();
+    var approval = new CountingApprovalPresenter();
+    var broker = new ToolBroker(new WindowsDesktopTools([], []), new ScriptedInference(), new ModelBroker(),
+        approval, null!, "", "", previewPresenter);
+    var arguments = new Dictionary<string, string>
+    {
+        ["application_id"] = "wechat",
+        ["recipient"] = "张三",
+        ["text"] = "下午三点见。",
+        ["attachments"] = "none"
+    };
+    var proposal = ToolBroker.Proposal("message.send.v1", arguments, "wechat:张三",
+        ToolExpectedOutcome.MessageSendPreviewShown);
+    var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
+    var shownPreview = previewPresenter.Previews.SingleOrDefault();
+    Require(!result.Success && result.ErrorCode == "SEND_ADAPTER_UNAVAILABLE"
+        && shownPreview is { ApplicationId: "wechat", Recipient: "张三", Text: "下午三点见。" }
+        && shownPreview.Attachments.Count == 0
+        && approval.CallCount == 0,
+        "预览未展示完整目标/正文，或没有发送适配器时仍请求了发送批准。");
+
+    var wrongTarget = await broker.ExecuteAsync(proposal with { Target = "qq:张三" }, CancellationToken.None);
+    Require(!wrongTarget.Success && wrongTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && previewPresenter.Previews.Count == 1 && approval.CallCount == 0,
+        "发送提案的应用与目标不一致时仍展示或执行了动作。");
+
+    using var cancelled = new CancellationTokenSource();
+    cancelled.Cancel();
+    var cancellationObserved = false;
+    try { await broker.ExecuteAsync(proposal, cancelled.Token); }
+    catch (OperationCanceledException) { cancellationObserved = true; }
+    Require(cancellationObserved && previewPresenter.Previews.Count == 1 && approval.CallCount == 0,
+        "取消的发送预览仍继续处理或请求批准。");
+}
+
 static MessageNoticePolicy CreateNoticePolicy() => new(["wechat.package!Main"], ["qq.package!Main"]);
 
 static async Task CheckRetainedCodeTaskHistoryAsync(string root)
@@ -2249,6 +2318,30 @@ internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decisio
         CommandPreview = commandPreview;
         beforeReturn?.Invoke();
         return Task.FromResult(decision);
+    }
+}
+
+internal sealed class CapturingMessageSendPreviewPresenter : IMessageSendPreviewPresenter
+{
+    public List<MessageSendPreview> Previews { get; } = [];
+
+    public Task ShowMessageSendPreviewAsync(MessageSendPreview preview, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Previews.Add(preview);
+        return Task.CompletedTask;
+    }
+}
+
+internal sealed class CountingApprovalPresenter : IApprovalPresenter
+{
+    public int CallCount { get; private set; }
+
+    public Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        return Task.FromResult(true);
     }
 }
 
