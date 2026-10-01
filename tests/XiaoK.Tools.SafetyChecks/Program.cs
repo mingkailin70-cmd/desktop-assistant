@@ -52,6 +52,12 @@ if (args.Length == 1 && args[0] == "--only-tool-proposal-preconditions")
     Console.WriteLine("通过：ToolBroker 拒绝缺失或错配的固定前置条件与预期结果。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-window-activation")
+{
+    await CheckWindowActivationOutcomesAsync();
+    Console.WriteLine("通过：窗口切换成功、未找到、被拒绝和取消路径。");
+    return;
+}
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
@@ -77,6 +83,9 @@ try
 
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
+
+    await CheckWindowActivationOutcomesAsync();
+    passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
 
     await CheckToolProposalPreconditionsAreTypedAsync();
     passed.Add("ToolBroker 拒绝缺失或错配的固定前置条件与预期结果");
@@ -1053,6 +1062,69 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
     }
 }
 
+static async Task CheckWindowActivationOutcomesAsync()
+{
+    const string appId = "vscode";
+    const string projectRoot = @"D:\Projects\siri";
+    var app = new DesktopApp(appId, Path.Combine(Environment.SystemDirectory, "notepad.exe"), projectRoot);
+    var proposal = ToolBroker.Proposal("window.activate.v1", [new KeyValuePair<string, string>("app_id", appId)],
+        appId, ToolExpectedOutcome.TargetWindowInForeground);
+
+    var successfulWindowController = new FakeDesktopWindowController(WindowActivationOutcome.Activated);
+    var successfulProcessController = new FakeDesktopAppProcessController();
+    var successfulDesktop = new WindowsDesktopTools([app], [], successfulProcessController, successfulWindowController);
+    var broker = new ToolBroker(successfulDesktop, null!, new ModelBroker(), null!, null!, "", "");
+    var activated = await broker.ExecuteAsync(proposal, CancellationToken.None);
+    Require(activated.Success && successfulWindowController.CallCount == 1
+        && successfulWindowController.LastApp?.WorkingDirectory == projectRoot
+        && successfulProcessController.StartCount == 0,
+        "窗口切换没有使用配置中的目标应用，或错误启动了未打开的应用。");
+
+    var missingController = new FakeDesktopWindowController(WindowActivationOutcome.NotFound);
+    var missingResult = await new WindowsDesktopTools([app], [], windowController: missingController)
+        .ActivateWindowAsync(proposal, CancellationToken.None);
+    Require(!missingResult.Success && missingResult.ErrorCode == "WINDOW_NOT_FOUND"
+        && missingController.CallCount == 1,
+        "未找到目标窗口时没有返回准确状态。");
+
+    var deniedController = new FakeDesktopWindowController(WindowActivationOutcome.ActivationDenied);
+    var deniedResult = await new WindowsDesktopTools([app], [], windowController: deniedController)
+        .ActivateWindowAsync(proposal, CancellationToken.None);
+    Require(!deniedResult.Success && deniedResult.ErrorCode == "WINDOW_ACTIVATION_DENIED"
+        && deniedController.CallCount == 1,
+        "Windows 拒绝切换时没有提示用户手动处理。");
+
+    var unknownController = new FakeDesktopWindowController(WindowActivationOutcome.Activated);
+    var unknownDesktop = new WindowsDesktopTools([app], [], windowController: unknownController);
+    var unknownProposal = ToolBroker.Proposal("window.activate.v1",
+        [new KeyValuePair<string, string>("app_id", "unlisted")], "unlisted",
+        ToolExpectedOutcome.TargetWindowInForeground);
+    var unknownResult = await unknownDesktop.ActivateWindowAsync(unknownProposal, CancellationToken.None);
+    Require(!unknownResult.Success && unknownResult.ErrorCode == "APP_NOT_ALLOWLISTED"
+        && unknownController.CallCount == 0,
+        "未知应用的窗口切换请求到达了窗口控制器。");
+
+    using var beforeCancellation = new CancellationTokenSource();
+    beforeCancellation.Cancel();
+    var beforeController = new FakeDesktopWindowController(WindowActivationOutcome.Activated);
+    var cancelledBefore = false;
+    try
+    {
+        _ = await new WindowsDesktopTools([app], [], windowController: beforeController)
+            .ActivateWindowAsync(proposal, beforeCancellation.Token);
+    }
+    catch (OperationCanceledException) when (beforeCancellation.IsCancellationRequested) { cancelledBefore = true; }
+    Require(cancelledBefore && beforeController.CallCount == 0,
+        "窗口切换请求发出前取消仍调用了 Windows 窗口控制器。");
+
+    using var afterCancellation = new CancellationTokenSource();
+    var afterController = new FakeDesktopWindowController(WindowActivationOutcome.Activated, afterCancellation.Cancel);
+    var completedAfterDispatch = await new WindowsDesktopTools([app], [], windowController: afterController)
+        .ActivateWindowAsync(proposal, afterCancellation.Token);
+    Require(completedAfterDispatch.Success && afterController.CallCount == 1,
+        "窗口切换请求发出后取消被误报为失败，而未等待独立核验结果。");
+}
+
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()
 {
     var appId = "test-app";
@@ -1781,6 +1853,21 @@ internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bo
     private sealed class EmptyDisposable : IDisposable
     {
         public void Dispose() { }
+    }
+}
+
+internal sealed class FakeDesktopWindowController(WindowActivationOutcome outcome, Action? onActivate = null)
+    : IDesktopWindowController
+{
+    public int CallCount { get; private set; }
+    public DesktopApp? LastApp { get; private set; }
+
+    public WindowActivationOutcome ActivateWindow(DesktopApp app)
+    {
+        CallCount++;
+        LastApp = app;
+        onActivate?.Invoke();
+        return outcome;
     }
 }
 
