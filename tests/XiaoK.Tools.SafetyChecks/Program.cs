@@ -15,6 +15,8 @@ using XiaoK.Inference;
 using XiaoK.Storage;
 using XiaoK.Tools;
 
+try
+{
 if (args.Length == 3 && args[0] == "--appcontainer-probe")
 {
     Environment.ExitCode = RunAppContainerProbe(args[1], args[2]);
@@ -296,6 +298,13 @@ try
 finally
 {
     if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true);
+}
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("安全检查未通过；以下异常已捕获，不会触发 Windows 未处理异常弹窗：");
+    Console.Error.WriteLine(ex);
+    Environment.ExitCode = 1;
 }
 
 static async Task CheckAppContainerFileBoundaryAsync(string root)
