@@ -46,6 +46,12 @@ if (args.Length == 1 && args[0] == "--only-appcontainer-recovery")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-tool-proposal-preconditions")
+{
+    await CheckToolProposalPreconditionsAreTypedAsync();
+    Console.WriteLine("通过：ToolBroker 拒绝缺失或错配的固定前置条件与预期结果。");
+    return;
+}
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
@@ -71,6 +77,9 @@ try
 
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
+
+    await CheckToolProposalPreconditionsAreTypedAsync();
+    passed.Add("ToolBroker 拒绝缺失或错配的固定前置条件与预期结果");
 
     await CheckAppLaunchCancellationIsTruthfulAsync();
     passed.Add("应用启动前取消不产生副作用，启动后取消显示结果待核对");
@@ -1016,6 +1025,32 @@ static void CheckAppResolverRejectsUnknownApplications()
         "已支持应用别名没有映射到预期的固定应用 ID。");
     Require(unknown is null && unsupportedVariant is null,
         "未知应用名称被错误映射到了某个已允许的应用。");
+}
+
+static async Task CheckToolProposalPreconditionsAreTypedAsync()
+{
+    const string appId = "not-allowlisted";
+    var valid = ToolBroker.Proposal("app.launch.v1", [new KeyValuePair<string, string>("app_id", appId)],
+        appId, ToolExpectedOutcome.ApplicationWindowVisible);
+    var broker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "");
+
+    var reachedAdapter = await broker.ExecuteAsync(valid, CancellationToken.None);
+    Require(!reachedAdapter.Success && reachedAdapter.ErrorCode == "APP_NOT_ALLOWLISTED",
+        "匹配的提案条件没有到达应用允许列表核验。");
+
+    var invalidProposals = new[]
+    {
+        valid with { Preconditions = ToolPrecondition.None },
+        valid with { Preconditions = ToolPrecondition.ConfiguredSearchRoot },
+        valid with { ExpectedOutcome = ToolExpectedOutcome.MatchingFilesListed }
+    };
+    foreach (var proposal in invalidProposals)
+    {
+        var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
+        Require(!result.Success && result.ErrorCode == "INVALID_TOOL_PROPOSAL"
+            && result.Summary.Contains("固定前置条件或可观察结果", StringComparison.Ordinal),
+            "缺失或错配的固定条件通过了 ToolBroker。");
+    }
 }
 
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()
