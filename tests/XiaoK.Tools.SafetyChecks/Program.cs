@@ -72,7 +72,8 @@ if (args.Length == 3 && args[0] == "--verify-live-vscode-window")
 if (args.Length == 1 && args[0] == "--only-app-launch")
 {
     await CheckAppLaunchRoutingAndFailureAsync();
-    Console.WriteLine("通过：白名单应用启动参数及启动失败状态。");
+    CheckVscodeLocalWindowTitleFiltering();
+    Console.WriteLine("通过：白名单应用启动参数、启动失败状态和本地/远程 VS Code 窗口筛选。");
     return;
 }
 var skipAppContainerChecks = args.Length == 1 && args[0] == "--without-appcontainer";
@@ -126,6 +127,9 @@ try
 
     await CheckAppLaunchRoutingAndFailureAsync();
     passed.Add("应用启动使用固定白名单路径和项目参数，启动失败状态准确");
+
+    CheckVscodeLocalWindowTitleFiltering();
+    passed.Add("VS Code 小K项目窗口筛选排除 SSH、WSL、容器和 Codespaces 远程窗口");
 
     await CheckToolProposalPreconditionsAreTypedAsync();
     passed.Add("ToolBroker 拒绝缺失或错配的固定前置条件与预期结果");
@@ -1245,6 +1249,24 @@ static async Task CheckAppLaunchRoutingAndFailureAsync()
     Require(!failure.Success && failure.ErrorCode == "APP_LAUNCH_FAILED"
         && failingProcessController.StartCount == 1 && failingProcessController.WindowCheckCount == 0,
         "固定应用启动器路径失效时没有如实返回启动失败。");
+}
+
+static void CheckVscodeLocalWindowTitleFiltering()
+{
+    Require(VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("欢迎 - siri - Visual Studio Code", "siri"),
+        "本地 VS Code 项目窗口被误判为远程窗口。");
+    Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("siri [SSH: Three] - Visual Studio Code", "siri"),
+        "SSH 远程窗口被当作本地小K项目窗口。");
+    Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("siri [WSL: Ubuntu] - Visual Studio Code", "siri"),
+        "WSL 远程窗口被当作本地小K项目窗口。");
+    Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("siri [Dev Container: dev] - Visual Studio Code", "siri"),
+        "开发容器窗口被当作本地小K项目窗口。");
+    Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("siri [Codespaces: cloud] - Visual Studio Code", "siri"),
+        "Codespaces 窗口被当作本地小K项目窗口。");
+    Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("Other Project - Visual Studio Code", "siri"),
+        "其他项目窗口被当作小K项目窗口。");
+    Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("siri - Visual Studio Code", ""),
+        "没有配置项目目录名时接受了 VS Code 窗口。");
 }
 
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()

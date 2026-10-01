@@ -22,6 +22,20 @@ internal enum WindowMatchStatus { NotFound, Unique, Ambiguous }
 
 internal readonly record struct WindowMatchSelection(WindowMatchStatus Status, IntPtr Handle);
 
+internal static class VscodeWindowTitleMatcher
+{
+    private static readonly string[] RemoteWindowMarkers = ["[SSH:", "[WSL:", "[Dev Container:", "[Codespaces:"];
+
+    public static bool IsLocalWorkspaceWindow(string? title, string? expectedProjectName)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(expectedProjectName)
+            || !title.Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return !RemoteWindowMarkers.Any(marker => title.Contains(marker, StringComparison.OrdinalIgnoreCase));
+    }
+}
+
 internal static class WindowMatchSelector
 {
     public static WindowMatchSelection Select(IEnumerable<IntPtr> candidateHandles)
@@ -468,7 +482,7 @@ public sealed class WindowsDesktopTools
                 if (titleLength <= 0 || titleLength > 32_768) return true;
                 var title = new StringBuilder(titleLength + 1);
                 if (GetWindowTextW(handle, title, title.Capacity) <= 0
-                    || !title.ToString().Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase)) return true;
+                    || !VscodeWindowTitleMatcher.IsLocalWorkspaceWindow(title.ToString(), expectedProjectName)) return true;
             }
 
             matchingHandles.Add(handle);
