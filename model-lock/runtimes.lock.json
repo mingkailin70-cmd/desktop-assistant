@@ -17,12 +17,12 @@
       "id": "llama.cpp",
       "version": "b11256",
       "source": "https://github.com/ggml-org/llama.cpp/releases/tag/b11256",
-      "sourceCommit": "c85b92c",
-      "target": "windows-x64-cuda13",
-      "artifact": null,
+      "sourceCommit": "c85b92c69c955961621193cd51da194f3cbcedf3",
+      "target": "windows-x64-cuda13.4",
+      "artifact": "llama-b11256-bin-win-cuda-13.4-x64.zip + cudart-llama-bin-win-cuda-13.4-x64.zip",
       "sha256": null,
       "status": "candidate",
-      "notes": "需核验官方资产文件名、提交签名、SHA256和CUDA DLL；再与本机驱动实测。"
+      "notes": "官方 b11256 预发布资产；Release 页面列出 CUDA 13.4 Windows x64 主程序与配套 DLL 包，源提交 c85b92c69c955961621193cd51da194f3cbcedf3 已签名。官方资产证明的 SHA256 和本机文件散列尚未核对。本机只读快照驱动为 596.49；NVIDIA CUDA 13.x minor compatibility 最低驱动为 580，仍须启动与负载实测。"
     },
     {
       "id": "python-asr",

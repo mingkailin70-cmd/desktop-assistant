@@ -1,27 +1,30 @@
 {
   "schemaVersion": 1,
   "status": "candidate-only-no-model-files-downloaded",
-  "lastSourceReviewDate": "2026-09-30",
+  "lastSourceReviewDate": "2026-10-02",
   "models": [
     {
       "id": "qwen3.5-4b-q4km",
       "role": "primary-llm-candidate",
-      "source": "https://huggingface.co/cmp-nct/Qwen3.5-4B-GGUF",
+      "source": "https://huggingface.co/lmstudio-community/Qwen3.5-4B-GGUF",
       "baseModel": "Qwen/Qwen3.5-4B",
-      "revision": null,
+      "baseModelRevision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "revision": "f9f88ac3e234be915e23811a6d28ea287bdb927e",
       "format": "GGUF",
       "quantization": "Q4_K_M",
+      "quantizer": "lmstudio-community",
+      "conversionRuntime": "llama.cpp b8185",
       "files": [
         {
           "name": "Qwen3.5-4B-Q4_K_M.gguf",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
+          "upstreamReportedSizeBytes": 2707513696,
+          "expectedUpstreamSha256": "25082a7dd3776cc3c741c6347d3bd04523f05796607b3fbc32fa3a25dfa1418c",
           "localVerifiedSha256": null
         }
       ],
       "license": "apache-2.0",
       "status": "candidate",
-      "notes": "第三方量化衍生件；下载前复核底模revision、转换版本、chat template及视觉投影文件。"
+      "notes": "Qwen 官方权重的第三方 GGUF 量化。Canfield 镜像卡报告此文件与 LM Studio Community 在固定 revision 上的文件逐字节相同，并给出 2,707,513,696 字节和 SHA256；下载前仍须读取固定 revision 的源文件元数据，下载后本机校验。LM Studio Community 使用 llama.cpp b8185 量化。此文件为纯文本权重，不含 mmproj，不能据此承诺图像理解。"
     },
     {
       "id": "qwen3-asr-0.6b",

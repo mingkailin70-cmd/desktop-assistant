@@ -75,6 +75,13 @@ if (args.Length == 1 && args[0] == "--only-app-launch")
     Console.WriteLine("通过：白名单应用启动参数及启动失败状态。");
     return;
 }
+var skipAppContainerChecks = args.Length == 1 && args[0] == "--without-appcontainer";
+if (args.Length != 0 && !skipAppContainerChecks)
+{
+    Console.Error.WriteLine("未知参数。可用参数见仓库开发指南；默认运行完整检查。");
+    Environment.ExitCode = 2;
+    return;
+}
 
 var tempRoot = Path.Combine(Path.GetTempPath(), "XiaoK-SafetyChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(tempRoot);
@@ -83,17 +90,27 @@ var skipped = new List<string>();
 
 try
 {
-    await CheckAppContainerFileBoundaryAsync(tempRoot);
-    passed.Add(".NET 探针在 Windows AppContainer 中只可写任务工作区，兄弟目录哨兵不可读写，且临时授权已回收");
+    if (skipAppContainerChecks)
+    {
+        skipped.Add("AppContainer 文件边界检查按显式诊断参数跳过；隔离边界仍未通过验收");
+        skipped.Add("AppContainer 超时与进程回收检查按显式诊断参数跳过；隔离边界仍未通过验收");
+        skipped.Add("AppContainer 取消与进程回收检查按显式诊断参数跳过；隔离边界仍未通过验收");
+        skipped.Add("AppContainer Host 崩溃恢复检查按显式诊断参数跳过；隔离边界仍未通过验收");
+    }
+    else
+    {
+        await CheckAppContainerFileBoundaryAsync(tempRoot);
+        passed.Add(".NET 探针在 Windows AppContainer 中只可写任务工作区，兄弟目录哨兵不可读写，且临时授权已回收");
 
-    await CheckAppContainerTimeoutAsync(tempRoot);
-    passed.Add("AppContainer 验证命令超时后终止进程并回收临时授权");
+        await CheckAppContainerTimeoutAsync(tempRoot);
+        passed.Add("AppContainer 验证命令超时后终止进程并回收临时授权");
 
-    await CheckAppContainerCancellationAsync(tempRoot);
-    passed.Add("AppContainer 验证命令取消后终止进程并回收临时授权");
+        await CheckAppContainerCancellationAsync(tempRoot);
+        passed.Add("AppContainer 验证命令取消后终止进程并回收临时授权");
 
-    await CheckAppContainerHostCrashRecoveryAsync(tempRoot);
-    passed.Add("强制结束 Host 后下次启动会回收遗留 ACL、临时身份和恢复记录");
+        await CheckAppContainerHostCrashRecoveryAsync(tempRoot);
+        passed.Add("强制结束 Host 后下次启动会回收遗留 ACL、临时身份和恢复记录");
+    }
 
     CheckAppContainerRecoveryRejectsCorruptManifest(tempRoot);
     passed.Add("隔离恢复记录损坏时失败关闭且保留证据");
