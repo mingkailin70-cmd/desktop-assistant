@@ -56,6 +56,7 @@ public partial class SettingsWindow : Window
         ActiveDatabasePathText.Text = activeDatabasePath;
         ModelRootBox.Text = settings.ModelRoot;
         EvaluationRootBox.Text = settings.EvaluationRoot;
+        SearchRootsBox.Text = string.Join(Environment.NewLine, settings.SearchRoots.Select(root => root.Path));
         CodeProjectRootBox.Text = settings.CodeProjectRoot;
         CodeWorkspaceRootBox.Text = settings.CodeWorkspaceRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
@@ -320,6 +321,22 @@ public partial class SettingsWindow : Window
 
     private void BrowseCodeWorkspace_Click(object sender, RoutedEventArgs e) => BrowseInto(CodeWorkspaceRootBox, "选择隔离编程工作区目录");
 
+    private void AddSearchRoot_Click(object sender, RoutedEventArgs e)
+    {
+        var existing = SearchRootsBox.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var initialPath = existing.FirstOrDefault(Directory.Exists) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        using var picker = new Forms.FolderBrowserDialog
+        {
+            Description = "选择要加入文件搜索范围的本机目录",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+            SelectedPath = initialPath
+        };
+        if (picker.ShowDialog() != Forms.DialogResult.OK) return;
+        if (existing.Contains(picker.SelectedPath, StringComparer.OrdinalIgnoreCase)) return;
+        SearchRootsBox.Text = string.Join(Environment.NewLine, existing.Append(picker.SelectedPath));
+    }
+
     private void BrowseInto(System.Windows.Controls.TextBox target, string description, bool allowNewFolder = true)
     {
         using var picker = new Forms.FolderBrowserDialog
@@ -467,6 +484,8 @@ public partial class SettingsWindow : Window
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
                 ModelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录"),
                 EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
+                SearchRoots = LocalSearchRootPolicy.Parse(SearchRootsBox.Text)
+                    .Select(root => new RootSetting(root.Id, root.Path)).ToList(),
                 CodeProjectRoot = ValidateOptionalProjectDirectory(CodeProjectRootBox.Text),
                 CodeWorkspaceRoot = ValidateLocalDirectory(CodeWorkspaceRootBox.Text, "隔离工作区目录"),
                 InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text),

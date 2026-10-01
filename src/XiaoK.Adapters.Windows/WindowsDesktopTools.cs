@@ -263,6 +263,7 @@ public sealed class WindowsDesktopTools
             var fullPath = Path.GetFullPath(path);
             var root = Path.GetPathRoot(fullPath);
             return root is not null && root.Length >= 3 && root[1] == ':'
+                && LocalSearchRootPolicy.IsLocalDrivePath(fullPath)
                 ? Path.TrimEndingDirectorySeparator(fullPath)
                 : null;
         }

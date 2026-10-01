@@ -131,6 +131,9 @@ try
     CheckVscodeLocalWindowTitleFiltering();
     passed.Add("VS Code 小K项目窗口筛选排除 SSH、WSL、容器和 Codespaces 远程窗口");
 
+    CheckLocalSearchRootPolicy(tempRoot);
+    passed.Add("文件搜索根目录只接受存在的本机目录，拒绝空值、网络路径、磁盘根目录和过量配置");
+
     await CheckToolProposalPreconditionsAreTypedAsync();
     passed.Add("ToolBroker 拒绝缺失或错配的固定前置条件与预期结果");
 
@@ -1512,6 +1515,41 @@ static void CheckVscodeLocalWindowTitleFiltering()
         "其他项目窗口被当作小K项目窗口。");
     Require(!VscodeWindowTitleMatcher.IsLocalWorkspaceWindow("siri - Visual Studio Code", ""),
         "没有配置项目目录名时接受了 VS Code 窗口。");
+}
+
+static void CheckLocalSearchRootPolicy(string tempRoot)
+{
+    var first = Directory.CreateDirectory(Path.Combine(tempRoot, "search-root-one")).FullName;
+    var second = Directory.CreateDirectory(Path.Combine(tempRoot, "search-root-two")).FullName;
+    var parsed = LocalSearchRootPolicy.Parse($" {first}{Environment.NewLine}{first}{Environment.NewLine}{second} ");
+    Require(parsed.Count == 2 && parsed[0].Path == Path.GetFullPath(first)
+        && parsed[0].Id == "search-root-01" && parsed[1].Id == "search-root-02",
+        "本机搜索目录没有规范化路径、去重并生成固定目录标识。");
+
+    static bool Rejected(Action action)
+    {
+        try { action(); return false; }
+        catch (ArgumentException) { return true; }
+        catch (DirectoryNotFoundException) { return true; }
+    }
+
+    Require(Rejected(() => LocalSearchRootPolicy.Parse("\r\n ")),
+        "空搜索目录配置没有失败关闭。");
+    Require(Rejected(() => LocalSearchRootPolicy.Parse("relative-folder")),
+        "相对搜索路径被接受。");
+    Require(Rejected(() => LocalSearchRootPolicy.Parse(@"\\server\share")),
+        "UNC 网络共享被接受为搜索目录。");
+    Require(Rejected(() => LocalSearchRootPolicy.Parse(Path.GetPathRoot(first)!)),
+        "磁盘根目录被接受为搜索目录。");
+    Require(!LocalSearchRootPolicy.IsLocalDriveType(DriveType.Network)
+        && LocalSearchRootPolicy.IsLocalDriveType(DriveType.Fixed)
+        && LocalSearchRootPolicy.IsLocalDriveType(DriveType.Removable),
+        "本机目录策略没有拒绝映射网络盘，或错误拒绝了本机/可移动盘。");
+    Require(Rejected(() => LocalSearchRootPolicy.Parse(Path.Combine(tempRoot, "missing-search-root"))),
+        "不存在的搜索目录被接受。");
+    var tooMany = string.Join(Environment.NewLine, Enumerable.Repeat(first, LocalSearchRootPolicy.MaximumRoots + 1));
+    Require(Rejected(() => LocalSearchRootPolicy.Parse(tooMany)),
+        "超过上限的搜索目录配置被接受。");
 }
 
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()

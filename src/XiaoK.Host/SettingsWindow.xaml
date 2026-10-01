@@ -54,6 +54,15 @@
                 <TextBlock x:Name="PrivacyStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                 <Separator Margin="0,0,0,12"/>
+                <TextBlock Text="文件搜索目录" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,6"/>
+                <TextBlock Text="每行一个已存在的本机目录，最多20个；不接受网络共享或磁盘根目录。搜索时会跳过链接和重解析点。"
+                           FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                <TextBox x:Name="SearchRootsBox" MinHeight="82" AcceptsReturn="True" TextWrapping="NoWrap"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="7,5"/>
+                <Button x:Name="AddSearchRootButton" Content="添加目录…" Click="AddSearchRoot_Click"
+                        HorizontalAlignment="Left" Margin="0,5,0,12"/>
+
+                <Separator Margin="0,0,0,12"/>
                 <TextBlock Text="本地编程代理" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,8"/>
                 <TextBlock Text="本次允许处理的项目目录（由你选择；模型不能更改路径）"/>
                 <DockPanel Margin="0,4,0,10">
