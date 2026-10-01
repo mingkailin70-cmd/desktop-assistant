@@ -9,5 +9,6 @@
 - requirements-asr.in 和 requirements-tts.in 是顶层依赖输入，分别对应独立 Python 3.12 环境。传递依赖解析为固定版本和 wheel SHA256 后，才生成对应的 requirements-*.lock.txt。
 - 本机文件 SHA256 必须由本机计算；上游文件树中 LFS SHA 作为预期值。固定 revision 中没有 LFS SHA 的小型配置文件，会在 TLS 下载并核对固定 revision/字节数后以首次本机散列建立后续校验基线。
 - 版本或文件变化时新增候选记录；新版本通过同一离线评测后再切换，不覆盖已验收版本。
+- `blocked-license-review` 表示来源或模型许可未明确，下载脚本会拒绝处理该条目。工具/引擎代码的开源许可证不能自动替代具体权重、token 或数据文件的许可证；取得权利人明确条款并完成评估后，才能改回 `candidate`。
 
-状态：candidate → partially_downloaded → downloaded_and_verified → locally_evaluated → accepted。当前三组 P0 模型权重下载已由用户授权；下载运行时、Python 环境、依赖包和可选研究模型仍要分别获得确认。
+状态：candidate → partially_downloaded → downloaded_and_verified → locally_evaluated → accepted。许可证审查阻塞项不得进入下载状态。当前三组 P0 模型权重下载已由用户授权；下载运行时、Python 环境和依赖包仍要分别获得确认。

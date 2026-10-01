@@ -172,14 +172,15 @@
     },
     {
       "id": "sherpa-kws-zh",
-      "role": "wakeword-model-unselected",
-      "source": "https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html",
+      "role": "wakeword-model-license-pending",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models",
+      "modelName": "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01",
       "revision": null,
-      "format": "ONNX",
+      "format": "ONNX tar.bz2 release archive",
       "files": [],
-      "license": "per-model-review-required",
-      "status": "candidate",
-      "notes": "先选定并审查具体中文关键词模型、tokens和许可条件，再登记文件。"
+      "license": "unconfirmed",
+      "status": "blocked-license-review",
+      "notes": "官方 KWS 文档将此模型列为仅中文，并要求逐模型核对许可；没有取得该模型权重和附带 tokens 的明确许可证。sherpa-onnx 引擎的 Apache-2.0 不自动证明模型权重许可。确认权利人条款前禁止下载、部署或再分发。"
     },
     {
       "id": "mimo-v2.6-distill-qwen-9b",
