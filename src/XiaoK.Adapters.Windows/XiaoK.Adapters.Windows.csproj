@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="XiaoK.Tools.SafetyChecks" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\XiaoK.Core\XiaoK.Core.csproj" />
   </ItemGroup>
 

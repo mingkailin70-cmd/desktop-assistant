@@ -58,6 +58,12 @@ if (args.Length == 1 && args[0] == "--only-window-activation")
     Console.WriteLine("通过：窗口切换成功、未找到、被拒绝和取消路径。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-window-selection")
+{
+    CheckWindowMatchSelection();
+    Console.WriteLine("通过：窗口目标选择只接受唯一且非零的句柄。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-app-launch")
 {
     await CheckAppLaunchRoutingAndFailureAsync();
@@ -92,6 +98,9 @@ try
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
+
+    CheckWindowMatchSelection();
+    passed.Add("窗口目标选择忽略零句柄、去重并拒绝多个不同目标");
 
     await CheckAppLaunchRoutingAndFailureAsync();
     passed.Add("应用启动使用固定白名单路径和项目参数，启动失败状态准确");
@@ -1069,6 +1078,19 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
             && result.Summary.Contains("固定前置条件或可观察结果", StringComparison.Ordinal),
             "缺失或错配的固定条件通过了 ToolBroker。");
     }
+}
+
+static void CheckWindowMatchSelection()
+{
+    var noTarget = WindowMatchSelector.Select([IntPtr.Zero]);
+    var uniqueTarget = WindowMatchSelector.Select([IntPtr.Zero, new IntPtr(17), new IntPtr(17)]);
+    var ambiguousTarget = WindowMatchSelector.Select([new IntPtr(17), new IntPtr(18), new IntPtr(19)]);
+    Require(noTarget.Status == WindowMatchStatus.NotFound && noTarget.Handle == IntPtr.Zero,
+        "没有有效窗口句柄时仍选择了目标。");
+    Require(uniqueTarget.Status == WindowMatchStatus.Unique && uniqueTarget.Handle == new IntPtr(17),
+        "重复出现的同一窗口句柄没有去重为唯一目标。");
+    Require(ambiguousTarget.Status == WindowMatchStatus.Ambiguous && ambiguousTarget.Handle == IntPtr.Zero,
+        "多个不同窗口句柄没有失败关闭并要求用户手动选择。");
 }
 
 static async Task CheckWindowActivationOutcomesAsync()

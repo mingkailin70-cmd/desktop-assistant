@@ -18,6 +18,25 @@ public interface IDesktopAppProcessController
 
 public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
 
+internal enum WindowMatchStatus { NotFound, Unique, Ambiguous }
+
+internal readonly record struct WindowMatchSelection(WindowMatchStatus Status, IntPtr Handle);
+
+internal static class WindowMatchSelector
+{
+    public static WindowMatchSelection Select(IEnumerable<IntPtr> candidateHandles)
+    {
+        ArgumentNullException.ThrowIfNull(candidateHandles);
+        var handles = candidateHandles.Where(handle => handle != IntPtr.Zero).Distinct().Take(2).ToArray();
+        return handles.Length switch
+        {
+            0 => new(WindowMatchStatus.NotFound, IntPtr.Zero),
+            1 => new(WindowMatchStatus.Unique, handles[0]),
+            _ => new(WindowMatchStatus.Ambiguous, IntPtr.Zero)
+        };
+    }
+}
+
 public interface IDesktopWindowController
 {
     WindowActivationOutcome ActivateWindow(DesktopApp app);
@@ -472,10 +491,10 @@ public sealed class WindowsDesktopTools
 
         public WindowActivationOutcome ActivateWindow(DesktopApp app)
         {
-            var matchingHandles = FindMatchingWindows(app);
-            if (matchingHandles.Count == 0) return WindowActivationOutcome.NotFound;
-            if (matchingHandles.Count > 1) return WindowActivationOutcome.Ambiguous;
-            var handle = matchingHandles[0];
+            var selection = WindowMatchSelector.Select(FindMatchingWindows(app));
+            if (selection.Status == WindowMatchStatus.NotFound) return WindowActivationOutcome.NotFound;
+            if (selection.Status == WindowMatchStatus.Ambiguous) return WindowActivationOutcome.Ambiguous;
+            var handle = selection.Handle;
             if (!IsWindow(handle) || !IsWindowVisible(handle)) return WindowActivationOutcome.NotFound;
 
             if (IsIconic(handle)) ShowWindowAsync(handle, SwRestore);
