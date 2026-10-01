@@ -623,11 +623,34 @@ static int RunAppContainerProbe(string insidePath, string outsideSentinel)
 
 static int RunAppContainerHangProbe(string startedMarker, string lateMarker, int delayMilliseconds)
 {
-    File.WriteAllText(startedMarker, "started");
+    if (delayMilliseconds is < 0 or > 60_000)
+    {
+        Console.Error.WriteLine("APPCONTAINER_PROBE_INVALID_DELAY: 延迟必须在 0 到 60000 毫秒之间。");
+        return 22;
+    }
+
+    try
+    {
+        File.WriteAllText(startedMarker, "started");
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine($"APPCONTAINER_PROBE_START_MARKER_FAILED: {ex.GetType().Name}: {ex.Message}");
+        return 20;
+    }
+
     _ = Task.Run(async () =>
     {
         await Task.Delay(TimeSpan.FromMilliseconds(delayMilliseconds));
-        File.WriteAllText(lateMarker, "late-write");
+        try
+        {
+            File.WriteAllText(lateMarker, "late-write");
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ArgumentException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"APPCONTAINER_PROBE_LATE_MARKER_FAILED: {ex.GetType().Name}: {ex.Message}");
+            Environment.Exit(21);
+        }
     });
     Console.WriteLine("受限进程已启动并等待外部取消。");
     Thread.Sleep(Timeout.InfiniteTimeSpan);
