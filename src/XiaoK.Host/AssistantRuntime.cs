@@ -189,6 +189,16 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private async Task<ToolResult> RouteAsync(string category, string request, CancellationToken token)
     {
         var lower = request.ToLowerInvariant();
+        if (category == "window")
+        {
+            var intent = AppLaunchIntentResolver.ResolveWindowActivation(request);
+            if (intent is null)
+                return new(false, "无法确定要切换到哪个受支持的已打开窗口。支持 VS Code 小K项目、Edge、资源管理器、微信和 QQ。", "WINDOW_TARGET_NOT_SUPPORTED");
+            var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
+            return await _broker.ExecuteAsync(new ToolProposal("window.activate.v1", args, intent.AppId,
+                "已打开的白名单窗口在前台，并核验其窗口句柄"), token);
+        }
+
         if (category == "app")
         {
             var intent = AppLaunchIntentResolver.Resolve(request);
@@ -274,6 +284,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
         if (lower.StartsWith("找文件") || lower.StartsWith("查找文件") || lower.StartsWith("搜索文件") || lower.StartsWith("搜索") || lower.StartsWith("帮我找文件")) return "file";
         if (lower.StartsWith("分析消息") || lower.StartsWith("分析聊天") || lower.StartsWith("理解聊天") || lower.StartsWith("解释这条消息") || lower.StartsWith("分析：") || lower.StartsWith("分析:")) return "analyze";
         if (lower.StartsWith("帮我回复") || lower.StartsWith("起草回复") || lower.StartsWith("回复草稿") || lower.StartsWith("帮我回")) return "draft";
@@ -285,7 +296,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "file" => "文件查找", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code" => "本地编程任务", _ => "本地对话"
     };
 

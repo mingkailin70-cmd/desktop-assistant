@@ -5,11 +5,26 @@ public sealed record AppLaunchIntent(string AppId, string? WorkspaceId = null);
 /// <summary>Maps explicit user phrases to fixed local app IDs; unknown app names never select a default app.</summary>
 public static class AppLaunchIntentResolver
 {
-    public static AppLaunchIntent? Resolve(string request)
+    private static readonly string[] WindowActivationPrefixes = ["切换到", "切换至", "切到", "聚焦", "显示"];
+    private static readonly string[] LaunchPrefixes = ["启动应用", "打开", "启动"];
+
+    public static bool IsWindowActivationRequest(string request)
+    {
+        if (string.IsNullOrWhiteSpace(request)) return false;
+        var phrase = Normalize(request);
+        return WindowActivationPrefixes.Any(prefix => phrase.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    public static AppLaunchIntent? Resolve(string request) => ResolveWithPrefixes(request, LaunchPrefixes);
+
+    public static AppLaunchIntent? ResolveWindowActivation(string request) =>
+        ResolveWithPrefixes(request, WindowActivationPrefixes);
+
+    private static AppLaunchIntent? ResolveWithPrefixes(string request, IReadOnlyList<string> prefixes)
     {
         if (string.IsNullOrWhiteSpace(request)) return null;
         var phrase = Normalize(request);
-        foreach (var prefix in new[] { "启动应用", "打开", "启动" })
+        foreach (var prefix in prefixes)
         {
             if (!phrase.StartsWith(prefix, StringComparison.Ordinal)) continue;
             phrase = phrase[prefix.Length..];

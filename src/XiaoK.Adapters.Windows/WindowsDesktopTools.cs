@@ -16,16 +16,25 @@ public interface IDesktopAppProcessController
     bool HasVisibleWindow(DesktopApp app);
 }
 
+public enum WindowActivationOutcome { Activated, NotFound, ActivationDenied }
+
+public interface IDesktopWindowController
+{
+    WindowActivationOutcome ActivateWindow(DesktopApp app);
+}
+
 public sealed class WindowsDesktopTools
 {
     private readonly IReadOnlyDictionary<string, DesktopApp> _apps;
     private readonly IReadOnlyDictionary<string, string> _searchRoots;
     private readonly IDesktopAppProcessController _appProcessController;
+    private readonly IDesktopWindowController _windowController;
 
     public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
-        IDesktopAppProcessController? appProcessController = null)
+        IDesktopAppProcessController? appProcessController = null, IDesktopWindowController? windowController = null)
     {
         _appProcessController = appProcessController ?? new SystemDesktopAppProcessController();
+        _windowController = windowController ?? new SystemDesktopWindowController();
         var allowedApps = new Dictionary<string, DesktopApp>(StringComparer.OrdinalIgnoreCase);
         foreach (var configuredApp in apps ?? [])
         {
@@ -103,6 +112,27 @@ public sealed class WindowsDesktopTools
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or FileNotFoundException)
         { return new(false, "应用启动失败；请检查本地路径设置。", "APP_LAUNCH_FAILED"); }
         finally { launchHandle?.Dispose(); }
+    }
+
+    public async Task<ToolResult> ActivateWindowAsync(ToolProposal proposal, CancellationToken cancellationToken)
+    {
+        if (!proposal.Arguments.TryGetValue("app_id", out var appId) || !_apps.TryGetValue(appId, out var app))
+            return new(false, "这个应用未在本机允许列表中。", "APP_NOT_ALLOWLISTED");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        // Once the focus request starts, finish verification and report the observed result even if the caller cancels.
+        WindowActivationOutcome outcome;
+        try { outcome = await Task.Run(() => _windowController.ActivateWindow(app), CancellationToken.None); }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UnauthorizedAccessException
+            or SecurityException or NotSupportedException or ArgumentException)
+        { return new(false, "无法安全核验目标窗口；请手动切换窗口。", "WINDOW_ACTIVATION_FAILED"); }
+
+        return outcome switch
+        {
+            WindowActivationOutcome.Activated => new(true, $"已切换到 {app.Id} 窗口，并核验该窗口在前台。"),
+            WindowActivationOutcome.NotFound => new(false, $"没有找到已打开且匹配白名单的 {app.Id} 窗口；小K没有启动应用。", "WINDOW_NOT_FOUND"),
+            _ => new(false, "Windows 未允许切换到该窗口，或前台窗口核验失败；请手动切换。", "WINDOW_ACTIVATION_DENIED")
+        };
     }
 
     private static ToolResult LaunchOutcomeUncertain(string appId, string message) =>
@@ -381,10 +411,10 @@ public sealed class WindowsDesktopTools
             ? path[4..]
             : path;
 
-    private static bool FindVisibleWindow(DesktopApp app)
+    private static IntPtr FindMatchingWindow(DesktopApp app)
     {
         var processName = Path.GetFileNameWithoutExtension(app.Executable);
-        if (string.IsNullOrWhiteSpace(processName)) return false;
+        if (string.IsNullOrWhiteSpace(processName)) return IntPtr.Zero;
         var expectedProjectName = string.IsNullOrWhiteSpace(app.WorkingDirectory)
             ? null : new DirectoryInfo(Path.TrimEndingDirectorySeparator(app.WorkingDirectory)).Name;
         foreach (var process in Process.GetProcessesByName(processName))
@@ -399,23 +429,61 @@ public sealed class WindowsDesktopTools
                 var handle = process.MainWindowHandle;
                 if (handle == IntPtr.Zero || !IsWindowVisible(handle)) continue;
                 if (app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(expectedProjectName))
-                    return process.MainWindowTitle.Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase);
-                return true;
+                {
+                    if (!process.MainWindowTitle.Contains(expectedProjectName, StringComparison.OrdinalIgnoreCase)) continue;
+                }
+                return handle;
             }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or UnauthorizedAccessException or NotSupportedException or ArgumentException) { }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or UnauthorizedAccessException
+                or SecurityException or NotSupportedException or ArgumentException) { }
             finally { process.Dispose(); }
         }
-        return false;
+        return IntPtr.Zero;
     }
 
     private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController
     {
         public IDisposable? Start(ProcessStartInfo startInfo) => Process.Start(startInfo);
-        public bool HasVisibleWindow(DesktopApp app) => FindVisibleWindow(app);
+        public bool HasVisibleWindow(DesktopApp app) => FindMatchingWindow(app) != IntPtr.Zero;
+    }
+
+    private sealed class SystemDesktopWindowController : IDesktopWindowController
+    {
+        private const int SwRestore = 9;
+
+        public WindowActivationOutcome ActivateWindow(DesktopApp app)
+        {
+            var handle = FindMatchingWindow(app);
+            if (handle == IntPtr.Zero) return WindowActivationOutcome.NotFound;
+            if (!IsWindow(handle) || !IsWindowVisible(handle)) return WindowActivationOutcome.NotFound;
+
+            if (IsIconic(handle)) ShowWindowAsync(handle, SwRestore);
+            SetForegroundWindow(handle);
+            Thread.Sleep(120);
+
+            return IsWindow(handle) && IsWindowVisible(handle) && GetForegroundWindow() == handle
+                ? WindowActivationOutcome.Activated
+                : WindowActivationOutcome.ActivationDenied;
+        }
     }
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr hWnd, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     private const uint FileReadAttributes = 0x00000080;
     private const uint FileListDirectory = 0x00000001;

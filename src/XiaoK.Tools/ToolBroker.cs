@@ -35,6 +35,7 @@ public sealed class ToolBroker
         return proposal.ToolId switch
         {
             "app.launch.v1" => await _desktop.LaunchAsync(proposal, cancellationToken),
+            "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
@@ -59,6 +60,7 @@ public sealed class ToolBroker
         return proposal.ToolId switch
         {
             "app.launch.v1" => ValidateAppLaunch(proposal),
+            "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.draft.v1" => ValidateDraft(proposal),
@@ -86,6 +88,15 @@ public sealed class ToolBroker
             && (!appId.Equals("vscode", StringComparison.OrdinalIgnoreCase) || workspaceId != "xiaok"))
             return InvalidProposal("工作区只能使用已配置的 VS Code 项目别名。");
 
+        return null;
+    }
+
+    private static ToolResult? ValidateWindowActivation(ToolProposal proposal)
+    {
+        var appId = proposal.Arguments.GetValueOrDefault("app_id");
+        if (proposal.Arguments.Count != 1 || string.IsNullOrWhiteSpace(appId)
+            || !string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase))
+            return InvalidProposal("窗口切换只接受与 app_id 完全绑定的白名单应用目标。未执行任意句柄、坐标或命令。");
         return null;
     }
 

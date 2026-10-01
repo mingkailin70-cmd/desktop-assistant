@@ -818,6 +818,7 @@ public sealed class SqliteTaskStore : ITaskStore
         summary = kind switch
         {
             "app" => "应用操作",
+            "window" => "窗口切换",
             "file" => "文件查找",
             "analyze" => "消息分析",
             "draft" => "回复草稿",
