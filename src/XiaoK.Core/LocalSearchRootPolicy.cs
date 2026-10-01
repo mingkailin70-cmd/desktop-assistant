@@ -9,14 +9,17 @@ public static class LocalSearchRootPolicy
 
     public static bool IsLocalDrivePath(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)
-            || path.StartsWith("\\\\", StringComparison.Ordinal)
-            || path.StartsWith("//", StringComparison.Ordinal)) return false;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)
+                || path.StartsWith("\\\\", StringComparison.Ordinal)
+                || path.StartsWith("//", StringComparison.Ordinal)) return false;
 
-        var fullPath = Path.GetFullPath(path);
-        var root = Path.GetPathRoot(fullPath);
-        if (root is null || root.Length < 3 || root[1] != ':') return false;
-        try { return IsLocalDriveType(new DriveInfo(root).DriveType); }
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetPathRoot(fullPath);
+            if (root is null || root.Length < 3 || root[1] != ':') return false;
+            return IsLocalDriveType(new DriveInfo(root).DriveType);
+        }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
         { return false; }
     }

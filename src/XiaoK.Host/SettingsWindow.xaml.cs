@@ -10,6 +10,8 @@ namespace XiaoK.Host;
 
 public partial class SettingsWindow : Window
 {
+    private static readonly HashSet<string> ConfigurableApplicationIds = new(StringComparer.OrdinalIgnoreCase)
+        { "vscode", "edge", "wechat", "qq", "explorer" };
     private XiaoKSettings _original;
     private readonly Func<Task<string>> _requestNotificationAccess;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> _loadContactReplyStyles;
@@ -57,6 +59,15 @@ public partial class SettingsWindow : Window
         ModelRootBox.Text = settings.ModelRoot;
         EvaluationRootBox.Text = settings.EvaluationRoot;
         SearchRootsBox.Text = string.Join(Environment.NewLine, settings.SearchRoots.Select(root => root.Path));
+        var vscode = settings.Applications.FirstOrDefault(app => app is not null && string.Equals(app.Id, "vscode", StringComparison.OrdinalIgnoreCase));
+        var edge = settings.Applications.FirstOrDefault(app => app is not null && string.Equals(app.Id, "edge", StringComparison.OrdinalIgnoreCase));
+        var wechat = settings.Applications.FirstOrDefault(app => app is not null && string.Equals(app.Id, "wechat", StringComparison.OrdinalIgnoreCase));
+        var qq = settings.Applications.FirstOrDefault(app => app is not null && string.Equals(app.Id, "qq", StringComparison.OrdinalIgnoreCase));
+        VscodeExecutableBox.Text = vscode?.Executable ?? string.Empty;
+        VscodeProjectRootBox.Text = vscode?.WorkingDirectory ?? string.Empty;
+        EdgeExecutableBox.Text = edge?.Executable ?? string.Empty;
+        WeChatExecutableBox.Text = wechat?.Executable ?? string.Empty;
+        QQExecutableBox.Text = qq?.Executable ?? string.Empty;
         CodeProjectRootBox.Text = settings.CodeProjectRoot;
         CodeWorkspaceRootBox.Text = settings.CodeWorkspaceRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
@@ -317,6 +328,38 @@ public partial class SettingsWindow : Window
 
     private void BrowseEvaluationRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(EvaluationRootBox, "选择脱敏评测样本目录");
 
+    private void BrowseVscodeExecutable_Click(object sender, RoutedEventArgs e) =>
+        BrowseExecutableInto(VscodeExecutableBox, "选择 VS Code 程序", "Code.exe");
+
+    private void BrowseVscodeProject_Click(object sender, RoutedEventArgs e) =>
+        BrowseInto(VscodeProjectRootBox, "选择包含 XiaoK.sln 的本地项目目录", allowNewFolder: false);
+
+    private void BrowseEdgeExecutable_Click(object sender, RoutedEventArgs e) =>
+        BrowseExecutableInto(EdgeExecutableBox, "选择 Microsoft Edge 程序", "msedge.exe");
+
+    private void BrowseWeChatExecutable_Click(object sender, RoutedEventArgs e) =>
+        BrowseExecutableInto(WeChatExecutableBox, "选择微信程序", "Weixin.exe");
+
+    private void BrowseQQExecutable_Click(object sender, RoutedEventArgs e) =>
+        BrowseExecutableInto(QQExecutableBox, "选择 QQ 程序", "QQ.exe");
+
+    private static void BrowseExecutableInto(System.Windows.Controls.TextBox target, string title, string expectedFileName)
+    {
+        var currentDirectory = Path.GetDirectoryName(target.Text.Trim());
+        using var picker = new Forms.OpenFileDialog
+        {
+            Title = title,
+            Filter = $"{expectedFileName}|{expectedFileName}",
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Multiselect = false,
+            InitialDirectory = !string.IsNullOrWhiteSpace(currentDirectory) && Directory.Exists(currentDirectory)
+                ? currentDirectory
+                : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+        if (picker.ShowDialog() == Forms.DialogResult.OK) target.Text = picker.FileName;
+    }
+
     private void BrowseCodeProject_Click(object sender, RoutedEventArgs e) => BrowseInto(CodeProjectRootBox, "选择本地编程项目目录", allowNewFolder: false);
 
     private void BrowseCodeWorkspace_Click(object sender, RoutedEventArgs e) => BrowseInto(CodeWorkspaceRootBox, "选择隔离编程工作区目录");
@@ -486,6 +529,7 @@ public partial class SettingsWindow : Window
                 EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
                 SearchRoots = LocalSearchRootPolicy.Parse(SearchRootsBox.Text)
                     .Select(root => new RootSetting(root.Id, root.Path)).ToList(),
+                Applications = BuildDesktopApplications(),
                 CodeProjectRoot = ValidateOptionalProjectDirectory(CodeProjectRootBox.Text),
                 CodeWorkspaceRoot = ValidateLocalDirectory(CodeWorkspaceRootBox.Text, "隔离工作区目录"),
                 InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text),
@@ -572,11 +616,52 @@ public partial class SettingsWindow : Window
         return ids;
     }
 
+    private List<AppSetting> BuildDesktopApplications()
+    {
+        var applications = _original.Applications
+            .Where(app => app is not null && !ConfigurableApplicationIds.Contains(app.Id)).ToList();
+        applications.Add(new AppSetting("explorer", "explorer.exe", null));
+
+        var vscodePath = VscodeExecutableBox.Text.Trim();
+        var vscodeProjectPath = VscodeProjectRootBox.Text.Trim();
+        if (vscodePath.Length > 0 || vscodeProjectPath.Length > 0)
+        {
+            if (vscodePath.Length == 0 || vscodeProjectPath.Length == 0)
+                throw new ArgumentException("VS Code 程序路径和小K项目目录必须同时填写；不使用时请同时留空。");
+            var executable = LocalDesktopAppPathPolicy.ValidateExecutablePath(vscodePath, "Code.exe", "VS Code");
+            applications.Add(new AppSetting("vscode", executable, ValidateVscodeProjectDirectory(vscodeProjectPath)));
+        }
+
+        AddOptionalApplication(applications, EdgeExecutableBox.Text, "msedge.exe", "edge", "Microsoft Edge");
+        AddOptionalApplication(applications, WeChatExecutableBox.Text, "Weixin.exe", "wechat", "微信");
+        AddOptionalApplication(applications, QQExecutableBox.Text, "QQ.exe", "qq", "QQ");
+        return applications;
+    }
+
+    private static void AddOptionalApplication(List<AppSetting> applications, string configuredPath,
+        string expectedFileName, string id, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath)) return;
+        var executable = LocalDesktopAppPathPolicy.ValidateExecutablePath(configuredPath, expectedFileName, displayName);
+        applications.Add(new AppSetting(id, executable, null));
+    }
+
+    private static string ValidateVscodeProjectDirectory(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !LocalSearchRootPolicy.IsLocalDrivePath(value.Trim()))
+            throw new ArgumentException("VS Code 小K项目必须位于本机磁盘，并选择包含 XiaoK.sln 的目录。", nameof(value));
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(value.Trim()));
+        if (!Directory.Exists(fullPath)) throw new DirectoryNotFoundException("VS Code 小K项目目录不存在。");
+        if (!File.Exists(Path.Combine(fullPath, "XiaoK.sln")))
+            throw new FileNotFoundException("所选 VS Code 项目目录不包含 XiaoK.sln。", Path.Combine(fullPath, "XiaoK.sln"));
+        return fullPath;
+    }
+
     private static string ValidateLocalDirectory(string value, string label, bool allowRepository = false)
     {
         var trimmed = value.Trim();
-        if (!Path.IsPathFullyQualified(trimmed) || trimmed.StartsWith("\\\\", StringComparison.Ordinal))
-            throw new ArgumentException($"{label}必须是本机上的完整目录路径。", nameof(value));
+        if (!LocalSearchRootPolicy.IsLocalDrivePath(trimmed))
+            throw new ArgumentException($"{label}必须位于本机固定盘、可移动盘或 RAM 盘，不能使用 UNC 或映射网络盘。", nameof(value));
 
         var fullPath = Path.GetFullPath(trimmed).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var pathRoot = Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

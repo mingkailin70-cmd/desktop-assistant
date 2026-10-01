@@ -134,6 +134,9 @@ try
     CheckLocalSearchRootPolicy(tempRoot);
     passed.Add("文件搜索根目录只接受存在的本机目录，拒绝空值、网络路径、磁盘根目录和过量配置");
 
+    CheckLocalDesktopAppPathPolicy(tempRoot);
+    passed.Add("桌面应用设置只接受存在的本机白名单程序文件名");
+
     await CheckToolProposalPreconditionsAreTypedAsync();
     passed.Add("ToolBroker 拒绝缺失或错配的固定前置条件与预期结果");
 
@@ -1550,6 +1553,30 @@ static void CheckLocalSearchRootPolicy(string tempRoot)
     var tooMany = string.Join(Environment.NewLine, Enumerable.Repeat(first, LocalSearchRootPolicy.MaximumRoots + 1));
     Require(Rejected(() => LocalSearchRootPolicy.Parse(tooMany)),
         "超过上限的搜索目录配置被接受。");
+}
+
+static void CheckLocalDesktopAppPathPolicy(string tempRoot)
+{
+    var appPath = Path.Combine(tempRoot, "Code.exe");
+    File.WriteAllText(appPath, "synthetic executable path marker");
+    var normalized = LocalDesktopAppPathPolicy.ValidateExecutablePath(appPath, "Code.exe", "VS Code");
+    Require(normalized == Path.GetFullPath(appPath), "VS Code 程序路径没有规范化为完整本机路径。");
+
+    static bool Rejected(Action action)
+    {
+        try { action(); return false; }
+        catch (ArgumentException) { return true; }
+        catch (FileNotFoundException) { return true; }
+    }
+
+    Require(Rejected(() => LocalDesktopAppPathPolicy.ValidateExecutablePath(appPath, "msedge.exe", "Edge")),
+        "Edge 配置接受了不匹配的程序文件名。");
+    Require(Rejected(() => LocalDesktopAppPathPolicy.ValidateExecutablePath(Path.Combine(tempRoot, "missing.exe"), "missing.exe", "应用")),
+        "桌面应用配置接受了不存在的可执行文件。");
+    Require(Rejected(() => LocalDesktopAppPathPolicy.ValidateExecutablePath(@"\\server\share\Code.exe", "Code.exe", "VS Code")),
+        "桌面应用配置接受了 UNC 网络路径。");
+    Require(!LocalSearchRootPolicy.IsLocalDrivePath("D:\\invalid\0path"),
+        "本机路径策略对包含 NUL 的非法路径抛错或误判为有效路径。");
 }
 
 static async Task CheckAppLaunchCancellationIsTruthfulAsync()

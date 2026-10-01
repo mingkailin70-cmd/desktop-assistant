@@ -627,18 +627,40 @@ internal sealed record XiaoKSettings
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-        var workspace = FindWorkspace(AppContext.BaseDirectory) ?? Environment.GetEnvironmentVariable("XIAOK_PROJECT_ROOT") ?? "";
-        var code = @"D:\VS Code\Code.exe";
-        var edge = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft", "Edge", "Application", "msedge.exe");
-        var apps = new List<AppSetting>
-        {
-            new("vscode", code, workspace), new("edge", edge, null), new("explorer", "explorer.exe", null),
-            new("wechat", @"D:\微信\Weixin\Weixin.exe", null), new("qq", @"D:\QQ\QQ.exe", null)
-        };
+        var detectedWorkspace = FindWorkspace(AppContext.BaseDirectory);
+        var environmentWorkspace = Environment.GetEnvironmentVariable("XIAOK_PROJECT_ROOT")?.Trim() ?? "";
+        var workspace = detectedWorkspace is not null && LocalSearchRootPolicy.IsLocalDrivePath(detectedWorkspace)
+            ? detectedWorkspace
+            : (environmentWorkspace.Length > 0 && LocalSearchRootPolicy.IsLocalDrivePath(environmentWorkspace)
+                && Directory.Exists(environmentWorkspace)
+                && File.Exists(Path.Combine(environmentWorkspace, "XiaoK.sln"))
+                    ? Path.GetFullPath(environmentWorkspace)
+                    : "");
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var code = FindExistingLocalExecutable(
+            @"D:\VS Code\Code.exe",
+            Path.Combine(localAppData, "Programs", "Microsoft VS Code", "Code.exe"),
+            Path.Combine(programFiles, "Microsoft VS Code", "Code.exe"),
+            Path.Combine(programFilesX86, "Microsoft VS Code", "Code.exe"));
+        var edge = FindExistingLocalExecutable(
+            Path.Combine(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"),
+            Path.Combine(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"));
+        var wechat = FindExistingLocalExecutable(@"D:\微信\Weixin\Weixin.exe");
+        var qq = FindExistingLocalExecutable(@"D:\QQ\QQ.exe");
+        var apps = new List<AppSetting> { new("explorer", "explorer.exe", null) };
+        if (code.Length > 0 && workspace.Length > 0) apps.Add(new AppSetting("vscode", code, workspace));
+        if (edge.Length > 0) apps.Add(new AppSetting("edge", edge, null));
+        if (wechat.Length > 0) apps.Add(new AppSetting("wechat", wechat, null));
+        if (qq.Length > 0) apps.Add(new AppSetting("qq", qq, null));
         var roots = new[] { ("Desktop", desktop), ("Documents", documents), ("Downloads", downloads) }
             .Where(x => !string.IsNullOrWhiteSpace(x.Item2)).Select(x => new RootSetting(x.Item1, x.Item2)).ToList();
         return new XiaoKSettings { Applications = apps, SearchRoots = roots };
     }
+
+    private static string FindExistingLocalExecutable(params string[] candidates) => candidates
+        .FirstOrDefault(path => File.Exists(path) && LocalSearchRootPolicy.IsLocalDrivePath(path)) ?? "";
 
     private XiaoKSettings WithDefaults(XiaoKSettings defaults) => this with
     {
