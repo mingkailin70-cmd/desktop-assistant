@@ -38,6 +38,7 @@ public sealed class ToolBroker
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
+            "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
             "message.send.v1" => await SendAsync(proposal, cancellationToken),
             "code.task.create.v1" => await _codeAgent.ExecuteAsync(_codeProjectRoot, _codeWorkspaceRoot,
@@ -69,6 +70,7 @@ public sealed class ToolBroker
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
+            "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
             "message.draft.v1" => ValidateDraft(proposal),
             "message.send.v1" => ValidateSend(proposal),
             "code.task.create.v1" => proposal.Arguments.Count == 1
@@ -140,6 +142,30 @@ public sealed class ToolBroker
         return null;
     }
 
+    private static ToolResult? ValidateVerifiedNotice(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var applicationId = args.GetValueOrDefault("application_id") ?? string.Empty;
+        var sourceAppId = args.GetValueOrDefault("source_app_id") ?? string.Empty;
+        var isPrivateConversation = args.GetValueOrDefault("is_private_conversation") ?? string.Empty;
+        var conversationId = args.GetValueOrDefault("conversation_id") ?? string.Empty;
+        var sender = args.GetValueOrDefault("sender") ?? string.Empty;
+        var body = args.GetValueOrDefault("body") ?? string.Empty;
+        var receivedAt = args.GetValueOrDefault("received_at_utc") ?? string.Empty;
+        var deduplicationKey = args.GetValueOrDefault("deduplication_key") ?? string.Empty;
+        if (args.Count != 8 || applicationId is not ("wechat" or "qq") || isPrivateConversation != "true"
+            || string.IsNullOrWhiteSpace(sourceAppId) || sourceAppId.Length > 256 || !sourceAppId.Contains('!')
+            || string.IsNullOrWhiteSpace(conversationId) && string.IsNullOrWhiteSpace(sender)
+            || conversationId.Length > 256 || sender.Length > 256
+            || string.IsNullOrWhiteSpace(body) || body.Length > 20_000
+            || !DateTimeOffset.TryParse(receivedAt, out var timestamp)
+            || timestamp > DateTimeOffset.UtcNow || timestamp < DateTimeOffset.UtcNow - TimeSpan.FromHours(24)
+            || deduplicationKey is not { Length: 64 } || !deduplicationKey.All(Uri.IsHexDigit)
+            || proposal.Target != "verified-private-notice")
+            return InvalidProposal("自动分析只接受来源已核验、近期、正文可见且会话归属明确的私聊通知。");
+        return null;
+    }
+
     private static ToolResult? ValidateSend(ToolProposal proposal)
     {
         var args = proposal.Arguments;
@@ -159,19 +185,24 @@ public sealed class ToolBroker
     private Task<ToolResult> AnalyzeAsync(ToolProposal proposal, CancellationToken token) =>
         CompleteAsync(proposal, "请用中文分析用户提供的单条聊天通知。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "message", token);
 
+    private Task<ToolResult> AnalyzeNoticeAsync(ToolProposal proposal, CancellationToken token) =>
+        CompleteAsync(proposal, "请用中文分析这条已核验私聊通知中可见的单条消息。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "body", token, background: true);
+
     private Task<ToolResult> DraftAsync(ToolProposal proposal, CancellationToken token) =>
         CompleteAsync(proposal,
             ContactReplyStyleCatalog.CreateSystemPrompt(proposal.Arguments.GetValueOrDefault("style_id", ContactReplyStyleCatalog.DefaultStyleId)),
             "draft", token);
 
-    private async Task<ToolResult> CompleteAsync(ToolProposal proposal, string systemPrompt, string key, CancellationToken token)
+    private async Task<ToolResult> CompleteAsync(ToolProposal proposal, string systemPrompt, string key,
+        CancellationToken token, bool background = false)
     {
         if (!proposal.Arguments.TryGetValue(key, out var body) || string.IsNullOrWhiteSpace(body))
             return new(false, "没有可供分析的正文。", "EMPTY_MESSAGE");
         try
         {
-            var answer = await _models.RunInteractiveAsync(
-                inner => _inference.CompleteAsync(systemPrompt, body, inner), token);
+            var answer = background
+                ? await _models.RunBackgroundStepAsync(inner => _inference.CompleteAsync(systemPrompt, body, inner), token)
+                : await _models.RunInteractiveAsync(inner => _inference.CompleteAsync(systemPrompt, body, inner), token);
             return new(true, answer);
         }
         catch (ModelQueueFullException) { return new(false, "本地模型请求过多；当前请求未排队。", "RESOURCE_BUSY"); }
@@ -203,6 +234,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
+        "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
         "message.send.v1" => ToolPrecondition.CompleteMessagePreview,
         "code.task.create.v1" => ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
         _ => ToolPrecondition.None
@@ -214,6 +246,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
+        "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,
         "message.send.v1" => ToolExpectedOutcome.PreviewConfirmedBeforeSend,
         "code.task.create.v1" => ToolExpectedOutcome.ReviewablePatchCreated,

@@ -17,7 +17,8 @@ public enum ToolPrecondition
     ConfiguredSearchRoot = 4,
     UserProvidedSingleMessage = 8,
     CompleteMessagePreview = 16,
-    ConfiguredProjectAndIsolatedWorkspace = 32
+    ConfiguredProjectAndIsolatedWorkspace = 32,
+    VerifiedPrivateNotice = 64
 }
 
 public enum ToolExpectedOutcome
@@ -47,6 +48,7 @@ public sealed record ToolResult(bool Success, string Summary, string? ErrorCode 
 public sealed record MessageNotice(string ApplicationId, string SourceAppId, string? ConversationId, string? SenderDisplayName,
     bool IsPrivateConversation, string? Body, DateTimeOffset ReceivedAtUtc, string DeduplicationKey);
 public sealed record NoticeDecision(bool Accepted, bool AnalyzeBody, string UserMessage, MessageNotice? Notice = null);
+public sealed record PrivateNoticeAnalysisResult(string ApplicationId, bool Success, string Text);
 
 public interface ITaskStore
 {

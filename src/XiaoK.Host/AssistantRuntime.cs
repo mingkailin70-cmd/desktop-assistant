@@ -1,8 +1,10 @@
 using System.IO;
 using System.Net.Http;
 using System.Collections.Immutable;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Threading.Channels;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 using XiaoK.Inference;
@@ -15,7 +17,7 @@ namespace XiaoK.Host;
 internal sealed class AssistantRuntime : IAsyncDisposable
 {
     private readonly DateTimeOffset _processStartedAtUtc = DateTimeOffset.UtcNow;
-    private readonly XiaoKSettings _settings;
+    private XiaoKSettings _settings;
     private readonly SqliteTaskStore _store;
     private readonly LocalInferenceClient _inference;
     private readonly IManagedModelRuntime? _managedModelRuntime;
@@ -24,6 +26,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
+    private readonly Channel<NoticeAnalysisWork> _noticeAnalysisQueue = Channel.CreateBounded<NoticeAnalysisWork>(
+        new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
+    private readonly CancellationTokenSource _noticeAnalysisStop = new();
+    private readonly Task _noticeAnalysisWorker;
+    private readonly ConcurrentDictionary<CancellationTokenSource, byte> _noticeAnalysisWorkItems = new();
     private CancellationTokenSource? _active;
     private int _stopping;
 
@@ -52,6 +59,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot);
+        _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
 
     public string ModelStatus => _managedModelRuntime?.Status
@@ -63,6 +71,71 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         : null;
     public XiaoKSettings CurrentSettings => _settings;
     public string ActiveDatabasePath => Path.Combine(_settings.DataRoot, "tasks.sqlite3");
+    public event Action<PrivateNoticeAnalysisResult>? PrivateNoticeAnalysisCompleted;
+
+    public void UpdateNotificationSettings(XiaoKSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        _settings = _settings with
+        {
+            MonitorWeChatNotifications = settings.MonitorWeChatNotifications,
+            MonitorQQNotifications = settings.MonitorQQNotifications,
+            WeChatPublisherAppIds = [.. settings.WeChatPublisherAppIds],
+            QQPublisherAppIds = [.. settings.QQPublisherAppIds]
+        };
+    }
+
+    public bool QueueVerifiedPrivateNotice(MessageNotice notice, CancellationToken monitoringSession,
+        out string status)
+    {
+        ArgumentNullException.ThrowIfNull(notice);
+        if (Volatile.Read(ref _stopping) != 0)
+        {
+            status = "小K正在退出；通知没有排入分析。";
+            return false;
+        }
+
+        var settings = _settings;
+        var allowedPublisherIds = string.Equals(notice.ApplicationId, "wechat", StringComparison.OrdinalIgnoreCase)
+            ? settings.MonitorWeChatNotifications ? settings.WeChatPublisherAppIds : []
+            : string.Equals(notice.ApplicationId, "qq", StringComparison.OrdinalIgnoreCase)
+                ? settings.MonitorQQNotifications ? settings.QQPublisherAppIds : []
+                : [];
+        if (!PrivateNoticeAnalysisPolicy.TryCreateProposal(notice, allowedPublisherIds,
+                DateTimeOffset.UtcNow, out var proposal) || proposal is null)
+        {
+            status = "通知未通过本地私聊分析准入检查；正文没有送入模型。";
+            return false;
+        }
+
+        CancellationTokenSource workLifetime;
+        try { workLifetime = CancellationTokenSource.CreateLinkedTokenSource(_noticeAnalysisStop.Token, monitoringSession); }
+        catch (ObjectDisposedException)
+        {
+            status = "通知监听已停止；正文没有排入分析。";
+            return false;
+        }
+        if (workLifetime.IsCancellationRequested)
+        {
+            workLifetime.Dispose();
+            status = "通知监听已停止；正文没有排入分析。";
+            return false;
+        }
+
+        _noticeAnalysisWorkItems.TryAdd(workLifetime, 0);
+        if (!_noticeAnalysisQueue.Writer.TryWrite(new NoticeAnalysisWork(notice.ApplicationId, proposal, workLifetime)))
+        {
+            _noticeAnalysisWorkItems.TryRemove(workLifetime, out _);
+            workLifetime.Dispose();
+            status = "本地通知分析队列已满；本条通知未排队，请手动查看会话。";
+            return false;
+        }
+
+        status = string.Equals(notice.ApplicationId, "wechat", StringComparison.OrdinalIgnoreCase)
+            ? "微信私聊通知已排入本地分析队列。"
+            : "QQ 私聊通知已排入本地分析队列。";
+        return true;
+    }
 
     public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
     {
@@ -162,6 +235,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         StopMicrophone();
         try { Volatile.Read(ref _active)?.Cancel(); }
         catch (ObjectDisposedException) { }
+        foreach (var work in _noticeAnalysisWorkItems.Keys)
+        {
+            try { work.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     public bool StopMicrophone()
@@ -175,6 +253,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
         CancelCurrent();
+        _noticeAnalysisQueue.Writer.TryComplete();
+        _noticeAnalysisStop.Cancel();
+        await _noticeAnalysisWorker.ConfigureAwait(false);
+        _noticeAnalysisStop.Dispose();
         await _executionGate.WaitAsync();
         try
         {
@@ -184,6 +266,29 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             _inference.Dispose();
             _executionGate.Release();
+        }
+    }
+
+    private async Task ProcessNoticeAnalysisQueueAsync()
+    {
+        await foreach (var work in _noticeAnalysisQueue.Reader.ReadAllAsync().ConfigureAwait(false))
+        {
+            using (work.Lifetime)
+            {
+                try
+                {
+                    if (work.Lifetime.IsCancellationRequested) continue;
+                    ToolResult result;
+                    try { result = await _broker.ExecuteAsync(work.Proposal, work.Lifetime.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (work.Lifetime.IsCancellationRequested) { continue; }
+                    catch (Exception) { result = new(false, "本地通知分析失败；正文未写入历史或日志。", "NOTICE_ANALYSIS_FAILED"); }
+
+                    if (!work.Lifetime.IsCancellationRequested)
+                        PrivateNoticeAnalysisCompleted?.Invoke(new PrivateNoticeAnalysisResult(
+                            work.ApplicationId, result.Success, result.Success ? result.Data ?? result.Summary : result.Summary));
+                }
+                finally { _noticeAnalysisWorkItems.TryRemove(work.Lifetime, out _); }
+            }
         }
     }
     private async Task<ToolResult> RouteAsync(string category, string request, CancellationToken token)
@@ -305,6 +410,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code" => "本地编程任务", _ => "本地对话"
     };
+
+    private sealed record NoticeAnalysisWork(string ApplicationId, ToolProposal Proposal,
+        CancellationTokenSource Lifetime);
 
     private static string TaskStateLabel(TaskLifecycleState state) => state switch
     {

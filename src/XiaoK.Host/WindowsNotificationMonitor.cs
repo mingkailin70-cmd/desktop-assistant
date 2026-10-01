@@ -27,6 +27,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private HashSet<string> _allowedAppIds = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _wechatPublisherIds = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _qqPublisherIds = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _sessionCancellation;
     private bool _baselineReady;
     private bool _disposed;
 
@@ -34,6 +35,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
 
     public string Status { get; private set; } = "通知监听关闭。";
     public event Action<string>? StatusChanged;
+    public event Action<MessageNotice, CancellationToken>? PrivateNoticeAccepted;
 
     public async Task<string> RequestPermissionAsync()
     {
@@ -90,6 +92,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             _policy = new MessageNoticePolicy(wechatIds, qqIds);
             _wechatAdapter = new WeChatNoticeAdapter(_policy);
             _qqAdapter = new QQNoticeAdapter(_policy);
+            _sessionCancellation = new CancellationTokenSource();
             _baselineReady = false;
             _pendingAddedIds.Clear();
             _seenNotificationKeys.Clear();
@@ -158,9 +161,10 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         {
             var listener = _listener;
             var policy = _policy;
+            var sessionCancellation = _sessionCancellation;
             var wechatAdapter = _wechatAdapter;
             var qqAdapter = _qqAdapter;
-            if (_disposed || listener is null || policy is null) return;
+            if (_disposed || listener is null || policy is null || sessionCancellation is null) return;
             if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 StopForRevokedPermission(listener);
@@ -168,7 +172,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             }
 
             var notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
-            if (_disposed || !ReferenceEquals(_listener, listener) || !ReferenceEquals(_policy, policy)) return;
+            if (_disposed || !ReferenceEquals(_listener, listener) || !ReferenceEquals(_policy, policy)
+                || !ReferenceEquals(_sessionCancellation, sessionCancellation)) return;
             if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 StopForRevokedPermission(listener);
@@ -217,10 +222,18 @@ internal sealed class WindowsNotificationMonitor : IDisposable
                     continue;
                 }
 
-                if (decision.Accepted)
-                    RaiseStatus(adapter.ApplicationId == "wechat"
-                        ? "微信通知：已收到匹配发布者的提醒；私聊类型未验证，正文未读取。请手动查看会话。"
-                        : "QQ 通知：已收到匹配发布者的提醒；私聊类型未验证，正文未读取。请手动查看会话。");
+                if (!decision.Accepted) continue;
+
+                var status = adapter.ApplicationId == "wechat"
+                    ? $"微信通知：{decision.UserMessage}"
+                    : $"QQ 通知：{decision.UserMessage}";
+                RaiseStatus(status);
+                if (decision.AnalyzeBody && decision.Notice is { IsPrivateConversation: true, Body: { Length: > 0 } noticeBody }
+                    && !sessionCancellation.IsCancellationRequested)
+                {
+                    // The body is handed off synchronously so the receiver can bind work to this monitor session.
+                    PrivateNoticeAccepted?.Invoke(decision.Notice with { Body = noticeBody }, sessionCancellation.Token);
+                }
             }
         }
         catch (Exception ex) when (IsRecoverable(ex))
@@ -238,6 +251,13 @@ internal sealed class WindowsNotificationMonitor : IDisposable
 
     private void StopListening()
     {
+        var sessionCancellation = _sessionCancellation;
+        _sessionCancellation = null;
+        if (sessionCancellation is not null)
+        {
+            try { sessionCancellation.Cancel(); }
+            finally { sessionCancellation.Dispose(); }
+        }
         if (_listener is not null) _listener.NotificationChanged -= OnNotificationChanged;
         _listener = null;
         _policy = null;

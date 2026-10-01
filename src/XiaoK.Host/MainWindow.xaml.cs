@@ -21,6 +21,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private bool _expanded = true;
     private bool _hotkeyRegistered;
     private bool _changingWindowMode;
+    private bool _userTaskRunning;
+    private readonly Queue<PrivateNoticeAnalysisResult> _pendingNoticeAnalyses = [];
     private double _expandedWidth = 500;
     private double _expandedHeight = 650;
 
@@ -30,6 +32,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _runtime = new AssistantRuntime(this);
         _notificationMonitor = new WindowsNotificationMonitor(Dispatcher);
         _notificationMonitor.StatusChanged += OnNotificationStatusChanged;
+        _notificationMonitor.PrivateNoticeAccepted += OnPrivateNoticeAccepted;
+        _runtime.PrivateNoticeAnalysisCompleted += OnPrivateNoticeAnalysisCompleted;
         _ = _notificationMonitor.ApplySettingsAsync(_runtime.CurrentSettings);
         FooterText.Text = _runtime.ModelStatus;
         SetStatus(_runtime.VoiceStatus);
@@ -129,20 +133,84 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         var request = RequestBox.Text;
         if (string.IsNullOrWhiteSpace(request)) return;
         RequestBox.Clear();
+        _userTaskRunning = true;
         OutputText.Text = "正在处理；可随时取消。聊天内容和模型回答仅保留在内存中。";
         SetStatus("任务运行中");
         SetButtonsEnabled(false);
         try { OutputText.Text = await _runtime.SubmitAsync(request); }
-        finally { SetStatus(_runtime.VoiceStatus); SetButtonsEnabled(true); }
+        finally { FinishUserTask(); }
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
     {
+        _userTaskRunning = true;
         OutputText.Text = "正在打开项目；可随时取消。";
         SetStatus("任务运行中");
         SetButtonsEnabled(false);
         try { OutputText.Text = await _runtime.SubmitAsync("打开小K项目"); }
-        finally { SetStatus(_runtime.VoiceStatus); SetButtonsEnabled(true); }
+        finally { FinishUserTask(); }
+    }
+
+    private void FinishUserTask()
+    {
+        _userTaskRunning = false;
+        SetStatus(_runtime.VoiceStatus);
+        SetButtonsEnabled(true);
+        if (_pendingNoticeAnalyses.Count == 0) return;
+
+        var analyses = _pendingNoticeAnalyses.ToArray();
+        _pendingNoticeAnalyses.Clear();
+        OutputText.Text += Environment.NewLine + Environment.NewLine
+            + "后台私聊通知分析（只基于各条通知中可见的文字）：" + Environment.NewLine
+            + string.Join(Environment.NewLine + Environment.NewLine, analyses.Select(FormatNoticeAnalysis));
+    }
+
+    private void OnPrivateNoticeAccepted(MessageNotice notice, CancellationToken monitoringSession)
+    {
+        if (_exiting) return;
+        if (_runtime.QueueVerifiedPrivateNotice(notice, monitoringSession, out var status))
+        {
+            SetStatus(status);
+            ShowTrayNotice("收到可见正文的私聊通知，正在本地分析；分析结果不会自动发送。");
+            return;
+        }
+
+        OutputText.Text = status;
+        SetStatus(status);
+    }
+
+    private void OnPrivateNoticeAnalysisCompleted(PrivateNoticeAnalysisResult result)
+    {
+        if (_exiting) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+            try { Dispatcher.BeginInvoke(new Action(() => OnPrivateNoticeAnalysisCompleted(result))); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+
+        if (_userTaskRunning)
+        {
+            if (_pendingNoticeAnalyses.Count == 5) _pendingNoticeAnalyses.Dequeue();
+            _pendingNoticeAnalyses.Enqueue(result);
+            SetStatus(result.Success ? "后台私聊分析完成" : "后台私聊分析未完成");
+            return;
+        }
+
+        OutputText.Text = FormatNoticeAnalysis(result);
+        SetStatus(result.Success ? "私聊通知已完成本地分析" : "私聊通知本地分析未完成");
+        ShowTrayNotice(result.Success
+            ? "私聊通知已完成本地分析；请打开小K查看结果。"
+            : "私聊通知未能完成本地分析；请打开小K查看状态。");
+    }
+
+    private static string FormatNoticeAnalysis(PrivateNoticeAnalysisResult result)
+    {
+        var application = result.ApplicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase) ? "微信" : "QQ";
+        return result.Success
+            ? $"{application}私聊通知分析：{Environment.NewLine}{result.Text}"
+            : $"{application}私聊通知分析未完成：{Environment.NewLine}{result.Text}";
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -212,16 +280,36 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private async Task ApplySettingsAndReportAsync()
     {
-        var notificationStatus = await _notificationMonitor.ApplySettingsAsync(XiaoKSettings.Load());
+        var settings = XiaoKSettings.Load();
+        _runtime.UpdateNotificationSettings(settings);
+        var notificationStatus = await _notificationMonitor.ApplySettingsAsync(settings);
         OutputText.Text = $"设置已保存。登录启动和通知监听立即生效；数据与推理路径将在重启小K后生效。\n{notificationStatus}";
     }
 
     private void OnNotificationStatusChanged(string message)
     {
         if (_exiting) return;
-        if (message.StartsWith("微信通知：", StringComparison.Ordinal)) SetStatus("收到微信通知");
-        else if (message.StartsWith("QQ 通知：", StringComparison.Ordinal)) SetStatus("收到 QQ 通知");
+        if (message.StartsWith("微信通知：", StringComparison.Ordinal))
+        {
+            SetStatus("收到微信通知");
+            if (!message.Contains("正在本地分析", StringComparison.Ordinal))
+                ShowTrayNotice("收到微信通知；请查看小K提示。");
+        }
+        else if (message.StartsWith("QQ 通知：", StringComparison.Ordinal))
+        {
+            SetStatus("收到 QQ 通知");
+            if (!message.Contains("正在本地分析", StringComparison.Ordinal))
+                ShowTrayNotice("收到 QQ 通知；请查看小K提示。");
+        }
         OutputText.Text = message;
+    }
+
+    private void ShowTrayNotice(string message)
+    {
+        if (_exiting || !_tray.Visible) return;
+        _tray.BalloonTipTitle = "小K桌面助手";
+        _tray.BalloonTipText = message;
+        _tray.ShowBalloonTip(4000);
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -489,6 +577,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _tray.Visible = false;
         _tray.Dispose();
         _notificationMonitor.StatusChanged -= OnNotificationStatusChanged;
+        _notificationMonitor.PrivateNoticeAccepted -= OnPrivateNoticeAccepted;
+        _runtime.PrivateNoticeAnalysisCompleted -= OnPrivateNoticeAnalysisCompleted;
         if (_source is not null)
         {
             if (_hotkeyRegistered) UnregisterHotKey(_source.Handle, 1901);

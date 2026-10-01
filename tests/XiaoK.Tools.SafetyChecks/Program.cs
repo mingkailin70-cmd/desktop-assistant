@@ -231,6 +231,12 @@ try
     CheckNoticePublisherAssignmentsAreUnambiguous();
     passed.Add("同一通知发布者不能同时归属微信和 QQ");
 
+    CheckVerifiedPrivateNoticeAnalysisProposal();
+    passed.Add("私聊通知分析提案只接受新鲜、正文可见且来源已核验的私聊");
+
+    await CheckVerifiedNoticeToolRouteAsync();
+    passed.Add("通知分析工具只把正文送入低优先级本地推理，拒绝伪造的私聊标记");
+
     CheckConfirmedPrivateNoticeReadsOnlyOnceAndDeduplicates();
     passed.Add("已确认私聊才读取正文，重复通知不会再次读取");
 
@@ -1453,6 +1459,63 @@ static void CheckNoticePublisherAssignmentsAreUnambiguous()
         "不同客户端的发布者被错误判定为归属歧义。");
     Require(!MessageNoticePublisherAssignments.HasOverlap([], []),
         "空发布者清单被错误判定为归属歧义。");
+}
+
+static void CheckVerifiedPrivateNoticeAnalysisProposal()
+{
+    var now = DateTimeOffset.UtcNow;
+    var valid = new MessageNotice("wechat", "wechat.package!Main", "chat-verified", "Alice", true,
+        "会议改到三点", now, new string('A', 64));
+    Require(PrivateNoticeAnalysisPolicy.TryCreateProposal(valid, ["WECHAT.PACKAGE!main"], now, out var proposal)
+        && proposal is not null
+        && proposal.ToolId == "message.notice.analyze.v1"
+        && proposal.Preconditions == ToolPrecondition.VerifiedPrivateNotice
+        && proposal.Arguments["body"] == "会议改到三点",
+        "有效的已验证私聊通知未生成固定本地分析提案。");
+
+    bool Rejected(MessageNotice notice, IEnumerable<string> allowed) =>
+        !PrivateNoticeAnalysisPolicy.TryCreateProposal(notice, allowed, now, out _);
+
+    Require(Rejected(valid with { IsPrivateConversation = false }, [valid.SourceAppId]),
+        "群聊或未确认私聊被接受用于自动分析。");
+    Require(Rejected(valid with { SourceAppId = "unknown.package!Main" }, [valid.SourceAppId]),
+        "不匹配发布者 allowlist 的通知被接受用于自动分析。");
+    Require(Rejected(valid with { ReceivedAtUtc = now.AddHours(-25) }, [valid.SourceAppId]),
+        "超过24小时的通知被接受用于自动分析。");
+    Require(Rejected(valid with { ReceivedAtUtc = now.AddSeconds(1) }, [valid.SourceAppId]),
+        "未来时间戳的通知被接受用于自动分析。");
+    Require(Rejected(valid with { ConversationId = null, SenderDisplayName = null }, [valid.SourceAppId]),
+        "缺少会话归属的通知被接受用于自动分析。");
+    Require(Rejected(valid with { Body = null }, [valid.SourceAppId]),
+        "没有正文的通知被接受用于自动分析。");
+    Require(Rejected(valid with { DeduplicationKey = "not-a-hash" }, [valid.SourceAppId]),
+        "缺少固定格式去重键的通知被接受用于自动分析。");
+}
+
+static async Task CheckVerifiedNoticeToolRouteAsync()
+{
+    var now = DateTimeOffset.UtcNow;
+    var notice = new MessageNotice("wechat", "wechat.package!Main", "chat-tool", "Alice", true,
+        "只分析这段可见文字", now, new string('B', 64));
+    Require(PrivateNoticeAnalysisPolicy.TryCreateProposal(notice, [notice.SourceAppId], now, out var proposal)
+        && proposal is not null,
+        "有效通知未生成 ToolBroker 提案。");
+
+    var inference = new ScriptedInference("只根据可见文字给出分析");
+    var broker = new ToolBroker(null!, inference, new ModelBroker(), null!, null!, "", "");
+    var result = await broker.ExecuteAsync(proposal!, CancellationToken.None);
+    Require(result.Success && inference.CallCount == 1
+        && inference.Prompts.Single() == "只分析这段可见文字"
+        && inference.SystemPrompts.Single().Contains("已核验私聊通知", StringComparison.Ordinal),
+        "通知工具未只将正文送入本地分析，或没有使用通知专用提示。");
+
+    var forged = proposal! with
+    {
+        Arguments = proposal.Arguments.SetItem("is_private_conversation", "false")
+    };
+    var rejected = await broker.ExecuteAsync(forged, CancellationToken.None);
+    Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && inference.CallCount == 1,
+        "伪造的私聊标记没有在模型调用前被 ToolBroker 拒绝。");
 }
 
 static void CheckConfirmedPrivateNoticeReadsOnlyOnceAndDeduplicates()
