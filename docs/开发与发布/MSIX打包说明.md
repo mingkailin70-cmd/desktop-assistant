@@ -8,6 +8,8 @@ Host 使用仓库内的 `Properties/PublishProfiles/Windows-x64-self-contained.p
 
 该 profile 只定义 Host 的发布方式，不生成 MSIX，也不代表运行时已发布或安装。MSIX 构建仍需补齐有效的包发布者身份、匹配的签名证书、打包工具链和资产文件；目前清单中的 `TODO-LOCAL-SIGNING-CERTIFICATE` 是占位符，禁止用于安装或通知权限验收。
 
+清单引用的三张图标已补入 `src/XiaoK.Host/Assets/`，以桌宠界面现用的紫色 K 形象制作。静态检查确认清单是格式正确的 XML，`StoreLogo.png` 为 50×50、`Square150x150Logo.png` 为 150×150、`Square44x44Logo.png` 为 44×44，且引用文件均存在；这还不等于通过 MSIX 工具链校验。
+
 预期的发布步骤（依赖包获准并锁定后执行）：
 
 ~~~powershell
