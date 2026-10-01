@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -8,6 +9,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using System.Net.Sockets;
 using Microsoft.Win32.SafeHandles;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
@@ -249,6 +251,9 @@ try
 
     CheckLocalInferenceClientRejectsNonLoopbackEndpoints();
     passed.Add("本地推理端点仅接受回环地址，拒绝外网地址、凭据、查询和片段");
+
+    await CheckLocalInferenceClientRequestAndRedirectBoundaryAsync();
+    passed.Add("本地推理只向回环端点发送固定接口请求，并拒绝跟随重定向");
 
     await CheckManagedRuntimeManifestIsStrictAsync(tempRoot);
     passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
@@ -2258,6 +2263,171 @@ static void CheckLocalInferenceClientRejectsNonLoopbackEndpoints()
 
     using var ipv4Loopback = new LocalInferenceClient("http://127.0.0.1:8080/");
     using var ipv6Loopback = new LocalInferenceClient("http://[::1]:8080/");
+}
+
+static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
+{
+    var responseBody = "{\"choices\":[{\"message\":{\"content\":\"本机测试回答\"}}]}";
+    var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    using var requestTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+    try
+    {
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var server = ServeOneLoopbackHttpRequestAsync(listener, HttpStatusCode.OK, responseBody, null,
+            requestTimeout.Token);
+        using var client = new LocalInferenceClient($"http://127.0.0.1:{port}/");
+        var answer = await client.CompleteAsync("仅本地系统提示", "仅本地用户消息", requestTimeout.Token);
+        var request = await server.WaitAsync(TimeSpan.FromSeconds(3));
+        using var payload = JsonDocument.Parse(request.Body);
+        var messages = payload.RootElement.GetProperty("messages");
+        Require(answer == "本机测试回答"
+            && request.Headers.StartsWith("POST /v1/chat/completions HTTP/", StringComparison.Ordinal)
+            && messages[0].GetProperty("content").GetString() == "仅本地系统提示"
+            && messages[1].GetProperty("content").GetString() == "仅本地用户消息",
+            "本地推理客户端未向 loopback 发送预期接口请求，或未解析兼容响应。");
+    }
+    finally { listener.Stop(); }
+
+    var redirectSource = new TcpListener(IPAddress.Loopback, 0);
+    var redirectTarget = new TcpListener(IPAddress.Loopback, 0);
+    redirectSource.Start();
+    redirectTarget.Start();
+    using var redirectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+    using var redirectProbeCancellation = CancellationTokenSource.CreateLinkedTokenSource(redirectTimeout.Token);
+    try
+    {
+        var sourcePort = ((IPEndPoint)redirectSource.LocalEndpoint).Port;
+        var targetPort = ((IPEndPoint)redirectTarget.LocalEndpoint).Port;
+        var targetProbe = ServeOptionalLoopbackHttpRequestAsync(redirectTarget, HttpStatusCode.OK, responseBody,
+            redirectProbeCancellation.Token);
+        var sourceServer = ServeOneLoopbackHttpRequestAsync(redirectSource, HttpStatusCode.Found, "",
+            $"http://127.0.0.1:{targetPort}/redirected", redirectTimeout.Token);
+        using var client = new LocalInferenceClient($"http://127.0.0.1:{sourcePort}/");
+        var redirectRejected = false;
+        try { _ = await client.CompleteAsync("system", "user", redirectTimeout.Token); }
+        catch (HttpRequestException ex) { redirectRejected = ex.StatusCode == HttpStatusCode.Found; }
+        await sourceServer.WaitAsync(TimeSpan.FromSeconds(3));
+        redirectProbeCancellation.Cancel();
+        var redirectWasFollowed = await targetProbe.WaitAsync(TimeSpan.FromSeconds(3));
+        Require(redirectRejected && !redirectWasFollowed,
+            "本地推理客户端跟随了 loopback 重定向，可能把请求转发到未核验端点。");
+    }
+    finally
+    {
+        redirectProbeCancellation.Cancel();
+        redirectSource.Stop();
+        redirectTarget.Stop();
+    }
+}
+
+static async Task<(string Headers, string Body)> ServeOneLoopbackHttpRequestAsync(TcpListener listener,
+    HttpStatusCode statusCode, string responseBody, string? location, CancellationToken cancellationToken)
+{
+    using var connection = await listener.AcceptTcpClientAsync(cancellationToken);
+    await using var stream = connection.GetStream();
+    var headerBytes = new List<byte>();
+    var oneByte = new byte[1];
+    while (headerBytes.Count < 65_536)
+    {
+        var read = await stream.ReadAsync(oneByte.AsMemory(), cancellationToken);
+        if (read == 0) throw new EndOfStreamException("Loopback HTTP 请求在标头完成前关闭。");
+        headerBytes.Add(oneByte[0]);
+        var count = headerBytes.Count;
+        if (count >= 4 && headerBytes[count - 4] == 13 && headerBytes[count - 3] == 10
+            && headerBytes[count - 2] == 13 && headerBytes[count - 1] == 10) break;
+    }
+    if (headerBytes.Count >= 65_536) throw new InvalidDataException("Loopback HTTP 请求标头过大。");
+
+    var headers = Encoding.ASCII.GetString(headerBytes.ToArray());
+    var contentLength = 0;
+    var isChunked = false;
+    foreach (var line in headers.Split("\r\n", StringSplitOptions.RemoveEmptyEntries).Skip(1))
+    {
+        if (line.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase)
+            && line.Contains("chunked", StringComparison.OrdinalIgnoreCase))
+            isChunked = true;
+        if (!line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) continue;
+        if (!int.TryParse(line["Content-Length:".Length..].Trim(), out contentLength) || contentLength is < 0 or > 1_000_000)
+            throw new InvalidDataException("Loopback HTTP Content-Length 无效。");
+    }
+    var requestBody = isChunked
+        ? await ReadChunkedLoopbackBodyAsync(stream, cancellationToken)
+        : new byte[contentLength];
+    if (!isChunked && requestBody.Length > 0) await stream.ReadExactlyAsync(requestBody, cancellationToken);
+
+    var responseBytes = Encoding.UTF8.GetBytes(responseBody);
+    var reason = statusCode switch
+    {
+        HttpStatusCode.OK => "OK",
+        HttpStatusCode.Found => "Found",
+        _ => "Test"
+    };
+    var locationHeader = location is null ? "" : $"Location: {location}\r\n";
+    var responseHeaders = Encoding.ASCII.GetBytes(
+        $"HTTP/1.1 {(int)statusCode} {reason}\r\nContent-Type: application/json\r\n"
+        + $"Content-Length: {responseBytes.Length}\r\nConnection: close\r\n{locationHeader}\r\n");
+    await stream.WriteAsync(responseHeaders, cancellationToken);
+    if (responseBytes.Length > 0) await stream.WriteAsync(responseBytes, cancellationToken);
+    await stream.FlushAsync(cancellationToken);
+    return (headers, Encoding.UTF8.GetString(requestBody));
+}
+
+static async Task<byte[]> ReadChunkedLoopbackBodyAsync(Stream stream, CancellationToken cancellationToken)
+{
+    using var body = new MemoryStream();
+    while (true)
+    {
+        var sizeLine = await ReadAsciiLoopbackLineAsync(stream, cancellationToken);
+        var extension = sizeLine.IndexOf(';');
+        var sizeToken = (extension >= 0 ? sizeLine[..extension] : sizeLine).Trim();
+        if (!int.TryParse(sizeToken, System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out var chunkSize)
+            || chunkSize < 0 || body.Length + chunkSize > 1_000_000)
+            throw new InvalidDataException("Loopback HTTP 分块大小无效。");
+        if (chunkSize == 0)
+        {
+            while ((await ReadAsciiLoopbackLineAsync(stream, cancellationToken)).Length > 0) { }
+            return body.ToArray();
+        }
+
+        var chunk = new byte[chunkSize];
+        await stream.ReadExactlyAsync(chunk, cancellationToken);
+        await body.WriteAsync(chunk, cancellationToken);
+        if ((await ReadAsciiLoopbackLineAsync(stream, cancellationToken)).Length != 0)
+            throw new InvalidDataException("Loopback HTTP 分块没有以 CRLF 结束。");
+    }
+}
+
+static async Task<string> ReadAsciiLoopbackLineAsync(Stream stream, CancellationToken cancellationToken)
+{
+    var bytes = new List<byte>();
+    var oneByte = new byte[1];
+    while (bytes.Count < 16_384)
+    {
+        var read = await stream.ReadAsync(oneByte.AsMemory(), cancellationToken);
+        if (read == 0) throw new EndOfStreamException("Loopback HTTP 分块行提前结束。");
+        if (oneByte[0] == 13)
+        {
+            await stream.ReadExactlyAsync(oneByte.AsMemory(), cancellationToken);
+            if (oneByte[0] != 10) throw new InvalidDataException("Loopback HTTP 分块行换行无效。");
+            return Encoding.ASCII.GetString(bytes.ToArray());
+        }
+        if (oneByte[0] == 10) throw new InvalidDataException("Loopback HTTP 分块行换行无效。");
+        bytes.Add(oneByte[0]);
+    }
+    throw new InvalidDataException("Loopback HTTP 分块行过长。");
+}
+
+static async Task<bool> ServeOptionalLoopbackHttpRequestAsync(TcpListener listener, HttpStatusCode statusCode,
+    string responseBody, CancellationToken cancellationToken)
+{
+    try
+    {
+        _ = await ServeOneLoopbackHttpRequestAsync(listener, statusCode, responseBody, null, cancellationToken);
+        return true;
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return false; }
 }
 
 static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
