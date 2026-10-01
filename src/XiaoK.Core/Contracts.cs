@@ -8,6 +8,30 @@ public sealed record TaskRecord(Guid Id, string Kind, string Summary, TaskLifecy
     DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null);
 public sealed record ApprovalAuditRecord(Guid Id, string ActionId, string Outcome, DateTimeOffset CreatedAtUtc);
 
+[Flags]
+public enum ToolPrecondition
+{
+    None = 0,
+    ApplicationAllowlisted = 1,
+    ExistingWindow = 2,
+    ConfiguredSearchRoot = 4,
+    UserProvidedSingleMessage = 8,
+    CompleteMessagePreview = 16,
+    ConfiguredProjectAndIsolatedWorkspace = 32
+}
+
+public enum ToolExpectedOutcome
+{
+    None = 0,
+    ApplicationWindowVisible = 1,
+    TargetWindowInForeground = 2,
+    MatchingFilesListed = 3,
+    LocalMessageAnalysis = 4,
+    ReplyDraftOnly = 5,
+    PreviewConfirmedBeforeSend = 6,
+    ReviewablePatchCreated = 7
+}
+
 public static class ApprovalAuditCatalog
 {
     public const string MessageSendAction = "message.send.v1";
@@ -17,7 +41,8 @@ public static class ApprovalAuditCatalog
     public const string RunDotNetTests = "run_dotnet_tests";
 }
 
-public sealed record ToolProposal(string ToolId, ImmutableDictionary<string, string> Arguments, string Target, string ExpectedOutcome);
+public sealed record ToolProposal(string ToolId, ImmutableDictionary<string, string> Arguments, string Target,
+    ToolPrecondition Preconditions, ToolExpectedOutcome ExpectedOutcome);
 public sealed record ToolResult(bool Success, string Summary, string? ErrorCode = null, string? Data = null, TaskLifecycleState? FinalState = null);
 public sealed record MessageNotice(string ApplicationId, string SourceAppId, string? ConversationId, string? SenderDisplayName,
     bool IsPrivateConversation, string? Body, DateTimeOffset ReceivedAtUtc, string DeduplicationKey);

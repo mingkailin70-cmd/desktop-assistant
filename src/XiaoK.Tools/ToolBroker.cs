@@ -51,11 +51,17 @@ public sealed class ToolBroker
         if (proposal is null || proposal.Arguments is null
             || string.IsNullOrWhiteSpace(proposal.ToolId) || proposal.ToolId.Length > 80
             || string.IsNullOrWhiteSpace(proposal.Target) || proposal.Target.Length > 512
-            || string.IsNullOrWhiteSpace(proposal.ExpectedOutcome) || proposal.ExpectedOutcome.Length > 300
+            || proposal.ExpectedOutcome == ToolExpectedOutcome.None
             || proposal.Arguments.Count > 8
             || proposal.Arguments.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Key.Length > 80
                 || pair.Value is null || pair.Value.Length > 20_000))
             return InvalidProposal();
+
+        var requiredPreconditions = GetRequiredPreconditions(proposal.ToolId);
+        if (requiredPreconditions != ToolPrecondition.None
+            && (proposal.Preconditions != requiredPreconditions
+                || proposal.ExpectedOutcome != GetRequiredExpectedOutcome(proposal.ToolId)))
+            return InvalidProposal("动作提案的固定前置条件或可观察结果缺失，或与工具不匹配；未执行。");
 
         return proposal.ToolId switch
         {
@@ -191,6 +197,31 @@ public sealed class ToolBroker
         return new(false, "预览已确认，但微信/QQ发送适配器尚未接入；未发送任何内容。", "SEND_ADAPTER_UNAVAILABLE");
     }
 
-    public static ToolProposal Proposal(string toolId, IEnumerable<KeyValuePair<string, string>> args, string target, string expected) =>
-        new(toolId, args.ToImmutableDictionary(StringComparer.Ordinal), target, expected);
+    private static ToolPrecondition GetRequiredPreconditions(string toolId) => toolId switch
+    {
+        "app.launch.v1" => ToolPrecondition.ApplicationAllowlisted,
+        "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+        "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
+        "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
+        "message.send.v1" => ToolPrecondition.CompleteMessagePreview,
+        "code.task.create.v1" => ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
+        _ => ToolPrecondition.None
+    };
+
+    private static ToolExpectedOutcome GetRequiredExpectedOutcome(string toolId) => toolId switch
+    {
+        "app.launch.v1" => ToolExpectedOutcome.ApplicationWindowVisible,
+        "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
+        "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
+        "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
+        "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,
+        "message.send.v1" => ToolExpectedOutcome.PreviewConfirmedBeforeSend,
+        "code.task.create.v1" => ToolExpectedOutcome.ReviewablePatchCreated,
+        _ => ToolExpectedOutcome.None
+    };
+
+    public static ToolProposal Proposal(string toolId, IEnumerable<KeyValuePair<string, string>> args, string target,
+        ToolExpectedOutcome expectedOutcome) =>
+        new(toolId, args.ToImmutableDictionary(StringComparer.Ordinal), target, GetRequiredPreconditions(toolId),
+            expectedOutcome);
 }

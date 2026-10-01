@@ -196,7 +196,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 return new(false, "无法确定要切换到哪个受支持的已打开窗口。支持 VS Code 小K项目、Edge、资源管理器、微信和 QQ。", "WINDOW_TARGET_NOT_SUPPORTED");
             var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
             return await _broker.ExecuteAsync(new ToolProposal("window.activate.v1", args, intent.AppId,
-                "已打开的白名单窗口在前台，并核验其窗口句柄"), token);
+                ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+                ToolExpectedOutcome.TargetWindowInForeground), token);
         }
 
         if (category == "app")
@@ -206,7 +207,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 return new(false, "无法确定要打开哪个受支持的应用。当前支持 VS Code 小K项目、Edge、资源管理器、微信和 QQ。", "APP_NOT_SUPPORTED");
             var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
             if (intent.WorkspaceId is not null) args = args.Add("workspace_id", intent.WorkspaceId);
-            return await _broker.ExecuteAsync(new ToolProposal("app.launch.v1", args, intent.AppId, "对应应用窗口可见"), token);
+            return await _broker.ExecuteAsync(new ToolProposal("app.launch.v1", args, intent.AppId,
+                ToolPrecondition.ApplicationAllowlisted, ToolExpectedOutcome.ApplicationWindowVisible), token);
         }
 
         if (category == "file")
@@ -215,7 +217,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             foreach (var prefix in new[] { "帮我找文件", "搜索文件", "查找文件", "找文件", "搜索", "查找" })
                 if (query.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { query = query[prefix.Length..].Trim(' ', '：', ':', '“', '”', '"'); break; }
             return await _broker.ExecuteAsync(new ToolProposal("file.search.v1",
-                ImmutableDictionary<string, string>.Empty.Add("query", query).Add("root_id", "user-files"), "user-files", "列出最多十个文件名匹配项"), token);
+                ImmutableDictionary<string, string>.Empty.Add("query", query).Add("root_id", "user-files"), "user-files",
+                ToolPrecondition.ConfiguredSearchRoot, ToolExpectedOutcome.MatchingFilesListed), token);
         }
 
         if (category == "analyze" || category == "draft")
@@ -244,7 +247,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             }
 
             return await _broker.ExecuteAsync(new ToolProposal(tool, arguments,
-                "用户本次提供的单条消息", "本地生成分析或草稿；不发送"), token);
+                "用户本次提供的单条消息", ToolPrecondition.UserProvidedSingleMessage,
+                category == "draft" ? ToolExpectedOutcome.ReplyDraftOnly : ToolExpectedOutcome.LocalMessageAnalysis), token);
         }
 
         if (category == "send")
@@ -252,7 +256,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
         if (category == "code")
             return await _broker.ExecuteAsync(new ToolProposal("code.task.create.v1",
-                ImmutableDictionary<string, string>.Empty.Add("instruction", request), "configured-project", "在仓库外隔离副本中生成可审阅 diff"), token);
+                ImmutableDictionary<string, string>.Empty.Add("instruction", request), "configured-project",
+                ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
+                ToolExpectedOutcome.ReviewablePatchCreated), token);
 
         try
         {
