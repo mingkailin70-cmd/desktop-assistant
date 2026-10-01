@@ -225,6 +225,12 @@ try
     CheckNoticePermissionAndLockState();
     passed.Add("权限缺失或锁屏时不读取通知正文");
 
+    CheckNoticeBodyAccessGateRechecksVolatileState();
+    passed.Add("读取通知正文前重新核对权限与解锁状态");
+
+    CheckNoticePublisherAssignmentsAreUnambiguous();
+    passed.Add("同一通知发布者不能同时归属微信和 QQ");
+
     CheckConfirmedPrivateNoticeReadsOnlyOnceAndDeduplicates();
     passed.Add("已确认私聊才读取正文，重复通知不会再次读取");
 
@@ -1406,6 +1412,47 @@ static void CheckNoticePermissionAndLockState()
     var revoked = revokedPolicy.Inspect("wechat", "wechat.package!Main", "chat-3", "Alice", true,
         () => { revokedReads++; return "不应读到"; }, DateTimeOffset.UtcNow, "notice-revoked", true, false);
     Require(!revoked.Accepted && revokedReads == 0, "权限未授予时读取了通知正文。");
+}
+
+static void CheckNoticeBodyAccessGateRechecksVolatileState()
+{
+    var bodyReads = 0;
+    var permissionGranted = false;
+    var unlocked = true;
+    var body = NoticeBodyReadGate.ReadIfAllowed(() => permissionGranted, () => unlocked,
+        () => { bodyReads++; return "private body"; }, out var failure);
+    Require(body is null && failure == NoticeBodyAccessFailure.PermissionUnavailable && bodyReads == 0,
+        "权限在通知枚举后撤销时仍读取了正文。");
+
+    permissionGranted = true;
+    unlocked = false;
+    body = NoticeBodyReadGate.ReadIfAllowed(() => permissionGranted, () => unlocked,
+        () => { bodyReads++; return "private body"; }, out failure);
+    Require(body is null && failure == NoticeBodyAccessFailure.SessionLocked && bodyReads == 0,
+        "用户会话在通知枚举后锁定时仍读取了正文。");
+
+    unlocked = true;
+    body = NoticeBodyReadGate.ReadIfAllowed(() => permissionGranted, () => unlocked,
+        () => { bodyReads++; return "private body"; }, out failure);
+    Require(body == "private body" && failure == NoticeBodyAccessFailure.None && bodyReads == 1,
+        "权限有效且会话解锁时正文读取器未正常运行。");
+
+    body = NoticeBodyReadGate.ReadIfAllowed(() => throw new UnauthorizedAccessException(), () => true,
+        () => { bodyReads++; return "must-not-read"; }, out failure);
+    Require(body is null && failure == NoticeBodyAccessFailure.PermissionUnavailable && bodyReads == 1,
+        "权限状态读取异常时没有失败关闭。");
+}
+
+static void CheckNoticePublisherAssignmentsAreUnambiguous()
+{
+    Require(MessageNoticePublisherAssignments.HasOverlap(
+            ["wechat.package!Main"], ["WECHAT.PACKAGE!main"]),
+        "大小写不同的重复发布者没有被识别为微信/QQ归属歧义。");
+    Require(!MessageNoticePublisherAssignments.HasOverlap(
+            ["wechat.package!Main"], ["qq.package!Main"]),
+        "不同客户端的发布者被错误判定为归属歧义。");
+    Require(!MessageNoticePublisherAssignments.HasOverlap([], []),
+        "空发布者清单被错误判定为归属歧义。");
 }
 
 static void CheckConfirmedPrivateNoticeReadsOnlyOnceAndDeduplicates()

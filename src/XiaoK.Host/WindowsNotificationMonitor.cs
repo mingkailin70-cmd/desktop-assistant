@@ -25,6 +25,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private IMessageNoticeAdapter? _wechatAdapter;
     private IMessageNoticeAdapter? _qqAdapter;
     private HashSet<string> _allowedAppIds = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _wechatPublisherIds = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _qqPublisherIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _baselineReady;
     private bool _disposed;
 
@@ -65,6 +67,13 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         StopListening();
         var wechatIds = settings.MonitorWeChatNotifications ? settings.WeChatPublisherAppIds : [];
         var qqIds = settings.MonitorQQNotifications ? settings.QQPublisherAppIds : [];
+        _wechatPublisherIds = new HashSet<string>(wechatIds, StringComparer.OrdinalIgnoreCase);
+        _qqPublisherIds = new HashSet<string>(qqIds, StringComparer.OrdinalIgnoreCase);
+        if (MessageNoticePublisherAssignments.HasOverlap(_wechatPublisherIds, _qqPublisherIds))
+        {
+            _allowedAppIds.Clear();
+            return SetStatus("同一个发布者 AUMID 不能同时配置为微信和 QQ；通知监听保持关闭。");
+        }
         _allowedAppIds = new HashSet<string>(wechatIds.Concat(qqIds), StringComparer.OrdinalIgnoreCase);
         if (_allowedAppIds.Count == 0) return SetStatus("微信 / QQ 通知监听关闭，或尚未配置已核实的发布者 AUMID。");
 
@@ -114,6 +123,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         _disposed = true;
         StopListening();
         _allowedAppIds.Clear();
+        _wechatPublisherIds.Clear();
+        _qqPublisherIds.Clear();
         Status = "通知监听已停止。";
     }
 
@@ -145,15 +156,25 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     {
         try
         {
-            if (_disposed || _listener is null || _policy is null) return;
-            if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+            var listener = _listener;
+            var policy = _policy;
+            var wechatAdapter = _wechatAdapter;
+            var qqAdapter = _qqAdapter;
+            if (_disposed || listener is null || policy is null) return;
+            if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
-                SetStatus("Windows 通知访问权限已撤销；已暂停通知处理。");
-                StopListening();
+                StopForRevokedPermission(listener);
                 return;
             }
 
-            var notifications = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
+            var notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
+            if (_disposed || !ReferenceEquals(_listener, listener) || !ReferenceEquals(_policy, policy)) return;
+            if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+            {
+                StopForRevokedPermission(listener);
+                return;
+            }
+
             foreach (var notification in notifications.Where(item => item.Id == id))
             {
                 // AppUserModelId is the only notification content metadata read before the publisher allowlist check.
@@ -163,24 +184,56 @@ internal sealed class WindowsNotificationMonitor : IDisposable
 
                 var key = $"{notification.Id}:{notification.CreationTime.UtcDateTime.Ticks}";
                 var unlocked = IsUnlockedInputDesktop();
-                var decision = _wechatAdapter?.Inspect(sourceAppId, null, null, null, () => ReadVisibleText(notification),
-                    notification.CreationTime, key, unlocked, permissionGranted: true);
-                if (decision?.Accepted == true)
+                if (!unlocked)
                 {
-                    RaiseStatus("微信通知：已收到匹配发布者的提醒；私聊类型未验证，正文未读取。请手动查看会话。");
+                    RaiseStatus("Windows 会话已锁定；通知正文未读取，请手动查看会话。");
                     continue;
                 }
 
-                decision = _qqAdapter?.Inspect(sourceAppId, null, null, null, () => ReadVisibleText(notification),
-                    notification.CreationTime, key, unlocked, permissionGranted: true);
-                if (decision?.Accepted == true)
-                    RaiseStatus("QQ 通知：已收到匹配发布者的提醒；私聊类型未验证，正文未读取。请手动查看会话。");
+                var adapter = _wechatPublisherIds.Contains(sourceAppId) ? wechatAdapter
+                    : _qqPublisherIds.Contains(sourceAppId) ? qqAdapter
+                    : null;
+                if (adapter is null) continue;
+
+                var bodyGateFailure = NoticeBodyAccessFailure.None;
+                string? ReadBodyIfStillAllowed() => NoticeBodyReadGate.ReadIfAllowed(
+                    () => !_disposed && ReferenceEquals(_listener, listener)
+                        && listener.GetAccessStatus() == UserNotificationListenerAccessStatus.Allowed,
+                    IsUnlockedInputDesktop,
+                    () => ReadVisibleText(notification),
+                    out bodyGateFailure);
+
+                var decision = adapter.Inspect(sourceAppId, null, null, null, ReadBodyIfStillAllowed,
+                    notification.CreationTime, key, true, true);
+
+                if (bodyGateFailure == NoticeBodyAccessFailure.PermissionUnavailable)
+                {
+                    StopForRevokedPermission(listener);
+                    return;
+                }
+                if (bodyGateFailure == NoticeBodyAccessFailure.SessionLocked)
+                {
+                    RaiseStatus("Windows 会话已锁定；通知正文未读取，请手动查看会话。");
+                    continue;
+                }
+
+                if (decision.Accepted)
+                    RaiseStatus(adapter.ApplicationId == "wechat"
+                        ? "微信通知：已收到匹配发布者的提醒；私聊类型未验证，正文未读取。请手动查看会话。"
+                        : "QQ 通知：已收到匹配发布者的提醒；私聊类型未验证，正文未读取。请手动查看会话。");
             }
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
             RaiseStatus("读取 Windows 通知元数据失败；未保存正文或转发通知内容。");
         }
+    }
+
+    private void StopForRevokedPermission(UserNotificationListener listener)
+    {
+        if (!ReferenceEquals(_listener, listener)) return;
+        SetStatus("Windows 通知访问权限已撤销；已暂停通知处理。");
+        StopListening();
     }
 
     private void StopListening()
