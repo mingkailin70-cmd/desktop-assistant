@@ -184,45 +184,108 @@
     },
     {
       "id": "mimo-v2.6-distill-qwen-9b",
-      "role": "optional-code-evaluation",
+      "role": "p0-code-evaluation-candidate",
       "source": "https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",
-      "revision": null,
+      "baseModel": "Qwen/Qwen3.5-9B",
+      "revision": "2367e865d009c13ac81713a2878291d33ab28177",
       "format": "Transformers Safetensors",
       "files": [
         {
+          "name": "chat_template.jinja",
+          "upstreamReportedSizeBytes": 3916,
+          "expectedUpstreamSha256": "59a64ebb4df6d1489d09a91267cf3ceb106162d4a893c4f84833cfb8c897ff63",
+          "localVerifiedSha256": "59a64ebb4df6d1489d09a91267cf3ceb106162d4a893c4f84833cfb8c897ff63"
+        },
+        {
+          "name": "config.json",
+          "upstreamReportedSizeBytes": 2784,
+          "expectedUpstreamSha256": "407c46388b8fa2ae9bf69fe27d40af236d373e86a6b48f5284c86df5cd183633",
+          "localVerifiedSha256": "407c46388b8fa2ae9bf69fe27d40af236d373e86a6b48f5284c86df5cd183633"
+        },
+        {
+          "name": "generation_config.json",
+          "upstreamReportedSizeBytes": 126,
+          "expectedUpstreamSha256": "aaed5b26f1cae55c1ceb58fc483c3cd65ee8d386b61daec3d7a9df82432d9205",
+          "localVerifiedSha256": "aaed5b26f1cae55c1ceb58fc483c3cd65ee8d386b61daec3d7a9df82432d9205"
+        },
+        {
+          "name": "merges.txt",
+          "upstreamReportedSizeBytes": 3353259,
+          "expectedUpstreamSha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+          "localVerifiedSha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"
+        },
+        {
           "name": "model-00001-of-00004.safetensors",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 5276436216,
+          "expectedUpstreamSha256": "aab052180118aee34abc3029b54eaa49096aac606b97d703866b420dceb703c3",
+          "localVerifiedSha256": "aab052180118aee34abc3029b54eaa49096aac606b97d703866b420dceb703c3"
         },
         {
           "name": "model-00002-of-00004.safetensors",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 5033171280,
+          "expectedUpstreamSha256": "7a0486565f06d25ac4628e9dba470dc3f604353471d240d5a0bf7128f64df396",
+          "localVerifiedSha256": "7a0486565f06d25ac4628e9dba470dc3f604353471d240d5a0bf7128f64df396"
         },
         {
           "name": "model-00003-of-00004.safetensors",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 5234499504,
+          "expectedUpstreamSha256": "6c73207563d1879bfd6c143a028cc70be68edff56280458c71a43df4240300f4",
+          "localVerifiedSha256": "6c73207563d1879bfd6c143a028cc70be68edff56280458c71a43df4240300f4"
         },
         {
           "name": "model-00004-of-00004.safetensors",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 3275613848,
+          "expectedUpstreamSha256": "1379a7cf8c0b8555a39ab65a47e830e0eb45e776b46045734da3afd73c09eea2",
+          "localVerifiedSha256": "1379a7cf8c0b8555a39ab65a47e830e0eb45e776b46045734da3afd73c09eea2"
         },
         {
           "name": "model.safetensors.index.json",
-          "upstreamReportedSizeBytes": null,
-          "expectedUpstreamSha256": null,
-          "localVerifiedSha256": null
+          "upstreamReportedSizeBytes": 69217,
+          "expectedUpstreamSha256": "4a24d25e902169c0393a2ca58b697c03b27efc40dcddbc2b59c42e5e1e2b1d90",
+          "localVerifiedSha256": "4a24d25e902169c0393a2ca58b697c03b27efc40dcddbc2b59c42e5e1e2b1d90"
+        },
+        {
+          "name": "preprocessor_config.json",
+          "upstreamReportedSizeBytes": 443,
+          "expectedUpstreamSha256": "3a159dfec9978a186a72ba085e0ad6a050f3968d8b364218d7bd13f5c89381f2",
+          "localVerifiedSha256": "3a159dfec9978a186a72ba085e0ad6a050f3968d8b364218d7bd13f5c89381f2"
+        },
+        {
+          "name": "processor_config.json",
+          "upstreamReportedSizeBytes": 1191,
+          "expectedUpstreamSha256": "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1",
+          "localVerifiedSha256": "d89ef49ce9cd37fbf510158e13c1ef063d9286411c1ec9049932dbe0487143b1"
+        },
+        {
+          "name": "tokenizer.json",
+          "upstreamReportedSizeBytes": 19989325,
+          "expectedUpstreamSha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
+          "localVerifiedSha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "upstreamReportedSizeBytes": 1165,
+          "expectedUpstreamSha256": "792fa3f0cb88b111e54ef3134c873531008c4df471d108da17903426e308aa7b",
+          "localVerifiedSha256": "792fa3f0cb88b111e54ef3134c873531008c4df471d108da17903426e308aa7b"
+        },
+        {
+          "name": "video_preprocessor_config.json",
+          "upstreamReportedSizeBytes": 385,
+          "expectedUpstreamSha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13",
+          "localVerifiedSha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"
+        },
+        {
+          "name": "vocab.json",
+          "upstreamReportedSizeBytes": 6722759,
+          "expectedUpstreamSha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+          "localVerifiedSha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003"
         }
       ],
       "license": "mit",
-      "status": "optional-candidate",
-      "notes": "约18.8 GB权重，独立评估是否下载；不作为常驻模型或P1/P2前置。"
+      "status": "downloaded_and_verified",
+      "notes": "约18.8 GB权重；用户授权下载到仓库根目录 models/，用于P0离线资源与代码任务对照。只作按需候选，不作常驻模型；8 GB独显不能容纳全模型，实际推理需后续单独批准运行时并验证部分CPU卸载、延迟与显存余量。",
+      "localDirectory": "llm/mimo-v2.6-distill-qwen-9b/2367e865d009c13ac81713a2878291d33ab28177",
+      "requiredForP0": true
     },
     {
       "id": "jev-9b-boe",

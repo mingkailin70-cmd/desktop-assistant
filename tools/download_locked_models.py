@@ -13,11 +13,13 @@ import sys
 import urllib.parse
 import urllib.error
 import urllib.request
+import time
 from pathlib import Path, PurePosixPath
 
 
 CHUNK_SIZE = 8 * 1024 * 1024
 PROGRESS_INTERVAL = 128 * 1024 * 1024
+MAX_DOWNLOAD_RETRIES = 8
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -109,8 +111,13 @@ def verify_upstream_files(opener: urllib.request.OpenerDirector, model: dict) ->
         entry = upstream_by_path.get(name)
         if not entry or entry.get("type") != "file":
             raise RuntimeError(f"{model.get('id')}: 固定 revision 中缺少文件：{name}")
+        upstream_size = entry.get("size")
+        if not isinstance(upstream_size, int) or upstream_size < 0:
+            raise RuntimeError(f"{model.get('id')}: 上游文件大小无效：{name}")
         expected_size = locked_file.get("upstreamReportedSizeBytes")
-        if not isinstance(expected_size, int) or entry.get("size") != expected_size:
+        if expected_size is None:
+            locked_file["upstreamReportedSizeBytes"] = upstream_size
+        elif not isinstance(expected_size, int) or upstream_size != expected_size:
             raise RuntimeError(f"{model.get('id')}: 上游文件大小与锁清单不符：{name}")
         upstream_hash = ((entry.get("lfs") or {}).get("oid") or "").removeprefix("sha256:").lower()
         expected_hash = locked_file.get("expectedUpstreamSha256")
@@ -150,54 +157,79 @@ def download_one(
                 return actual
         raise RuntimeError(f"目标文件已存在但无法用锁清单验证；为避免覆盖已保存数据而停止：{destination}")
 
-    offset = partial.stat().st_size if partial.exists() else 0
-    if offset > size:
-        raise RuntimeError(f"部分下载文件大于锁定大小；请检查后删除：{partial}")
-    if offset == size:
-        actual_hash = sha256_file(partial)
-        if expected_hash and actual_hash != expected_hash:
-            raise RuntimeError(f"完整部分文件 SHA-256 不匹配：{locked_file['name']}；文件保留供检查。")
-        if not expected_hash:
-            locked_file["expectedUpstreamSha256"] = actual_hash
-        locked_file["localVerifiedSha256"] = actual_hash
-        os.replace(partial, destination)
-        return actual_hash
-
     repo = urllib.parse.urlparse(model["source"]).path.strip("/")
     revision = model["revision"]
     remote_name = urllib.parse.quote(locked_file["name"], safe="/")
     url = f"https://huggingface.co/{repo}/resolve/{revision}/{remote_name}?download=true"
-    headers = {"User-Agent": "XiaoK-model-lock-downloader/1.0"}
-    if offset:
-        headers["Range"] = f"bytes={offset}-"
-    request = urllib.request.Request(url, headers=headers)
+    for attempt in range(MAX_DOWNLOAD_RETRIES + 1):
+        offset = partial.stat().st_size if partial.exists() else 0
+        if offset > size:
+            raise RuntimeError(f"部分下载文件大于锁定大小；请检查后删除：{partial}")
+        if offset == size:
+            break
 
-    with opener.open(request, timeout=120) as response:
-        status = getattr(response, "status", response.getcode())
-        if offset and status == 206:
-            content_range = response.headers.get("Content-Range", "")
-            if not content_range.startswith(f"bytes {offset}-"):
-                raise RuntimeError(f"上游续传范围与本地部分文件不一致：{content_range}")
-            mode = "ab"
-        elif status == 200:
-            offset = 0
-            mode = "wb"
-        else:
-            raise RuntimeError(f"上游返回意外 HTTP 状态：{status}")
+        headers = {"User-Agent": "XiaoK-model-lock-downloader/1.0"}
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        request = urllib.request.Request(url, headers=headers)
 
-        written = offset
-        next_report = ((written // PROGRESS_INTERVAL) + 1) * PROGRESS_INTERVAL
-        with partial.open(mode) as output:
-            while block := response.read(CHUNK_SIZE):
-                output.write(block)
-                written += len(block)
-                if written >= next_report:
-                    print(f"  {locked_file['name']}: {written:,}/{size:,} bytes", flush=True)
-                    next_report = written + PROGRESS_INTERVAL
+        try:
+            with opener.open(request, timeout=120) as response:
+                status = getattr(response, "status", response.getcode())
+                if offset and status == 206:
+                    content_range = response.headers.get("Content-Range", "")
+                    if not content_range.startswith(f"bytes {offset}-"):
+                        raise RuntimeError(f"上游续传范围与本地部分文件不一致：{content_range}")
+                    mode = "ab"
+                elif status == 200:
+                    offset = 0
+                    mode = "wb"
+                else:
+                    raise RuntimeError(f"上游返回意外 HTTP 状态：{status}")
+
+                written = offset
+                next_report = ((written // PROGRESS_INTERVAL) + 1) * PROGRESS_INTERVAL
+                with partial.open(mode) as output:
+                    while block := response.read(CHUNK_SIZE):
+                        output.write(block)
+                        written += len(block)
+                        if written >= next_report:
+                            print(f"  {locked_file['name']}: {written:,}/{size:,} bytes", flush=True)
+                            next_report = written + PROGRESS_INTERVAL
+        except urllib.error.URLError as error:
+            if isinstance(error, urllib.error.HTTPError):
+                raise
+            if attempt == MAX_DOWNLOAD_RETRIES:
+                raise RuntimeError(
+                    f"上游连接连续失败；断点文件已保留：{locked_file['name']}；{error}"
+                ) from error
+            print(
+                f"  上游连接中断，保留断点并重连 {attempt + 1}/{MAX_DOWNLOAD_RETRIES}：{error.reason}",
+                flush=True,
+            )
+            time.sleep(1)
+            continue
+
+        actual_size = partial.stat().st_size
+        if actual_size > size:
+            raise RuntimeError(f"上游返回内容超过锁定大小：{locked_file['name']}，{actual_size} > {size}。")
+        if actual_size < size:
+            if attempt == MAX_DOWNLOAD_RETRIES:
+                raise RuntimeError(
+                    f"上游连接连续提前结束；断点文件已保留：{locked_file['name']}，{actual_size}/{size} bytes。"
+                )
+            print(
+                f"  上游响应提前结束，保留断点 {actual_size:,}/{size:,} bytes；"
+                f"自动续传 {attempt + 1}/{MAX_DOWNLOAD_RETRIES}",
+                flush=True,
+            )
+            time.sleep(1)
+            continue
+        break
 
     actual_size = partial.stat().st_size
     if actual_size != size:
-        raise RuntimeError(f"下載大小錯誤：{locked_file['name']}，{actual_size} != {size}；部分文件保留以便續傳。")
+        raise RuntimeError(f"下载后文件大小错误：{locked_file['name']}，{actual_size} != {size}；部分文件保留供续传。")
 
     actual_hash = sha256_file(partial)
     if expected_hash and actual_hash != expected_hash:
