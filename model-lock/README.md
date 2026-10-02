@@ -13,4 +13,4 @@
 - 版本或文件变化时新增候选记录；新版本通过同一离线评测后再切换，不覆盖已验收版本。
 - `blocked-license-review` 表示来源或模型许可未明确，下载脚本会拒绝处理该条目。工具/引擎代码的开源许可证不能自动替代具体权重、token 或数据文件的许可证；取得权利人明确条款并完成评估后，才能改回 `candidate`。
 
-状态：candidate → partially_downloaded → downloaded_and_verified → locally_evaluated → accepted。许可证审查阻塞项不得进入下载状态。首版主模型、ASR、TTS 和 MiMo 9B 四组权重均已下载至仓库忽略的 `models/` 并通过校验，共35个文件、25,954,040,709字节。llama.cpp b11259 CUDA 13.4 两个官方 ZIP 已下载、校验并解压为55个本机文件；两次合成推理冒烟通过，但没有测得 CUDA 实际卸载、显存峰值和标准性能，尚不能标为 accepted。CUDA 本机使用许可已由用户确认；不分发运行包。语音环境现已安装和哈希锁定，依赖一致性与离线导入检查通过；ASR/TTS 权重推理、显卡/麦克风访问与语音质量仍待独立验收。
+状态：candidate → partially_downloaded → downloaded_and_verified → locally_evaluated → accepted。许可证审查阻塞项不得进入下载状态。四类功能组的5个锁定权重候选（主模型、ASR、TTS Base、TTS CustomVoice、MiMo 9B）均已下载至仓库忽略的 `models/` 并通过校验，共46个文件、28,452,424,319字节。llama.cpp b11259 CUDA 13.4 两个官方 ZIP 已下载、校验并解压为55个本机文件；两次合成推理冒烟通过，但没有测得 CUDA 实际卸载、显存峰值和标准性能，尚不能标为 accepted。CUDA 本机使用许可已由用户确认；不分发运行包。语音环境现已安装和哈希锁定，依赖一致性与离线导入检查通过；ASR/TTS 权重推理、显卡/麦克风访问与语音质量仍待独立验收。用户已授权项目所需依赖、运行时和候选模型下载及必要联网命令，无需逐项询问；仍须逐项核验来源、固定版本、SHA-256 和适用许可证。

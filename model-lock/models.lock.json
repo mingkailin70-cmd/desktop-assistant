@@ -337,6 +337,86 @@
       "license": "qwen-research",
       "status": "optional-candidate",
       "notes": "7B视觉生成组件，用于图像生成/编辑，不是对话或动作决策模型；Qwen Research License，是否适用须先审查协议。只作为离线素材研究项，不属于小K首版依赖。"
+    },
+    {
+      "id": "qwen3-tts-12hz-0.6b-customvoice",
+      "role": "tts-custom-voice-candidate",
+      "source": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+      "revision": "85e237c12c027371202489a0ec509ded67b5e4b5",
+      "format": "Transformers Safetensors",
+      "files": [
+        {
+          "name": "config.json",
+          "upstreamReportedSizeBytes": 4908,
+          "expectedUpstreamSha256": "81aca2b6fac304944d8acf345272d8a9a727d5fc2e2e66b222ab4729340c7455",
+          "localVerifiedSha256": "81aca2b6fac304944d8acf345272d8a9a727d5fc2e2e66b222ab4729340c7455"
+        },
+        {
+          "name": "generation_config.json",
+          "upstreamReportedSizeBytes": 245,
+          "expectedUpstreamSha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+          "localVerifiedSha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa"
+        },
+        {
+          "name": "merges.txt",
+          "upstreamReportedSizeBytes": 1671839,
+          "expectedUpstreamSha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+          "localVerifiedSha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+        },
+        {
+          "name": "model.safetensors",
+          "upstreamReportedSizeBytes": 1811626576,
+          "expectedUpstreamSha256": "bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb",
+          "localVerifiedSha256": "bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb"
+        },
+        {
+          "name": "preprocessor_config.json",
+          "upstreamReportedSizeBytes": 127,
+          "expectedUpstreamSha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+          "localVerifiedSha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119"
+        },
+        {
+          "name": "speech_tokenizer/config.json",
+          "upstreamReportedSizeBytes": 2336,
+          "expectedUpstreamSha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+          "localVerifiedSha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167"
+        },
+        {
+          "name": "speech_tokenizer/configuration.json",
+          "upstreamReportedSizeBytes": 76,
+          "expectedUpstreamSha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+          "localVerifiedSha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd"
+        },
+        {
+          "name": "speech_tokenizer/model.safetensors",
+          "upstreamReportedSizeBytes": 682293092,
+          "expectedUpstreamSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+          "localVerifiedSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+        },
+        {
+          "name": "speech_tokenizer/preprocessor_config.json",
+          "upstreamReportedSizeBytes": 234,
+          "expectedUpstreamSha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+          "localVerifiedSha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb"
+        },
+        {
+          "name": "tokenizer_config.json",
+          "upstreamReportedSizeBytes": 7344,
+          "expectedUpstreamSha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+          "localVerifiedSha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670"
+        },
+        {
+          "name": "vocab.json",
+          "upstreamReportedSizeBytes": 2776833,
+          "expectedUpstreamSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "localVerifiedSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "官方 CustomVoice 0.6B / 12Hz 候选，支持中文内置音色；固定 revision 文件树列出11个推理必需文件。需完成本机速度、音频质量和显存/内存评估后再决定是否替换 Base 变体。",
+      "localDirectory": "speech/tts/qwen3-tts-12hz-0.6b-customvoice/85e237c12c027371202489a0ec509ded67b5e4b5",
+      "requiredForP0": true
     }
   ]
 }
