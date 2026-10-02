@@ -36,12 +36,17 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 
 当前状态（2026-10-03）：在用户授权后已完成机器级证书信任导入和当前账户安装。SignTool 与 Authenticode 状态均通过，包标识为 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`。安装目录中的 Host EXE 存在，但应用尚未启动；通知/麦克风授权、UI、登录启动、重启恢复和真实功能仍未验收。
 
-若需回滚，先在目标账户移除小K包；只有本次安装新加入了证书时，才在管理员 PowerShell 删除对应的机器信任项。若证书此前已被其他部署信任，不要移除：
+若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
 
 ~~~powershell
-Get-AppxPackage -Name MingKaiLin.XiaoK | Remove-AppxPackage
-$thumbprint = (Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | ConvertFrom-Json).thumbprint
-Remove-Item -LiteralPath "Cert:\LocalMachine\TrustedPeople\$thumbprint"
+# 先预览会卸载的当前账户应用，不做变更
+.\tools\uninstall_xiaok_msix.ps1 -WhatIf
+
+# 确认卸载当前账户应用；脚本会提示确认
+.\tools\uninstall_xiaok_msix.ps1 -Confirm
+
+# 所有用户下均无依赖包后，在管理员 PowerShell 中单独移除机器信任
+.\tools\uninstall_xiaok_msix.ps1 -RemoveTrustedCertificate -Confirm
 ~~~
 
 卸载程序不会删除 `D:\XiaoK\Data` 用户数据库或模型；它们仍保留在包外，需按数据保留策略单独处理。
