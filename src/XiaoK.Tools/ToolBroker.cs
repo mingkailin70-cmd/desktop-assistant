@@ -159,7 +159,7 @@ public sealed class ToolBroker
         var receivedAt = args.GetValueOrDefault("received_at_utc") ?? string.Empty;
         var deduplicationKey = args.GetValueOrDefault("deduplication_key") ?? string.Empty;
         if (args.Count != 8 || applicationId is not ("wechat" or "qq") || isPrivateConversation != "true"
-            || string.IsNullOrWhiteSpace(sourceAppId) || sourceAppId.Length > 256 || !sourceAppId.Contains('!')
+            || !AppUserModelIdPolicy.IsValid(sourceAppId)
             || string.IsNullOrWhiteSpace(conversationId) && string.IsNullOrWhiteSpace(sender)
             || conversationId.Length > 256 || sender.Length > 256
             || string.IsNullOrWhiteSpace(body) || body.Length > 20_000

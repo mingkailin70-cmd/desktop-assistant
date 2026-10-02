@@ -299,6 +299,9 @@ try
     CheckNoticePublisherAssignmentsAreUnambiguous();
     passed.Add("同一通知发布者不能同时归属微信和 QQ");
 
+    CheckPackagedAndDesktopAppUserModelIds();
+    passed.Add("通知 allowlist 接受已核实的 MSIX 与经典桌面应用 AUMID，并拒绝空白、控制字符和超长值");
+
     CheckVerifiedPrivateNoticeAnalysisProposal();
     passed.Add("私聊通知分析提案只接受新鲜、正文可见且来源已核验的私聊");
 
@@ -1827,6 +1830,31 @@ static void CheckNoticePublisherAssignmentsAreUnambiguous()
         "空发布者清单被错误判定为归属歧义。");
 }
 
+static void CheckPackagedAndDesktopAppUserModelIds()
+{
+    Require(AppUserModelIdPolicy.IsValid("wechat.package!Main"), "有效的包应用 AUMID 被拒绝。");
+    Require(AppUserModelIdPolicy.IsValid("Tencent.WeChat"), "经典桌面应用 AUMID 被误要求必须带包分隔符。");
+    Require(AppUserModelIdPolicy.IsValid(@"C:\Program Files\Example App\Messenger.exe"), "桌面应用路径形式的系统标识候选被拒绝。");
+    Require(!AppUserModelIdPolicy.IsValid("wechat.package!"), "缺少包应用 ID 的 AUMID 被接受。");
+    Require(!AppUserModelIdPolicy.IsValid("!Main"), "缺少包族名的 AUMID 被接受。");
+    Require(!AppUserModelIdPolicy.IsValid("a!b!c"), "包含多个包分隔符的 AUMID 被接受。");
+    Require(!AppUserModelIdPolicy.IsValid("bad\u0001id"), "包含控制字符的 AUMID 被接受。");
+    Require(!AppUserModelIdPolicy.IsValid(new string('a', AppUserModelIdPolicy.MaximumLength + 1)), "超长 AUMID 被接受。");
+
+    const string desktopId = "Tencent.WeChat";
+    var policy = new MessageNoticePolicy([desktopId], []);
+    var now = DateTimeOffset.UtcNow;
+    var decision = policy.Inspect("wechat", desktopId, "verified-chat", "Alice", true,
+        () => "仅用于合成策略检查", now, "desktop-aumid-test", true, true);
+    Require(decision.AnalyzeBody && decision.Notice?.SourceAppId == desktopId,
+        "精确匹配的经典桌面应用 AUMID 未通过通知策略。");
+
+    var notice = new MessageNotice("wechat", desktopId, "verified-chat", "Alice", true,
+        "仅用于合成策略检查", now, new string('C', 64));
+    Require(PrivateNoticeAnalysisPolicy.TryCreateProposal(notice, [desktopId], now, out _),
+        "经典桌面应用 AUMID 未通过本地通知分析提案校验。");
+}
+
 static void CheckVerifiedPrivateNoticeAnalysisProposal()
 {
     var now = DateTimeOffset.UtcNow;
@@ -1861,7 +1889,7 @@ static void CheckVerifiedPrivateNoticeAnalysisProposal()
 static async Task CheckVerifiedNoticeToolRouteAsync()
 {
     var now = DateTimeOffset.UtcNow;
-    var notice = new MessageNotice("wechat", "wechat.package!Main", "chat-tool", "Alice", true,
+    var notice = new MessageNotice("wechat", @"C:\Program Files\Example App\Messenger.exe", "chat-tool", "Alice", true,
         "只分析这段可见文字", now, new string('B', 64));
     Require(PrivateNoticeAnalysisPolicy.TryCreateProposal(notice, [notice.SourceAppId], now, out var proposal)
         && proposal is not null,

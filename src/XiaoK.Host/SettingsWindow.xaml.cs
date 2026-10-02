@@ -611,8 +611,8 @@ public partial class SettingsWindow : Window
     {
         var ids = value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        if (ids.Any(id => id.Length > 256 || !id.Contains('!')))
-            throw new ArgumentException($"{application} 发布者 AUMID 格式无效；每行填写一个完整的 PackageFamily!ApplicationId。", nameof(value));
+        if (ids.Any(id => !AppUserModelIdPolicy.IsValid(id)))
+            throw new ArgumentException($"{application} 通知来源 AUMID 无效；每行填写一个完整标识（最多 {AppUserModelIdPolicy.MaximumLength} 个字符），并在读取真实通知元数据后核实。", nameof(value));
         return ids;
     }
 

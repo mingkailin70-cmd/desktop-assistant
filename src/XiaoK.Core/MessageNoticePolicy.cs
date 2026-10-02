@@ -120,7 +120,7 @@ public sealed class MessageNoticePolicy
         return null;
     }
 
-    private static bool IsConfiguredId(string value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 256 && value.Contains('!');
+    private static bool IsConfiguredId(string value) => AppUserModelIdPolicy.IsValid(value);
 
     private static string? LimitMetadata(string? value, int maximumLength) =>
         string.IsNullOrWhiteSpace(value) || value.Length > maximumLength ? null : value;

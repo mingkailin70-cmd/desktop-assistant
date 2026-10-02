@@ -152,10 +152,10 @@
                         <TextBlock Text="麦克风：未接入，当前不会采集" Margin="0,0,0,5"/>
                         <TextBlock Text="微信 / QQ 通知监听" FontWeight="SemiBold" Margin="0,0,0,6"/>
                         <CheckBox x:Name="MonitorWeChatCheck" Content="监听微信通知" Margin="0,0,0,4"/>
-                        <TextBlock Text="微信发布者 AUMID（每行一个，必须核实后填写）" FontSize="11"/>
+                        <TextBlock Text="微信通知来源 AUMID（每行一个，须从真实通知元数据核实；桌面版可不含 !）" FontSize="11"/>
                         <TextBox x:Name="WeChatAppIdsBox" MinHeight="44" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,3,0,7"/>
                         <CheckBox x:Name="MonitorQQCheck" Content="监听 QQ 通知" Margin="0,0,0,4"/>
-                        <TextBlock Text="QQ 发布者 AUMID（每行一个，必须核实后填写）" FontSize="11"/>
+                        <TextBlock Text="QQ 通知来源 AUMID（每行一个，须从真实通知元数据核实；桌面版可不含 !）" FontSize="11"/>
                         <TextBox x:Name="QQAppIdsBox" MinHeight="44" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,3,0,6"/>
                         <Button x:Name="RequestNotificationAccessButton" Content="请求 Windows 通知访问权限" Click="RequestNotificationAccess_Click" HorizontalAlignment="Left" Margin="0,0,0,5"/>
                         <TextBlock x:Name="NotificationStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,9"/>

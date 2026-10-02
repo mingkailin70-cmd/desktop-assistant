@@ -16,8 +16,7 @@ public static class PrivateNoticeAnalysisPolicy
 
         var applicationId = notice.ApplicationId?.ToLowerInvariant();
         if (applicationId is not ("wechat" or "qq")
-            || string.IsNullOrWhiteSpace(notice.SourceAppId) || notice.SourceAppId.Length > 256
-            || !notice.SourceAppId.Contains('!')
+            || !AppUserModelIdPolicy.IsValid(notice.SourceAppId)
             || !allowedPublisherIds.Any(value => string.Equals(value, notice.SourceAppId, StringComparison.OrdinalIgnoreCase))
             || !notice.IsPrivateConversation
             || (string.IsNullOrWhiteSpace(notice.ConversationId) && string.IsNullOrWhiteSpace(notice.SenderDisplayName))
