@@ -38,8 +38,8 @@
           "localPath": ".tools/downloads/runtimes/llama.cpp/b11259/cudart-llama-bin-win-cuda-13.4-x64.zip"
         }
       ],
-      "status": "staged_not_executed",
-      "notes": "固定资产已下载、校验并解压至锁定模型目录；尚未生成启用清单、启动运行时或执行模型推理。",
+      "status": "locally_evaluated",
+      "notes": "一次托管 Qwen 合成聊天冒烟通过；仅证明本机模型服务能启动并返回短句，CUDA 实际层卸载、峰值显存、性能和退出时延未完整测量，不能标记为 accepted。",
       "stagedDirectory": "models/llm/qwen3.5-4b/f9f88ac3e234be915e23811a6d28ea287bdb927e/Runtime",
       "stagedFiles": [
         {
@@ -317,7 +317,27 @@
           "sizeBytes": 1787904,
           "sha256": "235097e315c83f3da2b4c5a8ef64e9ae0e055deecad866dc8b5591b49cc2909e"
         }
-      ]
+      ],
+      "localSmokeTest": {
+        "date": "2026-10-02",
+        "result": "passed_single_synthetic_chat_completion",
+        "method": "LlamaCppModelRuntime + ModelBroker + LocalInferenceClient",
+        "endpoint": "http://127.0.0.1:18080/",
+        "modelId": "qwen3.5-4b-q4km",
+        "contextTokens": 4096,
+        "gpuLayersRequested": 99,
+        "admissionBudgetMiB": 5000,
+        "minimumReserveMiB": 1024,
+        "freeVramBeforeMiB": 6329,
+        "freeVramAfterResponseMiB": 6329,
+        "elapsedSeconds": 12,
+        "syntheticInputOnly": true,
+        "responseMatchedExpectedShortText": true,
+        "gpuLayerOffloadConfirmed": false,
+        "peakVramCaptured": false,
+        "temporaryManifestRemoved": true,
+        "processObservation": "llama-server 在即时检查中仍存在，约4分钟后的复核已退出且端口关闭；精确退出时延及 Host 崩溃回收未验证。"
+      }
     },
     {
       "id": "python-asr",

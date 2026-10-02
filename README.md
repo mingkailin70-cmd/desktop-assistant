@@ -42,7 +42,7 @@ $dotnet = if (Test-Path .\.tools\dotnet\dotnet.exe) { Resolve-Path .\.tools\dotn
 - 联系人回复风格：同一 SQLite 数据库的 `contact_reply_styles` 表；旧设置中的偏好仅在首次迁移时导入，迁移标记防止用户删除后再次导入。迁移本身不改写 `settings.json`，设置页不再把新的偏好写回该文件。
 - 开发阶段主模型目录：`D:\Desktop\learn\siri\models\llm\qwen3.5-4b\f9f88ac3e234be915e23811a6d28ea287bdb927e`（已由 Git 忽略）；正式安装目标模型、缓存和评测目录：`D:\XiaoK\Models`、`D:\XiaoK\Cache`、`D:\XiaoK\Evaluations`
 
-可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。权重下载由 [固定模型下载器](tools/download_locked_models.py) 按锁定 revision 和 SHA256 写入 Git 忽略目录；llama.cpp b11259 CUDA 13.4 运行资产已获准下载、校验并暂存，启动运行时进行本机推理验证前仍需确认 CUDA 许可。
+可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。权重下载由 [固定模型下载器](tools/download_locked_models.py) 按锁定 revision 和 SHA256 写入 Git 忽略目录；llama.cpp b11259 CUDA 13.4 运行资产已获准下载、校验并暂存。用户已接受本机使用许可，一次合成推理通过；CUDA 实际卸载、资源峰值与性能尚未验收。
 
 ## 文档导航
 
