@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.IO;
+using System.Media;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Interop;
@@ -22,6 +24,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private bool _hotkeyRegistered;
     private bool _changingWindowMode;
     private bool _userTaskRunning;
+    private bool _speechProcessing;
+    private int _speechMaximumDurationPending;
+    private CancellationTokenSource? _speechCaptureCancellation;
+    private CancellationTokenSource? _speechPlaybackCancellation;
+    private SoundPlayer? _soundPlayer;
     private readonly Queue<PrivateNoticeAnalysisResult> _pendingNoticeAnalyses = [];
     private double _expandedWidth = 500;
     private double _expandedHeight = 650;
@@ -30,6 +37,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     {
         InitializeComponent();
         _runtime = new AssistantRuntime(this);
+        _runtime.SpeechCaptureMaximumDurationReached += OnSpeechCaptureMaximumDurationReached;
         _notificationMonitor = new WindowsNotificationMonitor(Dispatcher);
         _notificationMonitor.StatusChanged += OnNotificationStatusChanged;
         _notificationMonitor.PrivateNoticeAccepted += OnPrivateNoticeAccepted;
@@ -127,6 +135,233 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private async void Run_Click(object sender, RoutedEventArgs e) => await RunRequestAsync();
 
+    private async void Speech_Click(object sender, RoutedEventArgs e)
+    {
+        if (_exiting || _speechProcessing) return;
+        if (_speechPlaybackCancellation is not null)
+        {
+            OutputText.Text = "请先停止本地播报，再开始麦克风采集。";
+            return;
+        }
+        if (Volatile.Read(ref _speechMaximumDurationPending) != 0)
+        {
+            OutputText.Text = "录音已到时限，正在排队转写；请稍候。";
+            return;
+        }
+        if (_runtime.IsMicrophoneActive)
+        {
+            await FinishSpeechCaptureAsync(maximumDuration: false);
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _speechCaptureCancellation?.Dispose();
+        _speechCaptureCancellation = cancellation;
+        SpeechButton.IsEnabled = false;
+        SpeechButton.Content = "正在启动麦克风…";
+        try
+        {
+            await _runtime.StartMicrophoneAsync(cancellation.Token);
+            SpeechButton.IsEnabled = true;
+            SpeechButton.Content = "停止并转写";
+            SetStatus("正在采集麦克风");
+            OutputText.Text = "麦克风正在采集；再次点击“停止并转写”后才会调用本地语音识别。最长录音60秒。";
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(_runtime.VoiceStatus);
+            ResetSpeechCaptureState(cancellation);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            OutputText.Text = "Windows 未授予小K麦克风权限。请在 Windows 隐私设置中允许访问后重试；当前没有录音提交给模型。";
+            SetStatus("麦克风权限未授予");
+            ResetSpeechCaptureState(cancellation);
+        }
+        catch (Exception)
+        {
+            OutputText.Text = "无法启动麦克风。请检查 Windows 麦克风隐私权限、输入设备和系统音频设置；没有保存录音。";
+            SetStatus("麦克风设备不可用");
+            ResetSpeechCaptureState(cancellation);
+        }
+    }
+
+    private async Task FinishSpeechCaptureAsync(bool maximumDuration, byte[]? capturedWav = null)
+    {
+        if (_speechProcessing || _exiting)
+        {
+            if (capturedWav is not null) CryptographicOperations.ZeroMemory(capturedWav);
+            return;
+        }
+        _speechProcessing = true;
+        SpeechButton.IsEnabled = false;
+        byte[]? wav = capturedWav;
+        var cancellation = _speechCaptureCancellation;
+        if (cancellation is null && capturedWav is not null)
+        {
+            cancellation = new CancellationTokenSource();
+            _speechCaptureCancellation = cancellation;
+        }
+        try
+        {
+            wav ??= await _runtime.StopMicrophoneAndReadAsync();
+            if (wav.Length < 44)
+            {
+                OutputText.Text = "录音过短或没有音频；没有发送任何动作。请重新点击“开始说话”。";
+                return;
+            }
+
+            SetStatus("本地语音识别中");
+            OutputText.Text = "正在本机识别；识别完成后只填入输入框，不会自动执行任务。可随时取消。";
+            var recognition = await _runtime.TranscribeLocalWavAsync(wav, forceChinese: true,
+                cancellation?.Token ?? CancellationToken.None);
+            var transcript = recognition.Text.Trim();
+            if (transcript.Length == 0)
+            {
+                OutputText.Text = "本地语音识别没有得到文字；没有执行任何动作。可以重试或使用文本输入。";
+                return;
+            }
+
+            RequestBox.Text = string.IsNullOrWhiteSpace(RequestBox.Text)
+                ? transcript
+                : RequestBox.Text.TrimEnd() + Environment.NewLine + transcript;
+            RequestBox.CaretIndex = RequestBox.Text.Length;
+            OutputText.Text = (maximumDuration ? "已达到60秒录音上限。" : "语音转写完成。")
+                + "请检查下面的识别文本，再手动点击“运行任务”。" + Environment.NewLine + Environment.NewLine + transcript;
+            RequestBox.Focus();
+        }
+        catch (OperationCanceledException)
+        {
+            OutputText.Text = "语音识别已取消；录音和识别文字仅在内存中处理，没有执行任何动作。";
+            SetStatus("语音识别已取消");
+        }
+        catch (Exception)
+        {
+            OutputText.Text = "本地语音识别失败。可以检查模型环境后重试，也可以使用文本输入；录音没有写入历史。";
+            SetStatus("本地语音识别失败");
+        }
+        finally
+        {
+            if (wav is not null) CryptographicOperations.ZeroMemory(wav);
+            if (cancellation is not null) ResetSpeechCaptureState(cancellation);
+            _speechProcessing = false;
+            SpeechButton.IsEnabled = true;
+            SetStatus(_runtime.VoiceStatus);
+        }
+    }
+
+    private void ResetSpeechCaptureState(CancellationTokenSource cancellation)
+    {
+        if (!ReferenceEquals(_speechCaptureCancellation, cancellation))
+        {
+            cancellation.Dispose();
+            return;
+        }
+        _speechCaptureCancellation = null;
+        cancellation.Dispose();
+        SpeechButton.Content = "开始说话";
+        SpeechButton.IsEnabled = true;
+    }
+
+    private void OnSpeechCaptureMaximumDurationReached(byte[] wav)
+    {
+        Interlocked.Exchange(ref _speechMaximumDurationPending, 1);
+        if (_exiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            CryptographicOperations.ZeroMemory(wav);
+            Interlocked.Exchange(ref _speechMaximumDurationPending, 0);
+            return;
+        }
+        try
+        {
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try
+                {
+                    OutputText.Text = "已达到60秒录音上限，正在转写这段录音。";
+                    await FinishSpeechCaptureAsync(maximumDuration: true, capturedWav: wav);
+                }
+                finally { Interlocked.Exchange(ref _speechMaximumDurationPending, 0); }
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            CryptographicOperations.ZeroMemory(wav);
+            Interlocked.Exchange(ref _speechMaximumDurationPending, 0);
+        }
+    }
+
+    private async void SpeakOutput_Click(object sender, RoutedEventArgs e)
+    {
+        if (_exiting || _speechPlaybackCancellation is not null) return;
+        if (_runtime.IsMicrophoneActive || _speechProcessing
+            || Volatile.Read(ref _speechMaximumDurationPending) != 0)
+        {
+            OutputText.Text = "请先停止麦克风采集或等待语音转写结束，再开始播报。";
+            return;
+        }
+        var text = OutputText.Text.Trim();
+        if (string.IsNullOrWhiteSpace(text)) return;
+        if (text.Length > 1000)
+        {
+            OutputText.Text = "播报文本最多1000个字符。请先选择或复制需要播报的短内容。";
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        _speechPlaybackCancellation = cancellation;
+        byte[]? wav = null;
+        MemoryStream? stream = null;
+        SoundPlayer? player = null;
+        SpeakOutputButton.IsEnabled = false;
+        StopSpeakingButton.IsEnabled = true;
+        try
+        {
+            SetStatus("本地语音合成中");
+            wav = await _runtime.SynthesizeChineseWavAsync(text, cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            stream = new MemoryStream(wav, writable: false);
+            player = new SoundPlayer(stream);
+            player.Load();
+            _soundPlayer = player;
+            SetStatus("正在本地播报");
+            await Task.Run(player.PlaySync, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("播报已停止");
+        }
+        catch (Exception)
+        {
+            OutputText.Text = "本地播报失败。请检查音频输出设备；文本和生成音频不会保存。";
+            SetStatus("本地播报失败");
+        }
+        finally
+        {
+            try { player?.Stop(); }
+            catch (Exception) { }
+            _soundPlayer = null;
+            player?.Dispose();
+            stream?.Dispose();
+            if (wav is not null) CryptographicOperations.ZeroMemory(wav);
+            StopSpeakingButton.IsEnabled = false;
+            SpeakOutputButton.IsEnabled = true;
+            if (ReferenceEquals(_speechPlaybackCancellation, cancellation)) _speechPlaybackCancellation = null;
+            cancellation.Dispose();
+            SetStatus(_runtime.VoiceStatus);
+        }
+    }
+
+    private void StopSpeaking_Click(object sender, RoutedEventArgs e) => StopSpeechPlayback();
+
+    private void StopSpeechPlayback()
+    {
+        try { _speechPlaybackCancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        try { _soundPlayer?.Stop(); }
+        catch (Exception) { }
+    }
+
     private void Header_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed)
@@ -157,6 +392,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private async Task RunRequestAsync()
     {
+        if (_runtime.IsMicrophoneActive)
+        {
+            OutputText.Text = "麦克风仍在采集。请先停止并转写，或使用“停麦”丢弃录音，再运行任务。";
+            return;
+        }
         var request = RequestBox.Text;
         if (string.IsNullOrWhiteSpace(request)) return;
         RequestBox.Clear();
@@ -170,6 +410,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
     {
+        if (_runtime.IsMicrophoneActive)
+        {
+            OutputText.Text = "麦克风仍在采集。请先结束或丢弃录音，再打开项目。";
+            return;
+        }
         _userTaskRunning = true;
         OutputText.Text = "正在打开项目；可随时取消。";
         SetStatus("任务运行中");
@@ -242,17 +487,34 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
+        StopMicrophoneAndDiscard();
+        try { _speechCaptureCancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        StopSpeechPlayback();
         _runtime.CancelCurrent();
+        SpeechButton.Content = "开始说话";
         SetStatus("已请求取消");
     }
 
     private void StopMic_Click(object sender, RoutedEventArgs e)
     {
-        var wasCapturing = _runtime.StopMicrophone();
+        var wasCapturing = StopMicrophoneAndDiscard();
         SetStatus(_runtime.VoiceStatus);
         OutputText.Text = wasCapturing
-            ? "麦克风已停止采集；当前桌面任务继续运行。"
+            ? "麦克风已立即停止；未完成的录音已丢弃，未送入识别。桌面任务继续运行。"
             : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
+    }
+
+    private bool StopMicrophoneAndDiscard()
+    {
+        var wasActive = _runtime.StopMicrophone();
+        if (wasActive)
+        {
+            try { _speechCaptureCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            if (_speechCaptureCancellation is { } cancellation) ResetSpeechCaptureState(cancellation);
+        }
+        return wasActive;
     }
 
     private void Expand_Click(object sender, RoutedEventArgs e)
@@ -402,16 +664,21 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void StopMicrophoneFromTray()
     {
-        var wasCapturing = _runtime.StopMicrophone();
+        var wasCapturing = StopMicrophoneAndDiscard();
         SetStatus(_runtime.VoiceStatus);
         OutputText.Text = wasCapturing
-            ? "麦克风已停止采集；当前桌面任务继续运行。"
+            ? "麦克风已立即停止；未完成的录音已丢弃，未送入识别。桌面任务继续运行。"
             : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
     }
 
     private void CancelFromTray()
     {
+        StopMicrophoneAndDiscard();
+        try { _speechCaptureCancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        StopSpeechPlayback();
         _runtime.CancelCurrent();
+        SpeechButton.Content = "开始说话";
         SetStatus("已请求取消");
     }
 
@@ -587,6 +854,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             SetStatus("正在停止任务…");
             SetButtonsEnabled(false);
             CancelButton.IsEnabled = false;
+            StopMicrophoneAndDiscard();
+            try { _speechCaptureCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            StopSpeechPlayback();
             _tray.Visible = false;
             _notificationMonitor.Dispose();
             if (_source is not null && _hotkeyRegistered)
@@ -605,6 +876,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _tray.Dispose();
         _notificationMonitor.StatusChanged -= OnNotificationStatusChanged;
         _notificationMonitor.PrivateNoticeAccepted -= OnPrivateNoticeAccepted;
+        _runtime.SpeechCaptureMaximumDurationReached -= OnSpeechCaptureMaximumDurationReached;
         _runtime.PrivateNoticeAnalysisCompleted -= OnPrivateNoticeAnalysisCompleted;
         if (_source is not null)
         {

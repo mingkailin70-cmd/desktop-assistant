@@ -104,6 +104,14 @@
                         <Button x:Name="CancelButton" Style="{StaticResource ToolButton}" Content="取消任务" Click="Cancel_Click"/>
                         <Button x:Name="StopMicButton" Style="{StaticResource ToolButton}" Content="停麦" Click="StopMic_Click"/>
                     </WrapPanel>
+                    <WrapPanel Margin="0,7,0,0">
+                        <Button x:Name="SpeechButton" Style="{StaticResource ToolButton}" Content="开始说话"
+                                Click="Speech_Click" ToolTip="仅点击后采集麦克风；再次点击完成转写，最长60秒"/>
+                        <Button x:Name="SpeakOutputButton" Style="{StaticResource ToolButton}" Content="朗读反馈"
+                                Click="SpeakOutput_Click" ToolTip="仅在点击后用本地语音朗读当前反馈"/>
+                        <Button x:Name="StopSpeakingButton" Style="{StaticResource ToolButton}" Content="停止播报"
+                                Click="StopSpeaking_Click" IsEnabled="False"/>
+                    </WrapPanel>
                 </StackPanel>
 
                 <Border Grid.Row="3" Background="White" CornerRadius="15" BorderBrush="#E4E8F1"

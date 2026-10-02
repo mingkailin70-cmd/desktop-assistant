@@ -35,7 +35,7 @@ public sealed class VoiceInferenceService : IAsyncDisposable
         _tts = tts;
     }
 
-    public string Status => "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；麦克风未采集，推理仍待本机验收。";
+    public string Status => "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；合成往返单样例通过，麦克风未采集，设备与语音质量仍待验收。";
 
     /// <summary>Loads a verified local model only for the duration of this scheduled inference call.</summary>
     public Task<SpeechRecognition> TranscribeWavAsync(ReadOnlyMemory<byte> wav, bool forceChinese,
@@ -89,7 +89,7 @@ public sealed class VoiceInferenceService : IAsyncDisposable
                 "qwen3-tts-12hz-0.6b-customvoice", "85e237c12c027371202489a0ec509ded67b5e4b5");
             var asr = new PythonVoiceModelRuntime("asr", asrDefinition);
             var tts = new PythonVoiceModelRuntime("tts", ttsDefinition);
-            status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；麦克风未采集，推理仍待本机验收。";
+            status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；合成往返单样例通过，麦克风未采集，设备与语音质量仍待验收。";
             return new VoiceInferenceService(broker, asr, tts);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException

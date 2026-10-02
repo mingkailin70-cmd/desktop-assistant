@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Collections.Immutable;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Channels;
 using XiaoK.Adapters.Windows;
@@ -22,7 +23,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly LocalInferenceClient _inference;
     private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly DotNetTestRunner _dotNetTestRunner;
-    private readonly AudioGateway _voice = new();
+    private readonly WindowsMicrophoneCapture _microphone = new();
     private readonly VoiceInferenceService? _voiceInference;
     private readonly string _voiceStatus;
     private readonly ToolBroker _broker;
@@ -39,6 +40,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public AssistantRuntime(IApprovalPresenter approval)
     {
         _settings = XiaoKSettings.Load();
+        _microphone.MaximumDurationReached += OnMicrophoneMaximumDurationReached;
         Directory.CreateDirectory(_settings.DataRoot);
         _store = new SqliteTaskStore(Path.Combine(_settings.DataRoot, "tasks.sqlite3"),
             Path.Combine(_settings.DataRoot, "tasks.json"), _settings.ContactReplyStyles,
@@ -89,7 +91,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
     public string VoiceStatus => XiaoKSettings.IsDiagnosticsMode
         ? _voiceStatus
+        : _microphone.IsActive ? "语音：正在采集麦克风（最长60秒）"
         : _voiceInference is null ? _voiceStatus : _voiceInference.Status;
+    public bool IsMicrophoneActive => _microphone.IsActive;
     public string? StartupIsolationNotice => !_dotNetTestRunner.StartupIsolationRecovery.Success
         || _dotNetTestRunner.StartupIsolationRecovery.RecoveredProfiles > 0
         ? _dotNetTestRunner.StartupIsolationRecovery.Message
@@ -97,6 +101,15 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public XiaoKSettings CurrentSettings => _settings;
     public string ActiveDatabasePath => Path.Combine(_settings.DataRoot, "tasks.sqlite3");
     public event Action<PrivateNoticeAnalysisResult>? PrivateNoticeAnalysisCompleted;
+    public event Action<byte[]>? SpeechCaptureMaximumDurationReached;
+
+    public Task StartMicrophoneAsync(CancellationToken cancellationToken)
+    {
+        if (_voiceInference is null) throw new InvalidOperationException(_voiceStatus);
+        return _microphone.StartAsync(cancellationToken);
+    }
+
+    public Task<byte[]> StopMicrophoneAndReadAsync() => _microphone.StopAndReadAsync();
 
     public void UpdateNotificationSettings(XiaoKSettings settings)
     {
@@ -270,9 +283,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public bool StopMicrophone()
     {
-        var wasCapturing = _voice.IsCapturing;
-        _voice.StopImmediately();
-        return wasCapturing;
+        return _microphone.StopImmediatelyAndDiscard();
     }
 
     public Task<SpeechRecognition> TranscribeLocalWavAsync(ReadOnlyMemory<byte> wav, bool forceChinese,
@@ -294,6 +305,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         await _executionGate.WaitAsync();
         try
         {
+            await _microphone.DisposeAsync();
             if (_voiceInference is not null) await _voiceInference.DisposeAsync();
             if (_managedModelRuntime is not null) await _managedModelRuntime.DisposeAsync();
         }
@@ -302,6 +314,18 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _inference.Dispose();
             _executionGate.Release();
         }
+    }
+
+    private void OnMicrophoneMaximumDurationReached(byte[] wav)
+    {
+        var handler = SpeechCaptureMaximumDurationReached;
+        if (handler is null)
+        {
+            CryptographicOperations.ZeroMemory(wav);
+            return;
+        }
+        try { handler(wav); }
+        catch (Exception) { CryptographicOperations.ZeroMemory(wav); }
     }
 
     private async Task ProcessNoticeAnalysisQueueAsync()
