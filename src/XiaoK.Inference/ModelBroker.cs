@@ -71,6 +71,10 @@ public sealed class ModelBroker
                 {
                     await _runtime.UnloadIfIdleAsync(cancellationToken).ConfigureAwait(false);
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     Poison(ex);

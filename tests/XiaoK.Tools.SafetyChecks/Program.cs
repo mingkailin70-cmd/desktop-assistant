@@ -2277,6 +2277,61 @@ static async Task CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync()
         && externalRuntime.ActiveLeases == 0,
         "竞争模型结束后没有释放并卸载自己的运行时。");
 
+    var primaryUnloadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var primaryUnloadGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var cancellablePrimary = new TrackingModelRuntime
+    {
+        UnloadStarted = primaryUnloadStarted,
+        UnloadGate = primaryUnloadGate.Task
+    };
+    var untouchedExternal = new TrackingModelRuntime();
+    var cancellationBroker = new ModelBroker(cancellablePrimary);
+    using (var cancellation = new CancellationTokenSource())
+    {
+        var cancelledBeforeExternalStart = cancellationBroker.RunCompetingModelInteractiveAsync(
+            untouchedExternal, _ => Task.FromResult(true), cancellation.Token);
+        await primaryUnloadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        try
+        {
+            await cancelledBeforeExternalStart;
+            throw new InvalidOperationException("主模型卸载等待期间的取消没有中断竞争模型请求。");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+    }
+    Require(untouchedExternal.Acquisitions == 0 && cancellablePrimary.ActiveLeases == 0,
+        "卸载等待期间取消后仍启动了竞争模型或遗留主模型租约。");
+    var recoveredAfterUnloadCancel = await cancellationBroker.RunInteractiveAsync(
+        _ => Task.FromResult(true), CancellationToken.None);
+    Require(recoveredAfterUnloadCancel && cancellablePrimary.Acquisitions == 1,
+        "用户取消主模型卸载等待后，ModelBroker 被错误熔断。");
+
+    var cancellableExternalRuntime = new TrackingModelRuntime();
+    var externalStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var externalCancellationBroker = new ModelBroker(new TrackingModelRuntime());
+    using (var cancellation = new CancellationTokenSource())
+    {
+        var cancelledDuringExternalCall = externalCancellationBroker.RunCompetingModelInteractiveAsync(
+            cancellableExternalRuntime, async token =>
+            {
+                Require(cancellableExternalRuntime.ActiveLeases == 1,
+                    "可取消竞争操作未持有运行时租约。");
+                externalStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return true;
+            }, cancellation.Token);
+        await externalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        try
+        {
+            await cancelledDuringExternalCall;
+            throw new InvalidOperationException("竞争模型运行期间的取消没有中断操作。");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+    }
+    Require(cancellableExternalRuntime.ActiveLeases == 0 && cancellableExternalRuntime.UnloadCalls == 1,
+        "竞争模型运行期间取消后未释放租约并卸载模型。");
+
     try
     {
         await broker.RunCompetingModelBackgroundStepAsync<bool>(externalRuntime,
@@ -3044,6 +3099,8 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
     public int UnloadCalls { get; private set; }
     public int ActiveLeases => Volatile.Read(ref _activeLeases);
     public bool FailUnload { get; init; }
+    public TaskCompletionSource? UnloadStarted { get; init; }
+    public Task? UnloadGate { get; init; }
 
     public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
     {
@@ -3053,13 +3110,14 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
         return ValueTask.FromResult<IAsyncDisposable>(new Lease(this));
     }
 
-    public ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken)
+    public async ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (ActiveLeases != 0) throw new InvalidOperationException("运行时有活动租约时不能卸载。");
         UnloadCalls++;
+        UnloadStarted?.TrySetResult();
+        if (UnloadGate is not null) await UnloadGate.WaitAsync(cancellationToken);
         if (FailUnload) throw new IOException("synthetic-unload-failure");
-        return ValueTask.CompletedTask;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
