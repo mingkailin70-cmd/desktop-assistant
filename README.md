@@ -42,7 +42,7 @@ $dotnet = if (Test-Path .\.tools\dotnet\dotnet.exe) { Resolve-Path .\.tools\dotn
 - 联系人回复风格：同一 SQLite 数据库的 `contact_reply_styles` 表；旧设置中的偏好仅在首次迁移时导入，迁移标记防止用户删除后再次导入。迁移本身不改写 `settings.json`，设置页不再把新的偏好写回该文件。
 - 开发阶段主模型目录：`D:\Desktop\learn\siri\models\llm\qwen3.5-4b\f9f88ac3e234be915e23811a6d28ea287bdb927e`（已由 Git 忽略）；正式安装目标模型、缓存和评测目录：`D:\XiaoK\Models`、`D:\XiaoK\Cache`、`D:\XiaoK\Evaluations`
 
-可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。Qwen + llama.cpp 托管合成请求已通过；独立 CPU/GPU 微基准确认 GPU 配置卸载33/33层，生成均速约95.34 token/s，采样显存占用峰值4,378 MiB。该微基准不等于小K托管服务的冷启动、取消、空闲卸载、长期运行或恢复验收。签名开发版 MSIX 已安装但尚未启动；P0 与首版发布门槛仍未通过。
+可将 [设置样例](src/XiaoK.Host/settings.example.json) 复制到用户设置路径后按需调整。默认模型端点为 `http://127.0.0.1:8080/`，程序只接受回环地址。Qwen + llama.cpp 托管链路已通过合成请求；独立 CPU/GPU 微基准确认 GPU 配置卸载33/33层，生成均速约95.34 token/s、采样显存占用峰值4,378 MiB。另有一次 ModelBroker 托管生命周期复验：首请求冷启动6.28秒、热请求10样本 p50/p95 为2.82/3.51秒、取消约0.51秒、空闲262秒后卸载并可重新加载，退出后进程回收；运行峰值显存占用4,678 MiB。短样本不能证明长期稳定、压力/OOM恢复或模型质量。签名开发版 MSIX 已安装但尚未启动；P0 与首版发布门槛仍未通过。
 
 ## 文档导航
 
