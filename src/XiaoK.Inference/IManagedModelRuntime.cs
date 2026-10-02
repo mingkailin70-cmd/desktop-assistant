@@ -5,6 +5,12 @@ public interface IManagedModelRuntime : IAsyncDisposable
 {
     string Status { get; }
     ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stops this model after the shared broker has excluded every other model operation.
+    /// The runtime remains reusable by a later primary-model request.
+    /// </summary>
+    ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken);
 }
 
 public sealed class ModelRuntimeUnavailableException(string message) : Exception(message);
@@ -16,6 +22,12 @@ public sealed class UnavailableModelRuntime(string status) : IManagedModelRuntim
 
     public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken) =>
         ValueTask.FromException<IAsyncDisposable>(new ModelRuntimeUnavailableException(Status));
+
+    public ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.CompletedTask;
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

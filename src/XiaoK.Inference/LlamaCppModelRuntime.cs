@@ -152,6 +152,21 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         finally { _gate.Release(); }
     }
 
+    public async ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposeRequested || _disposed) throw new ObjectDisposedException(nameof(LlamaCppModelRuntime));
+            if (_leases != 0)
+                throw new InvalidOperationException("主模型仍有活动租约；拒绝与其他大型模型并存。");
+
+            CancelIdleStop();
+            await StopCoreAsync().ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async ValueTask DisposeAsync()
     {
         Task? idleStopTask;

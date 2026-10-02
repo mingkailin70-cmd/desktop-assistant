@@ -84,6 +84,12 @@ if (args.Length == 1 && args[0] == "--only-app-launch")
     Console.WriteLine("通过：白名单应用启动参数、启动失败状态和本地/远程 VS Code 窗口筛选。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-cross-model-arbitration")
+{
+    await CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync();
+    Console.WriteLine("通过：竞争模型共用交互优先队列，启动前卸载主模型，结束后不遗留租约。");
+    return;
+}
 var skipAppContainerChecks = args.Length == 1 && args[0] == "--without-appcontainer";
 if (args.Length != 0 && !skipAppContainerChecks)
 {
@@ -234,6 +240,9 @@ try
 
     await CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync();
     passed.Add("交互推理在编程代理的后台步骤边界优先执行");
+
+    await CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync();
+    passed.Add("ASR/TTS等竞争模型共用交互优先队列，主模型在竞争运行前卸载");
 
     await CheckContactReplyStylesUseFixedUserPreferencesAsync();
     passed.Add("回复草稿仅使用用户确认的固定风格，且联系人名称不进入模型请求");
@@ -2220,6 +2229,99 @@ static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAs
         "后台步骤结束后，交互请求没有优先于下一后台步骤执行。");
 }
 
+static async Task CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync()
+{
+    var runtime = new TrackingModelRuntime();
+    var externalRuntime = new TrackingModelRuntime();
+    var broker = new ModelBroker(runtime);
+    var firstStepStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var releaseFirstStep = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var order = new ConcurrentQueue<string>();
+
+    var firstBackgroundStep = broker.RunBackgroundStepAsync(async token =>
+    {
+        Require(runtime.ActiveLeases == 1, "首个主模型后台步骤没有持有主模型租约。");
+        firstStepStarted.TrySetResult();
+        await releaseFirstStep.Task.WaitAsync(token);
+        order.Enqueue("主模型后台步骤1结束");
+        return "primary-step-1";
+    }, CancellationToken.None);
+
+    await firstStepStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    var secondBackgroundStep = broker.RunBackgroundStepAsync(token =>
+    {
+        Require(runtime.ActiveLeases == 1, "后续主模型后台步骤没有持有主模型租约。");
+        order.Enqueue("主模型后台步骤2");
+        return Task.FromResult("primary-step-2");
+    }, CancellationToken.None);
+    var externalInteractive = broker.RunCompetingModelInteractiveAsync(externalRuntime, token =>
+    {
+        Require(runtime.ActiveLeases == 0, "竞争模型运行期间主模型租约仍活动。");
+        Require(runtime.UnloadCalls == 1, "竞争模型启动前没有请求卸载主模型。");
+        Require(externalRuntime.ActiveLeases == 1, "竞争模型运行期间没有持有自己的运行时租约。");
+        order.Enqueue("竞争模型交互请求");
+        return Task.FromResult("external-interactive");
+    }, CancellationToken.None);
+
+    releaseFirstStep.TrySetResult();
+    var results = await Task.WhenAll(firstBackgroundStep, secondBackgroundStep, externalInteractive)
+        .WaitAsync(TimeSpan.FromSeconds(5));
+    var sequence = order.ToArray();
+    Require(results.Contains("external-interactive"), "竞争模型交互请求没有返回。");
+    Require(Array.IndexOf(sequence, "主模型后台步骤1结束") < Array.IndexOf(sequence, "竞争模型交互请求")
+        && Array.IndexOf(sequence, "竞争模型交互请求") < Array.IndexOf(sequence, "主模型后台步骤2"),
+        "主模型后台步骤边界没有让交互竞争模型先运行。");
+    Require(runtime.Acquisitions == 2 && runtime.UnloadCalls == 1 && runtime.ActiveLeases == 0,
+        "竞争模型调用错误获取主模型租约或遗留运行时租约。");
+    Require(externalRuntime.Acquisitions == 1 && externalRuntime.UnloadCalls == 1
+        && externalRuntime.ActiveLeases == 0,
+        "竞争模型结束后没有释放并卸载自己的运行时。");
+
+    try
+    {
+        await broker.RunCompetingModelBackgroundStepAsync<bool>(externalRuntime,
+            _ => throw new IOException("external-synthetic"), CancellationToken.None);
+        throw new InvalidOperationException("预期的竞争模型后台失败没有发生。");
+    }
+    catch (IOException ex) when (ex.Message == "external-synthetic") { }
+    Require(runtime.ActiveLeases == 0 && runtime.UnloadCalls == 2
+        && externalRuntime.ActiveLeases == 0 && externalRuntime.UnloadCalls == 2,
+        "竞争模型步骤失败后主模型或竞争模型租约/卸载状态不正确。");
+
+    var guardedPrimaryRuntime = new TrackingModelRuntime();
+    var failingExternalRuntime = new TrackingModelRuntime { FailUnload = true };
+    var guardedBroker = new ModelBroker(guardedPrimaryRuntime);
+    try
+    {
+        await guardedBroker.RunCompetingModelInteractiveAsync(failingExternalRuntime,
+            _ => Task.FromResult(true), CancellationToken.None);
+        throw new InvalidOperationException("外部运行时卸载失败后应当让调度器关闭。");
+    }
+    catch (ModelBrokerUnavailableException) { }
+
+    try
+    {
+        await guardedBroker.RunInteractiveAsync(_ => Task.FromResult(true), CancellationToken.None);
+        throw new InvalidOperationException("资源状态不明后调度器仍接受了主模型请求。");
+    }
+    catch (ModelBrokerUnavailableException) { }
+    Require(guardedPrimaryRuntime.Acquisitions == 0 && failingExternalRuntime.ActiveLeases == 0,
+        "卸载失败后调度器仍启动主模型或留下竞争模型租约。");
+
+    var failingPrimaryRuntime = new TrackingModelRuntime { FailUnload = true };
+    var untouchedExternalRuntime = new TrackingModelRuntime();
+    var primaryGuardedBroker = new ModelBroker(failingPrimaryRuntime);
+    try
+    {
+        await primaryGuardedBroker.RunCompetingModelInteractiveAsync(untouchedExternalRuntime,
+            _ => Task.FromResult(true), CancellationToken.None);
+        throw new InvalidOperationException("主模型卸载失败后不应启动竞争模型。");
+    }
+    catch (ModelBrokerUnavailableException) { }
+    Require(untouchedExternalRuntime.Acquisitions == 0 && failingPrimaryRuntime.UnloadCalls == 1,
+        "主模型卸载失败后仍启动了竞争模型。");
+}
+
 static async Task CheckModelRuntimeLeaseWrapsEachInferenceStepAsync()
 {
     var runtime = new TrackingModelRuntime();
@@ -2939,7 +3041,9 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
     private int _activeLeases;
     public string Status => "测试运行时";
     public int Acquisitions { get; private set; }
+    public int UnloadCalls { get; private set; }
     public int ActiveLeases => Volatile.Read(ref _activeLeases);
+    public bool FailUnload { get; init; }
 
     public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
     {
@@ -2947,6 +3051,15 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
         Acquisitions++;
         Interlocked.Increment(ref _activeLeases);
         return ValueTask.FromResult<IAsyncDisposable>(new Lease(this));
+    }
+
+    public ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ActiveLeases != 0) throw new InvalidOperationException("运行时有活动租约时不能卸载。");
+        UnloadCalls++;
+        if (FailUnload) throw new IOException("synthetic-unload-failure");
+        return ValueTask.CompletedTask;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
