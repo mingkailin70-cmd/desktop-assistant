@@ -2,6 +2,8 @@
 
 日期：2026-10-03。此记录证明固定 SDK 可生成含 .NET 运行时的 Windows x64 Host 并通过 MSIX 结构检查；不代表签名安装、应用运行或首版门槛通过。
 
+后续进度（2026-10-03）：清单 Publisher 已固定为 `CN=XiaoK Local Development`。新增本机开发证书脚本后，SignTool 已成功签名 82,564,395 字节自包含 MSIX，MakeAppx 解包检查成功。`Get-AuthenticodeSignature` 和 `SignTool verify /pa` 因证书链尚未受信任而返回根证书不受信任；这是尚未导入公钥证书的预期状态。签名证书未导入受信任存储，包仍未安装或启动，首次安装、授权、登录启动、应用功能、重启恢复和回滚仍待实机验收。
+
 ## 可复现命令
 
 在仓库根目录使用 Windows PowerShell 5.1：
@@ -22,4 +24,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\publish_xiaok.ps1
 
 ## 未验证范围
 
-验证包没有签名、安装或启动；没有验证本机证书信任、Windows 通知/麦克风授权、登录启动、升级/卸载、重启恢复、模型/语音部署与回滚。manifest 的 Publisher 仍为占位值；完成安装测试前必须先确定证书身份与证书保管方式。自包含只解决随包 .NET 运行时，不包含模型权重、Python 语音环境、数据库或用户数据迁移。
+原始验证包没有签名、安装或启动；后续签名包尚未导入本机信任或安装。没有验证 Windows 通知/麦克风授权、登录启动、升级/卸载、重启恢复、模型/语音部署与回滚。自包含只解决随包 .NET 运行时，不包含模型权重、Python 语音环境、数据库或用户数据迁移。

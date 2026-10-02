@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$PublishDirectory = 'artifacts\publish\win-x64',
-    [string]$WindowsSdkVersion = '10.0.26100.0'
+    [string]$WindowsSdkVersion = '10.0.26100.0',
+    [string]$CertificateThumbprint = ''
 )
 
 Set-StrictMode -Version Latest
@@ -52,6 +53,11 @@ if (-not (Test-Path -LiteralPath $makeAppxPath -PathType Leaf)) {
 }
 
 $manifestPath = Join-Path $repositoryRoot 'src\XiaoK.Host\Package.appxmanifest'
+$manifest = [xml](Get-Content -LiteralPath $manifestPath -Raw)
+$publisher = [string]$manifest.Package.Identity.Publisher
+if ([string]::IsNullOrWhiteSpace($publisher) -or $publisher -match 'TODO|PLACEHOLDER') {
+    throw 'Package.appxmanifest must use the configured local publisher before packaging.'
+}
 $assetsPath = Join-Path $repositoryRoot 'src\XiaoK.Host\Assets'
 foreach ($assetName in @('StoreLogo.png', 'Square150x150Logo.png', 'Square44x44Logo.png')) {
     if (-not (Test-Path -LiteralPath (Join-Path $assetsPath $assetName) -PathType Leaf)) {
@@ -61,7 +67,8 @@ foreach ($assetName in @('StoreLogo.png', 'Square150x150Logo.png', 'Square44x44L
 
 $validationRoot = Join-Path $artifactRoot (Join-Path 'msix-validation' ([guid]::NewGuid().ToString('N')))
 $layoutPath = Join-Path $validationRoot 'layout'
-$packagePath = Join-Path $validationRoot 'XiaoK-unsigned-validation.msix'
+$packageName = if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { 'XiaoK-unsigned-validation.msix' } else { 'XiaoK-signed-validation.msix' }
+$packagePath = Join-Path $validationRoot $packageName
 New-Item -ItemType Directory -Path $layoutPath -Force | Out-Null
 Copy-Item -Path (Join-Path $publishPath '*') -Destination $layoutPath -Recurse
 New-Item -ItemType Directory -Path (Join-Path $layoutPath 'Assets') -Force | Out-Null
@@ -73,7 +80,48 @@ if ($LASTEXITCODE -ne 0) {
     throw "MakeAppx failed with exit code $LASTEXITCODE. Review the preserved validation layout: $validationRoot"
 }
 
+if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+    $thumbprint = ($CertificateThumbprint -replace '\s', '').ToUpperInvariant()
+    if ($thumbprint -notmatch '^[0-9A-F]{40}$') {
+        throw 'CertificateThumbprint must be the 40-character SHA-1 thumbprint of the local development certificate.'
+    }
+
+    $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -ErrorAction Stop
+    if (-not $certificate.HasPrivateKey -or $certificate.Subject -cne $publisher -or $certificate.NotBefore -gt (Get-Date) -or $certificate.NotAfter -le (Get-Date)) {
+        throw 'The selected certificate must be current, include its private key, and exactly match the manifest Publisher.'
+    }
+
+    $hasCodeSigningEku = $false
+    $hasDigitalSignatureUsage = $false
+    foreach ($extension in $certificate.Extensions) {
+        if ($extension -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]) {
+            $hasCodeSigningEku = @($extension.EnhancedKeyUsages | Where-Object { $_.Value -eq '1.3.6.1.5.5.7.3.3' }).Count -gt 0
+        }
+        if ($extension -is [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]) {
+            $digitalSignatureFlag = [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature
+            $hasDigitalSignatureUsage = ([int]$extension.KeyUsages -band [int]$digitalSignatureFlag) -ne 0
+        }
+    }
+    if (-not $hasCodeSigningEku -or -not $hasDigitalSignatureUsage) {
+        throw 'The selected certificate must include the Code Signing EKU and Digital Signature key usage.'
+    }
+
+    $signToolPath = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\$WindowsSdkVersion\x64\signtool.exe"
+    if (-not (Test-Path -LiteralPath $signToolPath -PathType Leaf)) {
+        throw "SignTool.exe not found for Windows SDK $WindowsSdkVersion. No tool was downloaded."
+    }
+    & $signToolPath sign /fd SHA256 /sha1 $thumbprint $packagePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "SignTool failed with exit code $LASTEXITCODE. The package remains in $validationRoot"
+    }
+    Write-Output "Package signed with CurrentUser certificate $thumbprint. Certificate trust and installation were not changed."
+}
+
 $package = Get-Item -LiteralPath $packagePath
-Write-Output "Unsigned validation package: $($package.FullName)"
+Write-Output "Validation package: $($package.FullName)"
 Write-Output "Package bytes: $($package.Length)"
-Write-Output 'This script does not sign, install, or launch the package.'
+if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+    Write-Output 'The package was signed but not installed, launched, or added to a trusted certificate store.'
+} else {
+    Write-Output 'This script does not sign, install, or launch the package.'
+}
