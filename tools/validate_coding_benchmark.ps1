@@ -9,8 +9,10 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $root = (Resolve-Path -LiteralPath $DatasetRoot -ErrorAction Stop).Path
 $manifestPath = Join-Path $root 'manifest.json'
 $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $manifestPath | ConvertFrom-Json
-if ($manifest.version -ne 'coding-zh-v2' -or $manifest.schemaVersion -ne 2) {
-    throw '仅支持 schemaVersion=2 的 coding-zh-v2 评测集。'
+$taskFileName = switch ([string]$manifest.version) {
+    'coding-zh-v2' { if ($manifest.schemaVersion -ne 2) { throw 'coding-zh-v2 必须使用 schemaVersion=2。' }; 'coding_tasks_v2.jsonl' }
+    'coding-zh-v3' { if ($manifest.schemaVersion -ne 3) { throw 'coding-zh-v3 必须使用 schemaVersion=3。' }; 'coding_tasks_v3.jsonl' }
+    default { throw '只支持 coding-zh-v2 或 coding-zh-v3 固定评测集。' }
 }
 if ($manifest.status -ne 'targets-and-fixture-audited-not-scored') {
     throw '评测集状态字段不符合未评分版本要求。'
@@ -37,8 +39,9 @@ foreach ($entry in $manifest.files) {
     if ($actualHash -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "SHA-256 不匹配：$relativePath" }
 }
 
-$taskPath = Join-Path $root 'coding_tasks_v2.jsonl'
-$reviewPath = Join-Path $root 'review_key_v2.jsonl'
+$taskPath = Join-Path $root $taskFileName
+$reviewFileName = if ($manifest.version -eq 'coding-zh-v3') { 'review_key_v3.jsonl' } else { 'review_key_v2.jsonl' }
+$reviewPath = Join-Path $root $reviewFileName
 $tasks = @(Get-Content -Encoding UTF8 -LiteralPath $taskPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
 $reviews = @(Get-Content -Encoding UTF8 -LiteralPath $reviewPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
 if ($tasks.Count -ne 40 -or [int]$manifest.taskCount -ne 40) { throw "必須恰好40题；当前为 $($tasks.Count)" }
@@ -66,6 +69,9 @@ foreach ($task in $tasks) {
     if ($null -eq $task.targetFiles -or @($task.targetFiles).Count -eq 0) { throw "题目缺少 targetFiles：$id" }
     if ($task.PSObject.Properties.Name -contains 'target') { throw "题目仍保留含糊的旧 target 字段：$id" }
     if ([string]::IsNullOrWhiteSpace([string]$task.prompt) -or [string]::IsNullOrWhiteSpace([string]$task.acceptance)) { throw "题目提示或验收条件为空：$id" }
+    if ($manifest.version -eq 'coding-zh-v3' -and $category -eq 'S' -and ([string]$task.prompt).IndexOf([string]$task.acceptance, [StringComparison]::Ordinal) -lt 0) {
+        throw "v3 单文件修改题提示必须包含实际任务要求：$id"
+    }
     if ($task.networkAllowed -ne $false -or $task.externalSideEffectsAllowed -ne $false) { throw "题目意外允许联网或外部副作用：$id" }
 
     $targetCount = @($task.targetFiles).Count
@@ -121,5 +127,5 @@ foreach ($id in 1..10) {
 }
 if ((Get-Content -Raw -Encoding UTF8 -LiteralPath $fixtureProject) -match '<PackageReference\b') { throw '修复夹具不允许新增第三方 NuGet 依赖。' }
 
-Write-Output "结构验证通过：40题（R/S/M/F 各10题），40份评审答案，目标范围锁定到 $baseline。"
+Write-Output "结构验证通过：$($manifest.version) 40题（R/S/M/F 各10题），40份评审答案，目标范围锁定到 $baseline。"
 Write-Output '未运行本地模型或夹具；本结果不代表模型成功率或 P0 发布门槛通过。'

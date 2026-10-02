@@ -111,6 +111,7 @@ try
         skipped.Add("AppContainer 超时与进程回收检查按显式诊断参数跳过；隔离边界仍未通过验收");
         skipped.Add("AppContainer 取消与进程回收检查按显式诊断参数跳过；隔离边界仍未通过验收");
         skipped.Add("AppContainer Host 崩溃恢复检查按显式诊断参数跳过；隔离边界仍未通过验收");
+        skipped.Add("AppContainer 离线 .NET 还原与运行检查按显式诊断参数跳过；隔离边界仍未通过验收");
     }
     else
     {
@@ -125,6 +126,9 @@ try
 
         await CheckAppContainerHostCrashRecoveryAsync(tempRoot);
         passed.Add("强制结束 Host 后下次启动会回收遗留 ACL、临时身份和恢复记录");
+
+        await CheckOfflineRepairFixtureRunnerAsync(tempRoot);
+        passed.Add("AppContainer 在无网络条件下完成固定 .NET 夹具还原与运行");
     }
 
     CheckAppContainerRecoveryRejectsCorruptManifest(tempRoot);
@@ -167,7 +171,7 @@ try
     passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
 
     await CheckValidPatchIsIsolatedAsync(tempRoot);
-    passed.Add("有效补丁只写隔离工作区，保留 CRLF，并记录待审阅状态");
+    passed.Add("单文件项目确定性选择唯一源文件；有效补丁只写隔离工作区、保留 CRLF，并记录待审阅状态");
 
     await CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(tempRoot);
     passed.Add("编程代理拒绝代码围栏、额外文本、未知字段和重复JSON字段，原项目保持不变");
@@ -365,6 +369,31 @@ static async Task CheckAppContainerFileBoundaryAsync(string root)
         "AppContainer 没有确认临时授权和身份已回收。");
     Require(result.Output.Contains("测试步骤未授予网络能力", StringComparison.Ordinal),
         "测试步骤没有报告其 AppContainer 网络能力配置。");
+
+}
+
+static async Task CheckOfflineRepairFixtureRunnerAsync(string root)
+{
+    var workspace = Path.Combine(root, "offline-dotnet-fixture");
+    var fixture = Path.Combine(workspace, "repair-fixture");
+    var verification = Path.Combine(workspace, ".verification");
+    Directory.CreateDirectory(fixture);
+    await File.WriteAllTextAsync(Path.Combine(fixture, "RepairFixture.csproj"),
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>",
+        new UTF8Encoding(false));
+    await File.WriteAllTextAsync(Path.Combine(fixture, "Program.cs"),
+        "Console.WriteLine(\"OFFLINE_FIXTURE_OK\");\n", new UTF8Encoding(false));
+
+    var repositoryRoot = FindRepositoryRoot();
+    var runner = new DotNetTestRunner(repositoryRoot, Path.Combine(root, "offline-dotnet-recovery"));
+    var executable = runner.ExecutablePath ?? throw new InvalidOperationException("仓库固定的 dotnet SDK 不可用。");
+    var result = await runner.RunOfflineRepairFixtureAsync(workspace, verification, executable,
+        CancellationToken.None);
+    Require(result.RestoreStarted && result.RestoreExitCode == 0,
+        "AppContainer 离线还原夹具失败：" + result.Output);
+    Require(result.TestStarted && result.TestExitCode == 0
+        && result.Output.Contains("OFFLINE_FIXTURE_OK", StringComparison.Ordinal),
+        "AppContainer 离线运行夹具失败：" + result.Output);
 }
 
 static async Task CheckAppContainerTimeoutAsync(string root)
@@ -708,11 +737,12 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
     var project = CreateProject(root, "valid", "class Sample {\r\n    int Value = 1;\r\n}\r\n");
     var workspaceRoot = Path.Combine(root, "valid-workspaces");
     var inference = new ScriptedInference(
-        "{\"paths\":[\"Sample.cs\"]}",
         "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample {\\r\\n    int Value = 2;\\r\\n}\\r\\n\"}]}");
     var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Value 改为 2", CancellationToken.None);
 
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval, "有效补丁未进入待审阅状态。");
+    Require(inference.CallCount == 1 && inference.Prompts.Single().Contains("所选源文件JSON", StringComparison.Ordinal),
+        "唯一可读文件没有直接进入补丁步骤。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample {\r\n    int Value = 1;\r\n}\r\n", "原项目被改动。");
     var taskDirectory = Directory.GetDirectories(workspaceRoot).Single();
     var workspaceFile = Path.Combine(taskDirectory, "workspace", "Sample.cs");
@@ -746,6 +776,7 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
         var testCase = cases[index];
         var caseName = "strict-json-" + index;
         var project = CreateProject(root, caseName, source);
+        File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
         var workspaceRoot = Path.Combine(root, caseName + "-workspaces");
         var inference = new ScriptedInference(testCase.Selection, testCase.Patch);
         var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
@@ -771,6 +802,7 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
     const string original = "class Sample { int Value = 7; }\n";
     const string explanation = "入口位于 Sample.Value；这个字段当前初始化为 7。";
     var project = CreateProject(root, "code-inspection", original);
+    File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "code-inspection-workspaces");
     var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}", explanation);
     var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
@@ -1680,6 +1712,7 @@ static async Task CheckAppLaunchCancellationIsTruthfulAsync()
 static async Task CheckModelCannotSelectOutsidePathAsync(string root)
 {
     var project = CreateProject(root, "bad-selection", "class Sample {}\n");
+    File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var inference = new ScriptedInference("{\"paths\":[\"../outside.txt\"]}");
     var result = await NewAgent(inference).ExecuteAsync(project, Path.Combine(root, "bad-selection-workspaces"), "修改项目", CancellationToken.None);
     Require(!result.Success && result.ErrorCode == "CODE_TASK_FAILED", "清单外文件选择未被拒绝。");
@@ -1690,6 +1723,7 @@ static async Task CheckModelCannotSelectOutsidePathAsync(string root)
 static async Task CheckModelCannotPatchOutsidePathAsync(string root)
 {
     var project = CreateProject(root, "bad-patch", "class Sample {}\n");
+    File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var outside = Path.Combine(root, "outside-sentinel.txt");
     const string sentinel = "preserve-this-file";
     File.WriteAllText(outside, sentinel);
@@ -1736,6 +1770,7 @@ static async Task CheckCancellationPersistsAsync(string root)
 static async Task CheckWorkspaceRetentionLimitAsync(string root)
 {
     var project = CreateProject(root, "retention", "class Sample {}\n");
+    File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var workspace = Path.Combine(root, "retention-workspaces");
     var responses = Enumerable.Range(0, 5).SelectMany(_ => new[] { "{\"paths\":[]}" }).ToArray();
     var inference = new ScriptedInference(responses);
@@ -2502,7 +2537,7 @@ static void CheckLocalInferenceClientRejectsNonLoopbackEndpoints()
 
 static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
 {
-    var responseBody = "{\"choices\":[{\"message\":{\"content\":\"本机测试回答\"}}]}";
+    var responseBody = "{\"choices\":[{\"finish_reason\":\"length\",\"message\":{\"content\":\"本机测试回答\",\"reasoning_content\":\"不保存的推理诊断文本\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11}}";
     var listener = new TcpListener(IPAddress.Loopback, 0);
     listener.Start();
     using var requestTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
@@ -2512,14 +2547,21 @@ static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
         var server = ServeOneLoopbackHttpRequestAsync(listener, HttpStatusCode.OK, responseBody, null,
             requestTimeout.Token);
         using var client = new LocalInferenceClient($"http://127.0.0.1:{port}/");
-        var answer = await client.CompleteAsync("仅本地系统提示", "仅本地用户消息", requestTimeout.Token);
+        LocalInferenceResponseDiagnostics? diagnostics = null;
+        client.ResponseCompleted += value => diagnostics = value;
+        var answer = await client.CompleteAsync("仅本地系统提示", "仅本地用户消息",
+            new InferenceRequestOptions(DisableThinking: true, JsonObject: true), requestTimeout.Token);
         var request = await server.WaitAsync(TimeSpan.FromSeconds(3));
         using var payload = JsonDocument.Parse(request.Body);
         var messages = payload.RootElement.GetProperty("messages");
         Require(answer == "本机测试回答"
+            && diagnostics is { ContentCharacters: 6, ReasoningCharacters: 10, PromptTokens: 7, CompletionTokens: 11, FinishReason: "length" }
+            && !JsonSerializer.Serialize(diagnostics).Contains("不保存的推理诊断文本", StringComparison.Ordinal)
             && request.Headers.StartsWith("POST /v1/chat/completions HTTP/", StringComparison.Ordinal)
             && messages[0].GetProperty("content").GetString() == "仅本地系统提示"
-            && messages[1].GetProperty("content").GetString() == "仅本地用户消息",
+            && messages[1].GetProperty("content").GetString() == "仅本地用户消息"
+            && payload.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").ValueKind == JsonValueKind.False
+            && payload.RootElement.GetProperty("response_format").GetProperty("type").GetString() == "json_object",
             "本地推理客户端未向 loopback 发送预期接口请求，或未解析兼容响应。");
     }
     finally { listener.Stop(); }
@@ -2723,7 +2765,21 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
     await File.WriteAllTextAsync(manifestPath, validManifest);
     var runtime = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
     if (runtime is null) throw new InvalidOperationException("有效的固定清单未能加载托管运行时。");
+    Require(runtime.ContextTokens == 4096, "没有请求覆盖时，托管运行时未采用锁定上下文长度。");
     await runtime.DisposeAsync();
+
+    var evaluationRuntime = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/",
+        contextTokensOverride: 6144);
+    if (evaluationRuntime is null || evaluationRuntime.ContextTokens != 6144)
+        throw new InvalidOperationException("本地评测未能显式覆盖上下文长度。");
+    await evaluationRuntime.DisposeAsync();
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/",
+            contextTokensOverride: 8193);
+        throw new InvalidOperationException("超出范围的评测上下文覆盖没有被拒绝。");
+    }
+    catch (InvalidDataException) { }
 
     await File.WriteAllTextAsync(manifestPath, """
         {
@@ -2832,7 +2888,6 @@ static bool CheckDirectoryJunction(string root, out string skipReason)
     {
         var workspaceRoot = Path.Combine(root, "link-workspaces");
         var inference = new ScriptedInference(
-            "{\"paths\":[\"Sample.cs\"]}",
             "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
         var result = NewAgent(inference).ExecuteAsync(project, workspaceRoot, "改值", CancellationToken.None).GetAwaiter().GetResult();
         Require(result.Success, "普通文件代码任务在项目含目录联接时失败。");

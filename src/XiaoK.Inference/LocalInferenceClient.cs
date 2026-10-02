@@ -29,19 +29,31 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
         _http = new HttpClient(handler) { BaseAddress = EnsureTrailingSlash(uri), Timeout = TimeSpan.FromMinutes(3) };
     }
 
+    /// <summary>Emits response sizes and token/finish metadata only; response text is never included.</summary>
+    public event Action<LocalInferenceResponseDiagnostics>? ResponseCompleted;
+
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken)
+        => await CompleteAsync(systemPrompt, userPrompt, new InferenceRequestOptions(), cancellationToken);
+
+    public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, InferenceRequestOptions options,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(systemPrompt);
         ArgumentNullException.ThrowIfNull(userPrompt);
+        ArgumentNullException.ThrowIfNull(options);
         if (Encoding.UTF8.GetByteCount(systemPrompt) + Encoding.UTF8.GetByteCount(userPrompt) > MaximumPromptUtf8Bytes)
             throw new ArgumentException("Local inference prompt exceeds the configured size limit.");
 
-        var payload = new
+        var payload = new Dictionary<string, object?>
         {
-            model = "local-model",
-            stream = false,
-            messages = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
+            ["model"] = "local-model",
+            ["stream"] = false,
+            ["messages"] = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
         };
+        if (options.DisableThinking)
+            payload["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = false };
+        if (options.JsonObject)
+            payload["response_format"] = new Dictionary<string, string> { ["type"] = "json_object" };
         using var request = new HttpRequestMessage(HttpMethod.Post, "v1/chat/completions")
         {
             Content = JsonContent.Create(payload)
@@ -68,10 +80,40 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
         boundedContent.Position = 0;
         using var json = await JsonDocument.ParseAsync(boundedContent,
             new JsonDocumentOptions { MaxDepth = 32 }, cancellationToken);
-        return json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim()
-            ?? throw new InvalidDataException("Local inference returned no text.");
+        var root = json.RootElement;
+        var choice = root.GetProperty("choices")[0];
+        var message = choice.GetProperty("message");
+        var content = message.TryGetProperty("content", out var contentElement)
+            && contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString()?.Trim()
+                : null;
+        var reasoningCharacters = message.TryGetProperty("reasoning_content", out var reasoningElement)
+            && reasoningElement.ValueKind == JsonValueKind.String
+                ? reasoningElement.GetString()?.Length ?? 0
+                : 0;
+        var finishReason = choice.TryGetProperty("finish_reason", out var finishElement)
+            && finishElement.ValueKind == JsonValueKind.String
+                ? finishElement.GetString()
+                : null;
+        var promptTokens = ReadTokenCount(root, "prompt_tokens");
+        var completionTokens = ReadTokenCount(root, "completion_tokens");
+        var diagnostics = new LocalInferenceResponseDiagnostics(content?.Length ?? 0, reasoningCharacters,
+            promptTokens, completionTokens, finishReason);
+        try { ResponseCompleted?.Invoke(diagnostics); }
+        catch (Exception) { /* Diagnostics must never change inference behavior. */ }
+
+        return content ?? throw new InvalidDataException("Local inference returned no text.");
     }
 
     public void Dispose() => _http.Dispose();
     private static Uri EnsureTrailingSlash(Uri uri) => uri.AbsoluteUri.EndsWith('/') ? uri : new Uri(uri.AbsoluteUri + "/");
+
+    private static int ReadTokenCount(JsonElement root, string property) =>
+        root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object
+        && usage.TryGetProperty(property, out var value) && value.TryGetInt32(out var count)
+            ? Math.Max(0, count)
+            : 0;
 }
+
+public sealed record LocalInferenceResponseDiagnostics(int ContentCharacters, int ReasoningCharacters,
+    int PromptTokens, int CompletionTokens, string? FinishReason);

@@ -65,7 +65,12 @@ public interface ITaskStore
 public interface IInferenceClient
 {
     Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken);
+
+    Task<string> CompleteAsync(string systemPrompt, string userPrompt, InferenceRequestOptions options,
+        CancellationToken cancellationToken) => CompleteAsync(systemPrompt, userPrompt, cancellationToken);
 }
+
+public sealed record InferenceRequestOptions(bool DisableThinking = false, bool JsonObject = false);
 public interface ITool
 {
     string Id { get; }

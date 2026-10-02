@@ -89,6 +89,79 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
             "依赖还原输出：\n" + restore.Output + "\n测试输出：\n" + test.Output);
     }
 
+    /// <summary>
+    /// Runs the fixed synthetic benchmark fixture without any network capability. Both restore
+    /// and execution happen in the same AppContainer profile used by ordinary code verification.
+    /// </summary>
+    public async Task<DotNetTestExecutionResult> RunOfflineRepairFixtureAsync(string workspacePath,
+        string verificationRoot, string approvedExecutablePath, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(approvedExecutablePath) || !File.Exists(approvedExecutablePath)
+            || !string.Equals(Path.GetFullPath(approvedExecutablePath), ExecutablePath, StringComparison.OrdinalIgnoreCase))
+            return new(false, null, false, null, null, "dotnet.exe 路径已变化；没有运行命令。");
+
+        const string targetRelativePath = "repair-fixture/RepairFixture.csproj";
+        if (!TryResolveTarget(workspacePath, targetRelativePath, out var workingDirectory, out var targetFile)
+            || !TryResolveVerificationRoot(workspacePath, verificationRoot, out var resolvedVerificationRoot))
+            return new(false, null, false, null, null, "隔离工作区中的固定修复夹具目标失效或越界；没有运行命令。");
+
+        string emptyFeed;
+        string packageCache;
+        string tempRoot;
+        string dotNetHome;
+        string userProfileRoot;
+        string roamingRoot;
+        string localRoot;
+        string nugetConfig;
+        try
+        {
+            Directory.CreateDirectory(resolvedVerificationRoot);
+            if ((File.GetAttributes(resolvedVerificationRoot) & FileAttributes.ReparsePoint) != 0)
+                return new(false, null, false, null, null, "验证缓存目录是重解析点；没有运行命令。");
+            emptyFeed = Path.Combine(resolvedVerificationRoot, "empty-feed");
+            packageCache = Path.Combine(resolvedVerificationRoot, "packages");
+            tempRoot = Path.Combine(resolvedVerificationRoot, "temp");
+            dotNetHome = Path.Combine(resolvedVerificationRoot, "dotnet-home");
+            userProfileRoot = Path.Combine(resolvedVerificationRoot, "user-profile");
+            roamingRoot = Path.Combine(resolvedVerificationRoot, "appdata-roaming");
+            localRoot = Path.Combine(resolvedVerificationRoot, "appdata-local");
+            nugetConfig = Path.Combine(resolvedVerificationRoot, "NuGet.Config");
+            Directory.CreateDirectory(emptyFeed);
+            Directory.CreateDirectory(packageCache);
+            Directory.CreateDirectory(tempRoot);
+            Directory.CreateDirectory(dotNetHome);
+            Directory.CreateDirectory(userProfileRoot);
+            Directory.CreateDirectory(roamingRoot);
+            Directory.CreateDirectory(localRoot);
+            File.WriteAllText(nugetConfig,
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?><configuration><packageSources><clear/><add key=\"offline-empty\" value=\""
+                    + System.Security.SecurityElement.Escape(emptyFeed)
+                    + "\"/></packageSources></configuration>", new UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return new(false, null, false, null, null, "无法准备离线修复夹具；没有运行命令。");
+        }
+
+        var restore = await RunCommandAsync(approvedExecutablePath, workingDirectory, workspacePath,
+            ["restore", targetFile, "--configfile", nugetConfig, "--source", emptyFeed, "--packages", packageCache,
+                "-p:NuGetAudit=false"],
+            dotNetHome, packageCache, tempRoot, userProfileRoot, roamingRoot, localRoot,
+            allowInternet: false, cancellationToken);
+        if (!restore.Started || restore.TimedOut || restore.ExitCode != 0)
+            return new(restore.Started, restore.ExitCode, false, null,
+                restore.TimedOut ? "dotnet restore (offline fixture)" : null, "离线依赖还原输出：\n" + restore.Output);
+
+        var run = await RunCommandAsync(approvedExecutablePath, workingDirectory, workspacePath,
+            ["run", "--project", targetFile, "--no-restore"],
+            dotNetHome, packageCache, tempRoot, userProfileRoot, roamingRoot, localRoot,
+            allowInternet: false, cancellationToken);
+        return new(true, restore.ExitCode, run.Started, run.ExitCode,
+            run.TimedOut ? "dotnet run (offline fixture)" : null,
+            "离线依赖还原输出：\n" + restore.Output + "\n夹具执行输出：\n" + run.Output);
+    }
+
     public static string? ResolveExecutablePath(string? repositoryRoot)
     {
         var candidates = new List<string>();
@@ -208,6 +281,12 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
         environment["SystemRoot"] = systemRoot;
         environment["WINDIR"] = systemRoot;
         environment["PATH"] = dotNetRoot + Path.PathSeparator + system32;
+        // NuGet computes the machine-wide config root from PROGRAMFILES(X86), then
+        // PROGRAMFILES as a fallback. This restricted environment deliberately omits
+        // host-wide paths, so point both variables at the already-read-only SDK root.
+        // NuGet config discovery then stays inside the command's existing read boundary.
+        environment["PROGRAMFILES(X86)"] = dotNetRoot;
+        environment["PROGRAMFILES"] = dotNetRoot;
         environment["DOTNET_ROOT"] = dotNetRoot;
         environment["DOTNET_ROOT_X64"] = dotNetRoot;
         environment["DOTNET_CLI_HOME"] = dotNetHome;

@@ -75,7 +75,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         : "托管 llama.cpp 最近一次卸载未能确认；下次请求会先检查运行进程。";
 
     /// <summary>Returns null only when no manifest is present. An invalid present manifest must not silently fall back.</summary>
-    public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint, IGpuMemoryProbe? gpuMemoryProbe = null)
+    public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint, IGpuMemoryProbe? gpuMemoryProbe = null,
+        int? contextTokensOverride = null)
     {
         if (!Path.IsPathFullyQualified(modelRoot) || modelRoot.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("模型目录必须是本机绝对路径。");
@@ -104,6 +105,9 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             throw new InvalidDataException("llama.cpp 清单必须包含两个 64 位十六进制 SHA-256。");
         if (manifest.ContextTokens is < 1024 or > 8192 || manifest.GpuLayers is < 0 or > 99)
             throw new InvalidDataException("llama.cpp 上下文长度或 GPU 层数超出首版范围。");
+        var contextTokens = contextTokensOverride ?? manifest.ContextTokens;
+        if (contextTokens is < 1024 or > 8192)
+            throw new InvalidDataException("llama.cpp 请求上下文长度超出首版范围。");
         if (manifest.GpuLayers == 0 ? manifest.ExpectedGpuMemoryMiB != 0
                 : manifest.ExpectedGpuMemoryMiB is <= 0 or > 16384)
             throw new InvalidDataException("GPU 层数与已评估的显存预算不匹配。CPU 模式预算必须为 0；GPU 模式必须提供 1–16,384 MiB 预算。");
@@ -118,9 +122,11 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         var runtimePath = Path.Combine(root, RuntimeRelativePath);
         var modelPath = Path.Combine(root, ModelFileName);
         return new LlamaCppModelRuntime(root, runtimePath, modelPath,
-            manifest.RuntimeSha256, manifest.ModelSha256, manifest.ContextTokens, manifest.GpuLayers,
+            manifest.RuntimeSha256, manifest.ModelSha256, contextTokens, manifest.GpuLayers,
             manifest.ExpectedGpuMemoryMiB, uri, gpuMemoryProbe ?? new NvidiaSmiGpuMemoryProbe());
     }
+
+    public int ContextTokens => _contextTokens;
 
     public async ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
     {
