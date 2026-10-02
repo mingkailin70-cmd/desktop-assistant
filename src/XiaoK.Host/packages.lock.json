@@ -34,9 +34,11 @@
       "xiaok.voice": {
         "type": "Project",
         "dependencies": {
-          "XiaoK.Core": "[1.0.0, )"
+          "XiaoK.Core": "[1.0.0, )",
+          "XiaoK.Inference": "[1.0.0, )"
         }
       }
-    }
+    },
+    "net10.0-windows10.0.26100/win-x64": {}
   }
 }

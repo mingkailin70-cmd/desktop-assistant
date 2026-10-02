@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $artifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))
 
-if ([System.IO.Path]::IsPathFullyQualified($PublishDirectory)) {
+if ([System.IO.Path]::IsPathRooted($PublishDirectory) -or $PublishDirectory -match '^[A-Za-z]:') {
     throw 'PublishDirectory must be a repository-relative path under src\XiaoK.Host\bin\Release or artifacts\publish.'
 }
 
