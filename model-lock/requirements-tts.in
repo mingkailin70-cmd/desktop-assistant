@@ -1,7 +1,7 @@
 # Qwen3-TTS入口依赖；和ASR使用独立Python环境与哈希锁。
 # CUDA 13.2 wheel来源见 runtimes.lock.json，不在这里增加第三方包源。
 qwen-tts==0.1.1
-torch==2.14.0
-torchaudio==2.14.0
+torch==2.14.1
+torchaudio==2.11.0
 transformers==4.57.3
 accelerate==1.12.0

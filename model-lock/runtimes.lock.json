@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "candidate-only-no-runtimes-downloaded",
+  "status": "partially-staged-runtime-python-environments-not-installed",
   "lastSourceReviewDate": "2026-10-02",
   "runtimes": [
     {
@@ -342,30 +342,44 @@
     {
       "id": "python-asr",
       "version": "3.12.x-x64",
-      "source": "https://www.python.org/downloads/windows/",
+      "source": "https://docs.astral.sh/uv/concepts/python-versions/",
+      "distribution": "uv-managed CPython (python-build-standalone)",
+      "installDirectory": ".tools/python",
       "artifact": null,
       "sha256": null,
       "status": "candidate",
-      "notes": "选择仍受支持的安全维护版本，并在安装清单中固定补丁号。"
+      "notes": "本机仅有Python 3.14.6；Qwen ASR官方包当前列出支持至3.13。获准部署时须固定3.12补丁号、上游构建版本和SHA256；运行时放在仓库忽略目录，不改系统PATH或注册表。"
     },
     {
       "id": "python-tts",
       "version": "3.12.x-x64",
-      "source": "https://www.python.org/downloads/windows/",
+      "source": "https://docs.astral.sh/uv/concepts/python-versions/",
+      "distribution": "uv-managed CPython (python-build-standalone)",
+      "installDirectory": ".tools/python",
       "artifact": null,
       "sha256": null,
       "status": "candidate",
-      "notes": "与ASR相同的CPython补丁版本，使用独立虚拟环境。"
+      "notes": "与ASR共用同一项目内CPython运行时，使用独立虚拟环境；具体补丁号、构建版本和SHA256须在获准部署前固定。"
     },
     {
       "id": "pytorch-cuda",
-      "version": "2.14.0",
+      "version": "2.14.1",
       "source": "https://download.pytorch.org/whl/cu132/torch/",
       "target": "windows-amd64-cp312-cu132",
       "artifact": null,
       "sha256": null,
       "status": "candidate",
-      "notes": "官方CUDA 13.2轮子候选；锁定torch和torchaudio的完整文件名/散列后进行本机验证。"
+      "notes": "官方CUDA 13.2索引列有CPython 3.12 Windows轮子；固定文件名与SHA256后再安装并验证本机CUDA调用。"
+    },
+    {
+      "id": "torchaudio",
+      "version": "2.11.0",
+      "source": "https://pypi.org/project/torchaudio/",
+      "target": "windows-amd64-cp312",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "TorchAudio官方说明2.11系列可配合PyTorch 2.11及后续版本；Qwen ASR/TTS API兼容性、实际wheel和散列仍待获准下载后锁定。"
     },
     {
       "id": "qwen-asr",
