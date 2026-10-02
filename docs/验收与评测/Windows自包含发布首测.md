@@ -4,6 +4,8 @@
 
 后续进度（2026-10-03）：清单 Publisher 已固定为 `CN=XiaoK Local Development`。新增本机开发证书脚本后，SignTool 已成功签名 82,564,395 字节自包含 MSIX，MakeAppx 解包检查成功。`Get-AuthenticodeSignature` 和 `SignTool verify /pa` 因证书链尚未受信任而返回根证书不受信任；这是尚未导入公钥证书的预期状态。签名证书未导入受信任存储，包仍未安装或启动，首次安装、授权、登录启动、应用功能、重启恢复和回滚仍待实机验收。
 
+安装验收进度（2026-10-03）：用户授权后以管理员 PowerShell 导入开发公钥至机器级 `TrustedPeople`，`SignTool verify /pa /v` 成功，`Get-AuthenticodeSignature` 状态为 `Valid`。MSIX 安装到当前账户 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`，安装目录包含 `XiaoK.Host.exe`。应用未启动；尚未请求通知/麦克风授权，未核验 UI、登录启动、重启恢复、完整六类场景或回滚。机器级证书信任影响本机所有账户，回滚方法见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+
 ## 可复现命令
 
 在仓库根目录使用 Windows PowerShell 5.1：

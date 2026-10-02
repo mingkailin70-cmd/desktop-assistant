@@ -24,7 +24,7 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 .\tools\package_msix_validation.ps1 -CertificateThumbprint $cert.thumbprint
 ~~~
 
-打包脚本只允许从 Host Release 输出或仓库内 `artifacts\publish` 读取文件；它会检查必要入口文件、拒绝重解析点，并将 manifest、图标和发布输出复制到独立的 `artifacts\msix-validation\<随机ID>` 目录。传入证书指纹后，脚本检查证书主题与 manifest 发布者一致、证书有效、具有代码签名 EKU/数字签名用途及私钥，然后调用 Windows SDK SignTool 以 SHA-256 签名。脚本不会导入证书信任、安装或启动软件包。MakeAppx 成功只证明包结构和 manifest 语义检查通过；签名后仍需信任证书并验签，才能进入本机安装验收。
+打包脚本只允许从 Host Release 输出或仓库内 `artifacts\publish` 读取文件；它会检查必要入口文件、拒绝重解析点，并将 manifest、图标和发布输出复制到独立的 `artifacts\msix-validation\<随机ID>` 目录。传入证书指纹后，脚本检查证书主题与 manifest 发布者一致、证书有效、具有代码签名 EKU/数字签名用途及私钥，然后调用 Windows SDK SignTool 以 SHA-256 签名。打包脚本本身不会导入证书信任、安装或启动软件包。初次信任导入前，Authenticode 链验证按预期报告根证书不受信任；取得用户授权并导入公钥后，SignTool 验证已通过，签名状态为 `Valid`。
 
 安装前只读核对签名 MSIX、证书指纹和 SHA-256：
 
@@ -33,6 +33,8 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 ~~~
 
 需进入安装时，必须在管理员 PowerShell 中显式加上 `-Install`。脚本会先核对包内身份、签名者和本地公钥证书，然后把仅含公钥的证书导入 `Cert:\LocalMachine\TrustedPeople`，验签后只为当前执行账户运行 `Add-AppxPackage`，不会自动启动小K。Windows App Installer 对自签名 MSIX 要求机器级 `TrustedPeople` 信任，因此这项授权会影响该电脑所有用户，并需管理员权限；本证书留在 `TrustedPeople` 后，Windows 会认可任何由它签名的 MSIX。不要把此证书放入 `Trusted Root Certification Authorities`。
+
+当前状态（2026-10-03）：在用户授权后已完成机器级证书信任导入和当前账户安装。SignTool 与 Authenticode 状态均通过，包标识为 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`。安装目录中的 Host EXE 存在，但应用尚未启动；通知/麦克风授权、UI、登录启动、重启恢复和真实功能仍未验收。
 
 若需回滚，先在目标账户移除小K包；只有本次安装新加入了证书时，才在管理员 PowerShell 删除对应的机器信任项。若证书此前已被其他部署信任，不要移除：
 
