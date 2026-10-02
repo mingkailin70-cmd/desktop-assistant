@@ -2,7 +2,7 @@ namespace XiaoK.Voice;
 
 public enum VoiceAvailability { NotConfigured, Ready, Listening, Stopped, DeviceUnavailable, PermissionDenied }
 
-/// <summary>Voice boundary only; CPU wake-word and ASR runtime are not bundled pending P0 comparison.</summary>
+/// <summary>Microphone capture and CPU wake-word/VAD are not active; model worker integration is separate.</summary>
 public sealed class AudioGateway
 {
     private int _capturing;

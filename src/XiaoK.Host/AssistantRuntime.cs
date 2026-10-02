@@ -23,6 +23,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly DotNetTestRunner _dotNetTestRunner;
     private readonly AudioGateway _voice = new();
+    private readonly VoiceInferenceService? _voiceInference;
+    private readonly string _voiceStatus;
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
@@ -53,6 +55,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         }
         _managedModelRuntime = managedRuntime;
         _models = new ModelBroker(managedRuntime);
+        var workspaceRoot = XiaoKSettings.FindWorkspace(AppContext.BaseDirectory);
+        if (!XiaoKSettings.IsDiagnosticsMode && workspaceRoot is not null)
+        {
+            var bundledWorker = Path.Combine(AppContext.BaseDirectory, "voice_worker.py");
+            var sourceWorker = Path.Combine(workspaceRoot, "src", "XiaoK.Voice", "voice_worker.py");
+            var workerPath = File.Exists(bundledWorker) ? bundledWorker : sourceWorker;
+            _voiceInference = VoiceInferenceService.TryCreateForWorkspace(workspaceRoot, workerPath, _models,
+                out _voiceStatus);
+        }
+        else
+        {
+            _voiceStatus = XiaoKSettings.IsDiagnosticsMode
+                ? "诊断模式：语音模型和麦克风均关闭。"
+                : "语音：仅在仓库开发环境提供；当前安装包语音部署清单尚未接入。麦克风未采集。";
+        }
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
         var recoveryRoot = XiaoKSettings.IsDiagnosticsMode
@@ -70,7 +87,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         ? "诊断模式：临时设置与数据库；通知、语音采集和模型推理均关闭"
         : _managedModelRuntime?.Status
             ?? "本地模型：" + _settings.InferenceEndpoint + "（仅回环地址；手动运行本地服务；未连接时不会转云端）";
-    public string VoiceStatus => _voice.Availability == VoiceAvailability.NotConfigured ? "语音：运行时尚未安装；麦克风未采集" : "语音：" + _voice.Availability;
+    public string VoiceStatus => XiaoKSettings.IsDiagnosticsMode
+        ? _voiceStatus
+        : _voiceInference is null ? _voiceStatus : _voiceInference.Status;
     public string? StartupIsolationNotice => !_dotNetTestRunner.StartupIsolationRecovery.Success
         || _dotNetTestRunner.StartupIsolationRecovery.RecoveredProfiles > 0
         ? _dotNetTestRunner.StartupIsolationRecovery.Message
@@ -256,6 +275,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         return wasCapturing;
     }
 
+    public Task<SpeechRecognition> TranscribeLocalWavAsync(ReadOnlyMemory<byte> wav, bool forceChinese,
+        CancellationToken cancellationToken) => _voiceInference?.TranscribeWavAsync(wav, forceChinese, cancellationToken)
+        ?? Task.FromException<SpeechRecognition>(new InvalidOperationException(_voiceStatus));
+
+    public Task<byte[]> SynthesizeChineseWavAsync(string text, CancellationToken cancellationToken) =>
+        _voiceInference?.SynthesizeChineseWavAsync(text, cancellationToken)
+        ?? Task.FromException<byte[]>(new InvalidOperationException(_voiceStatus));
+
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
@@ -267,6 +294,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         await _executionGate.WaitAsync();
         try
         {
+            if (_voiceInference is not null) await _voiceInference.DisposeAsync();
             if (_managedModelRuntime is not null) await _managedModelRuntime.DisposeAsync();
         }
         finally

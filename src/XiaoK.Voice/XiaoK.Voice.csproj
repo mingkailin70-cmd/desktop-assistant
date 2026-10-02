@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\XiaoK.Core\XiaoK.Core.csproj" />
+    <ProjectReference Include="..\XiaoK.Inference\XiaoK.Inference.csproj" />
+    <Content Include="voice_worker.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>
