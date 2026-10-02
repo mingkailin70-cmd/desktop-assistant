@@ -39,7 +39,7 @@
         }
       ],
       "status": "locally_evaluated",
-      "notes": "两次托管 Qwen 合成聊天冒烟通过；仅证明本机模型服务能启动并返回短句，CUDA 实际层卸载、峰值显存、性能和退出时延未完整测量，不能标记为 accepted。",
+      "notes": "两次托管 Qwen 合成聊天冒烟通过。2026-10-03 固定 llama-bench 离线微基准以8线程、64 prompt/32生成token各跑3次：CPU/GPU生成均速18.84/95.34 token/s；详细日志确认GPU配置实际卸载33/33层，NVIDIA总显存占用峰值4378 MiB、空闲最低3522 MiB。证据见 docs/验收与评测/本地模型推理首测记录.md；微基准不等于小K托管 ModelBroker 端到端、冷启动、取消、自动卸载、长任务或OOM恢复验收，状态保持locally_evaluated，不能标记为 accepted。",
       "stagedDirectory": "models/llm/qwen3.5-4b/f9f88ac3e234be915e23811a6d28ea287bdb927e/Runtime",
       "stagedFiles": [
         {
