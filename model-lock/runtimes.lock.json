@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "partially-staged-runtime-python-environments-not-installed",
+  "status": "speech-python-environments-installed-and-hash-locked",
   "lastSourceReviewDate": "2026-10-02",
   "runtimes": [
     {
@@ -362,23 +362,27 @@
       "id": "python-asr",
       "version": "3.12.15+20261001-x64",
       "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261001",
-      "distribution": "uv-managed CPython (python-build-standalone)",
-      "installDirectory": ".tools/python",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "固定CPython 3.12.15与Astral构建20261001；本机仅有Python 3.14.6。下载前验证Windows x64发行资产及GitHub Artifact Attestation并登记SHA256；放在仓库忽略目录，不改系统PATH或注册表。"
+      "distribution": "CPython 3.12.15 x64 install_only",
+      "installDirectory": ".tools/python/cpython-3.12.15+20261001",
+      "artifact": "cpython-3.12.15+20261001-x86_64-pc-windows-msvc-install_only.tar.gz",
+      "artifactSizeBytes": 46415849,
+      "sha256": "62faca756c1b2e9b2454b6ad9396a6890496aebf7479a0c93e1ed615c67f2985",
+      "localVerifiedSha256": "62faca756c1b2e9b2454b6ad9396a6890496aebf7479a0c93e1ed615c67f2985",
+      "status": "installed_and_version_verified",
+      "notes": "从Astral官方Release下载；GitHub资产摘要与发布SHA256SUMS双重匹配。仅供本仓库，不改系统Python、PATH或注册表。"
     },
     {
       "id": "python-tts",
       "version": "3.12.15+20261001-x64",
       "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261001",
-      "distribution": "uv-managed CPython (python-build-standalone)",
-      "installDirectory": ".tools/python",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "与ASR共用同一固定CPython运行时，使用独立虚拟环境；发行资产及散列在获准下载前验证并登记。"
+      "distribution": "CPython 3.12.15 x64 install_only (shared)",
+      "installDirectory": ".tools/python/cpython-3.12.15+20261001",
+      "artifact": "cpython-3.12.15+20261001-x86_64-pc-windows-msvc-install_only.tar.gz",
+      "artifactSizeBytes": 46415849,
+      "sha256": "62faca756c1b2e9b2454b6ad9396a6890496aebf7479a0c93e1ed615c67f2985",
+      "localVerifiedSha256": "62faca756c1b2e9b2454b6ad9396a6890496aebf7479a0c93e1ed615c67f2985",
+      "status": "installed_and_version_verified",
+      "notes": "与ASR共用同一固定CPython运行时，但使用独立虚拟环境；两环境均通过依赖一致性与离线模块导入检查。"
     },
     {
       "id": "uv",
@@ -386,51 +390,75 @@
       "source": "https://github.com/astral-sh/uv/releases/tag/0.12.20",
       "target": "windows-x86_64",
       "installDirectory": ".tools/bin",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "下载官方便携ZIP，先核验发布资产SHA256与GitHub Artifact Attestation；仅供仓库内Python运行时与venv管理，不写全局PATH。"
+      "artifact": "uv-x86_64-pc-windows-msvc.zip",
+      "artifactSizeBytes": 18039150,
+      "sha256": "95f9bc30fbb3574d276e28ac4a6de932d25153645853d13da8c21eec3bc88d06",
+      "localVerifiedSha256": "95f9bc30fbb3574d276e28ac4a6de932d25153645853d13da8c21eec3bc88d06",
+      "status": "installed_and_version_verified",
+      "notes": "核验GitHub官方Release资产摘要并运行版本校验；便携版仅放在仓库忽略目录，不写全局PATH。"
     },
     {
       "id": "pytorch-cuda",
-      "version": "2.14.1",
+      "version": "2.14.1+cu132",
       "source": "https://download.pytorch.org/whl/cu132/torch/",
       "target": "windows-amd64-cp312-cu132",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "官方CUDA 13.2索引列有CPython 3.12 Windows轮子；固定文件名与SHA256后再安装并验证本机CUDA调用。"
+      "artifact": "torch-2.14.1+cu132-cp312-cp312-win_amd64.whl",
+      "artifactSizeBytes": 1993688363,
+      "sha256": "882a670a7e2a17f2eb351406dc4a235455fd9256ac737752de5f1279e2a1df8c",
+      "localVerifiedSha256": "882a670a7e2a17f2eb351406dc4a235455fd9256ac737752de5f1279e2a1df8c",
+      "status": "installed_and_hash_locked_in_asr_and_tts",
+      "notes": "CUDA 13.2官方索引Windows CPython 3.12 wheel；两虚拟环境均导入并确认torch.version.cuda为13.2。未调用CUDA设备、未运行GPU推理。"
     },
     {
       "id": "torchaudio",
       "version": "2.11.0",
       "source": "https://pypi.org/project/torchaudio/",
       "target": "windows-amd64-cp312",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "TorchAudio官方说明2.11系列可配合PyTorch 2.11及后续版本；Qwen ASR/TTS API兼容性、实际wheel和散列仍待获准下载后锁定。"
+      "artifact": "torchaudio-2.11.0-cp312-cp312-win_amd64.whl",
+      "artifactSizeBytes": 328663,
+      "sha256": "478110f981e5d40a8d82221732c57a56c85a1d5895fb8fe646e86ee15eded3bd",
+      "localVerifiedSha256": "478110f981e5d40a8d82221732c57a56c85a1d5895fb8fe646e86ee15eded3bd",
+      "status": "installed_and_hash_locked_in_asr_and_tts",
+      "notes": "PyPI Windows wheel运行时报告2.11.0+cpu；TorchAudio官方稳定ABI说明2.11可配PyTorch 2.11及以后版本。音频预处理留在CPU，CUDA推理由PyTorch承担；尚未做模型推理。"
     },
     {
       "id": "qwen-asr",
       "version": "0.0.6",
       "source": "https://pypi.org/project/qwen-asr/",
       "target": "CPython-3.12",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "官方pyproject要求transformers==4.57.6、accelerate==1.12.0；传递依赖待锁哈希。"
+      "artifact": "qwen_asr-0.0.6-py3-none-any.whl",
+      "artifactSizeBytes": 141603,
+      "sha256": "b9c55a38413298f3a990a4475467399daec6e8f4172363053fc42e2166c2dfd3",
+      "localVerifiedSha256": "b9c55a38413298f3a990a4475467399daec6e8f4172363053fc42e2166c2dfd3",
+      "status": "installed_and_hash_locked",
+      "environment": ".tools/venvs/asr",
+      "notes": "requirements-asr.lock.txt锁定96个包及wheel哈希；依赖一致性和离线导入检查通过，未加载语音权重或调用麦克风。"
     },
     {
       "id": "qwen-tts",
       "version": "0.1.1",
       "source": "https://pypi.org/project/qwen-tts/",
       "target": "CPython-3.12",
-      "artifact": null,
-      "sha256": null,
-      "status": "candidate",
-      "notes": "官方pyproject要求transformers==4.57.3、accelerate==1.12.0；传递依赖待锁哈希。"
+      "artifact": "qwen_tts-0.1.1-py3-none-any.whl",
+      "artifactSizeBytes": 113529,
+      "sha256": "11a290d8dabc7ef91a90c54478c8ab19b3edb1d85c0882313721892bdc4af15d",
+      "localVerifiedSha256": "11a290d8dabc7ef91a90c54478c8ab19b3edb1d85c0882313721892bdc4af15d",
+      "status": "installed_and_hash_locked",
+      "environment": ".tools/venvs/tts",
+      "notes": "requirements-tts.lock.txt锁定90个包及wheel哈希；依赖一致性和离线导入检查通过。12Hz语音权重未加载，未执行语音合成。SoX提示来自可选25Hz tokenizer路径。"
     }
   ],
-  "lastLocalVerificationDate": "2026-10-02"
+  "lastLocalVerificationDate": "2026-10-02",
+  "speechEnvironmentVerification": {
+    "result": "dependency_check_and_offline_imports_passed",
+    "asrEnvironment": ".tools/venvs/asr",
+    "asrPackagesChecked": 97,
+    "ttsEnvironment": ".tools/venvs/tts",
+    "ttsPackagesChecked": 91,
+    "offlineImports": ["torch", "torchaudio", "qwen_asr", "qwen_tts", "onnxruntime"],
+    "modelWeightsLoaded": false,
+    "cudaDeviceAccessed": false,
+    "microphoneAccessed": false,
+    "notes": "仅验证环境包一致性及离线模块导入，不代表模型推理、GPU占用、语音质量或延迟验收通过。"
+  }
 }
