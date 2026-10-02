@@ -1,6 +1,6 @@
 # Windows 通知接入与隐私边界
 
-更新：2026-09-30。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。
+更新：2026-10-03。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。
 
 ## 当前实现
 
@@ -21,7 +21,7 @@
 
 项目将目标框架固定为 `net10.0-windows10.0.26100.0`，通过 `WindowsSdkPackageVersion` 使用 `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87。`NuGet.Config` 仅映射该获准包；这不是客户端发送/读取接口，也不提供微信或 QQ 私聊元数据。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，但发布者和图标仍是占位输入。当前尚未建立签名发布者、构建并安装 MSIX，也未在本机请求并授予真实授权。代码成功编译只证明目标 API 可用，不代表已在打包应用中取得权限。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力。开发发布者固定为 `CN=XiaoK Local Development`；签名 MSIX 已通过 Authenticode 验证并安装到当前账户，包身份为 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`。截至本文更新时应用尚未启动，Windows 通知授权尚未请求，微信/QQ 发布者 AUMID allowlist 也未配置。因此通知监听仍未在安装应用中运行验收；编译、签名和安装都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 

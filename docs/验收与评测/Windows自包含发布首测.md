@@ -2,7 +2,7 @@
 
 日期：2026-10-03。此记录证明固定 SDK 可生成含 .NET 运行时的 Windows x64 Host 并通过 MSIX 结构检查；不代表签名安装、应用运行或首版门槛通过。
 
-后续进度（2026-10-03）：清单 Publisher 已固定为 `CN=XiaoK Local Development`。新增本机开发证书脚本后，SignTool 已成功签名 82,564,395 字节自包含 MSIX，MakeAppx 解包检查成功。`Get-AuthenticodeSignature` 和 `SignTool verify /pa` 因证书链尚未受信任而返回根证书不受信任；这是尚未导入公钥证书的预期状态。签名证书未导入受信任存储，包仍未安装或启动，首次安装、授权、登录启动、应用功能、重启恢复和回滚仍待实机验收。
+签名阶段记录（2026-10-03）：清单 Publisher 固定为 `CN=XiaoK Local Development`。新增本机开发证书脚本后，SignTool 成功签名 82,564,395 字节自包含 MSIX，MakeAppx 解包检查成功。首次信任导入前，`Get-AuthenticodeSignature` 和 `SignTool verify /pa` 因证书链不受信任而失败；这是该阶段的历史结果，后续已按用户授权导入公钥并复验通过。
 
 安装验收进度（2026-10-03）：用户授权后以管理员 PowerShell 导入开发公钥至机器级 `TrustedPeople`，`SignTool verify /pa /v` 成功，`Get-AuthenticodeSignature` 状态为 `Valid`。MSIX 安装到当前账户 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`，安装目录包含 `XiaoK.Host.exe`。应用未启动；尚未请求通知/麦克风授权，未核验 UI、登录启动、重启恢复、完整六类场景或回滚。机器级证书信任影响本机所有账户，回滚方法见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
@@ -26,4 +26,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\publish_xiaok.ps1
 
 ## 未验证范围
 
-原始验证包没有签名、安装或启动；后续签名包尚未导入本机信任或安装。没有验证 Windows 通知/麦克风授权、登录启动、升级/卸载、重启恢复、模型/语音部署与回滚。自包含只解决随包 .NET 运行时，不包含模型权重、Python 语音环境、数据库或用户数据迁移。
+原始验证包没有签名、安装或启动。后续签名包的机器级信任导入与当前账户安装已经完成，签名状态为 `Valid`；安装的应用尚未启动。Windows 通知/麦克风授权、登录启动、升级/卸载、重启恢复、模型/语音部署与回滚仍未验证。自包含只解决随包 .NET 运行时，不包含模型权重、Python 语音环境、数据库或用户数据迁移。
