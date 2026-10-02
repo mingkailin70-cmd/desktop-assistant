@@ -39,7 +39,7 @@
         }
       ],
       "status": "locally_evaluated",
-      "notes": "一次托管 Qwen 合成聊天冒烟通过；仅证明本机模型服务能启动并返回短句，CUDA 实际层卸载、峰值显存、性能和退出时延未完整测量，不能标记为 accepted。",
+      "notes": "两次托管 Qwen 合成聊天冒烟通过；仅证明本机模型服务能启动并返回短句，CUDA 实际层卸载、峰值显存、性能和退出时延未完整测量，不能标记为 accepted。",
       "stagedDirectory": "models/llm/qwen3.5-4b/f9f88ac3e234be915e23811a6d28ea287bdb927e/Runtime",
       "stagedFiles": [
         {
@@ -337,6 +337,25 @@
         "peakVramCaptured": false,
         "temporaryManifestRemoved": true,
         "processObservation": "llama-server 在即时检查中仍存在，约4分钟后的复核已退出且端口关闭；精确退出时延及 Host 崩溃回收未验证。"
+      },
+      "postBrokerChangeSmokeTest": {
+        "date": "2026-10-02",
+        "result": "passed_synthetic_chat_completion_after_broker_change",
+        "method": "LlamaCppModelRuntime + ModelBroker + LocalInferenceClient",
+        "endpoint": "http://127.0.0.1:18080/",
+        "modelId": "qwen3.5-4b-q4km",
+        "contextTokens": 4096,
+        "gpuLayersRequested": 99,
+        "admissionBudgetMiB": 5000,
+        "elapsedSeconds": 9.88,
+        "syntheticInputOnly": true,
+        "responseMatchedExpectedShortText": true,
+        "unloadRequestedAndCompleted": true,
+        "gpuTelemetryCaptured": false,
+        "backendLogSaved": false,
+        "peakVramCaptured": false,
+        "temporaryManifestRemoved": true,
+        "temporaryHarnessRemoved": true
       }
     },
     {
