@@ -341,25 +341,36 @@
     },
     {
       "id": "python-asr",
-      "version": "3.12.x-x64",
-      "source": "https://docs.astral.sh/uv/concepts/python-versions/",
+      "version": "3.12.15+20261001-x64",
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261001",
       "distribution": "uv-managed CPython (python-build-standalone)",
       "installDirectory": ".tools/python",
       "artifact": null,
       "sha256": null,
       "status": "candidate",
-      "notes": "本机仅有Python 3.14.6；Qwen ASR官方包当前列出支持至3.13。获准部署时须固定3.12补丁号、上游构建版本和SHA256；运行时放在仓库忽略目录，不改系统PATH或注册表。"
+      "notes": "固定CPython 3.12.15与Astral构建20261001；本机仅有Python 3.14.6。下载前验证Windows x64发行资产及GitHub Artifact Attestation并登记SHA256；放在仓库忽略目录，不改系统PATH或注册表。"
     },
     {
       "id": "python-tts",
-      "version": "3.12.x-x64",
-      "source": "https://docs.astral.sh/uv/concepts/python-versions/",
+      "version": "3.12.15+20261001-x64",
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261001",
       "distribution": "uv-managed CPython (python-build-standalone)",
       "installDirectory": ".tools/python",
       "artifact": null,
       "sha256": null,
       "status": "candidate",
-      "notes": "与ASR共用同一项目内CPython运行时，使用独立虚拟环境；具体补丁号、构建版本和SHA256须在获准部署前固定。"
+      "notes": "与ASR共用同一固定CPython运行时，使用独立虚拟环境；发行资产及散列在获准下载前验证并登记。"
+    },
+    {
+      "id": "uv",
+      "version": "0.12.20",
+      "source": "https://github.com/astral-sh/uv/releases/tag/0.12.20",
+      "target": "windows-x86_64",
+      "installDirectory": ".tools/bin",
+      "artifact": null,
+      "sha256": null,
+      "status": "candidate",
+      "notes": "下载官方便携ZIP，先核验发布资产SHA256与GitHub Artifact Attestation；仅供仓库内Python运行时与venv管理，不写全局PATH。"
     },
     {
       "id": "pytorch-cuda",
