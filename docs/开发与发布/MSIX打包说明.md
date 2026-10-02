@@ -34,7 +34,7 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 
 需进入安装时，必须在管理员 PowerShell 中显式加上 `-Install`。脚本会先核对包内身份、签名者和本地公钥证书，然后把仅含公钥的证书导入 `Cert:\LocalMachine\TrustedPeople`，验签后只为当前执行账户运行 `Add-AppxPackage`，不会自动启动小K。Windows App Installer 对自签名 MSIX 要求机器级 `TrustedPeople` 信任，因此这项授权会影响该电脑所有用户，并需管理员权限；本证书留在 `TrustedPeople` 后，Windows 会认可任何由它签名的 MSIX。不要把此证书放入 `Trusted Root Certification Authorities`。
 
-当前状态（2026-10-03）：在用户授权后已完成机器级证书信任导入和当前账户安装。SignTool 与 Authenticode 状态均通过，包标识为 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`。安装目录中的 Host EXE 存在，但应用尚未启动；通知/麦克风授权、UI、登录启动、重启恢复和真实功能仍未验收。
+当前状态（2026-10-03）：在用户授权后已完成机器级证书信任导入和当前账户安装。SignTool 与 Authenticode 状态均通过，包标识为 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`。随后仅用 `--diagnostics-profile` 隔离配置启动一次并通过小K界面退出；确认通知监听与模型均关闭、未请求 Windows 通知/麦克风授权、未读取常规设置，诊断临时目录位于 `%TEMP%\XiaoK-Diagnostics-*`。常规模式未启动；通知/麦克风授权、完整 UI、登录启动、重启恢复和真实功能仍未验收。
 
 若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
 

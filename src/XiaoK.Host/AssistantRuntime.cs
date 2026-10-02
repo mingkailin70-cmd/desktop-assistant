@@ -421,7 +421,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             {
                 var message = errorCode == "SEND_ATTACHMENTS_UNSUPPORTED"
                     ? "当前只支持无附件的发送预览；附件选择与身份核验尚未接入，本次没有读取或发送文件。"
-                    : "请按“发送微信给张三：正文”或“发送QQ给张三：正文”提供明确平台、收件人和正文。当前只显示预览，不会发送。";
+                    : "当前仅允许“发送微信给 L：正文”或“发送QQ给 K：正文”。其他收件人或平台组合会被拒绝；本版本只显示预览，不会发送。";
                 return new(false, message, errorCode ?? "SEND_FORMAT_INVALID");
             }
 

@@ -2010,19 +2010,33 @@ static async Task CheckContactReplyStylesUseFixedUserPreferencesAsync()
 
 static void CheckMessageSendIntentResolver()
 {
-    Require(MessageSendIntentResolver.TryResolve("发送微信给 张三：我们改到下午三点：收到请回复。",
+    Require(MessageSendIntentResolver.TryResolve("发送微信给 L：我们改到下午三点：收到请回复。",
             out var wechat, out var wechatError)
-        && wechatError is null && wechat is { ApplicationId: "wechat", Recipient: "张三" }
+        && wechatError is null && wechat is { ApplicationId: "wechat", Recipient: "L" }
         && wechat.Text == "我们改到下午三点：收到请回复。",
         "微信发送预览解析没有保留完整正文或绑定明确收件人。");
-    Require(MessageSendIntentResolver.TryResolve("发QQ给 Alice: hello",
+    Require(MessageSendIntentResolver.TryResolve("发QQ给 K: hello",
             out var qq, out var qqError)
-        && qqError is null && qq is { ApplicationId: "qq", Recipient: "Alice", Text: "hello" },
+        && qqError is null && qq is { ApplicationId: "qq", Recipient: "K", Text: "hello" },
         "QQ 发送预览解析错误。");
+    Require(!MessageSendIntentResolver.TryResolve("发送微信给 K：内容",
+            out var wrongWeChatRecipient, out var wrongWeChatError)
+        && wrongWeChatRecipient is null && wrongWeChatError == "SEND_RECIPIENT_NOT_ALLOWED"
+        && !MessageSendIntentResolver.TryResolve("发送QQ给 L：内容",
+            out var wrongQqRecipient, out var wrongQqError)
+        && wrongQqRecipient is null && wrongQqError == "SEND_RECIPIENT_NOT_ALLOWED"
+        && !MessageSendIntentResolver.TryResolve("发送微信给 l：内容",
+            out var wrongCase, out var wrongCaseError)
+        && wrongCase is null && wrongCaseError == "SEND_RECIPIENT_NOT_ALLOWED",
+        "自然语言发送解析未严格限制 QQ K、微信 L 的平台和大小写组合。");
+    Require(!MessageSendIntentResolver.TryResolve("发送微信给 张三：内容",
+            out var otherRecipient, out var otherRecipientError)
+        && otherRecipient is null && otherRecipientError == "SEND_RECIPIENT_NOT_ALLOWED",
+        "非白名单联系人仍能通过自然语言发送解析。");
     Require(!MessageSendIntentResolver.TryResolve("发送给张三：你好", out var noApp, out var noAppError)
         && noApp is null && noAppError == "SEND_FORMAT_INVALID",
         "未指定发送应用时没有失败关闭。");
-    Require(!MessageSendIntentResolver.TryResolve("发送微信给张三：你好；附件：D:\\秘密.pdf",
+    Require(!MessageSendIntentResolver.TryResolve("发送微信给 L：你好；附件：D:\\秘密.pdf",
             out var withAttachment, out var attachmentError)
         && withAttachment is null && attachmentError == "SEND_ATTACHMENTS_UNSUPPORTED",
         "未接入附件能力时仍接受了附件发送请求。");
@@ -2137,31 +2151,60 @@ static async Task CheckSendPreviewNeverConfirmsWithoutSenderAsync()
     var arguments = new Dictionary<string, string>
     {
         ["application_id"] = "wechat",
-        ["recipient"] = "张三",
+        ["recipient"] = "L",
         ["text"] = "下午三点见。",
         ["attachments"] = "none"
     };
-    var proposal = ToolBroker.Proposal("message.send.v1", arguments, "wechat:张三",
+    var proposal = ToolBroker.Proposal("message.send.v1", arguments, "wechat:L",
         ToolExpectedOutcome.MessageSendPreviewShown);
     var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
     var shownPreview = previewPresenter.Previews.SingleOrDefault();
     Require(!result.Success && result.ErrorCode == "SEND_ADAPTER_UNAVAILABLE"
-        && shownPreview is { ApplicationId: "wechat", Recipient: "张三", Text: "下午三点见。" }
+        && shownPreview is { ApplicationId: "wechat", Recipient: "L", Text: "下午三点见。" }
         && shownPreview.Attachments.Count == 0
         && approval.CallCount == 0,
         "预览未展示完整目标/正文，或没有发送适配器时仍请求了发送批准。");
 
-    var wrongTarget = await broker.ExecuteAsync(proposal with { Target = "qq:张三" }, CancellationToken.None);
+    var wrongTarget = await broker.ExecuteAsync(proposal with { Target = "qq:L" }, CancellationToken.None);
     Require(!wrongTarget.Success && wrongTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
         && previewPresenter.Previews.Count == 1 && approval.CallCount == 0,
         "发送提案的应用与目标不一致时仍展示或执行了动作。");
+
+    foreach (var (applicationId, recipient) in new[] { ("wechat", "K"), ("qq", "L"), ("qq", "Alice") })
+    {
+        var denied = await broker.ExecuteAsync(proposal with
+        {
+            Target = $"{applicationId}:{recipient}",
+            Arguments = proposal.Arguments
+                .SetItem("application_id", applicationId)
+                .SetItem("recipient", recipient)
+        }, CancellationToken.None);
+        Require(!denied.Success && denied.ErrorCode == "SEND_RECIPIENT_NOT_ALLOWED"
+            && previewPresenter.Previews.Count == 1 && approval.CallCount == 0,
+            $"ToolBroker 未在展示预览前拒绝非白名单目标 {applicationId}:{recipient}。");
+    }
+
+    var qqArguments = new Dictionary<string, string>
+    {
+        ["application_id"] = "qq",
+        ["recipient"] = "K",
+        ["text"] = "已收到。",
+        ["attachments"] = "none"
+    };
+    var qqResult = await broker.ExecuteAsync(ToolBroker.Proposal("message.send.v1", qqArguments, "qq:K",
+        ToolExpectedOutcome.MessageSendPreviewShown), CancellationToken.None);
+    Require(!qqResult.Success && qqResult.ErrorCode == "SEND_ADAPTER_UNAVAILABLE"
+        && previewPresenter.Previews.Count == 2
+        && previewPresenter.Previews.Last() is { ApplicationId: "qq", Recipient: "K", Text: "已收到。" }
+        && approval.CallCount == 0,
+        "QQ 联系人 K 的白名单预览无效，或没有发送适配器时仍请求了批准。");
 
     using var cancelled = new CancellationTokenSource();
     cancelled.Cancel();
     var cancellationObserved = false;
     try { await broker.ExecuteAsync(proposal, cancelled.Token); }
     catch (OperationCanceledException) { cancellationObserved = true; }
-    Require(cancellationObserved && previewPresenter.Previews.Count == 1 && approval.CallCount == 0,
+    Require(cancellationObserved && previewPresenter.Previews.Count == 2 && approval.CallCount == 0,
         "取消的发送预览仍继续处理或请求批准。");
 }
 

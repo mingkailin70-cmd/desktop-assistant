@@ -82,7 +82,7 @@
                     <TextBox x:Name="RequestBox" MinHeight="74" MaxHeight="110" AcceptsReturn="True" TextWrapping="Wrap"
                              KeyDown="RequestBox_KeyDown" VerticalScrollBarVisibility="Auto" FontSize="13" Padding="11"
                              Background="White" BorderBrush="#DCE2EF"
-                             ToolTip="例如：打开小K项目 / 查找文件 预算 / 发送微信给张三：正文（仅预览，不发送）"/>
+                             ToolTip="例如：打开小K项目 / 查找文件 预算 / 发送微信给 L：正文 / 发送QQ给 K：正文（仅预览，不发送）"/>
                     <TextBlock Text="快捷入口 · 点一下后补充内容" FontSize="10" Foreground="#7A8299" Margin="2,9,0,6"/>
                     <WrapPanel>
                         <Button Style="{StaticResource QuickPromptButton}" Content="查找文件" Tag="查找文件 " Click="QuickPrompt_Click"/>

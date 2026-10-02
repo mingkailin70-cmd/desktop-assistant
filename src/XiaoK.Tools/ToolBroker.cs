@@ -185,6 +185,9 @@ public sealed class ToolBroker
             || attachments is null
             || proposal.Target != $"{applicationId}:{recipient}")
             return InvalidProposal("发送预览必须绑定明确的微信或 QQ、最终收件人、正文和附件清单。");
+        if (!MessageSendRecipientPolicy.IsAllowed(applicationId, recipient))
+            return new(false, "当前只允许 QQ 联系人 K 和微信联系人 L；其他目标均已拒绝，未显示或发送内容。",
+                "SEND_RECIPIENT_NOT_ALLOWED");
         if (attachments != "none")
             return new(false, "当前版本不支持附件；没有显示或发送任何文件。", "SEND_ATTACHMENTS_UNSUPPORTED");
         return null;
