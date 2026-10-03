@@ -283,7 +283,7 @@
       ],
       "license": "mit",
       "status": "downloaded_and_verified",
-      "notes": "约18.8 GB权重；用户授权下载到仓库根目录 models/，用于P0离线资源与代码任务对照。只作按需候选，不作常驻模型；8 GB独显不能容纳全模型，实际推理需后续单独批准运行时并验证部分CPU卸载、延迟与显存余量。",
+      "notes": "约18.8 GB权重；用户授权下载到仓库根目录 models/，用于P0离线资源与代码任务对照。只作按需候选，不作常驻模型。独立 Transformers 5.12.1 / CUDA PyTorch 2.14.1 环境已按 wheel SHA-256 锁定并通过离线配置/架构导入检查；未加载权重张量、未初始化 CUDA、未运行推理。8 GB独显不能容纳全模型，仍需验证部分CPU卸载、延迟与显存余量后才能评测。",
       "localDirectory": "llm/mimo-v2.6-distill-qwen-9b/2367e865d009c13ac81713a2878291d33ab28177",
       "requiredForP0": true
     },
