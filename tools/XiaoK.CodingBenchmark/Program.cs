@@ -20,7 +20,8 @@ internal static class Program
     private const long MinimumRuntimeGpuFreeMiB = 1_024;
     private const int EvaluationContextTokens = 6144;
     private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v17-target-path-noise-contained-nuget-paths-6144-no-thinking";
-    private const string ExpectedBenchmarkManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
+    private const string V3ManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
+    private const string V4ManifestSha256 = "9d5e09034231d119895fcc029b0fd6119d8993e24cb5fe116c4de88322208d5f";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static async Task<int> Main(string[] args)
@@ -29,28 +30,30 @@ internal static class Program
         Console.InputEncoding = new UTF8Encoding(false);
         try
         {
-            if (args.Length != 4 || args[0] != "--repo" || args[2] != "--task")
+            if (args.Length != 6 || args[0] != "--repo" || args[2] != "--dataset" || args[4] != "--task")
             {
-                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --task <R01|S01|M01|F01>");
+                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --dataset <coding-zh-v3|coding-zh-v4> --task <R01|S01|M01|F01>");
                 return 2;
             }
 
             var repoRoot = RequireLocalDirectory(args[1], "仓库目录");
-            var taskId = args[3].ToUpperInvariant();
+            var datasetVersion = args[3];
+            var datasetLock = ResolveDatasetLock(datasetVersion);
+            var taskId = args[5].ToUpperInvariant();
             if (taskId.Length != 3 || taskId[0] is not ('R' or 'S' or 'M' or 'F')
                 || !int.TryParse(taskId.AsSpan(1), out var taskNumber) || taskNumber is < 1 or > 10)
                 throw new ArgumentException("题目 ID 必须是 R01–R10、S01–S10、M01–M10 或 F01–F10。");
 
-            var datasetRoot = RequireLocalDirectory(Path.Combine("D:\\XiaoK\\Evaluations\\benchmarks", "coding-zh-v3"), "固定评测集");
-            var manifest = ReadAndValidateManifest(datasetRoot);
-            var task = ReadTask(datasetRoot, taskId);
+            var datasetRoot = RequireLocalDirectory(Path.Combine("D:\\XiaoK\\Evaluations\\benchmarks", datasetVersion), "固定评测集");
+            var manifest = ReadAndValidateManifest(datasetRoot, datasetVersion, datasetLock);
+            var task = ReadTask(datasetRoot, taskId, datasetLock);
             if (!string.Equals(task.Category, taskId[..1], StringComparison.Ordinal))
                 throw new InvalidDataException("题目类别与 ID 前缀不一致。");
 
             var baselineCommit = RequireGitCommit(manifest.BaselineCommit);
             await EnsureGitCommitExistsAsync(repoRoot, baselineCommit);
             var model = ResolveModel(repoRoot);
-            var resultFile = GetAggregateResultPath();
+            var resultFile = GetAggregateResultPath(manifest.Version);
             EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Revision, PipelineVersion, taskId);
             var gpuBaseline = await ReadGpuSnapshotAsync();
             if (gpuBaseline.FreeMiB < MinimumInitialGpuFreeMiB)
@@ -167,7 +170,7 @@ internal static class Program
                     Console.WriteLine($"隔离夹具：{(fixtureResult.RestoreExitCode == 0 && fixtureResult.TestExitCode == 0 ? "通过" : "失败")}（离线 AppContainer）\n{fixtureResult.Output}");
 
                 PrintBounded("模型结果", result.Data ?? result.Summary, 24_000);
-                var reviewKey = ReadReviewKeyAfterInference(datasetRoot, task.Id);
+                var reviewKey = ReadReviewKeyAfterInference(datasetRoot, task.Id, datasetLock);
                 Console.WriteLine();
                 Console.WriteLine("独立评审依据（此内容在模型生成结束后才读取，未发送给模型）：");
                 Console.WriteLine("期望：" + reviewKey.Expected);
@@ -233,9 +236,9 @@ internal static class Program
         }
     }
 
-    private static BenchmarkTask ReadTask(string datasetRoot, string taskId)
+    private static BenchmarkTask ReadTask(string datasetRoot, string taskId, DatasetLock datasetLock)
     {
-        var path = Path.Combine(datasetRoot, "coding_tasks_v3.jsonl");
+        var path = Path.Combine(datasetRoot, datasetLock.TaskFileName);
         foreach (var line in File.ReadLines(path, Encoding.UTF8))
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
@@ -246,9 +249,9 @@ internal static class Program
         throw new InvalidDataException("评测集内找不到指定题目。");
     }
 
-    private static ReviewKey ReadReviewKeyAfterInference(string datasetRoot, string taskId)
+    private static ReviewKey ReadReviewKeyAfterInference(string datasetRoot, string taskId, DatasetLock datasetLock)
     {
-        foreach (var line in File.ReadLines(Path.Combine(datasetRoot, "review_key_v3.jsonl"), Encoding.UTF8))
+        foreach (var line in File.ReadLines(Path.Combine(datasetRoot, datasetLock.ReviewFileName), Encoding.UTF8))
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             using var item = JsonDocument.Parse(line);
@@ -258,17 +261,24 @@ internal static class Program
         throw new InvalidDataException("评测集缺少题目对应的独立评审依据。");
     }
 
-    private static BenchmarkManifest ReadAndValidateManifest(string datasetRoot)
+    private static DatasetLock ResolveDatasetLock(string datasetVersion) => datasetVersion switch
+    {
+        "coding-zh-v3" => new(3, V3ManifestSha256, "coding_tasks_v3.jsonl", "review_key_v3.jsonl", 6),
+        "coding-zh-v4" => new(4, V4ManifestSha256, "coding_tasks_v4.jsonl", "review_key_v4.jsonl", 8),
+        _ => throw new ArgumentException("只支持固定评测集 coding-zh-v3 或 coding-zh-v4。")
+    };
+
+    private static BenchmarkManifest ReadAndValidateManifest(string datasetRoot, string expectedVersion, DatasetLock datasetLock)
     {
         var manifestPath = Path.Combine(datasetRoot, "manifest.json");
-        if (!string.Equals(Sha256File(manifestPath), ExpectedBenchmarkManifestSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("coding-zh-v3 清单哈希与代码内固定值不符；拒绝运行评测。");
+        if (!string.Equals(Sha256File(manifestPath), datasetLock.ManifestSha256, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(expectedVersion + " 清单哈希与代码内固定值不符；拒绝运行评测。");
         var manifest = JsonSerializer.Deserialize<BenchmarkManifest>(File.ReadAllText(manifestPath, Encoding.UTF8), JsonOptions)
             ?? throw new InvalidDataException("评测清单为空。");
-        if (manifest.SchemaVersion != 3 || manifest.Version != "coding-zh-v3" || manifest.TaskCount != 40 || manifest.Categories.R != 10
+        if (manifest.SchemaVersion != datasetLock.SchemaVersion || manifest.Version != expectedVersion || manifest.TaskCount != 40 || manifest.Categories.R != 10
             || manifest.Categories.S != 10 || manifest.Categories.M != 10 || manifest.Categories.F != 10
-            || manifest.Files.Count != 6)
-            throw new InvalidDataException("评测集清单版本、题数或类别不符合固定的 v3 结构。");
+            || manifest.Files.Count != datasetLock.LockedFileCount)
+            throw new InvalidDataException("评测集清单版本、题数或类别不符合固定结构。");
 
         foreach (var lockedFile in manifest.Files)
         {
@@ -516,9 +526,11 @@ internal static class Program
         return await runner.RunOfflineRepairFixtureAsync(workspacePath, verificationRoot, executable, token);
     }
 
-    private static string GetAggregateResultPath()
+    private static string GetAggregateResultPath(string datasetVersion)
     {
-        var root = Path.GetFullPath("D:\\XiaoK\\Evaluations\\runs\\coding-zh-v3");
+        if (datasetVersion is not ("coding-zh-v3" or "coding-zh-v4"))
+            throw new ArgumentException("结果目录只允许固定的 v3 或 v4 评测版本。");
+        var root = Path.GetFullPath(Path.Combine("D:\\XiaoK\\Evaluations\\runs", datasetVersion));
         Directory.CreateDirectory(root);
         return Path.Combine(root, "results.jsonl");
     }
@@ -649,6 +661,8 @@ internal static class Program
     private sealed record BenchmarkTask(string Id, string Category, string Acceptance, string Grading,
         bool NetworkAllowed, bool ExternalSideEffectsAllowed, IReadOnlyList<string> TargetFiles, string Prompt);
     private sealed record ReviewKey(string Expected, string Evidence);
+    private sealed record DatasetLock(int SchemaVersion, string ManifestSha256, string TaskFileName, string ReviewFileName,
+        int LockedFileCount);
     private sealed record BenchmarkManifest(int SchemaVersion, string Version, string BaselineCommit, int TaskCount,
         CategoryCounts Categories, IReadOnlyList<LockedFile> Files);
     private sealed record CategoryCounts(int R, int S, int M, int F);
