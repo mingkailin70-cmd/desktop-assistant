@@ -74,6 +74,21 @@ if (args.Length == 1 && args[0] == "--only-window-selection")
     Console.WriteLine("通过：窗口目标选择只接受唯一且非零的句柄。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-pet-position-store")
+{
+    var petPositionRoot = Path.Combine(Path.GetTempPath(), "XiaoK-PetPositionProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(petPositionRoot);
+    try
+    {
+        CheckPetWindowPositionStore(petPositionRoot);
+        Console.WriteLine("通过：桌宠坐标使用独立原子文件保存；非法或损坏数据失败关闭，通用设置文件保持不变。");
+    }
+    finally
+    {
+        if (Directory.Exists(petPositionRoot)) Directory.Delete(petPositionRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 3 && args[0] == "--verify-live-vscode-window")
 {
     await VerifyLiveVscodeWindowAsync(args[1], args[2]);
@@ -148,6 +163,9 @@ try
         await CheckOfflineRepairFixtureRunnerAsync(tempRoot);
         passed.Add("AppContainer 在无网络条件下完成固定 .NET 夹具还原与运行");
     }
+
+    CheckPetWindowPositionStore(Path.Combine(tempRoot, "PetWindowPosition"));
+    passed.Add("桌宠位置使用独立原子文件保存；损坏和越界数据失败关闭，通用设置保持不变");
 
     CheckAppContainerRecoveryRejectsCorruptManifest(tempRoot);
     passed.Add("隔离恢复记录损坏时失败关闭且保留证据");
@@ -2200,6 +2218,50 @@ static void CheckWindowMatchSelection()
         "重复出现的同一窗口句柄没有去重为唯一目标。");
     Require(ambiguousTarget.Status == WindowMatchStatus.Ambiguous && ambiguousTarget.Handle == IntPtr.Zero,
         "多个不同窗口句柄没有失败关闭并要求用户手动选择。");
+}
+
+static void CheckPetWindowPositionStore(string root)
+{
+    var directory = Path.Combine(root, "position-store");
+    Directory.CreateDirectory(directory);
+    var settingsPath = Path.Combine(directory, "settings.json");
+    const string settingsSentinel = "settings-must-remain-unchanged";
+    File.WriteAllText(settingsPath, settingsSentinel, new UTF8Encoding(false));
+    var store = new PetWindowPositionStore(directory);
+    var positionPath = Path.Combine(directory, "pet-window-position.json");
+
+    Require(!store.TryLoad(out _), "没有位置记录时返回了位置。");
+    store.Save(-1920, 1080);
+    Require(store.TryLoad(out var first) && first == new PetWindowPosition(-1920, 1080),
+        "独立位置文件第一次保存后无法读取。");
+    store.Save(3840, -240);
+    Require(store.TryLoad(out var replaced) && replaced == new PetWindowPosition(3840, -240),
+        "原子替换后没有读取到最新的桌宠位置。");
+    Require(File.ReadAllText(settingsPath) == settingsSentinel,
+        "保存桌宠位置时改写了通用设置文件。");
+    Require(!Directory.EnumerateFiles(directory, ".pet-window-position-*.tmp").Any(),
+        "位置保存后残留临时文件。");
+
+    var invalidFiles = new[]
+    {
+        "{",
+        "{\"leftPixels\":1,\"topPixels\":2,\"extra\":3}",
+        "{\"leftPixels\":1,\"leftPixels\":3,\"topPixels\":2}",
+        "{\"leftPixels\":1000001,\"topPixels\":2}",
+        new string('x', 513)
+    };
+    foreach (var invalid in invalidFiles)
+    {
+        File.WriteAllText(positionPath, invalid, new UTF8Encoding(false));
+        Require(!store.TryLoad(out _), "损坏、扩展或越界的位置数据未失败关闭。");
+    }
+
+    File.WriteAllText(positionPath, "{\"leftPixels\":3840,\"topPixels\":-240}", new UTF8Encoding(false));
+    var rejectedRange = false;
+    try { store.Save(int.MaxValue, 0); }
+    catch (ArgumentOutOfRangeException) { rejectedRange = true; }
+    Require(rejectedRange && store.TryLoad(out var retained) && retained == new PetWindowPosition(3840, -240),
+        "越界坐标没有被拒绝，或拒绝前覆盖了最后一条有效位置。");
 }
 
 static async Task VerifyLiveVscodeWindowAsync(string executablePath, string workspacePath)

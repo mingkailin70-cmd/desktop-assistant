@@ -8,12 +8,14 @@ using System.Windows.Media;
 using System.Windows.Interop;
 using Forms = System.Windows.Forms;
 using XiaoK.Core;
+using XiaoK.Storage;
 
 namespace XiaoK.Host;
 
 public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
     private readonly AssistantRuntime _runtime;
+    private readonly PetWindowPositionStore _petWindowPositionStore;
     private readonly WindowsNotificationMonitor _notificationMonitor;
     private readonly Forms.NotifyIcon _tray;
     private HwndSource? _source;
@@ -37,6 +39,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     {
         InitializeComponent();
         _runtime = new AssistantRuntime(this);
+        _petWindowPositionStore = new PetWindowPositionStore(
+            Path.GetDirectoryName(XiaoKSettings.GetSettingsPath())
+            ?? throw new InvalidOperationException("无法确定小K本地设置目录。"));
         _runtime.SpeechCaptureMaximumDurationReached += OnSpeechCaptureMaximumDurationReached;
         _runtime.WakeWordDetected += OnWakeWordDetected;
         _runtime.WakeWordStatusChanged += OnWakeWordStatusChanged;
@@ -874,7 +879,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         if (handle == IntPtr.Zero || !GetWindowRect(handle, out var current)) return;
 
         var settings = _runtime.CurrentSettings;
-        if (settings.PetWindowLeftPixels is int savedLeft && settings.PetWindowTopPixels is int savedTop)
+        if (_petWindowPositionStore.TryLoad(out var savedPosition))
+        {
+            SetWindowPosition(handle, savedPosition.LeftPixels, savedPosition.TopPixels);
+        }
+        else if (settings.PetWindowLeftPixels is int savedLeft && settings.PetWindowTopPixels is int savedTop)
         {
             SetWindowPosition(handle, savedLeft, savedTop);
         }
@@ -937,14 +946,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect)) return;
         try
         {
-            var latest = XiaoKSettings.Load();
-            (latest with
-            {
-                PetWindowLeft = null,
-                PetWindowTop = null,
-                PetWindowLeftPixels = rect.Left,
-                PetWindowTopPixels = rect.Top
-            }).Save();
+            _petWindowPositionStore.Save(rect.Left, rect.Top);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or System.Security.SecurityException or InvalidOperationException or ArgumentException)
