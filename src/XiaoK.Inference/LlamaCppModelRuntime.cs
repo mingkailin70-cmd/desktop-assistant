@@ -26,6 +26,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     private const string MiMoEvaluationModelFileName = "MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf";
     private const string Qwen9BEvaluationModelId = "qwen3.5-9b-q4km-eval";
     private const string Qwen9BEvaluationModelFileName = "Qwen3.5-9B-Q4_K_M.gguf";
+    private const string Jev9BEvaluationModelId = "autotrust-jev-9b-q4km-eval";
+    private const string Jev9BEvaluationModelFileName = "JEV-9B.Q4_K_M.gguf";
     private static readonly TimeSpan IdleUnloadDelay = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(3);
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -97,7 +99,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         {
             MiMoEvaluationModelId => (MiMoEvaluationModelId, MiMoEvaluationModelFileName),
             Qwen9BEvaluationModelId => (Qwen9BEvaluationModelId, Qwen9BEvaluationModelFileName),
-            _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0 或 Qwen3.5-9B Q4 候选模型。")
+            Jev9BEvaluationModelId => (Jev9BEvaluationModelId, Jev9BEvaluationModelFileName),
+            _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0、Qwen3.5-9B Q4 或 JEV-9B Q4 候选模型。")
         };
         return TryLoadCore(modelRoot, runtimeDirectory, endpoint, candidate.Item1,
             candidate.Item2, gpuMemoryProbe, contextTokensOverride);

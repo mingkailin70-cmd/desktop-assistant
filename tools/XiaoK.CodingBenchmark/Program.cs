@@ -32,7 +32,7 @@ internal static class Program
             if ((args.Length != 6 && args.Length != 8) || args[0] != "--repo" || args[2] != "--dataset"
                 || args[4] != "--task" || (args.Length == 8 && args[6] != "--model-id"))
             {
-                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --dataset <coding-zh-v3|coding-zh-v4> --task <R01|S01|M01|F01> [--model-id <qwen3.5-4b-q4km|mimo-v2.6-distill-qwen-9b-gguf-q8-0|qwen3.5-9b-q4km-eval>]");
+                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --dataset <coding-zh-v3|coding-zh-v4> --task <R01|S01|M01|F01> [--model-id <qwen3.5-4b-q4km|mimo-v2.6-distill-qwen-9b-gguf-q8-0|qwen3.5-9b-q4km-eval|autotrust-jev-9b-q4km-eval>]");
                 return 2;
             }
 
@@ -315,14 +315,17 @@ internal static class Program
             "qwen3.5-4b-q4km" => new ModelProfile("Qwen3.5-4B-Q4_K_M.gguf", 99, 5_000, 6_024, false),
             "mimo-v2.6-distill-qwen-9b-gguf-q8-0" => new ModelProfile("MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf", 8, 3_500, 4_524, true),
             "qwen3.5-9b-q4km-eval" => new ModelProfile("Qwen3.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
-            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0 或 Qwen3.5-9B Q4_K_M 模型。", nameof(modelId))
+            "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
+            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M 或 AutoTrust JEV-9B Q4_K_M 模型。", nameof(modelId))
         };
         var model = modelLock.Models.Single(item => item.Id == modelId);
         var runtime = runtimeLock.Runtimes.Single(item => item.Id == "llama.cpp");
-        var expectedModelStatus = profile.EvaluationCandidate ? "locally_evaluated" : "downloaded_and_verified";
-        if (model.Status != expectedModelStatus || runtime.Version != "b11259"
+        var modelStatusAllowsEvaluation = profile.EvaluationCandidate
+            ? model.Status is "downloaded_and_verified" or "locally_evaluated"
+            : model.Status == "downloaded_and_verified";
+        if (!modelStatusAllowsEvaluation || runtime.Version != "b11259"
             || runtime.Status != "locally_evaluated" || model.Files.Count != 1 || runtime.StagedFiles.Count == 0)
-            throw new InvalidDataException("锁定模型或 llama.cpp b11259 状态不符合评测要求。");
+            throw new InvalidDataException("锁定模型尚未通过哈希校验，或 llama.cpp b11259 状态不符合评测要求。");
         var modelsRoot = Path.GetFullPath(Path.Combine(repoRoot, "models"));
         var root = Path.GetFullPath(Path.Combine(modelsRoot, model.LocalDirectory.Replace('/', Path.DirectorySeparatorChar)));
         if (!root.StartsWith(modelsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

@@ -466,6 +466,30 @@
       "notes": "仅作离线候选，不得更改生产默认模型。固定 Q4_K_M 单文件已逐字节校验。2026-10-03 使用本机 llama.cpp b11259、12 GPU层、6,144上下文做合成短聊，显式关闭 thinking 后正确回答“7加5等于12”，生成12 tokens，用时1.07秒；初始空闲显存6,272 MiB、采样最低空闲3,717 MiB（活动新增占用峰值约2,555 MiB，整卡采样占用峰值4,434 MiB），系统可用内存从16.76 GiB降至11.20 GiB。任务后 llama-server 已退出，显存/内存恢复至约6,271 MiB/16.76 GiB可用。此结果仅证明该环境能完成一条合成推理与短时资源观察；未完成编码质量、长时稳定性或生产验收，仍不能作为首版主模型。",
       "localDirectory": "llm/qwen3.5-9b-q4km/1379f25c6b505a3fc737bd7818cb09389cf807c1",
       "requiredForP0": false
+    },
+    {
+      "id": "autotrust-jev-9b-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/mradermacher/JEV-9B-GGUF",
+      "baseModel": "autotrust/JEV-9B",
+      "revision": "95be0d83b95147aa9d95ab3f462a2a727276d9a3",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "mradermacher static quantization",
+      "conversionRuntime": "llama.cpp compatible GGUF",
+      "files": [
+        {
+          "name": "JEV-9B.Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 5629110048,
+          "expectedUpstreamSha256": "e1bef4864401bac66ab3ea39d159aa6ac922b14fd3ffd739e9dc2605d82f5ca9",
+          "localVerifiedSha256": "e1bef4864401bac66ab3ea39d159aa6ac922b14fd3ffd739e9dc2605d82f5ca9"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "locally_evaluated",
+      "notes": "AutoTrust官方JEV-9B权重的社区GGUF静态量化；固定revision和SHA-256已验证，Apache-2.0由上游模型页和JEV模型卡声明。2026-10-03使用本机llama.cpp b11259、12个GPU层、6,144上下文和coding-zh-v4/v23管线完成M01、R01–R10初筛，2/11通过（R03、R09）；关键错误包括虚构QQ别名、通知未知会话正文读取顺序、漏掉外发不确定时禁止重发、CodeAgent限制、显存零预算合法性和当前通知适配器行为。其余29题即使全部通过最高31/40（77.5%），低于80%门槛，停止此固定管线质量评分，不接受为首版模型。运行中最低空闲显存3,482 MiB、峰值占用4,418 MiB，工具范围检查通过，原项目未修改。上游自报HumanEval使用completion-style提示，不代替小K固定中文CodeAgent任务集；GGUF仅作文本生成评测，不预设专用System 1决策头或vLLM适配能力。",
+      "localDirectory": "llm/autotrust-jev-9b-q4km/95be0d83b95147aa9d95ab3f462a2a727276d9a3",
+      "requiredForP0": false
     }
   ]
 }
