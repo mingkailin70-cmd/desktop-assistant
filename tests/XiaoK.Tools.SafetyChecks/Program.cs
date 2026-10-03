@@ -176,11 +176,20 @@ try
     await CheckLargeCodeTaskUsesBoundedContextAndExactEditsAsync(tempRoot);
     passed.Add("大文件任务只暴露受限代码片段，并通过唯一精确编辑形成完整审阅补丁");
 
+    await CheckMultilineLfEditMatchesCrlfBaselineAsync(tempRoot);
+    passed.Add("大文件多行补丁允许模型换行符规范化并精确映射回 CRLF 原文");
+
     await CheckTargetPathListDoesNotBiasLargeContextAsync(tempRoot);
     passed.Add("大文件索引从任务语义定位代码，不让授权路径清单把上下文带到文件头部");
 
+    await CheckFileSearchContextRanksAdapterLimitLoopAsync(tempRoot);
+    passed.Add("文件搜索上下文索引能定位结果计数循环和适配器返回路径");
+
     await CheckLargeCodeTaskCoversEveryAuthorizedFileAsync(tempRoot);
     passed.Add("大文件上下文即使模型漏选位置，也覆盖任务已授权的每个目标文件");
+
+    await CheckModelChosenLargeContextLocationsArePreservedAsync(tempRoot);
+    passed.Add("大文件上下文保留模型在授权索引中选定的位置并补齐每个目标文件");
 
     await CheckLargeCodeTaskRejectsEditOutsideContextAsync(tempRoot);
     passed.Add("大文件任务拒绝片段外编辑和整文件重写，原项目保持不变");
@@ -190,6 +199,9 @@ try
 
     await CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(tempRoot);
     passed.Add("编程代理拒绝代码围栏、额外文本、未知字段和重复JSON字段，原项目保持不变");
+
+    await CheckNonUniqueEditGetsOneBoundedCorrectionAsync(tempRoot);
+    passed.Add("精确编辑定位失败时只允许一次受限纠正，仍失败则不审阅也不修改原项目");
 
     await CheckCodeTaskInspectionIsReadOnlyAsync(tempRoot);
     passed.Add("只读代码检索经 ToolBroker 选择并解释项目文件，不改写、审阅或测试原项目");
@@ -902,6 +914,34 @@ static async Task CheckLargeCodeTaskRejectsEditOutsideContextAsync(string root)
         "大文件任务没有拒绝整文件重写输出。");
 }
 
+static async Task CheckMultilineLfEditMatchesCrlfBaselineAsync(string root)
+{
+    var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    const int targetLine = 351;
+    lines.Insert(targetLine - 1, "static void Target()");
+    lines.Insert(targetLine, "{");
+    lines.Insert(targetLine + 1, "    int marker = 1;");
+    lines.Insert(targetLine + 2, "}");
+    var original = string.Join("\r\n", lines) + "\r\n";
+    var project = CreateProject(root, "large-context-crlf-multiline-edit", original);
+    var workspaceRoot = Path.Combine(root, "large-context-crlf-multiline-workspaces");
+    var inference = new ScriptedInference(
+        $"{{\"locations\":[{{\"path\":\"Sample.cs\",\"line\":{targetLine}}}]}}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"static void Target()\\n{\\n    int marker = 1;\\n}\",\"replace\":\"static void Target()\\n{\\n    int marker = 2;\\n}\"}]}" );
+
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot,
+        "把 Target 的 marker 改为 2", CancellationToken.None);
+
+    var expected = original.Replace("    int marker = 1;", "    int marker = 2;", StringComparison.Ordinal);
+    var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval && inference.CallCount == 2,
+        "CRLF 文件中的多行精确补丁未进入待审阅状态。" + result.Summary);
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
+        "CRLF 多行补丁生成期间修改了原项目。");
+    Require(File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")) == expected,
+        "LF 查找文本没有精确映射到 CRLF 基线，或更新后没有保留 CRLF。");
+}
+
 static async Task CheckLargeCodeTaskCoversEveryAuthorizedFileAsync(string root)
 {
     var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
@@ -928,6 +968,85 @@ static async Task CheckLargeCodeTaskCoversEveryAuthorizedFileAsync(string root)
     Require(File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")).Contains("int marker = 2;", StringComparison.Ordinal)
         && File.ReadAllText(Path.Combine(taskRoot, "workspace", "Second.cs")).Contains("int secondMarker = 4;", StringComparison.Ordinal),
         "遗漏位置的已授权目标文件没有被补入受限上下文。");
+}
+
+static async Task CheckModelChosenLargeContextLocationsArePreservedAsync(string root)
+{
+    var paths = new[] { "Sample.cs", "Second.cs", "Third.cs", "Fourth.cs" };
+    var project = Path.Combine(root, "model-chosen-context-locations");
+    Directory.CreateDirectory(project);
+    foreach (var path in paths)
+    {
+        var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+        lines.Insert(350, "static void Primary() { int firstMarker = 1; }");
+        lines.Insert(600, "static void Secondary() { int selectedMarker = 1; }");
+        File.WriteAllText(Path.Combine(project, path), string.Join("\n", lines) + "\n", new UTF8Encoding(false));
+    }
+
+    var locations = string.Join(',', paths.Select(path => $"{{\"path\":\"{path}\",\"line\":601}}"));
+    var edits = string.Join(',', paths.Select(path => $"{{\"path\":\"{path}\",\"find\":\"int selectedMarker = 1;\",\"replace\":\"int selectedMarker = 2;\"}}"));
+    var inference = new ScriptedInference($"{{\"locations\":[{locations}]}}", $"{{\"edits\":[{edits}]}}");
+    var result = await NewAgent(inference).ExecuteAsync(project,
+        Path.Combine(root, "model-chosen-context-locations-workspaces"),
+        "修改 Sample.cs、Second.cs、Third.cs、Fourth.cs 中各自已选位置的 marker", CancellationToken.None);
+
+    var taskRoot = Directory.GetDirectories(Path.Combine(root, "model-chosen-context-locations-workspaces")).Single();
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval && inference.CallCount == 2,
+        "模型已选择的位置被回退上下文覆盖，或目标文件没有全部进入上下文。" + result.Summary);
+    Require(paths.All(path => File.ReadAllText(Path.Combine(taskRoot, "workspace", path))
+            .Contains("int selectedMarker = 2;", StringComparison.Ordinal)),
+        "模型选择的四个授权上下文位置没有全部生成隔离补丁。");
+}
+
+static async Task CheckFileSearchContextRanksAdapterLimitLoopAsync(string root)
+{
+    var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    lines.Insert(350, "private void SearchFiles()");
+    lines.Insert(351, "{");
+    lines.Insert(390, "    while (queue.Count > 0 && matches.Count < 10)");
+    lines.Insert(391, "    {");
+    lines.Insert(392, "        matches.Add(\"name\");");
+    lines.Insert(393, "    }");
+    lines.Insert(394, "}");
+    var adapter = string.Join("\n", lines) + "\n";
+
+    var brokerLines = Enumerable.Range(0, 700).Select(index => $"// broker-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    brokerLines.Insert(350, "private static ToolResult? ValidateFileSearch(ToolProposal proposal)");
+    brokerLines.Insert(351, "{");
+    brokerLines.Insert(352, "    return proposal.Arguments.Count == 2 ? null : InvalidProposal();");
+    brokerLines.Insert(353, "}");
+    var broker = string.Join("\n", brokerLines) + "\n";
+
+    var testLines = Enumerable.Range(0, 700).Select(index => $"// test-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    testLines.Insert(350, "static void CheckFileSearch()");
+    testLines.Insert(351, "{");
+    testLines.Insert(352, "    var result = SearchFilesAsync(proposal);");
+    testLines.Insert(353, "    Require(result.Success);");
+    testLines.Insert(354, "}");
+    var tests = string.Join("\n", testLines) + "\n";
+
+    var project = Path.Combine(root, "file-search-result-limit-context");
+    Directory.CreateDirectory(Path.Combine(project, "src"));
+    Directory.CreateDirectory(Path.Combine(project, "tests"));
+    File.WriteAllText(Path.Combine(project, "src", "WindowsDesktopTools.cs"), adapter, new UTF8Encoding(false));
+    File.WriteAllText(Path.Combine(project, "src", "ToolBroker.cs"), broker, new UTF8Encoding(false));
+    File.WriteAllText(Path.Combine(project, "tests", "Program.cs"), tests, new UTF8Encoding(false));
+    var workspaceRoot = Path.Combine(root, "file-search-result-limit-context-workspaces");
+    var locations = "{\"locations\":[{\"path\":\"src/WindowsDesktopTools.cs\",\"line\":351},{\"path\":\"src/ToolBroker.cs\",\"line\":351},{\"path\":\"tests/Program.cs\",\"line\":351}]}";
+    var inference = new ScriptedInference(locations, "{\"edits\":[]}");
+    var result = await NewAgent(inference).ExecuteAsync(project,
+        workspaceRoot,
+        "为 src/ToolBroker.cs、src/WindowsDesktopTools.cs、tests/Program.cs 中的文件搜索增加 max_results 参数，默认10条，按请求数量上限停止收集匹配结果；无效参数在适配器调用前拒绝。",
+        CancellationToken.None);
+
+    var prompts = inference.Prompts.ToArray();
+    Require(!result.Success && inference.CallCount == 2
+        && prompts.Any(prompt => prompt.Contains("matches.Count", StringComparison.Ordinal)),
+        "任务语义没有把结果计数上限循环带入受限索引或代码片段。" + result.Summary);
+    Require(File.ReadAllText(Path.Combine(project, "src", "WindowsDesktopTools.cs")) == adapter
+        && File.ReadAllText(Path.Combine(project, "src", "ToolBroker.cs")) == broker
+        && File.ReadAllText(Path.Combine(project, "tests", "Program.cs")) == tests,
+        "文件搜索上下文定位回归修改了原项目。");
 }
 
 static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string root)
@@ -971,6 +1090,40 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
                 .Contains("failed", StringComparison.Ordinal),
             $"模型输出 {testCase.Name} 没有留下失败状态。");
     }
+}
+
+static async Task CheckNonUniqueEditGetsOneBoundedCorrectionAsync(string root)
+{
+    const string source = "class Sample { int Value = 1; int Other = 2; }\n";
+    var project = CreateProject(root, "non-unique-edit-retry", source);
+    var workspaceRoot = Path.Combine(root, "non-unique-edit-retry-workspaces");
+    var inference = new ScriptedInference(
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int \",\"replace\":\"string \"}]}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}");
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot,
+        "只把 Value 改为 3", CancellationToken.None, review);
+
+    var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+        && inference.CallCount == 2 && review.CallCount == 1,
+        "非唯一精确编辑没有进行单次修正，或修正后未进入审阅。" + result.Summary);
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source
+        && File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs"))
+            == "class Sample { int Value = 3; int Other = 2; }\n",
+        "修正补丁越过隔离工作区或修改了非目标代码。");
+
+    var rejectedProject = CreateProject(root, "non-unique-edit-retry-rejected", source);
+    var rejectedWorkspace = Path.Combine(root, "non-unique-edit-retry-rejected-workspaces");
+    var rejectedInference = new ScriptedInference(
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int \",\"replace\":\"string \"}]}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int \",\"replace\":\"string \"}]}");
+    var rejectedReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var rejectedResult = await NewAgent(rejectedInference).ExecuteAsync(rejectedProject, rejectedWorkspace,
+        "只把 Value 改为 3", CancellationToken.None, rejectedReview);
+    Require(!rejectedResult.Success && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
+        && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
+        "第二次非唯一精确编辑没有失败关闭或进入了审阅。");
 }
 
 static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
