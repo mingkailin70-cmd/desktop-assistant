@@ -2575,6 +2575,15 @@ static async Task CheckMessageAnalysisNormalFailureTimeoutAndCancellationAsync()
         && normal.Summary.StartsWith("明确内容：", StringComparison.Ordinal),
         "聊天理解没有只把用户提供的单条消息送入本地推理，或没有返回正常分析结果。");
 
+    var emptyInference = new ThrowingInference(new InvalidDataException("Local inference returned empty text."));
+    var emptyBroker = new ToolBroker(new WindowsDesktopTools([], []), emptyInference, new ModelBroker(),
+        null!, null!, "", "");
+    var empty = await emptyBroker.ExecuteAsync(CreateProposal("请确认会议时间。"), CancellationToken.None);
+    Require(!empty.Success && empty.ErrorCode == "LOCAL_MODEL_INVALID_RESPONSE"
+        && empty.Summary.Contains("本地模型返回内容无法读取", StringComparison.Ordinal)
+        && emptyInference.CallCount == 1,
+        "聊天理解把空模型响应显示为空白成功，或发生了额外推理调用。");
+
     var offlineInference = new ThrowingInference(new HttpRequestException("local endpoint unavailable"));
     var offlineBroker = new ToolBroker(new WindowsDesktopTools([], []), offlineInference, new ModelBroker(),
         null!, null!, "", "");
@@ -2621,6 +2630,15 @@ static async Task CheckReplyDraftFailureTimeoutAndCancellationAsync()
         && normalInference.Prompts.Single() == "明天的时间我晚点确认。"
         && normal.Summary == "可以回复：好的，我明天确认后告诉你。",
         "回复草稿正常路径没有返回草稿，或消息正文被改写。");
+
+    var emptyInference = new ThrowingInference(new InvalidDataException("Local inference returned empty text."));
+    var emptyBroker = new ToolBroker(new WindowsDesktopTools([], []), emptyInference, new ModelBroker(),
+        null!, null!, "", "");
+    var empty = await emptyBroker.ExecuteAsync(CreateProposal("明天的时间我晚点确认。"), CancellationToken.None);
+    Require(!empty.Success && empty.ErrorCode == "LOCAL_MODEL_INVALID_RESPONSE"
+        && empty.Summary.Contains("本地模型返回内容无法读取", StringComparison.Ordinal)
+        && emptyInference.CallCount == 1,
+        "回复草稿把空模型响应显示为空白成功，或发生了额外推理调用。");
 
     var offlineInference = new ThrowingInference(new HttpRequestException("local endpoint unavailable"));
     var offlineBroker = new ToolBroker(new WindowsDesktopTools([], []), offlineInference, new ModelBroker(),
