@@ -102,7 +102,9 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
         try { ResponseCompleted?.Invoke(diagnostics); }
         catch (Exception) { /* Diagnostics must never change inference behavior. */ }
 
-        return content ?? throw new InvalidDataException("Local inference returned no text.");
+        if (string.IsNullOrWhiteSpace(content))
+            throw new InvalidDataException("Local inference returned empty text.");
+        return content;
     }
 
     public void Dispose() => _http.Dispose();

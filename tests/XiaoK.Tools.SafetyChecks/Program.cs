@@ -3109,6 +3109,14 @@ static async Task CheckLocalInferenceClientRejectsInvalidResponsesAsync()
         sendResponseBody: false);
     Require(oversized is InvalidDataException,
         "本地推理客户端没有在读取响应正文前拒绝超过大小上限的响应。");
+
+    var emptyText = await RunResponseCaseAsync("{\"choices\":[{\"message\":{\"content\":\"\"}}]}");
+    Require(emptyText is InvalidDataException,
+        "本地推理客户端把空回答当作成功，Host 可能会静默显示空白结果。");
+
+    var whitespaceText = await RunResponseCaseAsync("{\"choices\":[{\"message\":{\"content\":\"   \"}}]}");
+    Require(whitespaceText is InvalidDataException,
+        "本地推理客户端把纯空白回答当作成功，Host 可能会静默显示空白结果。");
 }
 
 static async Task<(string Headers, string Body)> ServeOneLoopbackHttpRequestAsync(TcpListener listener,
