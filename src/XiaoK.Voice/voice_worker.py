@@ -22,16 +22,33 @@ def emit(value):
     PROTOCOL_OUT.flush()
 
 
-def load_model(task, model_dir):
+GPU_MODEL_MINIMUM_FREE_MIB = 4524
+
+
+def load_model(task, model_dir, device):
     import torch
+
+    if device == "cuda":
+        if task != "tts":
+            raise ValueError("GPU evaluation is enabled only for the fixed TTS candidate")
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA_UNAVAILABLE")
+        free_bytes, _ = torch.cuda.mem_get_info(0)
+        if free_bytes < GPU_MODEL_MINIMUM_FREE_MIB * 1024 * 1024:
+            raise RuntimeError("GPU_ADMISSION_REJECTED")
+        gpu_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        device_map = "cuda:0"
+    else:
+        gpu_dtype = torch.float32
+        device_map = "cpu"
 
     if task == "asr":
         from qwen_asr import Qwen3ASRModel
 
         return Qwen3ASRModel.from_pretrained(
             model_dir,
-            torch_dtype=torch.float32,
-            device_map="cpu",
+            torch_dtype=gpu_dtype,
+            device_map=device_map,
             local_files_only=True,
             trust_remote_code=False,
             low_cpu_mem_usage=True,
@@ -42,8 +59,8 @@ def load_model(task, model_dir):
 
     return Qwen3TTSModel.from_pretrained(
         model_dir,
-        torch_dtype=torch.float32,
-        device_map="cpu",
+        torch_dtype=gpu_dtype,
+        device_map=device_map,
         local_files_only=True,
         trust_remote_code=False,
         low_cpu_mem_usage=True,
@@ -130,10 +147,11 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--task", choices=("asr", "tts"), required=True)
     parser.add_argument("--model-dir", required=True)
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     args = parser.parse_args()
 
     try:
-        model = load_model(args.task, args.model_dir)
+        model = load_model(args.task, args.model_dir, args.device)
     except Exception:
         traceback.print_exc(file=sys.stderr)
         emit({"type": "ready", "ok": False, "code": "MODEL_LOAD_FAILED"})
