@@ -90,6 +90,22 @@ if (args.Length == 1 && args[0] == "--only-cross-model-arbitration")
     Console.WriteLine("通过：竞争模型共用交互优先队列，启动前卸载主模型，结束后不遗留租约。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-code-inspection")
+{
+    var inspectionTestRoot = Path.Combine(Path.GetTempPath(), "XiaoK-CodeInspectionProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(inspectionTestRoot);
+    try
+    {
+        await CheckCodeTaskInspectionIsReadOnlyAsync(inspectionTestRoot);
+        await CheckInspectionCitationsAreBoundToProvidedSourceAsync(inspectionTestRoot);
+        Console.WriteLine("通过：只读说明逐条输出结构化引用；缺引用、外部路径和越界行均失败关闭。");
+    }
+    finally
+    {
+        if (Directory.Exists(inspectionTestRoot)) Directory.Delete(inspectionTestRoot, recursive: true);
+    }
+    return;
+}
 var skipAppContainerChecks = args.Length == 1 && args[0] == "--without-appcontainer";
 if (args.Length != 0 && !skipAppContainerChecks)
 {
@@ -1347,10 +1363,11 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 {
     const string original = "class Sample { int Value = 7; }\n";
     const string explanation = "Sample.Value 在第 1 行定义，初值为 7。[Sample.cs:1]";
+    const string explanationJson = "{\"claims\":[{\"text\":\"Sample.Value 在第 1 行定义，初值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
     var project = CreateProject(root, "code-inspection", original);
     File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "code-inspection-workspaces");
-    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}", explanation);
+    var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}", explanationJson);
     var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
     var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "should not run"));
     var agent = NewAgent(inference, runner);
@@ -1363,12 +1380,15 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
     var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
 
     Require(result.Success && result.FinalState == TaskLifecycleState.Completed && result.Data == explanation,
-        "只读检索没有返回本地说明和完成状态。");
+        $"只读检索没有返回本地说明和完成状态：{result.ErrorCode} {result.Summary} {result.Data}");
     Require(inference.CallCount == 2
         && inference.Prompts.Any(prompt => prompt.Contains("1|class Sample { int Value = 7; }", StringComparison.Ordinal))
-        && inference.SystemPrompts.Any(prompt => prompt.Contains("每个可核验的关键结论后必须引用", StringComparison.Ordinal)
-            && prompt.Contains("回答末尾另起一行写", StringComparison.Ordinal)),
-        "只读检索没有提供绝对行号上下文或要求可核验的源码引用。");
+        && inference.SystemPrompts.Any(prompt => prompt.Contains("严格JSON对象", StringComparison.Ordinal)
+            && prompt.Contains("claims", StringComparison.Ordinal) && prompt.Contains("citations", StringComparison.Ordinal)
+            && prompt.Contains("回看入口之后的分支", StringComparison.Ordinal)
+            && prompt.Contains("不得把调用后的结果检查写成调用前条件", StringComparison.Ordinal)
+            && prompt.Contains("按源码行号从小到大排列", StringComparison.Ordinal)),
+        "只读检索没有提供绝对行号上下文、要求结构化逐条来源引用，或要求准确区分、排序目标调用前后的控制流检查。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
         "只读代码检索修改了用户所选的原项目。");
     var taskRoot = Directory.GetDirectories(workspaces).Single();
@@ -1383,20 +1403,22 @@ static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string r
 {
     const string original = "class Sample { int Value = 7; }\n";
     const string correctedAnswer = "Sample.Value 在第 1 行定义，初值为 7。[Sample.cs:1]";
+    const string correctedAnswerJson = "{\"claims\":[{\"text\":\"Sample.Value 在第 1 行定义，初值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
     var correctedProject = CreateProject(root, "code-inspection-citation-correction", original);
     var correctedWorkspace = Path.Combine(root, "code-inspection-citation-correction-workspaces");
-    var correctionInference = new ScriptedInference("Sample.Value 当前初始化为 7。", correctedAnswer);
+    var correctionInference = new ScriptedInference(
+        "{\"claims\":[{\"text\":\"Sample.Value 当前初始化为 7。\",\"citations\":[]}]}", correctedAnswerJson);
     var corrected = await NewAgent(correctionInference).InspectAsync(correctedProject, correctedWorkspace,
         "说明 Value 当前在哪里定义", CancellationToken.None);
     Require(corrected.Success && corrected.Data == correctedAnswer && correctionInference.CallCount == 2
-        && correctionInference.SystemPrompts.Any(prompt => prompt.Contains("一次性引用校正步骤", StringComparison.Ordinal)),
+        && correctionInference.SystemPrompts.Any(prompt => prompt.Contains("一次性JSON说明校正步骤", StringComparison.Ordinal)),
         "缺少引用的首次说明没有通过一次同片段校正恢复。");
 
     var invalidAnswers = new (string Answer, string Feedback)[]
     {
-        ("结论没有源码引用。", "没有检测到格式为 [相对路径:正整数行号] 的源码引用"),
-        ("字段定义见 [Other.cs:1]。", "源码引用的路径不在本次提供的上下文中"),
-        ("字段定义见 [Sample.cs:99]。", "源码引用的行号超出本次提供的上下文片段")
+        ("{\"claims\":[{\"text\":\"结论没有源码引用。\",\"citations\":[]}]}", "每条claim必须包含1至8条源码引用"),
+        ("{\"claims\":[{\"text\":\"字段定义见。\",\"citations\":[{\"path\":\"Other.cs\",\"startLine\":1,\"endLine\":1}]}]}", "源码引用的路径不在本次提供的上下文中"),
+        ("{\"claims\":[{\"text\":\"字段定义见。\",\"citations\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"endLine\":99}]}]}", "源码引用行号超出本次提供的源码片段")
     };
     for (var index = 0; index < invalidAnswers.Length; index++)
     {
@@ -1411,7 +1433,7 @@ static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string r
             && inference.Prompts.Any(prompt => prompt.Contains(invalidAnswers[index].Feedback, StringComparison.Ordinal))
             && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal)
             && File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
-            $"无来源、未提供文件或越界行号的检索引用没有获得对应诊断后失败关闭（样本 {index}）。");
+            $"无来源、未提供文件或越界行号的结构化检索引用没有获得对应诊断后失败关闭（样本 {index}）。");
     }
 }
 
