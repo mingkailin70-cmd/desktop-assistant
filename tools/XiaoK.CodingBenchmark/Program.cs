@@ -18,7 +18,7 @@ internal static class Program
 {
     private const long MinimumRuntimeGpuFreeMiB = 1_024;
     private const int EvaluationContextTokens = 6144;
-    private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking";
+    private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v33-fixed-source-reference-line-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking";
     private const string V3ManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
     private const string V4ManifestSha256 = "9d5e09034231d119895fcc029b0fd6119d8993e24cb5fe116c4de88322208d5f";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

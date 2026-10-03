@@ -1363,7 +1363,8 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
         "只读检索没有返回本地说明和完成状态。");
     Require(inference.CallCount == 2
         && inference.Prompts.Any(prompt => prompt.Contains("1|class Sample { int Value = 7; }", StringComparison.Ordinal))
-        && inference.SystemPrompts.Any(prompt => prompt.Contains("每个可核验的关键结论后必须引用", StringComparison.Ordinal)),
+        && inference.SystemPrompts.Any(prompt => prompt.Contains("每个可核验的关键结论后必须引用", StringComparison.Ordinal)
+            && prompt.Contains("回答末尾另起一行写", StringComparison.Ordinal)),
         "只读检索没有提供绝对行号上下文或要求可核验的源码引用。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
         "只读代码检索修改了用户所选的原项目。");
