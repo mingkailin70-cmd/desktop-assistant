@@ -9,6 +9,8 @@ public sealed record PetWindowPosition(int LeftPixels, int TopPixels);
 /// </summary>
 public sealed class PetWindowPositionStore
 {
+    public const string FileName = "pet-window-position.json";
+
     private const int MaximumCoordinateMagnitude = 1_000_000;
     private const int MaximumFileBytes = 512;
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -19,7 +21,7 @@ public sealed class PetWindowPositionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
-        _path = Path.Combine(_directory, "pet-window-position.json");
+        _path = Path.Combine(_directory, FileName);
     }
 
     public bool TryLoad(out PetWindowPosition position)

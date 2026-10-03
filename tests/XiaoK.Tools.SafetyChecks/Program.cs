@@ -2050,31 +2050,40 @@ static void CheckLegacyAndManagedFilePrivacyCleanup(string root)
     const string privateName = "PRIVATE_CONTACT_NAME_SENTINEL";
     File.WriteAllText(settingsPath,
         "{\"dataRoot\":\"D:\\\\XiaoK\\\\Data\",\"contactReplyStyles\":[{\"contactName\":\"" + privateName
-            + "\",\"styleId\":\"warm\"}],\"unknownSetting\":42}", new UTF8Encoding(false));
-    var settingsSnapshot = LegacyContactStylesPrivacyCleanup.Preview(settingsPath);
-    Require(settingsSnapshot.HasContactStylesProperty && settingsSnapshot.ContactStyleRows == 1,
-        "旧设置清理预览未统计联系人偏好数量。");
-    Require(LegacyContactStylesPrivacyCleanup.RemoveIfUnchanged(settingsPath, settingsSnapshot),
-        "旧联系人偏好字段没有从设置 JSON 中移除。");
+            + "\",\"styleId\":\"warm\"}],\"unknownSetting\":42,\"petWindowLeft\":1.25,\"petWindowTop\":2.5,\"petWindowLeftPixels\":3,\"petWindowTopPixels\":4}", new UTF8Encoding(false));
+    var settingsSnapshot = LegacySettingsPrivacyCleanup.Preview(settingsPath);
+    Require(settingsSnapshot.HasContactStylesProperty && settingsSnapshot.ContactStyleRows == 1
+        && settingsSnapshot.PetWindowPositionPropertyCount == 4,
+        "旧设置清理预览未统计联系人偏好或旧桌宠坐标字段。");
+    Require(LegacySettingsPrivacyCleanup.RemoveIfUnchanged(settingsPath, settingsSnapshot),
+        "旧联系人偏好或桌宠坐标字段没有从设置 JSON 中移除。");
     using (var cleanedSettings = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(settingsPath)))
     {
         var rootObject = cleanedSettings.RootElement;
         Require(!rootObject.EnumerateObject().Any(property => property.Name.Equals("contactReplyStyles", StringComparison.OrdinalIgnoreCase))
+            && !rootObject.EnumerateObject().Any(property => property.Name.StartsWith("petWindow", StringComparison.OrdinalIgnoreCase))
             && rootObject.GetProperty("dataRoot").GetString() == @"D:\XiaoK\Data"
             && rootObject.GetProperty("unknownSetting").GetInt32() == 42
             && !File.ReadAllText(settingsPath).Contains(privateName, StringComparison.Ordinal),
-            "旧偏好清理删除了其他设置，或仍保留联系人名称。");
+            "旧偏好/桌宠坐标清理删除了其他设置，或仍保留敏感字段。");
     }
 
     var staleSettingsPath = Path.Combine(directory, "stale-settings.json");
     File.WriteAllText(staleSettingsPath,
-        "{\"contactReplyStyles\":[{\"contactName\":\"" + privateName + "\",\"styleId\":\"warm\"}]}", new UTF8Encoding(false));
-    var staleSnapshot = LegacyContactStylesPrivacyCleanup.Preview(staleSettingsPath);
+        "{\"contactReplyStyles\":[{\"contactName\":\"" + privateName + "\",\"styleId\":\"warm\"}],\"petWindowLeftPixels\":10}", new UTF8Encoding(false));
+    var staleSnapshot = LegacySettingsPrivacyCleanup.Preview(staleSettingsPath);
     File.AppendAllText(staleSettingsPath, " ");
     var staleRejected = false;
-    try { _ = LegacyContactStylesPrivacyCleanup.RemoveIfUnchanged(staleSettingsPath, staleSnapshot); }
+    try { _ = LegacySettingsPrivacyCleanup.RemoveIfUnchanged(staleSettingsPath, staleSnapshot); }
     catch (InvalidOperationException) { staleRejected = true; }
     Require(staleRejected, "设置文件在确认后变化时未拒绝替换。");
+
+    var duplicatePositionPath = Path.Combine(directory, "duplicate-position-settings.json");
+    File.WriteAllText(duplicatePositionPath, "{\"petWindowLeft\":1,\"petWindowLeft\":2}", new UTF8Encoding(false));
+    var duplicatePositionRejected = false;
+    try { _ = LegacySettingsPrivacyCleanup.Preview(duplicatePositionPath); }
+    catch (InvalidDataException) { duplicatePositionRejected = true; }
+    Require(duplicatePositionRejected, "旧设置重复定义桌宠坐标字段时未拒绝清理。");
 
     var tasksPath = Path.Combine(directory, "tasks.json");
     var migrationBackup = Path.Combine(directory, "tasks.sqlite3.before-migration-20260930.bak");
@@ -2083,24 +2092,26 @@ static void CheckLegacyAndManagedFilePrivacyCleanup(string root)
     var staging = Path.Combine(directory, "tasks.sqlite3.restore-incomplete.tmp");
     var unrelated = Path.Combine(directory, "keep-me.txt");
     var customBackup = Path.Combine(directory, "manual-copy.sqlite3");
-    foreach (var path in new[] { tasksPath, migrationBackup, restoreBackup, userBackup, staging, unrelated, customBackup })
+    var petPosition = Path.Combine(directory, PetWindowPositionStore.FileName);
+    var positionLookalike = Path.Combine(directory, PetWindowPositionStore.FileName + ".bak");
+    foreach (var path in new[] { tasksPath, migrationBackup, restoreBackup, userBackup, staging, unrelated, customBackup, petPosition, positionLookalike })
         File.WriteAllText(path, "synthetic local data", new UTF8Encoding(false));
 
     var filePlan = ManagedPrivacyFileCleanup.Preview(directory, tasksPath);
-    Require(filePlan.Files.Count == 5 && filePlan.SkippedEntries == 0,
-        "清理预览没有只枚举旧任务文件、小K管理的数据库备份和暂存文件。");
+    Require(filePlan.Files.Count == 6 && filePlan.SkippedEntries == 0,
+        "清理预览没有只枚举已知桌宠位置、旧任务文件、小K管理的数据库备份和暂存文件。");
     var appearedAfterPreview = Path.Combine(directory, "tasks.sqlite3.before-migration-new.bak");
     File.WriteAllText(appearedAfterPreview, "new synthetic backup", new UTF8Encoding(false));
     var staleFileResult = ManagedPrivacyFileCleanup.DeleteIfUnchanged(filePlan);
     Require(staleFileResult.PlanChanged && staleFileResult.DeletedCount == 0 && File.Exists(tasksPath),
         "清理确认期间出现新文件后仍删除了原预览中的数据。");
     filePlan = ManagedPrivacyFileCleanup.Preview(directory, tasksPath);
-    Require(filePlan.Files.Count == 6, "重新预览未包括确认期间新增的小K管理备份。");
+    Require(filePlan.Files.Count == 7, "重新预览未包括确认期间新增的小K管理备份。");
     var deleteResult = ManagedPrivacyFileCleanup.DeleteIfUnchanged(filePlan);
-    Require(deleteResult.DeletedCount == 6 && deleteResult.FailedFileNames.Count == 0
+    Require(deleteResult.DeletedCount == 7 && deleteResult.FailedFileNames.Count == 0
         && !File.Exists(tasksPath) && !File.Exists(migrationBackup) && !File.Exists(restoreBackup)
-        && !File.Exists(userBackup) && !File.Exists(staging) && !File.Exists(appearedAfterPreview)
-        && File.Exists(unrelated) && File.Exists(customBackup),
+        && !File.Exists(userBackup) && !File.Exists(staging) && !File.Exists(appearedAfterPreview) && !File.Exists(petPosition)
+        && File.Exists(unrelated) && File.Exists(customBackup) && File.Exists(positionLookalike),
         "受管隐私文件清理删除了无关文件/自定义备份或留下计划内文件。");
 }
 

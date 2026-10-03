@@ -4,10 +4,11 @@ using System.Text.Json.Nodes;
 
 namespace XiaoK.Storage;
 
-public sealed record LegacyContactStylesCleanupSnapshot(
+public sealed record LegacySettingsCleanupSnapshot(
     bool SettingsFileExists,
     bool HasContactStylesProperty,
     int ContactStyleRows,
+    int PetWindowPositionPropertyCount,
     long Length,
     long LastWriteUtcTicks,
     string Sha256);
@@ -25,26 +26,34 @@ public sealed record ManagedPrivacyFilesPlan(
 
 public sealed record ManagedPrivacyFilesDeleteResult(int DeletedCount, IReadOnlyList<string> FailedFileNames, bool PlanChanged = false);
 
-/// <summary>Removes only the legacy contact preference property from the current settings file.</summary>
-public static class LegacyContactStylesPrivacyCleanup
+/// <summary>Removes only known legacy personal-preference fields from the current settings file.</summary>
+public static class LegacySettingsPrivacyCleanup
 {
     private const int MaximumSettingsBytes = 2 * 1024 * 1024;
     private const string ContactStylesProperty = "contactReplyStyles";
+    private static readonly string[] PetWindowPositionProperties =
+        ["petWindowLeft", "petWindowTop", "petWindowLeftPixels", "petWindowTopPixels"];
 
-    public static LegacyContactStylesCleanupSnapshot Preview(string settingsPath)
+    public static LegacySettingsCleanupSnapshot Preview(string settingsPath)
     {
         var path = ValidateLocalPath(settingsPath);
-        if (!File.Exists(path)) return new(false, false, 0, 0, 0, "");
+        if (!File.Exists(path)) return new(false, false, 0, 0, 0, 0, "");
         var (bytes, length, lastWriteTicks) = ReadStableSettingsFile(path);
         using var document = JsonDocument.Parse(bytes);
         if (document.RootElement.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("本机设置文件不是 JSON 对象；为避免改坏设置，已停止清理。");
 
-        var matchingProperties = document.RootElement.EnumerateObject()
+        var properties = document.RootElement.EnumerateObject().ToArray();
+        var matchingProperties = properties
             .Where(property => string.Equals(property.Name, ContactStylesProperty, StringComparison.OrdinalIgnoreCase))
             .ToArray();
         if (matchingProperties.Length > 1)
             throw new InvalidDataException("本机设置文件重复定义了联系人偏好字段；为避免误删，已停止清理。");
+
+        var positionProperties = properties.Where(property => IsPetWindowPositionProperty(property.Name)).ToArray();
+        foreach (var knownProperty in PetWindowPositionProperties)
+            if (positionProperties.Count(property => string.Equals(property.Name, knownProperty, StringComparison.OrdinalIgnoreCase)) > 1)
+                throw new InvalidDataException("本机设置文件重复定义了桌宠坐标字段；为避免误删，已停止清理。");
 
         var contactCount = 0;
         if (matchingProperties.Length == 1)
@@ -55,15 +64,16 @@ public static class LegacyContactStylesPrivacyCleanup
                 throw new InvalidDataException("本机设置文件中的旧联系人偏好格式无法确认；为避免误删，已停止清理。");
         }
 
-        return new(true, matchingProperties.Length == 1, contactCount, length, lastWriteTicks,
+        return new(true, matchingProperties.Length == 1, contactCount, positionProperties.Length, length, lastWriteTicks,
             Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
-    public static bool RemoveIfUnchanged(string settingsPath, LegacyContactStylesCleanupSnapshot approvedSnapshot)
+    public static bool RemoveIfUnchanged(string settingsPath, LegacySettingsCleanupSnapshot approvedSnapshot)
     {
         ArgumentNullException.ThrowIfNull(approvedSnapshot);
         var path = ValidateLocalPath(settingsPath);
-        if (!approvedSnapshot.SettingsFileExists || !approvedSnapshot.HasContactStylesProperty) return false;
+        if (!approvedSnapshot.SettingsFileExists
+            || (!approvedSnapshot.HasContactStylesProperty && approvedSnapshot.PetWindowPositionPropertyCount == 0)) return false;
 
         var (bytes, length, lastWriteTicks) = ReadStableSettingsFile(path);
         if (length != approvedSnapshot.Length || lastWriteTicks != approvedSnapshot.LastWriteUtcTicks
@@ -73,11 +83,14 @@ public static class LegacyContactStylesPrivacyCleanup
         var root = JsonNode.Parse(bytes) as JsonObject
             ?? throw new InvalidDataException("本机设置文件不是 JSON 对象；没有清理。");
         var matchingKeys = root.Select(property => property.Key)
-            .Where(key => string.Equals(key, ContactStylesProperty, StringComparison.OrdinalIgnoreCase))
+            .Where(IsLegacyPersonalSettingProperty)
             .ToArray();
-        if (matchingKeys.Length != 1)
+        var contactKeyCount = matchingKeys.Count(key => string.Equals(key, ContactStylesProperty, StringComparison.OrdinalIgnoreCase));
+        var positionKeyCount = matchingKeys.Length - contactKeyCount;
+        if (contactKeyCount != (approvedSnapshot.HasContactStylesProperty ? 1 : 0)
+            || positionKeyCount != approvedSnapshot.PetWindowPositionPropertyCount)
             throw new InvalidOperationException("本机设置文件结构与预览不一致；没有清理，请重新预览。");
-        root.Remove(matchingKeys[0]);
+        foreach (var key in matchingKeys) root.Remove(key);
 
         var temporaryPath = path + ".privacy-cleanup-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -104,6 +117,13 @@ public static class LegacyContactStylesPrivacyCleanup
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
+
+    private static bool IsPetWindowPositionProperty(string name) =>
+        PetWindowPositionProperties.Any(property => string.Equals(name, property, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsLegacyPersonalSettingProperty(string name) =>
+        string.Equals(name, ContactStylesProperty, StringComparison.OrdinalIgnoreCase)
+        || IsPetWindowPositionProperty(name);
 
     private static (byte[] Bytes, long Length, long LastWriteTicks) ReadStableSettingsFile(string path)
     {
@@ -214,6 +234,7 @@ public static class ManagedPrivacyFileCleanup
     {
         if (string.Equals(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(legacyTasksJsonPath)!, name)),
             legacyTasksJsonPath, StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(name, PetWindowPositionStore.FileName, StringComparison.OrdinalIgnoreCase)) return true;
         return name.StartsWith("tasks.sqlite3.before-migration-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("tasks.sqlite3.before-restore-", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("tasks.sqlite3.restore-", StringComparison.OrdinalIgnoreCase)

@@ -663,7 +663,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             string? settingsCleanupError = null;
             try
             {
-                settingsPropertyRemoved = LegacyContactStylesPrivacyCleanup.RemoveIfUnchanged(
+                settingsPropertyRemoved = LegacySettingsPrivacyCleanup.RemoveIfUnchanged(
                     XiaoKSettings.GetSettingsPath(), approvedPreview.LegacySettings);
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException
@@ -674,7 +674,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
             var fileResult = ManagedPrivacyFileCleanup.DeleteIfUnchanged(approvedPreview.ManagedFiles);
             return new(databaseCompacted, settingsPropertyRemoved,
-                approvedPreview.LegacySettings.HasContactStylesProperty,
+                approvedPreview.LegacySettings.HasContactStylesProperty
+                    || approvedPreview.LegacySettings.PetWindowPositionPropertyCount > 0,
                 fileResult.DeletedCount, approvedPreview.ManagedFiles.SkippedEntries,
                 fileResult.FailedFileNames, fileResult.PlanChanged, settingsCleanupError);
         }
@@ -684,7 +685,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private async Task<LocalDataCleanupPreview> BuildLocalDataCleanupPreviewAsync(CancellationToken cancellationToken)
     {
         var database = await _store.GetPersonalDataSummaryAsync(cancellationToken);
-        var settings = LegacyContactStylesPrivacyCleanup.Preview(XiaoKSettings.GetSettingsPath());
+        var settings = LegacySettingsPrivacyCleanup.Preview(XiaoKSettings.GetSettingsPath());
         var managedFiles = ManagedPrivacyFileCleanup.Preview(_settings.DataRoot,
             Path.Combine(_settings.DataRoot, "tasks.json"));
         return new(database, settings, managedFiles);
@@ -909,7 +910,7 @@ internal sealed record AppSetting(string Id, string Executable, string? WorkingD
 internal sealed record RootSetting(string Id, string Path);
 internal sealed record TaskHistoryEntry(string Title, string State, DateTimeOffset UpdatedAtUtc, string Detail);
 internal sealed record LocalDataCleanupPreview(SqlitePersonalDataSummary Database,
-    LegacyContactStylesCleanupSnapshot LegacySettings, ManagedPrivacyFilesPlan ManagedFiles);
+    LegacySettingsCleanupSnapshot LegacySettings, ManagedPrivacyFilesPlan ManagedFiles);
 internal sealed record LocalDataCleanupResult(bool DatabaseCompacted, bool LegacySettingsPropertyRemoved,
-    bool LegacySettingsPropertyWasPresent, int DeletedManagedFiles, int SkippedManagedFiles,
+    bool LegacySettingsPropertiesWerePresent, int DeletedManagedFiles, int SkippedManagedFiles,
     IReadOnlyList<string> FailedManagedFileNames, bool ManagedFilePlanChanged, string? LegacySettingsCleanupError);

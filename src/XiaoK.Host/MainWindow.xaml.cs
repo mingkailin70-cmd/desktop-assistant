@@ -40,8 +40,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         InitializeComponent();
         _runtime = new AssistantRuntime(this);
         _petWindowPositionStore = new PetWindowPositionStore(
-            Path.GetDirectoryName(XiaoKSettings.GetSettingsPath())
-            ?? throw new InvalidOperationException("无法确定小K本地设置目录。"));
+            _runtime.CurrentSettings.DataRoot);
         _runtime.SpeechCaptureMaximumDurationReached += OnSpeechCaptureMaximumDurationReached;
         _runtime.WakeWordDetected += OnWakeWordDetected;
         _runtime.WakeWordStatusChanged += OnWakeWordStatusChanged;

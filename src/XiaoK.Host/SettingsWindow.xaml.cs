@@ -251,7 +251,8 @@ public partial class SettingsWindow : Window
             var preview = await _getLocalDataCleanupPreview(CancellationToken.None);
             var database = preview.Database;
             var hasData = database.TaskRows > 0 || database.ContactPreferenceRows > 0 || database.ApprovalAuditRows > 0
-                || preview.LegacySettings.HasContactStylesProperty || preview.ManagedFiles.Files.Count > 0;
+                || preview.LegacySettings.HasContactStylesProperty || preview.LegacySettings.PetWindowPositionPropertyCount > 0
+                || preview.ManagedFiles.Files.Count > 0;
             if (!hasData)
             {
                 DatabaseMaintenanceStatusText.Text = preview.ManagedFiles.SkippedEntries == 0
@@ -263,9 +264,9 @@ public partial class SettingsWindow : Window
             var confirmation = System.Windows.MessageBox.Show(
                 this,
                 $"将清除本地数据库中的任务记录（{database.TaskRows}）、联系人回复偏好（{database.ContactPreferenceRows}）和审批记录（{database.ApprovalAuditRows}）。"
-                    + $"\n旧设置文件中检测到 {preview.LegacySettings.ContactStyleRows} 条联系人偏好副本；数据目录内有 {preview.ManagedFiles.Files.Count} 个小K管理的旧任务/备份/暂存文件（{preview.ManagedFiles.TotalBytes / (1024d * 1024d):F1} MiB）。"
+                    + $"\n旧设置文件中检测到 {preview.LegacySettings.ContactStyleRows} 条联系人偏好副本和 {preview.LegacySettings.PetWindowPositionPropertyCount} 个旧桌宠坐标字段；数据目录内有 {preview.ManagedFiles.Files.Count} 个小K管理文件（含桌宠位置、旧任务、备份和暂存文件，共 {preview.ManagedFiles.TotalBytes / (1024d * 1024d):F1} MiB）。"
                     + $"\n当前数据目录：{Path.GetDirectoryName(_activeDatabasePath)}"
-                    + $"\n\n此操作不可撤销。迁移标记会保留，避免重启后从旧文件重新导入。只会从当前设置中移除联系人偏好字段；其他设置、隔离编程工作区、评测样本和用户另存到其他位置或自定义名称的备份不会删除。{(preview.ManagedFiles.SkippedEntries == 0 ? "" : $"\n另有 {preview.ManagedFiles.SkippedEntries} 个链接或只读文件会保留。")}\n\n要继续吗？",
+                    + $"\n\n此操作不可撤销。迁移标记会保留，避免重启后从旧文件重新导入。只会从当前设置中移除旧联系人偏好和桌宠坐标字段，并删除预览列出的受管文件；其他设置、隔离编程工作区、评测样本和用户另存到其他位置或自定义名称的备份不会删除。{(preview.ManagedFiles.SkippedEntries == 0 ? "" : $"\n另有 {preview.ManagedFiles.SkippedEntries} 个链接或只读文件会保留。")}\n\n要继续吗？",
                 "确认清理小K本地历史数据",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning,
@@ -295,10 +296,10 @@ public partial class SettingsWindow : Window
             var status = result.DatabaseCompacted
                 ? "数据库记录已清除，WAL已检查点并完成空间整理。"
                 : "数据库逻辑记录已清除，但 WAL 检查点或空间整理未完成；关闭其他数据库查看工具后可重试清理。";
-            status += result.LegacySettingsPropertyWasPresent
-                ? result.LegacySettingsPropertyRemoved ? "旧设置中的联系人偏好副本已移除。"
-                    : $"旧设置偏好副本未能移除：{result.LegacySettingsCleanupError ?? "请检查设置文件后重试。"}"
-                : "没有旧设置联系人偏好副本。";
+            status += result.LegacySettingsPropertiesWerePresent
+                ? result.LegacySettingsPropertyRemoved ? "旧设置中的临时偏好和桌宠坐标字段已移除。"
+                    : $"旧设置中的临时字段未能移除：{result.LegacySettingsCleanupError ?? "请检查设置文件后重试。"}"
+                : "没有检测到旧设置临时字段。";
             status += $"已删除 {result.DeletedManagedFiles} 个小K管理文件。";
             if (result.SkippedManagedFiles > 0) status += $"保留了 {result.SkippedManagedFiles} 个只读或链接文件。";
             if (result.FailedManagedFileNames.Count > 0)
