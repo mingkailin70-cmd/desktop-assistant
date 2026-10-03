@@ -19,6 +19,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -27,13 +28,18 @@
                 <TextBlock x:Name="ApplicationText" Margin="0,3,0,0"/>
             </StackPanel>
             <StackPanel Grid.Row="1" Margin="0,0,0,10">
-                <TextBlock Text="最终收件人" FontWeight="SemiBold" Foreground="#343A50"/>
+                <TextBlock Text="收件人显示名" FontWeight="SemiBold" Foreground="#343A50"/>
                 <TextBlock x:Name="RecipientText" Margin="0,3,0,0"/>
             </StackPanel>
-            <TextBlock Grid.Row="2" Text="正文" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,5"/>
-            <TextBox x:Name="BodyText" Grid.Row="3" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+            <Border Grid.Row="2" Background="#FFF6DF" CornerRadius="5" Padding="8" Margin="0,0,0,10">
+                <TextBlock x:Name="RecipientIdentityStatusText"
+                           Text="身份状态：仅匹配到白名单显示名；对应客户端账号身份尚未核验。当前版本只预览，不会发送。"
+                           Foreground="#654A00" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+            </Border>
+            <TextBlock Grid.Row="3" Text="正文" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,5"/>
+            <TextBox x:Name="BodyText" Grid.Row="4" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
                      VerticalScrollBarVisibility="Auto" Padding="9" BorderBrush="#DCE2EF" Margin="0,0,0,10"/>
-            <StackPanel Grid.Row="4">
+            <StackPanel Grid.Row="5">
                 <TextBlock Text="附件" FontWeight="SemiBold" Foreground="#343A50"/>
                 <TextBlock x:Name="AttachmentsText" Margin="0,3,0,0" TextWrapping="Wrap"/>
             </StackPanel>

@@ -30,7 +30,7 @@ public static class MessageSendIntentResolver
                 || text.Length is 0 or > 20_000 || text.Contains('\0'))
                 return false;
 
-            if (!MessageSendRecipientPolicy.IsAllowed(applicationId, recipient))
+            if (!MessageSendRecipientPolicy.IsPreviewAllowed(applicationId, recipient))
             {
                 errorCode = "SEND_RECIPIENT_NOT_ALLOWED";
                 return false;

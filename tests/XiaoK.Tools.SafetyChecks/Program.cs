@@ -2948,11 +2948,19 @@ static async Task CheckSendPreviewNeverConfirmsWithoutSenderAsync()
         ToolExpectedOutcome.MessageSendPreviewShown);
     var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
     var shownPreview = previewPresenter.Previews.SingleOrDefault();
+    var previewWindowXaml = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "MessageSendPreviewWindow.xaml"));
     Require(!result.Success && result.ErrorCode == "SEND_ADAPTER_UNAVAILABLE"
         && shownPreview is { ApplicationId: "wechat", Recipient: "L", Text: "下午三点见。" }
         && shownPreview.Attachments.Count == 0
+        && previewWindowXaml.Contains("收件人显示名", StringComparison.Ordinal)
+        && previewWindowXaml.Contains("对应客户端账号身份尚未核验", StringComparison.Ordinal)
+        && previewWindowXaml.Contains("当前版本只预览，不会发送", StringComparison.Ordinal)
+        && MessageSendRecipientPolicy.IsPreviewAllowed("wechat", "L")
+        && !MessageSendRecipientPolicy.IsPreviewAllowed("wechat", "K")
+        && !MessageSendRecipientPolicy.IsPreviewAllowed("qq", "L")
+        && MessageSendRecipientPolicy.IsPreviewAllowed("qq", "K")
         && approval.CallCount == 0,
-        "预览未展示完整目标/正文，或没有发送适配器时仍请求了发送批准。");
+        "预览未显示收件人显示名/正文/身份未核验状态，或没有发送适配器时仍请求了发送批准。");
 
     var wrongTarget = await broker.ExecuteAsync(proposal with { Target = "qq:L" }, CancellationToken.None);
     Require(!wrongTarget.Success && wrongTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
