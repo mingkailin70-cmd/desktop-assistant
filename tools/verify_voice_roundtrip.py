@@ -46,7 +46,12 @@ GPU_MINIMUM_INITIAL_FREE_MIB = 4_524
 GPU_MINIMUM_RUNTIME_FREE_MIB = 1_024
 
 
-def load_locked_models() -> dict[str, tuple[pathlib.Path, pathlib.Path]]:
+def load_locked_models(
+    model_root: pathlib.Path | None = None,
+    environment_root: pathlib.Path | None = None,
+) -> dict[str, tuple[pathlib.Path, pathlib.Path]]:
+    model_root = (model_root or ROOT / "models").resolve(strict=True)
+    environment_root = (environment_root or ROOT / ".tools" / "venvs").resolve(strict=True)
     lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
     models = {item["id"]: item for item in lock["models"]}
     result = {}
@@ -59,8 +64,8 @@ def load_locked_models() -> dict[str, tuple[pathlib.Path, pathlib.Path]]:
             or item.get("requiredForP0") is not True
         ):
             raise RuntimeError(f"Model lock mismatch: {model_id}")
-        model_dir = (ROOT / "models" / item["localDirectory"]).resolve(strict=True)
-        if not model_dir.is_relative_to((ROOT / "models").resolve(strict=True)):
+        model_dir = (model_root / item["localDirectory"]).resolve(strict=True)
+        if not model_dir.is_relative_to(model_root):
             raise RuntimeError(f"Model path escapes models/: {model_id}")
         for file in item["files"]:
             expected_hash = file["expectedUpstreamSha256"].lower()
@@ -75,9 +80,9 @@ def load_locked_models() -> dict[str, tuple[pathlib.Path, pathlib.Path]]:
                     digest.update(block)
             if digest.hexdigest() != expected_hash:
                 raise RuntimeError(f"Model file SHA-256 mismatch: {model_id}/{file['name']}")
-        python = ROOT / ".tools" / "venvs" / environment / "Scripts" / "python.exe"
+        python = environment_root / environment / "Scripts" / "python.exe"
         if not python.is_file():
-            raise RuntimeError(f"Locked Python environment missing: {environment}")
+            raise RuntimeError(f"Locked Python environment missing: {python}")
         result[model_id] = (model_dir, python)
     if not WORKER.is_file():
         raise RuntimeError("Voice worker is missing")
@@ -444,10 +449,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--strict-transcript", action="store_true", help="return failure unless normalized ASR text matches the synthetic prompt")
     parser.add_argument("--tts-device", choices=("cpu", "cuda"), default="cpu", help="evaluation-only TTS device; ASR remains CPU")
+    parser.add_argument("--model-root", type=pathlib.Path, default=ROOT / "models", help="model root containing the locked llm/ and speech/ trees")
+    parser.add_argument("--environment-root", type=pathlib.Path, default=ROOT / ".tools" / "venvs", help="root containing the locked asr/ and tts/ Python environments")
     args = parser.parse_args()
     if os.name != "nt":
         raise RuntimeError("This check targets the locked Windows speech environments")
-    models = load_locked_models()
+    models = load_locked_models(args.model_root, args.environment_root)
     gpu_sampler = NvidiaGpuMemorySampler() if args.tts_device == "cuda" else None
     system_resources = SystemResourceSampler()
     try:
