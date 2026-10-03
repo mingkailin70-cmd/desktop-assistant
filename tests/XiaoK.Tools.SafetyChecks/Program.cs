@@ -1379,7 +1379,9 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 
     var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
 
-    Require(result.Success && result.FinalState == TaskLifecycleState.Completed && result.Data == explanation,
+    Require(result.Success && result.FinalState == TaskLifecycleState.Completed && result.Data == explanation
+        && result.Summary.Contains("结论语义未经验证", StringComparison.Ordinal)
+        && result.Summary.Contains("请对照源码复核", StringComparison.Ordinal),
         $"只读检索没有返回本地说明和完成状态：{result.ErrorCode} {result.Summary} {result.Data}");
     Require(inference.CallCount == 2
         && inference.Prompts.Any(prompt => prompt.Contains("1|class Sample { int Value = 7; }", StringComparison.Ordinal))

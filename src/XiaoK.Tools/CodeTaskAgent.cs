@@ -349,7 +349,7 @@ public sealed class CodeTaskAgent
             }
 
             await snapshot.WriteStateAsync("completed", CancellationToken.None);
-            return new(true, "只读代码检索已完成；原项目未修改，没有生成补丁或运行命令。",
+            return new(true, "只读代码检索已完成。引用位置已核验，但结论语义未经验证，请对照源码复核；原项目未修改，也未运行命令。",
                 Data: explanation.Text, FinalState: TaskLifecycleState.Completed);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
