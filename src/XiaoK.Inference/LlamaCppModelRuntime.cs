@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Win32.SafeHandles;
@@ -84,14 +85,31 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint, IGpuMemoryProbe? gpuMemoryProbe = null,
         int? contextTokensOverride = null)
         => TryLoadCore(modelRoot, Path.Combine(Path.GetFullPath(modelRoot), "Runtime"), endpoint,
-            PrimaryModelId, PrimaryModelFileName, gpuMemoryProbe, contextTokensOverride);
+            PrimaryModelId, PrimaryModelFileName, gpuMemoryProbe, contextTokensOverride, manifestJsonOverride: null);
+
+    /// <summary>
+    /// Loads the primary model for an offline evaluation using a transient manifest,
+    /// leaving the production model manifest untouched.
+    /// </summary>
+    public static LlamaCppModelRuntime? TryLoadPrimaryForEvaluation(string modelRoot, string runtimeDirectory,
+        string endpoint, string evaluationManifestJson, IGpuMemoryProbe? gpuMemoryProbe = null,
+        int? contextTokensOverride = null)
+    {
+        if (!Path.IsPathFullyQualified(runtimeDirectory) || runtimeDirectory.StartsWith("\\\\", StringComparison.Ordinal))
+            throw new InvalidDataException("评测运行时目录必须是本机绝对路径。");
+        if (string.IsNullOrWhiteSpace(evaluationManifestJson))
+            throw new InvalidDataException("离线评测运行清单不能为空。");
+        return TryLoadCore(modelRoot, runtimeDirectory, endpoint, PrimaryModelId, PrimaryModelFileName,
+            gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
+    }
 
     /// <summary>
     /// Loads the one explicitly supported non-primary GGUF candidate for offline coding evaluation.
     /// Production Host startup must continue to use <see cref="TryLoad"/>.
     /// </summary>
     public static LlamaCppModelRuntime? TryLoadEvaluationCandidate(string modelRoot, string runtimeDirectory,
-        string endpoint, string modelId, IGpuMemoryProbe? gpuMemoryProbe = null, int? contextTokensOverride = null)
+        string endpoint, string modelId, IGpuMemoryProbe? gpuMemoryProbe = null, int? contextTokensOverride = null,
+        string? evaluationManifestJson = null)
     {
         if (!Path.IsPathFullyQualified(runtimeDirectory) || runtimeDirectory.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("评测运行时目录必须是本机绝对路径。");
@@ -103,12 +121,12 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0、Qwen3.5-9B Q4 或 JEV-9B Q4 候选模型。")
         };
         return TryLoadCore(modelRoot, runtimeDirectory, endpoint, candidate.Item1,
-            candidate.Item2, gpuMemoryProbe, contextTokensOverride);
+            candidate.Item2, gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
     }
 
     private static LlamaCppModelRuntime? TryLoadCore(string modelRoot, string runtimeDirectory, string endpoint,
         string expectedModelId, string expectedModelFileName, IGpuMemoryProbe? gpuMemoryProbe,
-        int? contextTokensOverride)
+        int? contextTokensOverride, string? manifestJsonOverride)
     {
         if (!Path.IsPathFullyQualified(modelRoot) || modelRoot.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("模型目录必须是本机绝对路径。");
@@ -119,18 +137,28 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             throw new InvalidDataException("模型目录不能是磁盘根目录。");
         root = Path.TrimEndingDirectorySeparator(root);
         if (!TryEnsureNoReparseComponents(root)) return null;
-        var manifestPath = Path.Combine(root, ManifestName);
-        if (!TryEnsureNoReparseComponents(manifestPath)) return null;
-
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
         };
-        using var manifestStream = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (manifestStream.Length is <= 0 or > 16 * 1024)
-            throw new InvalidDataException("llama.cpp 清单文件大小无效。");
-        var manifest = JsonSerializer.Deserialize<RuntimeManifest>(manifestStream, options)
-            ?? throw new InvalidDataException("llama.cpp 清单为空。");
+        RuntimeManifest manifest;
+        if (manifestJsonOverride is null)
+        {
+            var manifestPath = Path.Combine(root, ManifestName);
+            if (!TryEnsureNoReparseComponents(manifestPath)) return null;
+            using var manifestStream = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (manifestStream.Length is <= 0 or > 16 * 1024)
+                throw new InvalidDataException("llama.cpp 清单文件大小无效。");
+            manifest = JsonSerializer.Deserialize<RuntimeManifest>(manifestStream, options)
+                ?? throw new InvalidDataException("llama.cpp 清单为空。");
+        }
+        else
+        {
+            if (Encoding.UTF8.GetByteCount(manifestJsonOverride) is <= 0 or > 16 * 1024)
+                throw new InvalidDataException("离线评测运行清单大小无效。");
+            manifest = JsonSerializer.Deserialize<RuntimeManifest>(manifestJsonOverride, options)
+                ?? throw new InvalidDataException("离线评测运行清单为空。");
+        }
         if (manifest.SchemaVersion != 1 || manifest.RuntimeVersion != RuntimeVersion
             || !string.Equals(manifest.ModelId, expectedModelId, StringComparison.Ordinal))
             throw new InvalidDataException("llama.cpp 清单版本或模型 ID 不受支持。");

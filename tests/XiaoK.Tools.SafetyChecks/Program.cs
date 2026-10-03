@@ -315,7 +315,7 @@ try
     passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
 
     await CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(tempRoot);
-    passed.Add("MiMo、Qwen3.5-9B 与 JEV-9B 候选仅可经固定离线评测入口加载，生产默认入口仍只接受 Qwen 主模型");
+    passed.Add("离线评测模型用内存清单加载、不改生产清单；候选模型仍只可经固定评测入口加载");
 
     CheckGpuMemoryAdmissionRequiresReserve();
     passed.Add("GPU 推理准入要求模型预算之外保留至少 1 GiB 显存");
@@ -1137,6 +1137,14 @@ static async Task CheckExplicitCodeTaskTargetsSurviveWeakModelSelectionAsync(str
             new { path = hostPath, find = "internal sealed class Settings { }", replace = "internal sealed class Settings { int Value = 2; }" }
         }
     });
+    var forwardSlashPatch = JsonSerializer.Serialize(new
+    {
+        edits = new[]
+        {
+            new { path = corePath.Replace('\\', '/'), find = "internal sealed class Resolver { }", replace = "internal sealed class Resolver { int Value = 1; }" },
+            new { path = hostPath.Replace('\\', '/'), find = "internal sealed class Settings { }", replace = "internal sealed class Settings { int Value = 2; }" }
+        }
+    });
     var instruction = "请修改 src/XiaoK.Core/Resolver.cs 和 src/XiaoK.Host/Settings.cs 中的实现。";
 
     var emptySelectionInference = new ScriptedInference("{\"paths\":[]}", patch);
@@ -1154,7 +1162,7 @@ static async Task CheckExplicitCodeTaskTargetsSurviveWeakModelSelectionAsync(str
         "明确目标文件恢复选择时改写了原项目。");
 
     var omittedWorkspaceRoot = Path.Combine(root, "explicit-targets-omitted-workspaces");
-    var omittedTargetInference = new ScriptedInference("{\"paths\":[\"src/XiaoK.Other/Other.cs\"]}", patch);
+    var omittedTargetInference = new ScriptedInference("{\"paths\":[\"src/XiaoK.Other/Other.cs\"]}", forwardSlashPatch);
     var omittedTarget = await NewAgent(omittedTargetInference).ExecuteAsync(project, omittedWorkspaceRoot,
         instruction, CancellationToken.None, new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch));
     var omittedWorkspace = Path.Combine(Directory.GetDirectories(omittedWorkspaceRoot).Single(), "workspace");
@@ -1223,7 +1231,7 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
         "无效目标路径没有通过一次受限纠正后进入待审阅。" + result.Summary);
     Require(correctionPrompt is not null
         && correctionPrompt.Contains(rejectedEdit, StringComparison.Ordinal)
-        && correctionPrompt.Contains("未选择文件", StringComparison.Ordinal)
+        && correctionPrompt.Contains("文件清单之外的路径", StringComparison.Ordinal)
         && correctionPrompt.Contains("受限源代码片段JSON", StringComparison.Ordinal)
         && systemPrompts.Any(prompt => prompt.Contains("不得扩大文件、路径、片段、权限或操作范围", StringComparison.Ordinal)),
         "纠正提示没有明确传达固定校验原因和不扩大的授权边界。");
@@ -3466,6 +3474,40 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
         throw new InvalidOperationException("候选评测入口接受了任意模型 ID。");
     }
     catch (InvalidDataException) { }
+
+    const string productionManifest = """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-4b-q4km",
+          "modelSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "contextTokens": 4096,
+          "gpuLayers": 99,
+          "expectedGpuMemoryMiB": 5000
+        }
+        """;
+    const string evaluationManifest = """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-4b-q4km",
+          "modelSha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "contextTokens": 6144,
+          "gpuLayers": 99,
+          "expectedGpuMemoryMiB": 5000
+        }
+        """;
+    await File.WriteAllTextAsync(manifestPath, productionManifest);
+    var regularPrimary = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+    var evaluationPrimary = LlamaCppModelRuntime.TryLoadPrimaryForEvaluation(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", evaluationManifest, contextTokensOverride: 6144);
+    Require(regularPrimary?.ContextTokens == 4096 && evaluationPrimary?.ContextTokens == 6144
+        && await File.ReadAllTextAsync(manifestPath) == productionManifest,
+        "评测专用内存清单没有与生产清单隔离，或覆盖/改写了生产模型设置。");
+    await regularPrimary!.DisposeAsync();
+    await evaluationPrimary!.DisposeAsync();
 }
 
 static void CheckGpuMemoryAdmissionRequiresReserve()

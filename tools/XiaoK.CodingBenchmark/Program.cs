@@ -18,7 +18,7 @@ internal static class Program
 {
     private const long MinimumRuntimeGpuFreeMiB = 1_024;
     private const int EvaluationContextTokens = 6144;
-    private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v24-bounded-validation-correction-explicit-target-priority-cross-separator-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking";
+    private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v25-explicit-target-priority-cross-separator-selection-and-edit-paths-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking";
     private const string V3ManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
     private const string V4ManifestSha256 = "9d5e09034231d119895fcc029b0fd6119d8993e24cb5fe116c4de88322208d5f";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -69,22 +69,14 @@ internal static class Program
                 throw new InvalidOperationException("发现已有 llama.cpp 进程；为避免资源争用，本次未启动。");
 
             var endpoint = GetUnusedLoopbackEndpoint();
-            var createdManifest = EnsureRuntimeManifest(model);
-            LlamaCppModelRuntime runtime;
-            try
-            {
-                runtime = (model.EvaluationCandidate
-                    ? LlamaCppModelRuntime.TryLoadEvaluationCandidate(model.Root, model.RuntimeRoot,
-                        endpoint.AbsoluteUri, model.Id, contextTokensOverride: model.ContextTokens)
-                    : LlamaCppModelRuntime.TryLoad(model.Root, endpoint.AbsoluteUri,
-                        contextTokensOverride: model.ContextTokens))
-                    ?? throw new InvalidDataException("固定 llama.cpp 运行时清单未能加载。");
-            }
-            catch
-            {
-                if (createdManifest) TryDeleteOwnedFile(Path.Combine(model.Root, "llama-runtime.json"));
-                throw;
-            }
+            var evaluationManifest = CreateEvaluationManifestJson(model);
+            var runtime = (model.EvaluationCandidate
+                ? LlamaCppModelRuntime.TryLoadEvaluationCandidate(model.Root, model.RuntimeRoot,
+                    endpoint.AbsoluteUri, model.Id, contextTokensOverride: model.ContextTokens,
+                    evaluationManifestJson: evaluationManifest)
+                : LlamaCppModelRuntime.TryLoadPrimaryForEvaluation(model.Root, model.RuntimeRoot,
+                    endpoint.AbsoluteUri, evaluationManifest, contextTokensOverride: model.ContextTokens))
+                ?? throw new InvalidDataException("固定 llama.cpp 评测运行清单未能加载。");
             var broker = new ModelBroker(runtime);
             using var inference = new LocalInferenceClient(endpoint.AbsoluteUri);
             var responseDiagnostics = new List<LocalInferenceResponseDiagnostics>();
@@ -230,8 +222,6 @@ internal static class Program
                     var temporaryDataRemoved = TryDeleteOwnedDirectory(tempRoot);
                     if (!temporaryDataRemoved)
                         Console.Error.WriteLine("临时评测工作区未能清理；合成任务输出可能仍位于：" + tempRoot);
-                    if (createdManifest)
-                        TryDeleteOwnedFile(Path.Combine(model.Root, "llama-runtime.json"));
                 }
                 if (!completed)
                     Console.WriteLine("评测摘要未包含模型原始输出；临时目录清理状态见上方信息。");
@@ -345,7 +335,7 @@ internal static class Program
             profile.MinimumInitialGpuFreeMiB, profile.EvaluationCandidate);
     }
 
-    private static bool EnsureRuntimeManifest(ModelConfig model)
+    private static string CreateEvaluationManifestJson(ModelConfig model)
     {
         foreach (var file in model.RuntimeFiles)
         {
@@ -358,31 +348,8 @@ internal static class Program
         if (!File.Exists(modelPath) || !string.Equals(Sha256File(modelPath), model.ModelSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("锁定模型文件缺失或哈希不符；本次未启动。");
 
-        var manifestPath = Path.Combine(model.Root, "llama-runtime.json");
-        var created = false;
-        var content = JsonSerializer.Serialize(new RuntimeManifest(1, model.RuntimeVersion, model.RuntimeSha256,
+        return JsonSerializer.Serialize(new RuntimeManifest(1, model.RuntimeVersion, model.RuntimeSha256,
             model.Id, model.ModelSha256, model.ContextTokens, model.GpuLayers, model.ExpectedGpuMemoryMiB), JsonOptions);
-        try
-        {
-            using var stream = new FileStream(manifestPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            var bytes = new UTF8Encoding(false).GetBytes(content);
-            stream.Write(bytes);
-            created = true;
-        }
-        catch (IOException) when (File.Exists(manifestPath))
-        {
-            using var existing = JsonDocument.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
-            var root = existing.RootElement;
-            if (root.GetProperty("runtimeVersion").GetString() != model.RuntimeVersion
-                || root.GetProperty("runtimeSha256").GetString() != model.RuntimeSha256
-                || root.GetProperty("modelId").GetString() != model.Id
-                || root.GetProperty("modelSha256").GetString() != model.ModelSha256
-                || root.GetProperty("contextTokens").GetInt32() != model.ContextTokens
-                || root.GetProperty("gpuLayers").GetInt32() != model.GpuLayers
-                || root.GetProperty("expectedGpuMemoryMiB").GetInt64() != model.ExpectedGpuMemoryMiB)
-                throw new InvalidDataException("现有模型运行清单与固定评测资源配置不符；未覆盖用户设置。");
-        }
-        return created;
     }
 
     private static Uri GetUnusedLoopbackEndpoint()

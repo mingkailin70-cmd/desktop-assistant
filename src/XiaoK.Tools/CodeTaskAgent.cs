@@ -711,7 +711,8 @@ public sealed class CodeTaskAgent
             throw new InvalidDataException("模型返回的精确编辑数量无效。");
         if (edits.GetArrayLength() == 0) return [];
 
-        var originals = selected.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
+        var originals = selected.ToDictionary(file => NormalizeRelativePathSeparators(file.Path),
+            StringComparer.OrdinalIgnoreCase);
         var operations = new List<(CodeFileContent Original, int Start, int Length, string Replacement)>();
         var generatedBytes = 0;
         foreach (var edit in edits.EnumerateArray())
@@ -725,10 +726,11 @@ public sealed class CodeTaskAgent
             var path = pathElement.GetString()!;
             var find = findElement.GetString()!;
             var replacement = replaceElement.GetString()!;
-            if (!originals.TryGetValue(path, out var original) || string.IsNullOrEmpty(find)
-                || find.Length > 8_000 || replacement.Length > MaximumGeneratedCharacters
+            if (!originals.TryGetValue(NormalizeRelativePathSeparators(path), out var original))
+                throw new InvalidDataException("编辑包含文件清单之外的路径；已拒绝。");
+            if (string.IsNullOrEmpty(find) || find.Length > 8_000 || replacement.Length > MaximumGeneratedCharacters
                 || find.Contains('\0') || replacement.Contains('\0'))
-                throw new InvalidDataException("编辑包含未选择文件、空查找文本或超长/无效文本；已拒绝。");
+                throw new InvalidDataException("编辑包含空查找文本或超长/无效文本；已拒绝。");
 
             var baselineContent = original.OriginalContent ?? original.Content;
             var normalizedFind = NormalizeLineEndings(find);
