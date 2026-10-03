@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "p0-models-downloaded-and-verified-not-evaluated",
-  "lastSourceReviewDate": "2026-10-02",
+  "lastSourceReviewDate": "2026-10-03",
   "models": [
     {
       "id": "qwen3.5-4b-q4km",
@@ -283,7 +283,7 @@
       ],
       "license": "mit",
       "status": "downloaded_and_verified",
-      "notes": "约18.8 GB权重；用户授权下载到仓库根目录 models/，用于P0离线资源与代码任务对照。只作按需候选，不作常驻模型。独立 Transformers 5.12.1 / CUDA PyTorch 2.14.1 环境已按 wheel SHA-256 锁定并通过离线配置/架构导入检查；未加载权重张量、未初始化 CUDA、未运行推理。8 GB独显不能容纳全模型，仍需验证部分CPU卸载、延迟与显存余量后才能评测。",
+      "notes": "约18.8 GB BF16权重；用户授权下载到仓库根目录 models/，用于P0离线资源与代码任务对照。只作按需候选，不作常驻模型。独立 Transformers 5.12.1 / CUDA PyTorch 2.14.1 环境已按 wheel SHA-256 锁定并通过离线配置/架构导入检查。受控文本生成尝试使用GPU/CPU/磁盘手工卸载；两次生成都触发显存看门狗，最低空闲显存降至285 MiB后自动终止进程，未发生OOM，退出后资源释放。此 Transformers BF16 路径不满足至少1 GiB显存余量要求，不计作质量评测；AutoProcessor 也因上游预处理配置声明的 Qwen2VLImageProcessor 无法由当前锁定环境解析。",
       "localDirectory": "llm/mimo-v2.6-distill-qwen-9b/2367e865d009c13ac81713a2878291d33ab28177",
       "requiredForP0": true
     },
@@ -416,6 +416,30 @@
       "status": "downloaded_and_verified",
       "notes": "官方 CustomVoice 0.6B / 12Hz 候选，支持中文内置音色；固定 revision 文件树列出11个推理必需文件。需完成本机速度、音频质量和显存/内存评估后再决定是否替换 Base 变体。",
       "localDirectory": "speech/tts/qwen3-tts-12hz-0.6b-customvoice/85e237c12c027371202489a0ec509ded67b5e4b5",
+      "requiredForP0": true
+    },
+    {
+      "id": "mimo-v2.6-distill-qwen-9b-gguf-q8-0",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/ggml-org/MiMo-V2.6-Distill-Qwen-9B-GGUF",
+      "baseModel": "XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B",
+      "revision": "81baddc39bc48924a88e87b8d31aceb03058e559",
+      "format": "GGUF",
+      "quantization": "Q8_0",
+      "quantizer": "ggml-org official conversion",
+      "conversionRuntime": "llama.cpp compatible GGUF",
+      "files": [
+        {
+          "name": "MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf",
+          "upstreamReportedSizeBytes": 9527498048,
+          "expectedUpstreamSha256": "de6dae10334e088876358ef9f574835bb3b401ea2ecf5d6a9473f37894df6b73",
+          "localVerifiedSha256": "de6dae10334e088876358ef9f574835bb3b401ea2ecf5d6a9473f37894df6b73"
+        }
+      ],
+      "license": "mit",
+      "status": "locally_evaluated",
+      "notes": "ggml-org官方从XiaomiMiMo原始9B模型转换的Q8_0版本；文字任务不需要同仓库中的视觉mmproj。2026-10-03使用llama.cpp b11259、8个GPU层、512上下文和16 token上限完成一次合成聊天，UTF-8提示‘用一句中文回答：7加5等于几？’返回‘7加5等于12。’；生成约8.5 token/s，采样最低空闲显存3,261 MiB。随后按固定评测profile与Qwen v23相同的M01、R01–R10共11题完成首轮代码筛选：3/11通过（27.3%），运行时长中位数66.7秒、最长105.2秒，最低空闲显存3,086 MiB、采样峰值占用4,814 MiB，没有显存保护取消。未达80%发布门槛，剩余29题未评，不接受为首版模型。结果摘要见MiMo与Qwen编码任务初筛记录。官方模型卡注明GGUF转换聊天模板仍带临时修补项，工具调用/JSON行为及长时稳定性仍待评估。",
+      "localDirectory": "llm/mimo-v2.6-distill-qwen-9b-gguf-q8-0/81baddc39bc48924a88e87b8d31aceb03058e559",
       "requiredForP0": true
     }
   ]

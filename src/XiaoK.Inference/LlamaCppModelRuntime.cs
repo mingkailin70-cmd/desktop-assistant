@@ -18,10 +18,12 @@ namespace XiaoK.Inference;
 public sealed class LlamaCppModelRuntime : IManagedModelRuntime
 {
     private const string ManifestName = "llama-runtime.json";
-    private const string RuntimeRelativePath = "Runtime\\llama-server.exe";
+    private const string RuntimeFileName = "llama-server.exe";
     private const string RuntimeVersion = "b11259";
-    private const string ModelId = "qwen3.5-4b-q4km";
-    private const string ModelFileName = "Qwen3.5-4B-Q4_K_M.gguf";
+    private const string PrimaryModelId = "qwen3.5-4b-q4km";
+    private const string PrimaryModelFileName = "Qwen3.5-4B-Q4_K_M.gguf";
+    private const string MiMoEvaluationModelId = "mimo-v2.6-distill-qwen-9b-gguf-q8-0";
+    private const string MiMoEvaluationModelFileName = "MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf";
     private static readonly TimeSpan IdleUnloadDelay = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(3);
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -77,6 +79,27 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     /// <summary>Returns null only when no manifest is present. An invalid present manifest must not silently fall back.</summary>
     public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint, IGpuMemoryProbe? gpuMemoryProbe = null,
         int? contextTokensOverride = null)
+        => TryLoadCore(modelRoot, Path.Combine(Path.GetFullPath(modelRoot), "Runtime"), endpoint,
+            PrimaryModelId, PrimaryModelFileName, gpuMemoryProbe, contextTokensOverride);
+
+    /// <summary>
+    /// Loads the one explicitly supported non-primary GGUF candidate for offline coding evaluation.
+    /// Production Host startup must continue to use <see cref="TryLoad"/>.
+    /// </summary>
+    public static LlamaCppModelRuntime? TryLoadEvaluationCandidate(string modelRoot, string runtimeDirectory,
+        string endpoint, string modelId, IGpuMemoryProbe? gpuMemoryProbe = null, int? contextTokensOverride = null)
+    {
+        if (!string.Equals(modelId, MiMoEvaluationModelId, StringComparison.Ordinal))
+            throw new InvalidDataException("仅允许通过评测入口加载固定的 MiMo Q8_0 候选模型。");
+        if (!Path.IsPathFullyQualified(runtimeDirectory) || runtimeDirectory.StartsWith("\\\\", StringComparison.Ordinal))
+            throw new InvalidDataException("评测运行时目录必须是本机绝对路径。");
+        return TryLoadCore(modelRoot, runtimeDirectory, endpoint, MiMoEvaluationModelId,
+            MiMoEvaluationModelFileName, gpuMemoryProbe, contextTokensOverride);
+    }
+
+    private static LlamaCppModelRuntime? TryLoadCore(string modelRoot, string runtimeDirectory, string endpoint,
+        string expectedModelId, string expectedModelFileName, IGpuMemoryProbe? gpuMemoryProbe,
+        int? contextTokensOverride)
     {
         if (!Path.IsPathFullyQualified(modelRoot) || modelRoot.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("模型目录必须是本机绝对路径。");
@@ -99,7 +122,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             throw new InvalidDataException("llama.cpp 清单文件大小无效。");
         var manifest = JsonSerializer.Deserialize<RuntimeManifest>(manifestStream, options)
             ?? throw new InvalidDataException("llama.cpp 清单为空。");
-        if (manifest.SchemaVersion != 1 || manifest.RuntimeVersion != RuntimeVersion || manifest.ModelId != ModelId)
+        if (manifest.SchemaVersion != 1 || manifest.RuntimeVersion != RuntimeVersion
+            || !string.Equals(manifest.ModelId, expectedModelId, StringComparison.Ordinal))
             throw new InvalidDataException("llama.cpp 清单版本或模型 ID 不受支持。");
         if (!IsSha256(manifest.RuntimeSha256) || !IsSha256(manifest.ModelSha256))
             throw new InvalidDataException("llama.cpp 清单必须包含两个 64 位十六进制 SHA-256。");
@@ -119,8 +143,9 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             || uri.AbsolutePath != "/" || uri.Port is < 1 or > 65535)
             throw new InvalidDataException("托管 llama.cpp 只允许使用根路径上的 127.0.0.1 HTTP 地址。");
 
-        var runtimePath = Path.Combine(root, RuntimeRelativePath);
-        var modelPath = Path.Combine(root, ModelFileName);
+        var runtimeRoot = Path.GetFullPath(runtimeDirectory);
+        var runtimePath = Path.Combine(runtimeRoot, RuntimeFileName);
+        var modelPath = Path.Combine(root, expectedModelFileName);
         return new LlamaCppModelRuntime(root, runtimePath, modelPath,
             manifest.RuntimeSha256, manifest.ModelSha256, contextTokens, manifest.GpuLayers,
             manifest.ExpectedGpuMemoryMiB, uri, gpuMemoryProbe ?? new NvidiaSmiGpuMemoryProbe());

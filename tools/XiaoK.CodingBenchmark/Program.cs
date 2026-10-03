@@ -16,7 +16,6 @@ namespace XiaoK.CodingBenchmark;
 
 internal static class Program
 {
-    private const long MinimumInitialGpuFreeMiB = 6_024;
     private const long MinimumRuntimeGpuFreeMiB = 1_024;
     private const int EvaluationContextTokens = 6144;
     private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v23-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking";
@@ -30,9 +29,10 @@ internal static class Program
         Console.InputEncoding = new UTF8Encoding(false);
         try
         {
-            if (args.Length != 6 || args[0] != "--repo" || args[2] != "--dataset" || args[4] != "--task")
+            if ((args.Length != 6 && args.Length != 8) || args[0] != "--repo" || args[2] != "--dataset"
+                || args[4] != "--task" || (args.Length == 8 && args[6] != "--model-id"))
             {
-                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --dataset <coding-zh-v3|coding-zh-v4> --task <R01|S01|M01|F01>");
+                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --dataset <coding-zh-v3|coding-zh-v4> --task <R01|S01|M01|F01> [--model-id <qwen3.5-4b-q4km|mimo-v2.6-distill-qwen-9b-gguf-q8-0>]");
                 return 2;
             }
 
@@ -52,12 +52,13 @@ internal static class Program
 
             var baselineCommit = RequireGitCommit(manifest.BaselineCommit);
             await EnsureGitCommitExistsAsync(repoRoot, baselineCommit);
-            var model = ResolveModel(repoRoot);
+            var modelId = args.Length == 8 ? args[7] : "qwen3.5-4b-q4km";
+            var model = ResolveModel(repoRoot, modelId);
             var resultFile = GetAggregateResultPath(manifest.Version);
-            EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Revision, PipelineVersion, taskId);
+            EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision, PipelineVersion, taskId);
             var gpuBaseline = await ReadGpuSnapshotAsync();
-            if (gpuBaseline.FreeMiB < MinimumInitialGpuFreeMiB)
-                throw new InvalidOperationException($"启动前显存空闲 {gpuBaseline.FreeMiB} MiB，低于模型预算 5,000 MiB 加 1,024 MiB 余量；本次未启动。");
+            if (gpuBaseline.FreeMiB < model.MinimumInitialGpuFreeMiB)
+                throw new InvalidOperationException($"启动前显存空闲 {gpuBaseline.FreeMiB} MiB，低于该模型预算 {model.ExpectedGpuMemoryMiB:N0} MiB 加 1,024 MiB 余量；本次未启动。");
             if (Process.GetProcessesByName("llama-server").Length != 0 || Process.GetProcessesByName("llama-bench").Length != 0)
                 throw new InvalidOperationException("发现已有 llama.cpp 进程；为避免资源争用，本次未启动。");
 
@@ -66,8 +67,11 @@ internal static class Program
             LlamaCppModelRuntime runtime;
             try
             {
-                runtime = LlamaCppModelRuntime.TryLoad(model.Root, endpoint.AbsoluteUri,
-                    contextTokensOverride: EvaluationContextTokens)
+                runtime = (model.EvaluationCandidate
+                    ? LlamaCppModelRuntime.TryLoadEvaluationCandidate(model.Root, model.RuntimeRoot,
+                        endpoint.AbsoluteUri, model.Id, contextTokensOverride: model.ContextTokens)
+                    : LlamaCppModelRuntime.TryLoad(model.Root, endpoint.AbsoluteUri,
+                        contextTokensOverride: model.ContextTokens))
                     ?? throw new InvalidDataException("固定 llama.cpp 运行时清单未能加载。");
             }
             catch
@@ -294,44 +298,60 @@ internal static class Program
         return manifest;
     }
 
-    private static ModelConfig ResolveModel(string repoRoot)
+    private static ModelConfig ResolveModel(string repoRoot, string modelId)
     {
         var modelLock = JsonSerializer.Deserialize<ModelLock>(File.ReadAllText(Path.Combine(repoRoot, "model-lock", "models.lock.json"), Encoding.UTF8), JsonOptions)
             ?? throw new InvalidDataException("本地模型锁文件为空。");
         var runtimeLock = JsonSerializer.Deserialize<RuntimeLock>(File.ReadAllText(Path.Combine(repoRoot, "model-lock", "runtimes.lock.json"), Encoding.UTF8), JsonOptions)
             ?? throw new InvalidDataException("本地运行时锁文件为空。");
-        var model = modelLock.Models.Single(item => item.Id == "qwen3.5-4b-q4km");
+        var profile = modelId switch
+        {
+            "qwen3.5-4b-q4km" => new ModelProfile("Qwen3.5-4B-Q4_K_M.gguf", 99, 5_000, 6_024, false),
+            "mimo-v2.6-distill-qwen-9b-gguf-q8-0" => new ModelProfile("MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf", 8, 3_500, 4_524, true),
+            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M 或 MiMo V2.6 Q8_0 模型。", nameof(modelId))
+        };
+        var model = modelLock.Models.Single(item => item.Id == modelId);
         var runtime = runtimeLock.Runtimes.Single(item => item.Id == "llama.cpp");
-        if (model.Status != "downloaded_and_verified" || runtime.Version != "b11259"
-            || model.Files.Count != 1 || runtime.StagedFiles.Count == 0)
-            throw new InvalidDataException("锁定的 Qwen 权重或 llama.cpp b11259 状态不符合评测要求。");
+        var expectedModelStatus = profile.EvaluationCandidate ? "locally_evaluated" : "downloaded_and_verified";
+        if (model.Status != expectedModelStatus || runtime.Version != "b11259"
+            || runtime.Status != "locally_evaluated" || model.Files.Count != 1 || runtime.StagedFiles.Count == 0)
+            throw new InvalidDataException("锁定模型或 llama.cpp b11259 状态不符合评测要求。");
         var modelsRoot = Path.GetFullPath(Path.Combine(repoRoot, "models"));
         var root = Path.GetFullPath(Path.Combine(modelsRoot, model.LocalDirectory.Replace('/', Path.DirectorySeparatorChar)));
         if (!root.StartsWith(modelsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("模型目录越过忽略的 models 根目录。");
-        var modelFile = model.Files.Single(file => file.Name == "Qwen3.5-4B-Q4_K_M.gguf");
+        var modelFile = model.Files.Single(file => file.Name == profile.ModelFileName);
         var serverFile = runtime.StagedFiles.Single(file => file.Name == "llama-server.exe");
-        return new(model.Id, model.Revision, root, modelFile.Name, modelFile.LocalVerifiedSha256,
-            runtime.Version, serverFile.Sha256, runtime.StagedFiles);
+        var runtimeModel = modelId == "qwen3.5-4b-q4km"
+            ? model
+            : modelLock.Models.Single(item => item.Id == "qwen3.5-4b-q4km");
+        var runtimeRoot = Path.GetFullPath(Path.Combine(modelsRoot,
+            runtimeModel.LocalDirectory.Replace('/', Path.DirectorySeparatorChar), "Runtime"));
+        if (!runtimeRoot.StartsWith(modelsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("llama.cpp运行时目录越过忽略的 models 根目录。");
+        return new(model.Id, model.Revision, root, profile.ModelFileName, modelFile.LocalVerifiedSha256,
+            runtimeRoot, runtime.Version, serverFile.Sha256, runtime.StagedFiles,
+            EvaluationContextTokens, profile.GpuLayers, profile.ExpectedGpuMemoryMiB,
+            profile.MinimumInitialGpuFreeMiB, profile.EvaluationCandidate);
     }
 
     private static bool EnsureRuntimeManifest(ModelConfig model)
     {
         foreach (var file in model.RuntimeFiles)
         {
-            var path = Path.Combine(model.Root, "Runtime", file.Name);
+            var path = Path.Combine(model.RuntimeRoot, file.Name);
             if (!File.Exists(path) || new FileInfo(path).Length != file.SizeBytes
                 || !string.Equals(Sha256File(path), file.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("锁定运行时文件缺失或哈希不符：" + file.Name);
         }
         var modelPath = Path.Combine(model.Root, model.ModelFile);
         if (!File.Exists(modelPath) || !string.Equals(Sha256File(modelPath), model.ModelSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Qwen 模型文件缺失或哈希不符；本次未启动。");
+            throw new InvalidDataException("锁定模型文件缺失或哈希不符；本次未启动。");
 
         var manifestPath = Path.Combine(model.Root, "llama-runtime.json");
         var created = false;
         var content = JsonSerializer.Serialize(new RuntimeManifest(1, model.RuntimeVersion, model.RuntimeSha256,
-            model.Id, model.ModelSha256, 4096, 99, 5000), JsonOptions);
+            model.Id, model.ModelSha256, model.ContextTokens, model.GpuLayers, model.ExpectedGpuMemoryMiB), JsonOptions);
         try
         {
             using var stream = new FileStream(manifestPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -347,8 +367,9 @@ internal static class Program
                 || root.GetProperty("runtimeSha256").GetString() != model.RuntimeSha256
                 || root.GetProperty("modelId").GetString() != model.Id
                 || root.GetProperty("modelSha256").GetString() != model.ModelSha256
-                || root.GetProperty("gpuLayers").GetInt32() != 99
-                || root.GetProperty("expectedGpuMemoryMiB").GetInt64() != 5000)
+                || root.GetProperty("contextTokens").GetInt32() != model.ContextTokens
+                || root.GetProperty("gpuLayers").GetInt32() != model.GpuLayers
+                || root.GetProperty("expectedGpuMemoryMiB").GetInt64() != model.ExpectedGpuMemoryMiB)
                 throw new InvalidDataException("现有模型运行清单与固定评测资源配置不符；未覆盖用户设置。");
         }
         return created;
@@ -537,7 +558,7 @@ internal static class Program
 
     private static void AppendAggregate(string path, AggregateResult result)
     {
-        EnsureTaskNotAlreadyScored(path, result.DatasetVersion, result.BaselineCommit, result.ModelRevision,
+        EnsureTaskNotAlreadyScored(path, result.DatasetVersion, result.BaselineCommit, result.ModelId, result.ModelRevision,
             result.PipelineVersion ?? "", result.TaskId);
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(result, JsonOptions) + "\n");
         using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
@@ -546,7 +567,7 @@ internal static class Program
     }
 
     private static void EnsureTaskNotAlreadyScored(string path, string datasetVersion, string baselineCommit,
-        string modelRevision, string pipelineVersion, string taskId)
+        string modelId, string modelRevision, string pipelineVersion, string taskId)
     {
         if (!File.Exists(path)) return;
         foreach (var line in File.ReadLines(path, Encoding.UTF8))
@@ -555,6 +576,7 @@ internal static class Program
             var existing = JsonSerializer.Deserialize<AggregateResult>(line, JsonOptions)
                 ?? throw new InvalidDataException("已有评分摘要包含无效 JSON；拒绝追加，避免重复或覆盖评分。");
             if (existing.DatasetVersion == datasetVersion && existing.BaselineCommit == baselineCommit
+                && existing.ModelId == modelId
                 && existing.ModelRevision == modelRevision && existing.PipelineVersion == pipelineVersion
                 && existing.TaskId == taskId)
                 throw new InvalidOperationException($"题目 {taskId} 已在此模型 revision 和固定基线上评分；拒绝重复运行或覆盖评分。");
@@ -671,10 +693,14 @@ internal static class Program
     private sealed record ModelRecord(string Id, string Revision, string Status, string LocalDirectory, IReadOnlyList<ModelFile> Files);
     private sealed record ModelFile(string Name, long UpstreamReportedSizeBytes, string LocalVerifiedSha256);
     private sealed record RuntimeLock(IReadOnlyList<RuntimeRecord> Runtimes);
-    private sealed record RuntimeRecord(string Id, string Version, IReadOnlyList<RuntimeFile> StagedFiles);
+    private sealed record RuntimeRecord(string Id, string Version, string Status, IReadOnlyList<RuntimeFile> StagedFiles);
     private sealed record RuntimeFile(string Name, long SizeBytes, string Sha256);
+    private sealed record ModelProfile(string ModelFileName, int GpuLayers, long ExpectedGpuMemoryMiB,
+        long MinimumInitialGpuFreeMiB, bool EvaluationCandidate);
     private sealed record ModelConfig(string Id, string Revision, string Root, string ModelFile, string ModelSha256,
-        string RuntimeVersion, string RuntimeSha256, IReadOnlyList<RuntimeFile> RuntimeFiles);
+        string RuntimeRoot, string RuntimeVersion, string RuntimeSha256, IReadOnlyList<RuntimeFile> RuntimeFiles,
+        int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB, long MinimumInitialGpuFreeMiB,
+        bool EvaluationCandidate);
     private sealed record RuntimeManifest(int SchemaVersion, string RuntimeVersion, string RuntimeSha256, string ModelId,
         string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB);
     private sealed record AggregateResult(int SchemaVersion, string? PipelineVersion, int ResponseCount,
