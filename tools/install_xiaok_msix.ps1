@@ -87,6 +87,26 @@ if (-not $Install) {
     return
 }
 
+$previousPackage = Get-AppxPackage -Name $manifestName |
+    Where-Object { $_.Publisher -ceq $manifestPublisher } |
+    Sort-Object { [version]$_.Version } -Descending |
+    Select-Object -First 1
+if ($null -ne $previousPackage) {
+    $previousHostPath = [System.IO.Path]::GetFullPath((Join-Path $previousPackage.InstallLocation 'XiaoK.Host.exe'))
+    foreach ($hostProcess in @(Get-Process -Name 'XiaoK.Host' -ErrorAction SilentlyContinue)) {
+        $processPath = $null
+        try { $processPath = $hostProcess.Path } catch { }
+        if ([string]::IsNullOrWhiteSpace($processPath)) {
+            throw "Cannot verify XiaoK.Host process $($hostProcess.Id); no certificate or package changes were made. Close XiaoK normally and retry."
+        }
+
+        $processPath = [System.IO.Path]::GetFullPath($processPath)
+        if ([string]::Equals($processPath, $previousHostPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Installed XiaoK $($previousPackage.Version) is still running (PID $($hostProcess.Id)). Right-click the XiaoK pet or tray icon and choose 'Exit XiaoK', then retry. No certificate or package changes were made."
+        }
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList $identity
 if ($null -eq $trustedCertificate -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
