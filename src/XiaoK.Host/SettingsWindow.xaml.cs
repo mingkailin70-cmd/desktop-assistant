@@ -526,7 +526,8 @@ public partial class SettingsWindow : Window
             var updated = _original with
             {
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
-                ModelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录"),
+                ModelRoot = ModelRootPathPolicy.Validate(ModelRootBox.Text,
+                    XiaoKSettings.FindWorkspace(AppContext.BaseDirectory)),
                 EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
                 SearchRoots = LocalSearchRootPolicy.Parse(SearchRootsBox.Text)
                     .Select(root => new RootSetting(root.Id, root.Path)).ToList(),

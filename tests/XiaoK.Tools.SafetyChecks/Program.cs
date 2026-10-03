@@ -158,6 +158,9 @@ try
     CheckLocalSearchRootPolicy(tempRoot);
     passed.Add("文件搜索根目录只接受存在的本机目录，拒绝空值、网络路径、磁盘根目录和过量配置");
 
+    CheckModelRootPathPolicy(tempRoot);
+    passed.Add("模型目录允许仓库 models 子树，并拒绝仓库其他路径、UNC 和磁盘根目录");
+
     CheckLocalDesktopAppPathPolicy(tempRoot);
     passed.Add("桌面应用设置只接受存在的本机白名单程序文件名");
 
@@ -2071,6 +2074,38 @@ static void CheckLocalSearchRootPolicy(string tempRoot)
     var tooMany = string.Join(Environment.NewLine, Enumerable.Repeat(first, LocalSearchRootPolicy.MaximumRoots + 1));
     Require(Rejected(() => LocalSearchRootPolicy.Parse(tooMany)),
         "超过上限的搜索目录配置被接受。");
+}
+
+static void CheckModelRootPathPolicy(string tempRoot)
+{
+    var repositoryRoot = Directory.CreateDirectory(Path.Combine(tempRoot, "model-policy-repository")).FullName;
+    var modelsRoot = Directory.CreateDirectory(Path.Combine(repositoryRoot, "models")).FullName;
+    var revisionPath = Path.Combine(modelsRoot, "llm", "qwen3.5-4b", "revision");
+    var externalPath = Path.Combine(tempRoot, "external-models");
+
+    Require(ModelRootPathPolicy.Validate(modelsRoot, repositoryRoot) == Path.GetFullPath(modelsRoot),
+        "仓库 models 根目录被错误拒绝。");
+    Require(ModelRootPathPolicy.Validate(revisionPath, repositoryRoot) == Path.GetFullPath(revisionPath),
+        "仓库 models 子目录被错误拒绝。");
+    Require(ModelRootPathPolicy.Validate(externalPath, repositoryRoot) == Path.GetFullPath(externalPath),
+        "仓库外的本机模型目录被错误拒绝。");
+
+    static bool Rejected(Action action)
+    {
+        try { action(); return false; }
+        catch (ArgumentException) { return true; }
+    }
+
+    Require(Rejected(() => ModelRootPathPolicy.Validate(repositoryRoot, repositoryRoot)),
+        "整个仓库被接受为模型目录。");
+    Require(Rejected(() => ModelRootPathPolicy.Validate(Path.Combine(repositoryRoot, "src"), repositoryRoot)),
+        "仓库源码目录被接受为模型目录。");
+    Require(Rejected(() => ModelRootPathPolicy.Validate(Path.Combine(repositoryRoot, "models-backup"), repositoryRoot)),
+        "models 前缀相似的仓库兄弟目录被接受为模型目录。");
+    Require(Rejected(() => ModelRootPathPolicy.Validate(Path.GetPathRoot(repositoryRoot), repositoryRoot)),
+        "磁盘根目录被接受为模型目录。");
+    Require(Rejected(() => ModelRootPathPolicy.Validate(@"\\server\share\models", repositoryRoot)),
+        "UNC 路径被接受为模型目录。");
 }
 
 static void CheckLocalDesktopAppPathPolicy(string tempRoot)
