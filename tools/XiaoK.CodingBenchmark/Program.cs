@@ -36,6 +36,12 @@ internal static class Program
                 return 2;
             }
 
+            if (Console.IsInputRedirected)
+            {
+                Console.Error.WriteLine("评测需要交互终端进行独立人工评分；检测到标准输入被重定向，未启动模型且未写入结果。");
+                return 2;
+            }
+
             var repoRoot = RequireLocalDirectory(args[1], "仓库目录");
             var datasetVersion = args[3];
             var datasetLock = ResolveDatasetLock(datasetVersion);
