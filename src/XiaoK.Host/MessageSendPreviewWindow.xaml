@@ -24,11 +24,11 @@
             </Grid.RowDefinitions>
             <StackPanel Grid.Row="0" Margin="0,0,0,10">
                 <TextBlock Text="应用" FontWeight="SemiBold" Foreground="#343A50"/>
-                <TextBlock x:Name="ApplicationText" Margin="0,3,0,0" AutomationProperties.Name="发送应用"/>
+                <TextBlock x:Name="ApplicationText" Margin="0,3,0,0"/>
             </StackPanel>
             <StackPanel Grid.Row="1" Margin="0,0,0,10">
                 <TextBlock Text="最终收件人" FontWeight="SemiBold" Foreground="#343A50"/>
-                <TextBlock x:Name="RecipientText" Margin="0,3,0,0" AutomationProperties.Name="最终收件人"/>
+                <TextBlock x:Name="RecipientText" Margin="0,3,0,0"/>
             </StackPanel>
             <TextBlock Grid.Row="2" Text="正文" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,5"/>
             <TextBox x:Name="BodyText" Grid.Row="3" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
