@@ -203,6 +203,9 @@ try
     await CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(tempRoot);
     passed.Add("编程代理拒绝代码围栏、额外文本、未知字段和重复JSON字段，原项目保持不变");
 
+    await CheckExplicitCodeTaskTargetsSurviveWeakModelSelectionAsync(tempRoot);
+    passed.Add("用户明确列出的候选代码文件优先进入上下文；空/遗漏选择可恢复，越界路径仍失败关闭");
+
     await CheckNonUniqueEditGetsOneBoundedCorrectionAsync(tempRoot);
     passed.Add("精确编辑定位失败时只允许一次受限纠正，仍失败则不审阅也不修改原项目");
 
@@ -1069,6 +1072,7 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
         ("selection trailing text", validSelection + " chosen", validPatch, 1),
         ("selection unknown field", "{\"paths\":[\"Sample.cs\"],\"note\":\"ignored\"}", validPatch, 1),
         ("selection duplicate field", "{\"paths\":[],\"paths\":[\"Sample.cs\"]}", validPatch, 1),
+        ("selection outside manifest", "{\"paths\":[\"../Outside.cs\"]}", validPatch, 1),
         ("patch extra text", validSelection, validPatch + " done", 2),
         ("patch unknown root field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}],\"note\":\"ignored\"}", 3),
         ("patch unknown item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\",\"mode\":\"write\"}]}", 3),
@@ -1101,6 +1105,67 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
                 .Contains("failed", StringComparison.Ordinal),
             $"模型输出 {testCase.Name} 没有留下失败状态。");
     }
+}
+
+static async Task CheckExplicitCodeTaskTargetsSurviveWeakModelSelectionAsync(string root)
+{
+    const string coreOriginal = "namespace XiaoK.Core;\ninternal sealed class Resolver { }\n";
+    const string hostOriginal = "namespace XiaoK.Host;\ninternal sealed class Settings { }\n";
+    const string unrelatedOriginal = "namespace XiaoK.Other;\ninternal sealed class Other { }\n";
+    var project = CreateProject(root, "explicit-code-targets", "class Sample { }\n");
+    File.Delete(Path.Combine(project, "Sample.cs"));
+    foreach (var (path, content) in new[]
+    {
+        ("src/XiaoK.Core/Resolver.cs", coreOriginal),
+        ("src/XiaoK.Host/Settings.cs", hostOriginal),
+        ("src/XiaoK.Other/Other.cs", unrelatedOriginal)
+    })
+    {
+        var fullPath = Path.Combine(project, path.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+    }
+
+    var workspaceRoot = Path.Combine(root, "explicit-code-targets-workspaces");
+    var corePath = Path.Combine("src", "XiaoK.Core", "Resolver.cs");
+    var hostPath = Path.Combine("src", "XiaoK.Host", "Settings.cs");
+    var patch = JsonSerializer.Serialize(new
+    {
+        edits = new[]
+        {
+            new { path = corePath, find = "internal sealed class Resolver { }", replace = "internal sealed class Resolver { int Value = 1; }" },
+            new { path = hostPath, find = "internal sealed class Settings { }", replace = "internal sealed class Settings { int Value = 2; }" }
+        }
+    });
+    var instruction = "请修改 src/XiaoK.Core/Resolver.cs 和 src/XiaoK.Host/Settings.cs 中的实现。";
+
+    var emptySelectionInference = new ScriptedInference("{\"paths\":[]}", patch);
+    var emptySelection = await NewAgent(emptySelectionInference).ExecuteAsync(project, workspaceRoot,
+        instruction, CancellationToken.None, new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch));
+    var emptyWorkspace = Path.Combine(Directory.GetDirectories(workspaceRoot).Single(), "workspace");
+    Require(emptySelection.Success && emptySelectionInference.CallCount == 2
+        && File.ReadAllText(Path.Combine(emptyWorkspace, "src", "XiaoK.Core", "Resolver.cs"))
+            .Contains("int Value = 1", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(emptyWorkspace, "src", "XiaoK.Host", "Settings.cs"))
+            .Contains("int Value = 2", StringComparison.Ordinal),
+        "模型选择空数组时，没有从用户明确指定且已在清单中的路径恢复安全上下文。" + emptySelection.Summary);
+    Require(File.ReadAllText(Path.Combine(project, "src", "XiaoK.Core", "Resolver.cs")) == coreOriginal
+        && File.ReadAllText(Path.Combine(project, "src", "XiaoK.Host", "Settings.cs")) == hostOriginal,
+        "明确目标文件恢复选择时改写了原项目。");
+
+    var omittedWorkspaceRoot = Path.Combine(root, "explicit-targets-omitted-workspaces");
+    var omittedTargetInference = new ScriptedInference("{\"paths\":[\"src/XiaoK.Other/Other.cs\"]}", patch);
+    var omittedTarget = await NewAgent(omittedTargetInference).ExecuteAsync(project, omittedWorkspaceRoot,
+        instruction, CancellationToken.None, new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch));
+    var omittedWorkspace = Path.Combine(Directory.GetDirectories(omittedWorkspaceRoot).Single(), "workspace");
+    Require(omittedTarget.Success && omittedTargetInference.CallCount == 2
+        && File.ReadAllText(Path.Combine(omittedWorkspace, "src", "XiaoK.Core", "Resolver.cs"))
+            .Contains("int Value = 1", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(omittedWorkspace, "src", "XiaoK.Host", "Settings.cs"))
+            .Contains("int Value = 2", StringComparison.Ordinal),
+        "模型遗漏用户明确指定的文件时，没有将其与模型选择合并并限制到4个候选文件。" + omittedTarget.Summary);
+    Require(File.ReadAllText(Path.Combine(omittedWorkspace, "src", "XiaoK.Other", "Other.cs")) == unrelatedOriginal,
+        "上下文补充意外改写了模型额外选择的文件。");
 }
 
 static async Task CheckNonUniqueEditGetsOneBoundedCorrectionAsync(string root)

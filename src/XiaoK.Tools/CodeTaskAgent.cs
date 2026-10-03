@@ -103,7 +103,7 @@ public sealed class CodeTaskAgent
                         new InferenceRequestOptions(DisableThinking: true, JsonObject: true), inner), cancellationToken);
 
                 phase = "校验模型文件选择";
-                chosenPaths = ParseSelectedPaths(selected, candidates);
+                chosenPaths = ParseSelectedPaths(selected, candidates, instruction);
             }
             if (chosenPaths.Count == 0)
                 return await FailAsync(snapshot, "本地模型没有从项目清单中选择有效文件；原项目未修改。", "NO_VALID_FILES_SELECTED");
@@ -299,7 +299,7 @@ public sealed class CodeTaskAgent
                         new InferenceRequestOptions(DisableThinking: true, JsonObject: true), inner), cancellationToken);
 
                 phase = "校验模型文件选择";
-                chosenPaths = ParseSelectedPaths(selected, candidates);
+                chosenPaths = ParseSelectedPaths(selected, candidates, instruction);
             }
             if (chosenPaths.Count == 0)
                 return await FailAsync(snapshot, "本地模型没有从项目清单中选择有效文件；原项目未修改。", "NO_VALID_FILES_SELECTED");
@@ -382,25 +382,72 @@ public sealed class CodeTaskAgent
         return normalized.Length <= 240 ? normalized : normalized[..240];
     }
 
-    private static List<string> ParseSelectedPaths(string json, IReadOnlyList<CodeTextCandidate> candidates)
+    private static List<string> ParseSelectedPaths(string json, IReadOnlyList<CodeTextCandidate> candidates,
+        string instruction)
     {
         using var document = ParseJsonObject(json);
         RequireExactObjectProperties(document.RootElement, "paths");
         if (!document.RootElement.TryGetProperty("paths", out var paths) || paths.ValueKind != JsonValueKind.Array || paths.GetArrayLength() > MaximumSelectedFiles)
             throw new InvalidDataException("模型返回的文件选择格式无效。");
 
-        var allowed = candidates.ToDictionary(x => x.RelativePath, StringComparer.OrdinalIgnoreCase);
-        var result = new List<string>();
+        var allowed = candidates.ToDictionary(x => NormalizeRelativePathSeparators(x.RelativePath),
+            StringComparer.OrdinalIgnoreCase);
+        var modelSelection = new List<string>();
         foreach (var pathElement in paths.EnumerateArray())
         {
             if (pathElement.ValueKind != JsonValueKind.String) throw new InvalidDataException("模型返回了无效文件路径。");
             var path = pathElement.GetString()!;
-            if (!allowed.TryGetValue(path, out var candidate) || result.Contains(candidate.RelativePath, StringComparer.OrdinalIgnoreCase))
+            if (!allowed.TryGetValue(NormalizeRelativePathSeparators(path), out var candidate)
+                || modelSelection.Contains(candidate.RelativePath, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidDataException("模型选择了清单之外或重复的文件；已拒绝。");
-            result.Add(candidate.RelativePath);
+            modelSelection.Add(candidate.RelativePath);
+        }
+
+        var explicitTargets = FindExplicitCandidatePaths(instruction, candidates);
+        if (explicitTargets.Count > MaximumSelectedFiles)
+            throw new InvalidDataException($"任务明确指定了超过 {MaximumSelectedFiles} 个目标文件；请拆分任务。");
+
+        var result = new List<string>(MaximumSelectedFiles);
+        result.AddRange(explicitTargets);
+        foreach (var selectedPath in modelSelection)
+        {
+            if (result.Count >= MaximumSelectedFiles) break;
+            if (!result.Contains(selectedPath, StringComparer.OrdinalIgnoreCase)) result.Add(selectedPath);
         }
         return result;
     }
+
+    private static List<string> FindExplicitCandidatePaths(string instruction,
+        IReadOnlyList<CodeTextCandidate> candidates)
+    {
+        var normalizedInstruction = instruction.Replace('\\', '/');
+        var result = new List<string>();
+        foreach (var candidate in candidates)
+        {
+            var path = candidate.RelativePath.Replace('\\', '/');
+            var searchFrom = 0;
+            while (searchFrom < normalizedInstruction.Length)
+            {
+                var index = normalizedInstruction.IndexOf(path, searchFrom, StringComparison.OrdinalIgnoreCase);
+                if (index < 0) break;
+                var end = index + path.Length;
+                var hasLeadingBoundary = index == 0 || !IsPathNameCharacter(normalizedInstruction[index - 1]);
+                var hasTrailingBoundary = end == normalizedInstruction.Length || !IsPathNameCharacter(normalizedInstruction[end]);
+                if (hasLeadingBoundary && hasTrailingBoundary)
+                {
+                    result.Add(candidate.RelativePath);
+                    break;
+                }
+                searchFrom = index + 1;
+            }
+        }
+        return result;
+    }
+
+    private static bool IsPathNameCharacter(char value) =>
+        char.IsLetterOrDigit(value) || value is '_' or '-' or '.';
+
+    private static string NormalizeRelativePathSeparators(string path) => path.Replace('\\', '/');
 
     private static bool ShouldUseAllCandidates(IReadOnlyList<CodeTextCandidate> candidates, string instruction)
     {
