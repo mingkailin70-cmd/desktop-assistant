@@ -32,7 +32,9 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 .\tools\install_xiaok_msix.ps1 -PackagePath 'artifacts\msix-validation\<生成目录>\XiaoK-signed-validation.msix'
 ~~~
 
-需进入安装时，显式加上 `-Install`。脚本会先核对包内身份、签名者和本地公钥证书，再运行 SignTool 验签，最后只为当前执行账户运行 `Add-AppxPackage`，不会自动启动小K。若证书已在 `Cert:\LocalMachine\TrustedPeople`，更新当前账户包不需要管理员权限；若证书尚未受信任，导入机器级信任需要管理员 PowerShell，并会影响该电脑所有用户。脚本不会把证书放入 `Trusted Root Certification Authorities`。
+需进入安装时，显式加上 `-Install`。脚本先核对包内身份、签名者和本地公钥证书并验证签名，然后检查已安装进程。`0.1.7.0` 起，小K可接收只用于退出的固定注册窗口消息；安装器会核对窗口属于当前账户已安装的 Host 进程，请求应用走正常异步清理流程，并最多等待45秒。窗口或进程身份不匹配、请求失败或超时都会停止安装，不会强制结束进程，也不会修改证书信任。`0.1.7.0` 以前的运行版本不支持该请求，须从托盘菜单正常退出后再重试。关闭应用后，脚本才执行证书信任检查/必要导入和 `Add-AppxPackage`；安装不会自动启动小K。若证书已在 `Cert:\LocalMachine\TrustedPeople`，更新当前用户包不需要管理员权限；若证书尚未受信任，导入机器级信任需要管理员 PowerShell，并会影响该电脑所有用户。脚本不会把证书放入 `Trusted Root Certification Authorities`。
+
+0.1.7.0 更新包（2026-10-04）：自包含签名包位于 `artifacts\msix-validation\122d8a1f0e14464caba2c96baf1255a3\XiaoK-signed-validation.msix`，SHA-256 `1D056C984A959FCD02C0931E1F6848EA971F85DDABF44F7218518B349F435CD0`，Authenticode 状态 `Valid`。旧版0.1.5.0仍在运行时，安装脚本按设计拒绝安装；包当前只完成生成与验签，没有安装或启动。
 
 诊断启动记录（2026-10-03）：0.1.0.0 版本曾以 `--diagnostics-profile` 隔离配置启动并从小K界面退出；确认通知监听与模型均关闭、未请求 Windows 通知/麦克风授权、未读取常规设置。该结果不代表常规模式已启动。
 

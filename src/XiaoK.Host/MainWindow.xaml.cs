@@ -581,6 +581,12 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void Exit_Click(object sender, RoutedEventArgs e)
     {
+        RequestExit();
+    }
+
+    private void RequestExit()
+    {
+        if (_exiting) return;
         _exiting = true;
         Close();
     }
@@ -714,6 +720,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         if (App.RestoreMessageId != 0 && msg == (int)App.RestoreMessageId)
         {
             RestoreFromTray();
+            handled = true;
+        }
+        else if (App.ShutdownMessageId != 0 && msg == (int)App.ShutdownMessageId)
+        {
+            RequestExit();
             handled = true;
         }
         else if (msg == WmHotkey && wParam.ToInt32() == 1901)

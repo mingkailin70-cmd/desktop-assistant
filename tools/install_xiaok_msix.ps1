@@ -93,6 +93,7 @@ $previousPackage = Get-AppxPackage -Name $manifestName |
     Select-Object -First 1
 if ($null -ne $previousPackage) {
     $previousHostPath = [System.IO.Path]::GetFullPath((Join-Path $previousPackage.InstallLocation 'XiaoK.Host.exe'))
+    $matchingHostProcesses = @()
     foreach ($hostProcess in @(Get-Process -Name 'XiaoK.Host' -ErrorAction SilentlyContinue)) {
         $processPath = $null
         try { $processPath = $hostProcess.Path } catch { }
@@ -102,8 +103,118 @@ if ($null -ne $previousPackage) {
 
         $processPath = [System.IO.Path]::GetFullPath($processPath)
         if ([string]::Equals($processPath, $previousHostPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Installed XiaoK $($previousPackage.Version) is still running (PID $($hostProcess.Id)). Right-click the XiaoK pet or tray icon and choose 'Exit XiaoK', then retry. No certificate or package changes were made."
+            $matchingHostProcesses += $hostProcess
         }
+    }
+
+    if ($matchingHostProcesses.Count -gt 0) {
+        if ([version]$previousPackage.Version -lt [version]'0.1.7.0') {
+            $runningIds = ($matchingHostProcesses | ForEach-Object { $_.Id }) -join ', '
+            throw "Installed XiaoK $($previousPackage.Version) does not support the verified graceful-shutdown request (PID $runningIds). Right-click the XiaoK pet or tray icon and choose '退出小K', then retry. No process was terminated; no certificate or package changes were made."
+        }
+
+        if (-not ('XiaoK.MsixInstaller.ShutdownWindowMessage' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace XiaoK.MsixInstaller
+{
+    public static class ShutdownWindowMessage
+    {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint RegisterWindowMessage(string messageName);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr FindWindow(string className, string windowName);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        public static bool TryRequestShutdown(uint expectedProcessId, out bool windowFound,
+            out uint windowProcessId, out int lastError)
+        {
+            windowFound = false;
+            windowProcessId = 0;
+            lastError = 0;
+
+            uint message = RegisterWindowMessage("XiaoK.DesktopAssistant.Shutdown.v1");
+            if (message == 0)
+            {
+                lastError = Marshal.GetLastWin32Error();
+                return false;
+            }
+
+            IntPtr window = FindWindow(null, "小K");
+            if (window == IntPtr.Zero)
+            {
+                lastError = Marshal.GetLastWin32Error();
+                return false;
+            }
+
+            windowFound = true;
+            GetWindowThreadProcessId(window, out windowProcessId);
+            if (windowProcessId != expectedProcessId) return false;
+            if (PostMessage(window, message, IntPtr.Zero, IntPtr.Zero)) return true;
+
+            lastError = Marshal.GetLastWin32Error();
+            return false;
+        }
+    }
+}
+'@
+        }
+
+        $shutdownRequested = $false
+        $windowProcessId = [uint32]0
+        $shutdownError = 0
+        foreach ($hostProcess in $matchingHostProcesses) {
+            $windowFound = $false
+            $candidateWindowProcessId = [uint32]0
+            $candidateError = 0
+            $posted = [XiaoK.MsixInstaller.ShutdownWindowMessage]::TryRequestShutdown(
+                [uint32]$hostProcess.Id,
+                [ref]$windowFound,
+                [ref]$candidateWindowProcessId,
+                [ref]$candidateError)
+            if ($posted) {
+                $shutdownRequested = $true
+                $windowProcessId = $candidateWindowProcessId
+                break
+            }
+            if ($windowFound -and $matchingHostProcesses.Id -notcontains [int]$candidateWindowProcessId) {
+                throw "The XiaoK main window belongs to unexpected PID $candidateWindowProcessId; no certificate or package changes were made."
+            }
+            if ($candidateError -ne 0) { $shutdownError = $candidateError }
+        }
+
+        if (-not $shutdownRequested) {
+            throw "Could not send a verified graceful shutdown request to the installed XiaoK window (Win32 error $shutdownError). No certificate or package changes were made."
+        }
+
+        Write-Output "Requested graceful shutdown from installed XiaoK PID $windowProcessId; waiting up to 45 seconds for cleanup."
+        $shutdownDeadline = [DateTime]::UtcNow.AddSeconds(45)
+        do {
+            $runningHostProcesses = @()
+            foreach ($hostProcess in $matchingHostProcesses) {
+                try {
+                    $hostProcess.Refresh()
+                    if (-not $hostProcess.HasExited) { $runningHostProcesses += $hostProcess }
+                } catch [System.InvalidOperationException] { }
+            }
+            if ($runningHostProcesses.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $shutdownDeadline)
+
+        if ($runningHostProcesses.Count -gt 0) {
+            $runningIds = ($runningHostProcesses | ForEach-Object { $_.Id }) -join ', '
+            throw "XiaoK did not complete graceful shutdown within 45 seconds (PID $runningIds). No process was force-terminated; no certificate or package changes were made."
+        }
+        Write-Output 'XiaoK exited normally; continuing signed package verification and current-user installation.'
     }
 }
 

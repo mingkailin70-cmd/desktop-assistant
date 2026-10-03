@@ -137,6 +137,9 @@ try
     CheckAppResolverRejectsUnknownApplications();
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
 
+    CheckInstallGracefulShutdownContract(FindRepositoryRoot());
+    passed.Add("MSIX更新只向包路径与窗口PID匹配的小K请求优雅退出，超时不强杀且旧版本要求人工退出");
+
     CheckFileSearchResultSummaryReportsLimits();
     passed.Add("文件搜索达到扫描/显示上限时明确标记结果可能不完整");
 
@@ -2006,6 +2009,27 @@ static void CheckAppResolverRejectsUnknownApplications()
         "已支持应用别名没有映射到预期的固定应用 ID。");
     Require(unknown is null && unsupportedVariant is null,
         "未知应用名称被错误映射到了某个已允许的应用。");
+}
+
+static void CheckInstallGracefulShutdownContract(string repositoryRoot)
+{
+    const string messageName = "XiaoK.DesktopAssistant.Shutdown.v1";
+    var appSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "App.xaml.cs"));
+    var windowSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+    var installerSource = File.ReadAllText(Path.Combine(repositoryRoot, "tools", "install_xiaok_msix.ps1"));
+    Require(appSource.Contains(messageName, StringComparison.Ordinal)
+        && appSource.Contains("ShutdownMessageId = RegisterWindowMessage", StringComparison.Ordinal)
+        && windowSource.Contains("App.ShutdownMessageId", StringComparison.Ordinal)
+        && windowSource.Contains("RequestExit();", StringComparison.Ordinal),
+        "Host没有注册并处理安装器的固定优雅退出消息。");
+    Require(installerSource.Contains(messageName, StringComparison.Ordinal)
+        && installerSource.Contains("GetWindowThreadProcessId", StringComparison.Ordinal)
+        && installerSource.Contains("[string]::Equals($processPath, $previousHostPath", StringComparison.Ordinal)
+        && installerSource.Contains("TryRequestShutdown", StringComparison.Ordinal)
+        && installerSource.Contains("[version]'0.1.7.0'", StringComparison.Ordinal)
+        && installerSource.Contains("AddSeconds(45)", StringComparison.Ordinal)
+        && installerSource.Contains("No process was force-terminated", StringComparison.Ordinal),
+        "MSIX安装器没有执行固定消息、进程/窗口身份核对、旧版本拒绝和限时等待策略。");
 }
 
 static async Task CheckToolProposalPreconditionsAreTypedAsync()

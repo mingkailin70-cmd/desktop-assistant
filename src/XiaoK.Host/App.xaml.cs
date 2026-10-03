@@ -10,6 +10,7 @@ namespace XiaoK.Host;
 public partial class App : System.Windows.Application
 {
     private const string RestoreMessageName = "XiaoK.DesktopAssistant.Restore.v1";
+    private const string ShutdownMessageName = "XiaoK.DesktopAssistant.Shutdown.v1";
     private Mutex? _instanceMutex;
     private bool _ownsMutex;
 
@@ -19,11 +20,13 @@ public partial class App : System.Windows.Application
     }
 
     internal static uint RestoreMessageId { get; private set; }
+    internal static uint ShutdownMessageId { get; private set; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         RestoreMessageId = RegisterWindowMessage(RestoreMessageName);
+        ShutdownMessageId = RegisterWindowMessage(ShutdownMessageName);
 
         try
         {
