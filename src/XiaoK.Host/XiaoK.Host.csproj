@@ -5,6 +5,8 @@
     <ProjectReference Include="..\XiaoK.Voice\XiaoK.Voice.csproj" />
     <ProjectReference Include="..\XiaoK.Tools\XiaoK.Tools.csproj" />
     <ProjectReference Include="..\XiaoK.Storage\XiaoK.Storage.csproj" />
+    <Content Include="..\..\model-lock\models.lock.json" Link="model-lock\models.lock.json"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

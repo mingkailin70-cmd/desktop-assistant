@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
+using XiaoK.Core;
 using XiaoK.Inference;
 
 namespace XiaoK.Voice;
@@ -64,35 +66,76 @@ public sealed class VoiceInferenceService : IAsyncDisposable
             inner => _tts.SynthesizeChineseWavAsync(text, inner), token), cancellationToken);
     }
 
-    /// <summary>
-    /// Creates development runtimes only when the repository's fixed lock entries, Python venvs,
-    /// worker script, and model files are present. A packaged installation will use its own manifest later.
-    /// </summary>
-    public static VoiceInferenceService? TryCreateForWorkspace(string workspaceRoot, string workerScriptPath,
-        ModelBroker broker, out string status)
+    /// <summary>Creates development runtimes from the repository's locked models and Python environments.</summary>
+    public static VoiceInferenceService? TryCreateForWorkspace(string workspaceRoot, string voiceEnvironmentRoot,
+        string workerScriptPath, ModelBroker broker, out string status)
     {
         ArgumentNullException.ThrowIfNull(broker);
         try
         {
             var root = Path.GetFullPath(workspaceRoot);
-            var modelsLockPath = Path.Combine(root, "model-lock", "models.lock.json");
-            var modelsRoot = Path.Combine(root, "models");
-            var asrPython = Path.Combine(root, ".tools", "venvs", "asr", "Scripts", "python.exe");
-            var ttsPython = Path.Combine(root, ".tools", "venvs", "tts", "Scripts", "python.exe");
-            var worker = Path.GetFullPath(workerScriptPath);
-            if (!File.Exists(modelsLockPath) || !File.Exists(worker) || !File.Exists(asrPython) || !File.Exists(ttsPython))
-                return Missing("语音：锁定的模型、工作进程或隔离 Python 环境不完整；麦克风未采集。", out status);
+            return TryCreateFromLayout(Path.Combine(root, "model-lock", "models.lock.json"), root,
+                Path.Combine(root, "models"), voiceEnvironmentRoot, workerScriptPath, root, broker, out status);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+                                   or ArgumentException or NotSupportedException)
+        {
+            return Missing("语音：开发仓库路径无效；语音请求已关闭，麦克风未采集。", out status);
+        }
+    }
 
-            var asrDefinition = ReadDefinition(modelsLockPath, modelsRoot, asrPython, worker,
-                "qwen3-asr-0.6b", "5eb144179a02acc5e5ba31e748d22b0cf3e303b0");
-            var ttsDefinition = ReadDefinition(modelsLockPath, modelsRoot, ttsPython, worker,
-                "qwen3-tts-12hz-0.6b-customvoice", "85e237c12c027371202489a0ec509ded67b5e4b5");
+    /// <summary>Creates installed runtimes from the signed package manifest and configured external roots.</summary>
+    public static VoiceInferenceService? TryCreateForInstallation(string voiceEnvironmentRoot, string modelsRoot,
+        string packageRoot, ModelBroker broker, out string status)
+    {
+        ArgumentNullException.ThrowIfNull(broker);
+        try
+        {
+            var package = Path.GetFullPath(packageRoot);
+            return TryCreateFromLayout(Path.Combine(package, "model-lock", "models.lock.json"), package,
+                modelsRoot, voiceEnvironmentRoot, Path.Combine(package, "voice_worker.py"), package, broker, out status);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+                                   or ArgumentException or NotSupportedException)
+        {
+            return Missing("语音：安装包目录无效；语音请求已关闭，麦克风未采集。", out status);
+        }
+    }
+
+    private static VoiceInferenceService? TryCreateFromLayout(string modelsLockPath, string manifestRoot,
+        string modelsRoot, string voiceEnvironmentRoot, string workerScriptPath, string workerRoot,
+        ModelBroker broker, out string status)
+    {
+        try
+        {
+            var lockRoot = Path.GetFullPath(manifestRoot);
+            var modelRoot = Path.GetFullPath(modelsRoot);
+            var environmentRoot = Path.GetFullPath(voiceEnvironmentRoot);
+            var lockPath = Path.GetFullPath(modelsLockPath);
+            var worker = Path.GetFullPath(workerScriptPath);
+            var allowedWorkerRoot = Path.GetFullPath(workerRoot);
+            if (!LocalSearchRootPolicy.IsLocalDrivePath(lockRoot)
+                || !LocalSearchRootPolicy.IsLocalDrivePath(modelRoot)
+                || !LocalSearchRootPolicy.IsLocalDrivePath(environmentRoot)
+                || !LocalSearchRootPolicy.IsLocalDrivePath(allowedWorkerRoot))
+                throw new InvalidDataException("语音清单、模型、运行环境与工作进程必须位于本机磁盘。");
+            var asrPython = Path.Combine(environmentRoot, "asr", "Scripts", "python.exe");
+            var ttsPython = Path.Combine(environmentRoot, "tts", "Scripts", "python.exe");
+            if (!File.Exists(lockPath) || !File.Exists(worker) || !File.Exists(asrPython) || !File.Exists(ttsPython))
+                return Missing("语音：模型、工作进程或独立 Python 环境不完整；麦克风未采集。", out status);
+
+            var asrDefinition = ReadDefinition(lockPath, lockRoot, modelRoot, environmentRoot,
+                asrPython, allowedWorkerRoot, worker, "qwen3-asr-0.6b",
+                "5eb144179a02acc5e5ba31e748d22b0cf3e303b0");
+            var ttsDefinition = ReadDefinition(lockPath, lockRoot, modelRoot, environmentRoot,
+                ttsPython, allowedWorkerRoot, worker, "qwen3-tts-12hz-0.6b-customvoice",
+                "85e237c12c027371202489a0ec509ded67b5e4b5");
             var asr = new PythonVoiceModelRuntime("asr", asrDefinition);
             var tts = new PythonVoiceModelRuntime("tts", ttsDefinition);
             status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；合成往返单样例通过，麦克风未采集，设备与语音质量仍待验收。";
             return new VoiceInferenceService(broker, asr, tts);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or JsonException
                                    or InvalidDataException or ArgumentException or NotSupportedException
                                    or InvalidOperationException or KeyNotFoundException or FormatException)
         {
@@ -180,9 +223,14 @@ public sealed class VoiceInferenceService : IAsyncDisposable
         return null;
     }
 
-    private static VoiceModelDefinition ReadDefinition(string lockPath, string modelsRoot, string pythonPath,
-        string workerPath, string modelId, string expectedRevision)
+    private static VoiceModelDefinition ReadDefinition(string lockPath, string lockRoot, string modelsRoot,
+        string environmentRoot, string pythonPath, string workerRoot, string workerPath, string modelId,
+        string expectedRevision)
     {
+        EnsureContained(lockRoot, lockPath);
+        EnsureContained(environmentRoot, pythonPath);
+        EnsureContained(workerRoot, workerPath);
+        EnsureNoReparseComponents(lockPath);
         using var stream = new FileStream(lockPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (stream.Length is <= 0 or > 2 * 1024 * 1024) throw new InvalidDataException("模型锁清单大小无效。");
         using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { MaxDepth = 32 });

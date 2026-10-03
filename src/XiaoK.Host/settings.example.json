@@ -1,6 +1,7 @@
 {
   "dataRoot": "D:\\XiaoK\\Data",
   "modelRoot": "D:\\XiaoK\\Models",
+  "voiceEnvironmentRoot": "D:\\XiaoK\\Voice",
   "evaluationRoot": "D:\\XiaoK\\Evaluations",
   "codeProjectRoot": "选择你要让本地编程代理处理的项目目录",
   "codeWorkspaceRoot": "D:\\XiaoK\\Workspaces",

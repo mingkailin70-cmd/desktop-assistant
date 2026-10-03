@@ -44,6 +44,11 @@
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseModelRoot_Click" Margin="8,0,0,0"/>
                     <TextBox x:Name="ModelRootBox" MinHeight="32" Padding="7,5"/>
                 </DockPanel>
+                <TextBlock Text="本地语音 Python 环境目录（需含 asr、tts 两个独立环境）"/>
+                <DockPanel Margin="0,4,0,12">
+                    <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseVoiceEnvironmentRoot_Click" Margin="8,0,0,0"/>
+                    <TextBox x:Name="VoiceEnvironmentRootBox" MinHeight="32" Padding="7,5"/>
+                </DockPanel>
                 <TextBlock Text="脱敏评测样本目录"/>
                 <DockPanel Margin="0,4,0,12">
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseEvaluationRoot_Click" Margin="8,0,0,0"/>

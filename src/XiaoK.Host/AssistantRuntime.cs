@@ -67,19 +67,29 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _managedModelRuntime = managedRuntime;
         _models = new ModelBroker(managedRuntime);
         var workspaceRoot = XiaoKSettings.FindWorkspace(AppContext.BaseDirectory);
-        if (!XiaoKSettings.IsDiagnosticsMode && workspaceRoot is not null)
+        if (!XiaoKSettings.IsDiagnosticsMode)
         {
             var bundledWorker = Path.Combine(AppContext.BaseDirectory, "voice_worker.py");
-            var sourceWorker = Path.Combine(workspaceRoot, "src", "XiaoK.Voice", "voice_worker.py");
-            var workerPath = File.Exists(bundledWorker) ? bundledWorker : sourceWorker;
-            _voiceInference = VoiceInferenceService.TryCreateForWorkspace(workspaceRoot, workerPath, _models,
-                out _voiceStatus);
+            if (workspaceRoot is not null)
+            {
+                var sourceWorker = Path.Combine(workspaceRoot, "src", "XiaoK.Voice", "voice_worker.py");
+                var workerPath = File.Exists(bundledWorker) ? bundledWorker : sourceWorker;
+                _voiceInference = VoiceInferenceService.TryCreateForWorkspace(workspaceRoot,
+                    _settings.VoiceEnvironmentRoot, workerPath, _models, out _voiceStatus);
+            }
+            else if (WindowsPackageIdentity.IsPresent)
+            {
+                _voiceInference = VoiceInferenceService.TryCreateForInstallation(_settings.VoiceEnvironmentRoot,
+                    _settings.ModelRoot, AppContext.BaseDirectory, _models, out _voiceStatus);
+            }
+            else
+            {
+                _voiceStatus = "语音：开发模式未找到小K仓库；请从本地项目启动。麦克风未采集。";
+            }
         }
         else
         {
-            _voiceStatus = XiaoKSettings.IsDiagnosticsMode
-                ? "诊断模式：语音模型和麦克风均关闭。"
-                : "语音：仅在仓库开发环境提供；当前安装包语音部署清单尚未接入。麦克风未采集。";
+            _voiceStatus = "诊断模式：语音模型和麦克风均关闭。";
         }
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
@@ -714,6 +724,7 @@ internal sealed record XiaoKSettings
     internal bool ContactStylesMigrationSourceAvailable { get; init; } = true;
     public string DataRoot { get; init; } = @"D:\XiaoK\Data";
     public string ModelRoot { get; init; } = @"D:\XiaoK\Models";
+    public string VoiceEnvironmentRoot { get; init; } = @"D:\XiaoK\Voice";
     public string EvaluationRoot { get; init; } = @"D:\XiaoK\Evaluations";
     public string CodeProjectRoot { get; init; } = "";
     public string CodeWorkspaceRoot { get; init; } = @"D:\XiaoK\Workspaces";
@@ -754,6 +765,7 @@ internal sealed record XiaoKSettings
         {
             DataRoot = Path.Combine(fullRoot, "Data"),
             ModelRoot = Path.Combine(fullRoot, "Models"),
+            VoiceEnvironmentRoot = Path.Combine(fullRoot, "Voice"),
             EvaluationRoot = Path.Combine(fullRoot, "Evaluations"),
             CodeProjectRoot = "",
             CodeWorkspaceRoot = Path.Combine(fullRoot, "Workspaces"),
@@ -842,6 +854,9 @@ internal sealed record XiaoKSettings
             ModelRoot = workspaceModelRoot is null
                 ? @"D:\XiaoK\Models"
                 : Path.Combine(workspaceModelRoot, "models", "llm", "qwen3.5-4b", "f9f88ac3e234be915e23811a6d28ea287bdb927e"),
+            VoiceEnvironmentRoot = workspaceModelRoot is null
+                ? @"D:\XiaoK\Voice"
+                : Path.Combine(workspaceModelRoot, ".tools", "venvs"),
             Applications = apps,
             SearchRoots = roots
         };
@@ -854,6 +869,7 @@ internal sealed record XiaoKSettings
     {
         DataRoot = string.IsNullOrWhiteSpace(DataRoot) ? defaults.DataRoot : DataRoot,
         ModelRoot = string.IsNullOrWhiteSpace(ModelRoot) ? defaults.ModelRoot : ModelRoot,
+        VoiceEnvironmentRoot = string.IsNullOrWhiteSpace(VoiceEnvironmentRoot) ? defaults.VoiceEnvironmentRoot : VoiceEnvironmentRoot,
         EvaluationRoot = string.IsNullOrWhiteSpace(EvaluationRoot) ? defaults.EvaluationRoot : EvaluationRoot,
         CodeProjectRoot = CodeProjectRoot ?? "",
         CodeWorkspaceRoot = string.IsNullOrWhiteSpace(CodeWorkspaceRoot) ? defaults.CodeWorkspaceRoot : CodeWorkspaceRoot,

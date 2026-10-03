@@ -57,6 +57,7 @@ public partial class SettingsWindow : Window
         DataRootBox.Text = settings.DataRoot;
         ActiveDatabasePathText.Text = activeDatabasePath;
         ModelRootBox.Text = settings.ModelRoot;
+        VoiceEnvironmentRootBox.Text = settings.VoiceEnvironmentRoot;
         EvaluationRootBox.Text = settings.EvaluationRoot;
         SearchRootsBox.Text = string.Join(Environment.NewLine, settings.SearchRoots.Select(root => root.Path));
         var vscode = settings.Applications.FirstOrDefault(app => app is not null && string.Equals(app.Id, "vscode", StringComparison.OrdinalIgnoreCase));
@@ -327,6 +328,9 @@ public partial class SettingsWindow : Window
 
     private void BrowseModelRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(ModelRootBox, "选择本地模型目录");
 
+    private void BrowseVoiceEnvironmentRoot_Click(object sender, RoutedEventArgs e) =>
+        BrowseInto(VoiceEnvironmentRootBox, "选择独立的语音 Python 环境目录");
+
     private void BrowseEvaluationRoot_Click(object sender, RoutedEventArgs e) => BrowseInto(EvaluationRootBox, "选择脱敏评测样本目录");
 
     private void BrowseVscodeExecutable_Click(object sender, RoutedEventArgs e) =>
@@ -431,10 +435,12 @@ public partial class SettingsWindow : Window
         try
         {
             var dataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录");
-            var modelRoot = ValidateLocalDirectory(ModelRootBox.Text, "模型目录");
+            var modelRoot = ModelRootPathPolicy.Validate(ModelRootBox.Text,
+                XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
+            var voiceEnvironmentRoot = ValidateVoiceEnvironmentDirectory(VoiceEnvironmentRootBox.Text);
             var evaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录");
             var codeWorkspaceRoot = ValidateLocalDirectory(CodeWorkspaceRootBox.Text, "隔离工作区目录");
-            EnsureSeparateRoots(dataRoot, modelRoot, evaluationRoot, codeWorkspaceRoot);
+            EnsureSeparateRoots(dataRoot, modelRoot, voiceEnvironmentRoot, evaluationRoot, codeWorkspaceRoot);
             var preview = EvaluationSampleCleanup.Preview(evaluationRoot);
             if (preview.Files.Count == 0)
             {
@@ -528,6 +534,7 @@ public partial class SettingsWindow : Window
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
                 ModelRoot = ModelRootPathPolicy.Validate(ModelRootBox.Text,
                     XiaoKSettings.FindWorkspace(AppContext.BaseDirectory)),
+                VoiceEnvironmentRoot = ValidateVoiceEnvironmentDirectory(VoiceEnvironmentRootBox.Text),
                 EvaluationRoot = ValidateLocalDirectory(EvaluationRootBox.Text, "脱敏评测样本目录"),
                 SearchRoots = LocalSearchRootPolicy.Parse(SearchRootsBox.Text)
                     .Select(root => new RootSetting(root.Id, root.Path)).ToList(),
@@ -541,7 +548,8 @@ public partial class SettingsWindow : Window
                 WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
                 QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
             };
-            EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.EvaluationRoot, updated.CodeWorkspaceRoot);
+            EnsureSeparateRoots(updated.DataRoot, updated.ModelRoot, updated.VoiceEnvironmentRoot,
+                updated.EvaluationRoot, updated.CodeWorkspaceRoot);
             if (updated.CodeProjectRoot.Length > 0 && PathsOverlap(updated.CodeProjectRoot, updated.CodeWorkspaceRoot))
                 throw new ArgumentException("隔离工作区目录不能与编程项目目录相同或互相包含。");
 
@@ -678,6 +686,20 @@ public partial class SettingsWindow : Window
         return fullPath;
     }
 
+    private static string ValidateVoiceEnvironmentDirectory(string value)
+    {
+        var trimmed = value.Trim();
+        var workspace = XiaoKSettings.FindWorkspace(AppContext.BaseDirectory);
+        if (workspace is not null && LocalSearchRootPolicy.IsLocalDrivePath(trimmed))
+        {
+            var expectedDevelopmentRoot = Path.GetFullPath(Path.Combine(workspace, ".tools", "venvs"));
+            var selected = Path.GetFullPath(trimmed);
+            if (string.Equals(selected, expectedDevelopmentRoot, StringComparison.OrdinalIgnoreCase))
+                return selected;
+        }
+        return ValidateLocalDirectory(trimmed, "语音 Python 环境目录");
+    }
+
     private static string ValidateOptionalProjectDirectory(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return "";
@@ -694,13 +716,14 @@ public partial class SettingsWindow : Window
             || path.StartsWith(normalizedRoot + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void EnsureSeparateRoots(string dataRoot, string modelRoot, string evaluationRoot, string codeWorkspaceRoot)
+    private static void EnsureSeparateRoots(string dataRoot, string modelRoot, string voiceEnvironmentRoot,
+        string evaluationRoot, string codeWorkspaceRoot)
     {
-        var roots = new[] { dataRoot, modelRoot, evaluationRoot, codeWorkspaceRoot };
+        var roots = new[] { dataRoot, modelRoot, voiceEnvironmentRoot, evaluationRoot, codeWorkspaceRoot };
         for (var i = 0; i < roots.Length; i++)
         for (var j = i + 1; j < roots.Length; j++)
             if (PathsOverlap(roots[i], roots[j]))
-                throw new ArgumentException("数据、模型、评测和隔离工作区目录必须互相独立，避免混放或误删。");
+                throw new ArgumentException("用户数据、模型、语音环境、评测和隔离工作区目录必须互相独立，避免混放或误删。");
     }
 
     private static bool PathsOverlap(string first, string second) => IsSameOrChildPath(first, second) || IsSameOrChildPath(second, first);

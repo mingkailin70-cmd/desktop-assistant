@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
@@ -16,6 +17,7 @@ using XiaoK.Core;
 using XiaoK.Inference;
 using XiaoK.Storage;
 using XiaoK.Tools;
+using XiaoK.Voice;
 
 try
 {
@@ -179,6 +181,9 @@ try
 
     CheckModelRootPathPolicy(tempRoot);
     passed.Add("模型目录允许仓库 models 子树，并拒绝仓库其他路径、UNC 和磁盘根目录");
+
+    await CheckInstalledVoiceDeploymentLayoutAsync(tempRoot);
+    passed.Add("已安装语音工厂读取包内锁清单和外置 ASR/TTS 环境；缺少环境时关闭语音，初始化不启动工作进程");
 
     CheckLocalDesktopAppPathPolicy(tempRoot);
     passed.Add("桌面应用设置只接受存在的本机白名单程序文件名");
@@ -1682,6 +1687,86 @@ static string FindRepositoryRoot()
         current = current.Parent;
     }
     throw new DirectoryNotFoundException("安全检查无法定位小K仓库根目录。");
+}
+
+static async Task CheckInstalledVoiceDeploymentLayoutAsync(string root)
+{
+    var fixture = Path.Combine(root, "installed-voice-layout");
+    var packageRoot = Path.Combine(fixture, "package");
+    var modelsRoot = Path.Combine(fixture, "models");
+    var environmentRoot = Path.Combine(fixture, "voice");
+    var manifestDirectory = Path.Combine(packageRoot, "model-lock");
+    var asrDirectory = Path.Combine(modelsRoot, "speech", "asr");
+    var ttsDirectory = Path.Combine(modelsRoot, "speech", "tts");
+    var asrPython = Path.Combine(environmentRoot, "asr", "Scripts", "python.exe");
+    var ttsPython = Path.Combine(environmentRoot, "tts", "Scripts", "python.exe");
+    var workerPath = Path.Combine(packageRoot, "voice_worker.py");
+    Directory.CreateDirectory(manifestDirectory);
+    Directory.CreateDirectory(asrDirectory);
+    Directory.CreateDirectory(ttsDirectory);
+    Directory.CreateDirectory(Path.GetDirectoryName(asrPython)!);
+    Directory.CreateDirectory(Path.GetDirectoryName(ttsPython)!);
+    var asrBytes = Encoding.UTF8.GetBytes("synthetic-asr-model-file");
+    var ttsBytes = Encoding.UTF8.GetBytes("synthetic-tts-model-file");
+    File.WriteAllBytes(Path.Combine(asrDirectory, "weights.bin"), asrBytes);
+    File.WriteAllBytes(Path.Combine(ttsDirectory, "weights.bin"), ttsBytes);
+    File.WriteAllBytes(asrPython, []);
+    File.WriteAllBytes(ttsPython, []);
+    File.WriteAllText(workerPath, "# synthetic worker; factory creation must not run it");
+
+    static object Model(string id, string revision, string localDirectory, byte[] bytes) => new
+    {
+        id,
+        status = "downloaded_and_verified",
+        revision,
+        license = "apache-2.0",
+        requiredForP0 = true,
+        localDirectory,
+        files = new[]
+        {
+            new
+            {
+                name = "weights.bin",
+                upstreamReportedSizeBytes = bytes.LongLength,
+                expectedUpstreamSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                localVerifiedSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant()
+            }
+        }
+    };
+
+    var manifest = new
+    {
+        schemaVersion = 1,
+        models = new[]
+        {
+            Model("qwen3-asr-0.6b", "5eb144179a02acc5e5ba31e748d22b0cf3e303b0", "speech/asr", asrBytes),
+            Model("qwen3-tts-12hz-0.6b-customvoice", "85e237c12c027371202489a0ec509ded67b5e4b5", "speech/tts", ttsBytes)
+        }
+    };
+    File.WriteAllText(Path.Combine(manifestDirectory, "models.lock.json"),
+        JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+    var service = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot, packageRoot,
+        new ModelBroker(), out var status);
+    Require(service is not null && status.Contains("已配置", StringComparison.Ordinal),
+        "有效包内清单、外置模型与 ASR/TTS 环境应创建安装版语音服务。");
+    Require(File.Exists(asrPython) && File.Exists(ttsPython), "语音工厂初始化时不应修改或启动外置 Python 文件。");
+    await service!.DisposeAsync();
+
+    var networkEnvironment = VoiceInferenceService.TryCreateForInstallation(@"\\server\share\voice",
+        modelsRoot, packageRoot, new ModelBroker(), out _);
+    Require(networkEnvironment is null, "安装版语音环境不得从网络共享加载 Python 进程。");
+
+    File.Delete(ttsPython);
+    var missingEnvironment = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
+        packageRoot, new ModelBroker(), out var missingStatus);
+    Require(missingEnvironment is null && missingStatus.Contains("不完整", StringComparison.Ordinal),
+        "缺少其中一个独立 Python 环境时，安装版语音服务必须关闭并说明状态。");
+
+    var hostProject = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "XiaoK.Host.csproj"));
+    Require(hostProject.Contains("model-lock\\models.lock.json", StringComparison.Ordinal)
+        && hostProject.Contains("CopyToPublishDirectory=\"PreserveNewest\"", StringComparison.Ordinal),
+        "Host 发布项目必须把版本锁清单复制到 MSIX 发布目录。");
 }
 
 static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
