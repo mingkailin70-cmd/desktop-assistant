@@ -89,8 +89,8 @@ if (-not $Install) {
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList $identity
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Installation requires an elevated PowerShell because Windows App Installer checks LocalMachine\TrustedPeople for self-signed MSIX packages.'
+if ($null -eq $trustedCertificate -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'The development certificate is not in LocalMachine\TrustedPeople. Run an elevated PowerShell once to add machine-level trust, or have an administrator import the public certificate.'
 }
 
 $addedTrustedCertificate = $false
@@ -124,4 +124,5 @@ if ($null -eq $installedPackage) {
     throw 'Add-AppxPackage returned without an error, but the XiaoK package could not be found for the current user. Inspect Windows deployment logs before retrying.'
 }
 Write-Output "Installed for current user: $($installedPackage.PackageFullName)"
-Write-Output 'The app was not launched. LocalMachine\TrustedPeople now trusts this certificate; see the rollback commands in docs\开发与发布\MSIX打包说明.md.'
+$trustResult = if ($addedTrustedCertificate) { 'The certificate was added to LocalMachine\TrustedPeople.' } else { 'The certificate was already trusted in LocalMachine\TrustedPeople.' }
+Write-Output "The app was not launched. $trustResult See the rollback commands in docs\开发与发布\MSIX打包说明.md."

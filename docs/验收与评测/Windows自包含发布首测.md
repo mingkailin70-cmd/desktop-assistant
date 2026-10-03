@@ -4,7 +4,9 @@
 
 签名阶段记录（2026-10-03）：清单 Publisher 固定为 `CN=XiaoK Local Development`。新增本机开发证书脚本后，SignTool 成功签名 82,564,395 字节自包含 MSIX，MakeAppx 解包检查成功。首次信任导入前，`Get-AuthenticodeSignature` 和 `SignTool verify /pa` 因证书链不受信任而失败；这是该阶段的历史结果，后续已按用户授权导入公钥并复验通过。
 
-安装验收进度（2026-10-03）：用户授权后以管理员 PowerShell 导入开发公钥至机器级 `TrustedPeople`，`SignTool verify /pa /v` 成功，`Get-AuthenticodeSignature` 状态为 `Valid`。MSIX 安装到当前账户 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`，安装目录包含 `XiaoK.Host.exe`。应用未启动；尚未请求通知/麦克风授权，未核验 UI、登录启动、重启恢复、完整六类场景或回滚。机器级证书信任影响本机所有账户，回滚方法见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+首次安装记录（2026-10-03）：用户授权后以管理员 PowerShell 导入开发公钥至机器级 `TrustedPeople`，`SignTool verify /pa /v` 成功，`Get-AuthenticodeSignature` 状态为 `Valid`。MSIX 安装到当前账户 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`，安装目录包含 `XiaoK.Host.exe`。应用未启动；尚未请求通知/麦克风授权，未核验 UI、登录启动、重启恢复、完整六类场景或回滚。机器级证书信任影响本机所有账户，回滚方法见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+
+更新安装记录（2026-10-03）：以已受信任的同一开发证书将新包更新至当前账户，版本 `0.1.1.0`，状态 `Ok`；签名有效，包 SHA-256 为 `774954F84311E77812F20E56E351895163646827D57868A7548BBA2A7F8071D5`。没有重新导入证书，没有启动应用；`XiaoK.Host` 进程数为0，常规设置文件不存在。唤醒词及微信/QQ通知监听未启用，也未请求麦克风/通知权限。当前仅证明打包、签名和账户内更新成功。
 
 ## 可复现命令
 

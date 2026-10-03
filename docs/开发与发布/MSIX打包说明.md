@@ -32,9 +32,11 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 .\tools\install_xiaok_msix.ps1 -PackagePath 'artifacts\msix-validation\<生成目录>\XiaoK-signed-validation.msix'
 ~~~
 
-需进入安装时，必须在管理员 PowerShell 中显式加上 `-Install`。脚本会先核对包内身份、签名者和本地公钥证书，然后把仅含公钥的证书导入 `Cert:\LocalMachine\TrustedPeople`，验签后只为当前执行账户运行 `Add-AppxPackage`，不会自动启动小K。Windows App Installer 对自签名 MSIX 要求机器级 `TrustedPeople` 信任，因此这项授权会影响该电脑所有用户，并需管理员权限；本证书留在 `TrustedPeople` 后，Windows 会认可任何由它签名的 MSIX。不要把此证书放入 `Trusted Root Certification Authorities`。
+需进入安装时，显式加上 `-Install`。脚本会先核对包内身份、签名者和本地公钥证书，再运行 SignTool 验签，最后只为当前执行账户运行 `Add-AppxPackage`，不会自动启动小K。若证书已在 `Cert:\LocalMachine\TrustedPeople`，更新当前账户包不需要管理员权限；若证书尚未受信任，导入机器级信任需要管理员 PowerShell，并会影响该电脑所有用户。脚本不会把证书放入 `Trusted Root Certification Authorities`。
 
-当前状态（2026-10-03）：在用户授权后已完成机器级证书信任导入和当前账户安装。SignTool 与 Authenticode 状态均通过，包标识为 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe`。随后仅用 `--diagnostics-profile` 隔离配置启动一次并通过小K界面退出；确认通知监听与模型均关闭、未请求 Windows 通知/麦克风授权、未读取常规设置，诊断临时目录位于 `%TEMP%\XiaoK-Diagnostics-*`。常规模式未启动；通知/麦克风授权、完整 UI、登录启动、重启恢复和真实功能仍未验收。
+诊断启动记录（2026-10-03）：0.1.0.0 版本曾以 `--diagnostics-profile` 隔离配置启动并从小K界面退出；确认通知监听与模型均关闭、未请求 Windows 通知/麦克风授权、未读取常规设置。该结果不代表常规模式已启动。
+
+安装更新（2026-10-03）：当前账户已从 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe` 更新为 `MingKaiLin.XiaoK_0.1.1.0_neutral__g0ndt6g65c8pe`，包状态 `Ok`。SignTool 验签与 Authenticode 状态均为 `Valid`；包 SHA-256 为 `774954F84311E77812F20E56E351895163646827D57868A7548BBA2A7F8071D5`。安装脚本确认开发证书此前已在机器 `TrustedPeople` 中，本次没有新增信任项。小K没有启动，常规设置文件不存在，因此唤醒词和通知监听仍关闭；Windows 通知/麦克风授权、完整 UI、登录启动、重启恢复、真实功能和回滚仍待验收。
 
 若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
 
