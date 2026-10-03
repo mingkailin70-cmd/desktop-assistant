@@ -221,6 +221,9 @@ try
     await CheckCodeTaskInspectionIsReadOnlyAsync(tempRoot);
     passed.Add("只读代码检索经 ToolBroker 选择并解释项目文件，不改写、审阅或测试原项目");
 
+    await CheckInspectionCitationsAreBoundToProvidedSourceAsync(tempRoot);
+    passed.Add("只读代码说明必须引用实际提供的文件和行号，缺失或越界引用失败关闭");
+
     await CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(tempRoot);
     passed.Add("代码审阅默认只保留补丁，不运行命令");
 
@@ -1340,7 +1343,7 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
 static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 {
     const string original = "class Sample { int Value = 7; }\n";
-    const string explanation = "入口位于 Sample.Value；这个字段当前初始化为 7。";
+    const string explanation = "Sample.Value 在第 1 行定义，初值为 7。[Sample.cs:1]";
     var project = CreateProject(root, "code-inspection", original);
     File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "code-inspection-workspaces");
@@ -1358,8 +1361,10 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 
     Require(result.Success && result.FinalState == TaskLifecycleState.Completed && result.Data == explanation,
         "只读检索没有返回本地说明和完成状态。");
-    Require(inference.CallCount == 2 && inference.Prompts.Any(prompt => prompt.Contains("Value = 7", StringComparison.Ordinal)),
-        "只读检索没有按模型选择的项目文件提供本地上下文。");
+    Require(inference.CallCount == 2
+        && inference.Prompts.Any(prompt => prompt.Contains("1|class Sample { int Value = 7; }", StringComparison.Ordinal))
+        && inference.SystemPrompts.Any(prompt => prompt.Contains("每个可核验的关键结论后必须引用", StringComparison.Ordinal)),
+        "只读检索没有提供绝对行号上下文或要求可核验的源码引用。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
         "只读代码检索修改了用户所选的原项目。");
     var taskRoot = Directory.GetDirectories(workspaces).Single();
@@ -1368,6 +1373,40 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
         "只读检索未保留只读快照或没有记录完成状态。");
     Require(review.CallCount == 0 && runner.CallCount == 0,
         "只读检索意外进入补丁审阅或执行验证命令。");
+}
+
+static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string root)
+{
+    const string original = "class Sample { int Value = 7; }\n";
+    const string correctedAnswer = "Sample.Value 在第 1 行定义，初值为 7。[Sample.cs:1]";
+    var correctedProject = CreateProject(root, "code-inspection-citation-correction", original);
+    var correctedWorkspace = Path.Combine(root, "code-inspection-citation-correction-workspaces");
+    var correctionInference = new ScriptedInference("Sample.Value 当前初始化为 7。", correctedAnswer);
+    var corrected = await NewAgent(correctionInference).InspectAsync(correctedProject, correctedWorkspace,
+        "说明 Value 当前在哪里定义", CancellationToken.None);
+    Require(corrected.Success && corrected.Data == correctedAnswer && correctionInference.CallCount == 2
+        && correctionInference.SystemPrompts.Any(prompt => prompt.Contains("一次性引用校正步骤", StringComparison.Ordinal)),
+        "缺少引用的首次说明没有通过一次同片段校正恢复。");
+
+    var invalidAnswers = new[]
+    {
+        "结论没有源码引用。",
+        "字段定义见 [Other.cs:1]。",
+        "字段定义见 [Sample.cs:99]。"
+    };
+    for (var index = 0; index < invalidAnswers.Length; index++)
+    {
+        var project = CreateProject(root, $"code-inspection-invalid-citation-{index}",
+            original);
+        var workspace = Path.Combine(root, $"code-inspection-invalid-citation-workspaces-{index}");
+        var result = await NewAgent(new ScriptedInference(invalidAnswers[index], invalidAnswers[index])).InspectAsync(
+            project, workspace, "说明 Value 当前在哪里定义", CancellationToken.None);
+        var taskRoot = Directory.GetDirectories(workspace).Single();
+        Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION"
+            && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal)
+            && File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
+            $"无来源、未提供文件或越界行号的检索引用没有失败关闭（样本 {index}）。");
+    }
 }
 
 static async Task CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(string root)
