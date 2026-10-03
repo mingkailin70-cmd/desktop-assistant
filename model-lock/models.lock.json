@@ -462,8 +462,8 @@
         }
       ],
       "license": "apache-2.0",
-      "status": "downloaded_and_verified",
-      "notes": "独立离线编码质量候选，不得更改生产默认模型。采用 lmstudio-community 固定 GGUF revision 的 Q4_K_M 单文件，来源模型为 Qwen3.5-9B 官方权重；计划用仓库固定 llama.cpp b11259、受限 GPU 层和 6,144 上下文与相同 v23 工具管线比较。通过资源预检和短文本冒烟前不运行编码任务；达到独立验收门槛前不接受为首版模型。",
+      "status": "locally_evaluated",
+      "notes": "仅作离线候选，不得更改生产默认模型。固定 Q4_K_M 单文件已逐字节校验。2026-10-03 使用本机 llama.cpp b11259、12 GPU层、6,144上下文做合成短聊，显式关闭 thinking 后正确回答“7加5等于12”，生成12 tokens，用时1.07秒；初始空闲显存6,272 MiB、采样最低空闲3,717 MiB（活动新增占用峰值约2,555 MiB，整卡采样占用峰值4,434 MiB），系统可用内存从16.76 GiB降至11.20 GiB。任务后 llama-server 已退出，显存/内存恢复至约6,271 MiB/16.76 GiB可用。此结果仅证明该环境能完成一条合成推理与短时资源观察；未完成编码质量、长时稳定性或生产验收，仍不能作为首版主模型。",
       "localDirectory": "llm/qwen3.5-9b-q4km/1379f25c6b505a3fc737bd7818cb09389cf807c1",
       "requiredForP0": false
     }
