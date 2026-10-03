@@ -1157,6 +1157,11 @@ static async Task CheckExplicitCodeTaskTargetsSurviveWeakModelSelectionAsync(str
         && File.ReadAllText(Path.Combine(emptyWorkspace, "src", "XiaoK.Host", "Settings.cs"))
             .Contains("int Value = 2", StringComparison.Ordinal),
         "模型选择空数组时，没有从用户明确指定且已在清单中的路径恢复安全上下文。" + emptySelection.Summary);
+    Require(emptySelectionInference.SystemPrompts.Any(prompt =>
+            prompt.Contains("动作动词前缀和实体名称别名", StringComparison.Ordinal)
+            && prompt.Contains("用户配置的允许列表", StringComparison.Ordinal)
+            && prompt.Contains("未配置的 app_id 必须继续被拒绝", StringComparison.Ordinal)),
+        "编程代理没有收到应用别名与用户配置允许列表之间的固定边界。");
     Require(File.ReadAllText(Path.Combine(project, "src", "XiaoK.Core", "Resolver.cs")) == coreOriginal
         && File.ReadAllText(Path.Combine(project, "src", "XiaoK.Host", "Settings.cs")) == hostOriginal,
         "明确目标文件恢复选择时改写了原项目。");
