@@ -13,7 +13,7 @@ public sealed record DesktopApp(string Id, string Executable, string? WorkingDir
 public interface IDesktopAppProcessController
 {
     IDisposable? Start(ProcessStartInfo startInfo);
-    bool HasVisibleWindow(DesktopApp app);
+    IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app);
 }
 
 public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
@@ -62,12 +62,17 @@ public sealed class WindowsDesktopTools
     private readonly IReadOnlyDictionary<string, string> _searchRoots;
     private readonly IDesktopAppProcessController _appProcessController;
     private readonly IDesktopWindowController _windowController;
+    private readonly TimeSpan _appLaunchTimeout;
 
     public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
-        IDesktopAppProcessController? appProcessController = null, IDesktopWindowController? windowController = null)
+        IDesktopAppProcessController? appProcessController = null, IDesktopWindowController? windowController = null,
+        TimeSpan? appLaunchTimeout = null)
     {
         _appProcessController = appProcessController ?? new SystemDesktopAppProcessController();
         _windowController = windowController ?? new SystemDesktopWindowController();
+        _appLaunchTimeout = appLaunchTimeout ?? TimeSpan.FromSeconds(8);
+        if (_appLaunchTimeout <= TimeSpan.Zero || _appLaunchTimeout > TimeSpan.FromMinutes(1))
+            throw new ArgumentOutOfRangeException(nameof(appLaunchTimeout), "应用窗口核验超时必须在1毫秒到1分钟之间。");
         var allowedApps = new Dictionary<string, DesktopApp>(StringComparer.OrdinalIgnoreCase);
         foreach (var configuredApp in apps ?? [])
         {
@@ -110,7 +115,14 @@ public sealed class WindowsDesktopTools
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var start = new ProcessStartInfo(app.Executable) { UseShellExecute = true };
+            var requireNewProjectWindow = app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(app.WorkingDirectory);
+            var existingWindowHandles = requireNewProjectWindow
+                ? _appProcessController.GetVisibleWindowHandles(app).ToHashSet()
+                : null;
+            // Launch the already validated executable directly so the returned process handle and
+            // the window-creation request belong to this invocation, rather than shell mediation.
+            var start = new ProcessStartInfo(app.Executable) { UseShellExecute = false };
             if (!string.IsNullOrWhiteSpace(app.WorkingDirectory)) start.WorkingDirectory = app.WorkingDirectory;
             if (app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(app.WorkingDirectory))
             {
@@ -127,13 +139,24 @@ public sealed class WindowsDesktopTools
             if (launchHandle is null)
                 return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但没有返回可核验的进程句柄。");
 
-            var until = DateTimeOffset.UtcNow.AddSeconds(8);
+            var until = DateTimeOffset.UtcNow.Add(_appLaunchTimeout);
             while (DateTimeOffset.UtcNow < until)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (_appProcessController.HasVisibleWindow(app))
-                    return new(true, $"已启动并检测到 {app.Id} 的窗口。", Data: app.WorkingDirectory);
-                await Task.Delay(250, cancellationToken);
+                var visibleWindowHandles = _appProcessController.GetVisibleWindowHandles(app);
+                var targetWindowVisible = existingWindowHandles is null
+                    ? visibleWindowHandles.Count > 0
+                    : visibleWindowHandles.Any(handle => !existingWindowHandles.Contains(handle));
+                if (targetWindowVisible)
+                {
+                    var summary = requireNewProjectWindow
+                        ? "已请求打开 VS Code 项目，并核验新的本地项目窗口可见。"
+                        : $"已启动并检测到 {app.Id} 的窗口。";
+                    return new(true, summary, Data: app.WorkingDirectory);
+                }
+                var remaining = until - DateTimeOffset.UtcNow;
+                if (remaining > TimeSpan.Zero)
+                    await Task.Delay(remaining < TimeSpan.FromMilliseconds(250) ? remaining : TimeSpan.FromMilliseconds(250), cancellationToken);
             }
             return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但暂未检测到目标窗口；请手动核对应用状态。");
         }
@@ -502,7 +525,7 @@ public sealed class WindowsDesktopTools
     private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController
     {
         public IDisposable? Start(ProcessStartInfo startInfo) => Process.Start(startInfo);
-        public bool HasVisibleWindow(DesktopApp app) => FindMatchingWindows(app).Count > 0;
+        public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => FindMatchingWindows(app);
     }
 
     private sealed class SystemDesktopWindowController : IDesktopWindowController

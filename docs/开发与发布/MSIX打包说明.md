@@ -40,6 +40,10 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 
 MSIX 设置与首个工具链实测（2026-10-03）：打包应用的 `Environment.SpecialFolder.LocalApplicationData` 被 Windows 重定向到包专属 `LocalCache\Local`，设置实际保存在 `%LOCALAPPDATA%\Packages\MingKaiLin.XiaoK_g0ndt6g65c8pe\LocalCache\Local\XiaoK\settings.json`；`LocalCache` 在本机是指向 `D:\WpSystem` 的目录联接。普通非打包开发运行仍使用 `%LOCALAPPDATA%\XiaoK\settings.json`，两者不会自动同步。为已安装版本配置了 VS Code `D:\VS Code\Code.exe`、项目 `D:\Desktop\learn\siri`、隔离工作区 `D:\XiaoK\Workspaces` 和本机应用白名单；唤醒词、微信/QQ通知监控均关闭，发布者 AUMID 列表为空。首次启动工具按钮因配置写在非打包目录而按白名单策略安全拒绝，移入包内设置位置并重启后，点击“打开 VS Code 项目”显示目标目录。窗口枚举仍见一个本地 `siri` 窗口和一个 `[SSH: Three]` 窗口；本地窗口句柄前后相同，所以这次只证明项目目标链路返回成功，未证明新建了额外窗口。随后在小K输入“查找文件 XiaoK.sln”，本地搜索返回 `D:\Desktop\learn\siri\XiaoK.sln`，达到5,000目录项上限后明确提示结果可能不完整；没有读取文件内容。没有查看聊天或发送消息。
 
+VS Code 新窗口核验修正（2026-10-03）：复核后发现旧启动验收只能证明配置目标被接受，不能把启动前已存在的 VS Code 窗口当作本次启动结果。源码现先记录匹配项目的可见窗口句柄，只有检测到新增句柄才报告成功；超时返回 `APP_LAUNCH_OUTCOME_UNCERTAIN`，不自动重试。安装并启动 `0.1.2.0` 后再次点击“打开 VS Code 项目”，既有本地窗口 `68050` 和 SSH 窗口 `1575294` 均保留，但未出现新窗口；小K如实显示结果不确定。此次验证确认旧窗口不会再造成成功误报，独立窗口启动本身仍未通过。包 SHA-256：`3B40B279877ADDA91E038F03F750B15C3BB8FACF37B5613970406D60BAD3E5AB`；签名有效，开发证书此前已在 `LocalMachine\TrustedPeople`，本次未改动证书信任。未查看微信/QQ聊天或发送消息。
+
+直接进程启动复测（2026-10-03）：将白名单 EXE 的 `UseShellExecute` 设为 `false` 后重新发布、签名并安装 `0.1.3.0`；签名有效，包 SHA-256 为 `FD2A4E1CF72F93B499762B4DD5F9A533AF778884D247EFB32A72F221529F17C5`，本次没有改动证书信任。小K仍显示 `APP_LAUNCH_OUTCOME_UNCERTAIN`；复测前后只枚举到原本地 VS Code 窗口 `68050` 与 `[SSH: Three]` 窗口 `1575294`，没有创建新的匹配窗口。因此独立项目窗口启动仍失败，不把安全检查通过当成功验收，也不自动重试这次结果不确定的操作。
+
 若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
 
 ~~~powershell

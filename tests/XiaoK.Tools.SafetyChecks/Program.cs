@@ -1963,23 +1963,32 @@ static async Task CheckAppLaunchRoutingAndFailureAsync()
         [new KeyValuePair<string, string>("app_id", appId), new KeyValuePair<string, string>("workspace_id", "xiaok")],
         appId, ToolExpectedOutcome.ApplicationWindowVisible);
 
-    var processController = new FakeDesktopAppProcessController(windowVisible: true);
+    var processController = new FakeDesktopAppProcessController(windowVisible: true, addVisibleWindowOnStart: true);
     var desktop = new WindowsDesktopTools([app], [], processController);
     var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
     var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
     var startInfo = processController.LastStartInfo;
-    Require(result.Success && result.Data == projectRoot && processController.StartCount == 1
-        && processController.WindowCheckCount == 1
-        && startInfo is { FileName: executable, WorkingDirectory: projectRoot, UseShellExecute: true }
+    Require(result.Success && result.Data == projectRoot && result.Summary.Contains("新的本地项目窗口", StringComparison.Ordinal)
+        && processController.StartCount == 1 && processController.WindowCheckCount == 2
+        && startInfo is { FileName: executable, WorkingDirectory: projectRoot, UseShellExecute: false }
         && startInfo.ArgumentList.SequenceEqual(["--new-window", projectRoot]),
         "打开 VS Code 项目没有使用固定程序路径、工作目录和新窗口项目参数，或未核验窗口。");
+
+    var staleWindowController = new FakeDesktopAppProcessController(windowVisible: true);
+    var staleWindowDesktop = new WindowsDesktopTools([app], [], staleWindowController,
+        appLaunchTimeout: TimeSpan.FromMilliseconds(5));
+    var staleWindowResult = await staleWindowDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(!staleWindowResult.Success && staleWindowResult.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        && staleWindowResult.FinalState == TaskLifecycleState.OutcomeUncertain
+        && staleWindowController.StartCount == 1 && staleWindowController.WindowCheckCount >= 2,
+        "已有 VS Code 项目窗口被误当成这次启动新建的窗口。");
 
     var failingProcessController = new FakeDesktopAppProcessController(startFailure: new FileNotFoundException());
     var failingDesktop = new WindowsDesktopTools([app], [], failingProcessController);
     var failureBroker = new ToolBroker(failingDesktop, null!, new ModelBroker(), null!, null!, "", "");
     var failure = await failureBroker.ExecuteAsync(proposal, CancellationToken.None);
     Require(!failure.Success && failure.ErrorCode == "APP_LAUNCH_FAILED"
-        && failingProcessController.StartCount == 1 && failingProcessController.WindowCheckCount == 0,
+        && failingProcessController.StartCount == 1 && failingProcessController.WindowCheckCount == 1,
         "固定应用启动器路径失效时没有如实返回启动失败。");
 }
 
@@ -3732,9 +3741,11 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
 }
 
 internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true,
-    Exception? startFailure = null)
+    Exception? startFailure = null, bool addVisibleWindowOnStart = false)
     : IDesktopAppProcessController
 {
+    private readonly List<IntPtr> _windowHandles = windowVisible ? [new IntPtr(1)] : [];
+
     public int StartCount { get; private set; }
     public int WindowCheckCount { get; private set; }
     public ProcessStartInfo? LastStartInfo { get; private set; }
@@ -3745,13 +3756,14 @@ internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bo
         LastStartInfo = startInfo;
         onStart?.Invoke();
         if (startFailure is not null) throw startFailure;
+        if (addVisibleWindowOnStart) _windowHandles.Add(new IntPtr(_windowHandles.Count + 1));
         return new EmptyDisposable();
     }
 
-    public bool HasVisibleWindow(DesktopApp app)
+    public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app)
     {
         WindowCheckCount++;
-        return windowVisible;
+        return _windowHandles.ToArray();
     }
 
     private sealed class EmptyDisposable : IDisposable
