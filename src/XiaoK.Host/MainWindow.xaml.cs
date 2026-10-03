@@ -816,10 +816,19 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             ExpandedView.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
             PetView.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
             ResizeMode = expanded ? ResizeMode.CanResizeWithGrip : ResizeMode.NoResize;
-            MinWidth = expanded ? 440 : 150;
-            MinHeight = expanded ? 560 : 150;
-            Width = expanded ? _expandedWidth : 164;
-            Height = expanded ? _expandedHeight : 164;
+            ShellBorder.Background = expanded
+                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(247, 248, 252))
+                : System.Windows.Media.Brushes.Transparent;
+            ShellBorder.BorderBrush = expanded
+                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 226, 239))
+                : System.Windows.Media.Brushes.Transparent;
+            ShellBorder.BorderThickness = expanded ? new Thickness(1) : new Thickness(0);
+            ShellBorder.Padding = expanded ? new Thickness(14) : new Thickness(0);
+            ShellBorder.Margin = expanded ? new Thickness(5) : new Thickness(0);
+            MinWidth = expanded ? 440 : 176;
+            MinHeight = expanded ? 560 : 176;
+            Width = expanded ? _expandedWidth : 176;
+            Height = expanded ? _expandedHeight : 176;
             ClampWindowToMonitorWorkArea();
             if (expanded)
             {

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Resource Include="Assets\Pets\xiaok-silver-shaded.png" />
     <ProjectReference Include="..\XiaoK.Inference\XiaoK.Inference.csproj" />
     <ProjectReference Include="..\XiaoK.Voice\XiaoK.Voice.csproj" />
     <ProjectReference Include="..\XiaoK.Tools\XiaoK.Tools.csproj" />
