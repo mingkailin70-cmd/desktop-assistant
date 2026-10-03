@@ -1389,24 +1389,26 @@ static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string r
         && correctionInference.SystemPrompts.Any(prompt => prompt.Contains("一次性引用校正步骤", StringComparison.Ordinal)),
         "缺少引用的首次说明没有通过一次同片段校正恢复。");
 
-    var invalidAnswers = new[]
+    var invalidAnswers = new (string Answer, string Feedback)[]
     {
-        "结论没有源码引用。",
-        "字段定义见 [Other.cs:1]。",
-        "字段定义见 [Sample.cs:99]。"
+        ("结论没有源码引用。", "没有检测到格式为 [相对路径:正整数行号] 的源码引用"),
+        ("字段定义见 [Other.cs:1]。", "源码引用的路径不在本次提供的上下文中"),
+        ("字段定义见 [Sample.cs:99]。", "源码引用的行号超出本次提供的上下文片段")
     };
     for (var index = 0; index < invalidAnswers.Length; index++)
     {
         var project = CreateProject(root, $"code-inspection-invalid-citation-{index}",
             original);
         var workspace = Path.Combine(root, $"code-inspection-invalid-citation-workspaces-{index}");
-        var result = await NewAgent(new ScriptedInference(invalidAnswers[index], invalidAnswers[index])).InspectAsync(
+        var inference = new ScriptedInference(invalidAnswers[index].Answer, invalidAnswers[index].Answer);
+        var result = await NewAgent(inference).InspectAsync(
             project, workspace, "说明 Value 当前在哪里定义", CancellationToken.None);
         var taskRoot = Directory.GetDirectories(workspace).Single();
         Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION"
+            && inference.Prompts.Any(prompt => prompt.Contains(invalidAnswers[index].Feedback, StringComparison.Ordinal))
             && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal)
             && File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
-            $"无来源、未提供文件或越界行号的检索引用没有失败关闭（样本 {index}）。");
+            $"无来源、未提供文件或越界行号的检索引用没有获得对应诊断后失败关闭（样本 {index}）。");
     }
 }
 

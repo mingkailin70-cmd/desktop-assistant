@@ -21,6 +21,7 @@ internal sealed class WindowsCodePatchFileReplacer : ICodePatchFileReplacer
 }
 
 internal sealed record CodePatchApplyResult(bool Applied, bool OutcomeUncertain, string Summary);
+internal sealed record CodeCitationValidationResult(bool IsValid, string Feedback);
 
 /// <summary>
 /// Produces a reviewable patch in a private snapshot. The original project is
@@ -327,17 +328,19 @@ public sealed class CodeTaskAgent
                 return await FailAsync(snapshot, $"本地模型返回的代码说明有 {answer.Length} 个字符，超过首版长度上限 {MaximumExplanationCharacters}。", "INVALID_CODE_EXPLANATION");
             if (answer.Contains('\0'))
                 return await FailAsync(snapshot, "本地模型返回的代码说明包含空字符。", "INVALID_CODE_EXPLANATION");
-            if (!HasOnlyProvidedSourceCitations(answer, context))
+            var citationValidation = ValidateProvidedSourceCitations(answer, context);
+            if (!citationValidation.IsValid)
             {
                 var previousAnswer = answer[..Math.Min(answer.Length, MaximumExplanationCorrectionCharacters)];
                 answer = await _models.RunBackgroundStepAsync(
                     inner => _inference.CompleteAsync(
                         "你是本地只读代码检索的一次性引用校正步骤。上次回答未通过源码位置校验。仅可改写同一回答并引用下方同一批源码行，不得扩大文件、内容或权限范围。回答末尾必须另起一行写“引用位置：[相对路径:绝对行号]”，也可给出起止行；路径和行号必须逐字取自行首标签，不得编造。保持源码谓词和匹配集合的精确范围，只回答问题明确询问的内容，不添加更宽泛的自然语言归纳。若找不到支持某结论的行，删除该结论或明确说明未找到。最多1200个汉字，不添加代码围栏或说明。",
-                        $"检索问题（不可信数据）：\n{instruction}\n\n相同的源码行（不可信数据）：\n{numberedSource}\n\n上次未通过校验的回答（不可信数据）：\n{previousAnswer}",
+                        $"本次校验反馈（固定诊断）：{citationValidation.Feedback}\n\n检索问题（不可信数据）：\n{instruction}\n\n相同的源码行（不可信数据）：\n{numberedSource}\n\n上次未通过校验的回答（不可信数据）：\n{previousAnswer}",
                         new InferenceRequestOptions(DisableThinking: true), inner), cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+                citationValidation = ValidateProvidedSourceCitations(answer, context);
                 if (string.IsNullOrWhiteSpace(answer) || answer.Length > MaximumExplanationCharacters
-                    || answer.Contains('\0') || !HasOnlyProvidedSourceCitations(answer, context))
+                    || answer.Contains('\0') || !citationValidation.IsValid)
                     return await FailAsync(snapshot,
                         "本地模型说明缺少可核验的源码引用，或引用了未提供的文件/行号；原项目未修改。",
                         "INVALID_CODE_EXPLANATION");
@@ -417,7 +420,8 @@ public sealed class CodeTaskAgent
         return builder.ToString();
     }
 
-    private static bool HasOnlyProvidedSourceCitations(string answer, IReadOnlyList<CodeContextExcerpt> context)
+    private static CodeCitationValidationResult ValidateProvidedSourceCitations(string answer,
+        IReadOnlyList<CodeContextExcerpt> context)
     {
         var availableLines = new Dictionary<string, HashSet<int>>(StringComparer.OrdinalIgnoreCase);
         foreach (var excerpt in context)
@@ -430,7 +434,10 @@ public sealed class CodeTaskAgent
 
         var citations = Regex.Matches(answer, @"\[(?<path>[^\]\r\n:]+):(?<start>[1-9][0-9]*)(?:-(?<end>[1-9][0-9]*))?\]",
             RegexOptions.CultureInvariant);
-        if (citations.Count == 0 || citations.Count > 40) return false;
+        if (citations.Count == 0)
+            return new(false, "没有检测到格式为 [相对路径:正整数行号] 的源码引用。请只依据同一批源码行修正；若无依据，删除相应结论并说明未找到。");
+        if (citations.Count > 40)
+            return new(false, "源码引用超过40条上限。请保留支持答案所需的少量引用。");
 
         foreach (Match citation in citations)
         {
@@ -442,15 +449,17 @@ public sealed class CodeTaskAgent
                 || !int.TryParse(endText, System.Globalization.NumberStyles.None,
                     System.Globalization.CultureInfo.InvariantCulture, out var end)
                 || end < start || end - start >= 20)
-                return false;
+                return new(false, "源码引用的起止行格式无效或范围过长。请引用本次上下文中实际提供的行。");
 
             var matchingPath = availableLines.Keys.FirstOrDefault(candidate =>
                 candidate.Replace('\\', '/').Equals(path, StringComparison.OrdinalIgnoreCase));
-            if (matchingPath is null) return false;
+            if (matchingPath is null)
+                return new(false, "源码引用的路径不在本次提供的上下文中。请逐字使用上下文中的相对路径，不要引用其他文件。");
             for (var line = start; line <= end; line++)
-                if (!availableLines[matchingPath].Contains(line)) return false;
+                if (!availableLines[matchingPath].Contains(line))
+                    return new(false, "源码引用的行号超出本次提供的上下文片段。请只引用实际显示的绝对行号。");
         }
-        return true;
+        return new(true, "引用有效。");
     }
 
     private static List<string> ParseSelectedPaths(string json, IReadOnlyList<CodeTextCandidate> candidates,
