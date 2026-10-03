@@ -117,9 +117,16 @@ public sealed class WindowsDesktopTools
             cancellationToken.ThrowIfCancellationRequested();
             var requireNewProjectWindow = app.Id.Equals("vscode", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(app.WorkingDirectory);
-            var existingWindowHandles = requireNewProjectWindow
-                ? _appProcessController.GetVisibleWindowHandles(app).ToHashSet()
-                : null;
+            HashSet<IntPtr>? existingWindowHandles = null;
+            if (requireNewProjectWindow)
+            {
+                existingWindowHandles = _appProcessController.GetVisibleWindowHandles(app).ToHashSet();
+                var existingSelection = WindowMatchSelector.Select(existingWindowHandles);
+                if (existingSelection.Status == WindowMatchStatus.Ambiguous)
+                    return new(false, "检测到多个本地 VS Code 项目窗口；请手动选择目标，小K没有启动新窗口。", "APP_LAUNCH_TARGET_AMBIGUOUS");
+                if (existingSelection.Status == WindowMatchStatus.Unique)
+                    return ActivateExistingProjectWindow(app);
+            }
             // Launch the already validated executable directly so the returned process handle and
             // the window-creation request belong to this invocation, rather than shell mediation.
             var start = new ProcessStartInfo(app.Executable) { UseShellExecute = false };
@@ -168,6 +175,23 @@ public sealed class WindowsDesktopTools
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or FileNotFoundException)
         { return new(false, "应用启动失败；请检查本地路径设置。", "APP_LAUNCH_FAILED"); }
         finally { launchHandle?.Dispose(); }
+    }
+
+    private ToolResult ActivateExistingProjectWindow(DesktopApp app)
+    {
+        WindowActivationOutcome outcome;
+        try { outcome = _windowController.ActivateWindow(app); }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UnauthorizedAccessException
+            or SecurityException or NotSupportedException or ArgumentException)
+        { return new(false, "无法安全核验现有 VS Code 项目窗口；请手动切换。", "WINDOW_ACTIVATION_FAILED"); }
+
+        return outcome switch
+        {
+            WindowActivationOutcome.Activated => new(true, "小K项目已在现有本地 VS Code 窗口中打开，并已核验该窗口在前台。", Data: app.WorkingDirectory),
+            WindowActivationOutcome.NotFound => new(false, "目标项目窗口在切换前已关闭；请再次检查窗口状态后重试。", "WINDOW_NOT_FOUND"),
+            WindowActivationOutcome.Ambiguous => new(false, "发现多个本地 VS Code 项目窗口；请手动选择目标。", "APP_LAUNCH_TARGET_AMBIGUOUS"),
+            _ => new(false, "Windows 未允许切换到本地 VS Code 项目窗口，或前台核验失败；请手动切换。", "WINDOW_ACTIVATION_DENIED")
+        };
     }
 
     public async Task<ToolResult> ActivateWindowAsync(ToolProposal proposal, CancellationToken cancellationToken)

@@ -1963,27 +1963,55 @@ static async Task CheckAppLaunchRoutingAndFailureAsync()
         [new KeyValuePair<string, string>("app_id", appId), new KeyValuePair<string, string>("workspace_id", "xiaok")],
         appId, ToolExpectedOutcome.ApplicationWindowVisible);
 
-    var processController = new FakeDesktopAppProcessController(windowVisible: true, addVisibleWindowOnStart: true);
-    var desktop = new WindowsDesktopTools([app], [], processController);
+    var existingWindowProcessController = new FakeDesktopAppProcessController(windowVisible: true);
+    var existingWindowController = new FakeDesktopWindowController(WindowActivationOutcome.Activated);
+    var existingWindowDesktop = new WindowsDesktopTools([app], [], existingWindowProcessController, existingWindowController);
+    var existingWindowResult = await existingWindowDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(existingWindowResult.Success && existingWindowResult.Data == projectRoot
+        && existingWindowResult.Summary.Contains("现有本地 VS Code 窗口", StringComparison.Ordinal)
+        && existingWindowProcessController.StartCount == 0 && existingWindowProcessController.WindowCheckCount == 1
+        && existingWindowController.CallCount == 1,
+        "已有唯一的本地 VS Code 项目窗口时没有只激活并核验该窗口。");
+
+    var processController = new FakeDesktopAppProcessController(windowVisible: false, addVisibleWindowOnStart: true);
+    var newWindowController = new FakeDesktopWindowController(WindowActivationOutcome.Activated);
+    var desktop = new WindowsDesktopTools([app], [], processController, newWindowController);
     var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
     var result = await broker.ExecuteAsync(proposal, CancellationToken.None);
     var startInfo = processController.LastStartInfo;
     Require(result.Success && result.Data == projectRoot && result.Summary.Contains("新的本地项目窗口", StringComparison.Ordinal)
-        && processController.StartCount == 1 && processController.WindowCheckCount == 2
+        && processController.StartCount == 1 && processController.WindowCheckCount == 2 && newWindowController.CallCount == 0
         && startInfo is { FileName: executable, WorkingDirectory: projectRoot, UseShellExecute: false }
         && startInfo.ArgumentList.SequenceEqual(["--new-window", projectRoot]),
         "打开 VS Code 项目没有使用固定程序路径、工作目录和新窗口项目参数，或未核验窗口。");
 
-    var staleWindowController = new FakeDesktopAppProcessController(windowVisible: true);
+    var staleWindowController = new FakeDesktopAppProcessController(windowVisible: false);
     var staleWindowDesktop = new WindowsDesktopTools([app], [], staleWindowController,
         appLaunchTimeout: TimeSpan.FromMilliseconds(5));
     var staleWindowResult = await staleWindowDesktop.LaunchAsync(proposal, CancellationToken.None);
     Require(!staleWindowResult.Success && staleWindowResult.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
         && staleWindowResult.FinalState == TaskLifecycleState.OutcomeUncertain
         && staleWindowController.StartCount == 1 && staleWindowController.WindowCheckCount >= 2,
-        "已有 VS Code 项目窗口被误当成这次启动新建的窗口。");
+        "没有出现新的 VS Code 项目窗口时未返回结果待核对。");
 
-    var failingProcessController = new FakeDesktopAppProcessController(startFailure: new FileNotFoundException());
+    var ambiguousHandlesController = new FakeDesktopAppProcessController(initialWindowHandles: [new IntPtr(1), new IntPtr(2)]);
+    var ambiguousActivationController = new FakeDesktopWindowController(WindowActivationOutcome.Ambiguous);
+    var ambiguousDesktop = new WindowsDesktopTools([app], [], ambiguousHandlesController, ambiguousActivationController);
+    var ambiguous = await ambiguousDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(!ambiguous.Success && ambiguous.ErrorCode == "APP_LAUNCH_TARGET_AMBIGUOUS"
+        && ambiguousHandlesController.StartCount == 0 && ambiguousActivationController.CallCount == 0,
+        "存在多个本地项目窗口时仍启动或猜测目标。");
+
+    var deniedActivationProcessController = new FakeDesktopAppProcessController(windowVisible: true);
+    var deniedActivationWindowController = new FakeDesktopWindowController(WindowActivationOutcome.ActivationDenied);
+    var deniedActivationDesktop = new WindowsDesktopTools([app], [], deniedActivationProcessController, deniedActivationWindowController);
+    var deniedActivation = await deniedActivationDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(!deniedActivation.Success && deniedActivation.ErrorCode == "WINDOW_ACTIVATION_DENIED"
+        && deniedActivationProcessController.StartCount == 0 && deniedActivationWindowController.CallCount == 1,
+        "切换到现有项目窗口被 Windows 拒绝时又启动了重复窗口。");
+
+    var failingProcessController = new FakeDesktopAppProcessController(windowVisible: false,
+        startFailure: new FileNotFoundException());
     var failingDesktop = new WindowsDesktopTools([app], [], failingProcessController);
     var failureBroker = new ToolBroker(failingDesktop, null!, new ModelBroker(), null!, null!, "", "");
     var failure = await failureBroker.ExecuteAsync(proposal, CancellationToken.None);
@@ -3741,10 +3769,12 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
 }
 
 internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true,
-    Exception? startFailure = null, bool addVisibleWindowOnStart = false)
+    Exception? startFailure = null, bool addVisibleWindowOnStart = false,
+    IReadOnlyCollection<IntPtr>? initialWindowHandles = null)
     : IDesktopAppProcessController
 {
-    private readonly List<IntPtr> _windowHandles = windowVisible ? [new IntPtr(1)] : [];
+    private readonly List<IntPtr> _windowHandles = initialWindowHandles?.ToList()
+        ?? (windowVisible ? [new IntPtr(1)] : []);
 
     public int StartCount { get; private set; }
     public int WindowCheckCount { get; private set; }
