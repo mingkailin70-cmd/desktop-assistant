@@ -353,6 +353,9 @@ try
     CheckGpuMemoryAdmissionRequiresReserve();
     passed.Add("GPU 推理准入要求模型预算之外保留至少 1 GiB 显存");
 
+    await CheckInstalledModelRootResolutionAsync(tempRoot);
+    passed.Add("安装版模型根目录定位固定 revision 子目录，并在直接配置无效时失败关闭");
+
     await CheckGpuPreflightBlocksBeforeRuntimeLaunchAsync(tempRoot);
     passed.Add("GPU 显存预检不足时在读取运行时文件前拒绝启动");
 
@@ -3660,6 +3663,42 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
     {
         _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://192.168.1.10:8080/");
         throw new InvalidOperationException("非回环托管端点没有被拒绝。");
+    }
+    catch (InvalidDataException) { }
+}
+
+static async Task CheckInstalledModelRootResolutionAsync(string root)
+{
+    const string revision = "f9f88ac3e234be915e23811a6d28ea287bdb927e";
+    var modelsRoot = Path.Combine(root, "installed-models-root");
+    var primaryRoot = Path.Combine(modelsRoot, "llm", "qwen3.5-4b", revision);
+    Directory.CreateDirectory(primaryRoot);
+    await File.WriteAllTextAsync(Path.Combine(primaryRoot, "llama-runtime.json"), """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-4b-q4km",
+          "modelSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "contextTokens": 4096,
+          "gpuLayers": 99,
+          "expectedGpuMemoryMiB": 5000
+        }
+        """);
+
+    var runtime = LlamaCppModelRuntime.TryLoad(modelsRoot, "http://127.0.0.1:8080/");
+    Require(runtime is not null, "安装版模型根目录未发现锁定主模型目录中的运行清单。");
+    var modelRootField = typeof(LlamaCppModelRuntime).GetField("_modelRoot", BindingFlags.Instance | BindingFlags.NonPublic);
+    Require(modelRootField?.GetValue(runtime) is string resolvedRoot
+        && string.Equals(resolvedRoot, Path.GetFullPath(primaryRoot), StringComparison.OrdinalIgnoreCase),
+        "安装版运行时没有绑定到固定 Qwen revision 目录。");
+    await runtime!.DisposeAsync();
+
+    await File.WriteAllTextAsync(Path.Combine(modelsRoot, "llama-runtime.json"), "{}");
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelsRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("根目录中的无效直接清单被忽略，并错误回退到嵌套模型目录。");
     }
     catch (InvalidDataException) { }
 }

@@ -39,7 +39,7 @@
                         <TextBlock x:Name="DatabaseMaintenanceStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,3,0,0"/>
                     </StackPanel>
                 </Border>
-                <TextBlock Text="托管本地模型目录（需含 llama-runtime.json 与锁定模型文件）"/>
+                <TextBlock Text="本地模型目录（安装版按锁定结构定位主模型；开发版可直接选版本目录）"/>
                 <DockPanel Margin="0,4,0,12">
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseModelRoot_Click" Margin="8,0,0,0"/>
                     <TextBox x:Name="ModelRootBox" MinHeight="32" Padding="7,5"/>

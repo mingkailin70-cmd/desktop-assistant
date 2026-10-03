@@ -23,6 +23,7 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     private const string RuntimeVersion = "b11259";
     private const string PrimaryModelId = "qwen3.5-4b-q4km";
     private const string PrimaryModelFileName = "Qwen3.5-4B-Q4_K_M.gguf";
+    private const string PrimaryModelRevision = "f9f88ac3e234be915e23811a6d28ea287bdb927e";
     private const string MiMoEvaluationModelId = "mimo-v2.6-distill-qwen-9b-gguf-q8-0";
     private const string MiMoEvaluationModelFileName = "MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf";
     private const string Qwen9BEvaluationModelId = "qwen3.5-9b-q4km-eval";
@@ -84,8 +85,21 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     /// <summary>Returns null only when no manifest is present. An invalid present manifest must not silently fall back.</summary>
     public static LlamaCppModelRuntime? TryLoad(string modelRoot, string endpoint, IGpuMemoryProbe? gpuMemoryProbe = null,
         int? contextTokensOverride = null)
-        => TryLoadCore(modelRoot, Path.Combine(Path.GetFullPath(modelRoot), "Runtime"), endpoint,
+    {
+        var configuredRoot = Path.GetFullPath(modelRoot);
+        var directManifestPath = Path.Combine(configuredRoot, ManifestName);
+        var resolvedRoot = configuredRoot;
+        if (!File.Exists(directManifestPath) && !Directory.Exists(directManifestPath))
+        {
+            var installedPrimaryRoot = Path.Combine(configuredRoot, "llm", "qwen3.5-4b", PrimaryModelRevision);
+            var installedManifestPath = Path.Combine(installedPrimaryRoot, ManifestName);
+            if (File.Exists(installedManifestPath) || Directory.Exists(installedManifestPath))
+                resolvedRoot = installedPrimaryRoot;
+        }
+
+        return TryLoadCore(resolvedRoot, Path.Combine(resolvedRoot, "Runtime"), endpoint,
             PrimaryModelId, PrimaryModelFileName, gpuMemoryProbe, contextTokensOverride, manifestJsonOverride: null);
+    }
 
     /// <summary>
     /// Loads the primary model for an offline evaluation using a transient manifest,
