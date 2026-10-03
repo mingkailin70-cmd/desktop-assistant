@@ -185,6 +185,9 @@ try
     await CheckTargetPathListDoesNotBiasLargeContextAsync(tempRoot);
     passed.Add("大文件索引从任务语义定位代码，不让授权路径清单把上下文带到文件头部");
 
+    await CheckLargeContextIncludesDecisionBranchesAsync(tempRoot);
+    passed.Add("大文件受限索引包含实体别名映射所需的条件分支，不改写原项目");
+
     await CheckFileSearchContextRanksAdapterLimitLoopAsync(tempRoot);
     passed.Add("文件搜索上下文索引能定位结果计数循环和适配器返回路径");
 
@@ -1059,6 +1062,50 @@ static async Task CheckFileSearchContextRanksAdapterLimitLoopAsync(string root)
         && File.ReadAllText(Path.Combine(project, "src", "ToolBroker.cs")) == broker
         && File.ReadAllText(Path.Combine(project, "tests", "Program.cs")) == tests,
         "文件搜索上下文定位回归修改了原项目。");
+}
+
+static async Task CheckLargeContextIncludesDecisionBranchesAsync(string root)
+{
+    var paths = new[]
+    {
+        "src/XiaoK.Core/AppLaunchIntentResolver.cs",
+        "src/XiaoK.Host/AssistantRuntime.cs",
+        "src/XiaoK.Adapters.Windows/WindowsDesktopTools.cs",
+        "tests/XiaoK.Tools.SafetyChecks/Program.cs"
+    };
+    var project = Path.Combine(root, "large-context-decision-branches");
+    foreach (var path in paths)
+    {
+        var lines = Enumerable.Range(0, 180)
+            .Select(index => $"// unrelated-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+        lines.Insert(85, "    if (phrase is \"edge\")");
+        lines.Insert(86, "        return new AppLaunchIntent(\"edge\");");
+        var fullPath = Path.Combine(project, path.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllTextAsync(fullPath, string.Join('\n', lines) + "\n", new UTF8Encoding(false));
+    }
+
+    var workspaceRoot = Path.Combine(root, "large-context-decision-branches-workspaces");
+    var pathJson = JsonSerializer.Serialize(new { paths });
+    var locations = JsonSerializer.Serialize(new
+    {
+        locations = paths.Select(path => new { path, line = 86 }).ToArray()
+    });
+    var inference = new ScriptedInference(pathJson, locations, "{\"edits\":[]}");
+    var instruction = $"本题只可改这些文件：{string.Join('、', paths)}。在解析器中增加终端应用别名，但必须使用用户配置的固定应用 ID。";
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, instruction, CancellationToken.None);
+    var sourcePrompts = inference.Prompts
+        .Where(prompt => prompt.Contains("受限源代码片段JSON", StringComparison.Ordinal)).ToArray();
+
+    Require(!result.Success && result.ErrorCode == "NO_PATCH_GENERATED" && inference.CallCount == 3,
+        "空补丁任务没有按预期停止并保持原项目不变。" + result.Summary);
+    Require(sourcePrompts.Length > 0 && sourcePrompts.All(prompt =>
+            prompt.Contains("if (phrase is", StringComparison.Ordinal)
+            && prompt.Contains("return new AppLaunchIntent(", StringComparison.Ordinal)),
+        "大文件索引未把目标解析器的条件分支及相邻映射代码纳入受限上下文。");
+    Require(paths.All(path => File.ReadAllText(Path.Combine(project, path.Replace('/', Path.DirectorySeparatorChar)))
+            .Contains("if (phrase is \"edge\")", StringComparison.Ordinal)),
+        "条件分支上下文检查修改了原项目。");
 }
 
 static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string root)

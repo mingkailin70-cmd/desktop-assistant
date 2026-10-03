@@ -576,11 +576,12 @@ public sealed class CodeTaskAgent
                 var isMember = line.Contains('(') && Regex.IsMatch(line,
                     @"\b(static|public|private|protected|internal|async|Task)\b", RegexOptions.CultureInvariant);
                 var isConstant = Regex.IsMatch(line, @"\b(const|readonly)\b", RegexOptions.CultureInvariant);
+                var isDecisionBranch = Regex.IsMatch(line, @"\b(if|switch|case)\b", RegexOptions.CultureInvariant);
                 var lower = line.ToLowerInvariant();
                 var lineMatches = terms.Count(term => term.Length >= 3 && lower.Contains(term, StringComparison.Ordinal));
-                if (!isType && !isMember && !isConstant && lineMatches == 0) continue;
+                if (!isType && !isMember && !isConstant && !isDecisionBranch && lineMatches == 0) continue;
 
-                var score = (isMember ? 2 : isType ? 2 : isConstant ? 1 : 0) + lineMatches * 5;
+                var score = (isMember ? 2 : isType ? 2 : isConstant || isDecisionBranch ? 1 : 0) + lineMatches * 5;
                 var pathLower = file.Path.ToLowerInvariant();
                 score += terms.Count(term => term.Length >= 3 && pathLower.Contains(term, StringComparison.Ordinal));
                 all.Add((new(file.Path, index + 1, line.Length <= 180 ? line : line[..180], score), score));
