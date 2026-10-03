@@ -203,6 +203,9 @@ try
     await CheckNonUniqueEditGetsOneBoundedCorrectionAsync(tempRoot);
     passed.Add("精确编辑定位失败时只允许一次受限纠正，仍失败则不审阅也不修改原项目");
 
+    await CheckInvalidEditGetsOneBoundedCorrectionAsync(tempRoot);
+    passed.Add("精确编辑字段校验失败时同样只纠正一次，路径与源代码上下文权限不扩大");
+
     await CheckCodeTaskInspectionIsReadOnlyAsync(tempRoot);
     passed.Add("只读代码检索经 ToolBroker 选择并解释项目文件，不改写、审阅或测试原项目");
 
@@ -1061,9 +1064,9 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
         ("selection unknown field", "{\"paths\":[\"Sample.cs\"],\"note\":\"ignored\"}", validPatch, 1),
         ("selection duplicate field", "{\"paths\":[],\"paths\":[\"Sample.cs\"]}", validPatch, 1),
         ("patch extra text", validSelection, validPatch + " done", 2),
-        ("patch unknown root field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}],\"note\":\"ignored\"}", 2),
-        ("patch unknown item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\",\"mode\":\"write\"}]}", 2),
-        ("patch duplicate item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}", 2)
+        ("patch unknown root field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}],\"note\":\"ignored\"}", 3),
+        ("patch unknown item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\",\"mode\":\"write\"}]}", 3),
+        ("patch duplicate item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}", 3)
     };
 
     for (var index = 0; index < cases.Length; index++)
@@ -1073,7 +1076,9 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
         var project = CreateProject(root, caseName, source);
         File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
         var workspaceRoot = Path.Combine(root, caseName + "-workspaces");
-        var inference = new ScriptedInference(testCase.Selection, testCase.Patch);
+        var inference = testCase.ExpectedCalls == 3
+            ? new ScriptedInference(testCase.Selection, testCase.Patch, testCase.Patch)
+            : new ScriptedInference(testCase.Selection, testCase.Patch);
         var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
         var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Value 改为 2",
             CancellationToken.None, review);
@@ -1081,7 +1086,7 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
         Require(!result.Success && result.ErrorCode == "CODE_TASK_FAILED",
             $"模型输出 {testCase.Name} 未按严格 JSON 架构失败关闭。");
         Require(inference.CallCount == testCase.ExpectedCalls && review.CallCount == 0,
-            $"模型输出 {testCase.Name} 在拒绝前继续了推理步骤或展示了待审阅补丁。");
+            $"模型输出 {testCase.Name} 没有按允许的纠正次数失败关闭，或展示了待审阅补丁。");
         Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
             $"模型输出 {testCase.Name} 修改了原项目。");
 
@@ -1124,6 +1129,47 @@ static async Task CheckNonUniqueEditGetsOneBoundedCorrectionAsync(string root)
     Require(!rejectedResult.Success && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
         && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
         "第二次非唯一精确编辑没有失败关闭或进入了审阅。");
+}
+
+static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
+{
+    const string source = "class Sample { int Value = 1; }\n";
+    const string rejectedEdit = "{\"edits\":[{\"path\":\"Other.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}";
+    const string acceptedEdit = "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}";
+    var project = CreateProject(root, "invalid-edit-retry", source);
+    var workspaceRoot = Path.Combine(root, "invalid-edit-retry-workspaces");
+    var inference = new ScriptedInference(rejectedEdit, acceptedEdit);
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot,
+        "只把 Value 改为 3", CancellationToken.None, review);
+
+    var prompts = inference.Prompts.ToArray();
+    var systemPrompts = inference.SystemPrompts.ToArray();
+    var correctionPrompt = prompts.SingleOrDefault(prompt => prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+    var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+        && inference.CallCount == 2 && review.CallCount == 1,
+        "无效目标路径没有通过一次受限纠正后进入待审阅。" + result.Summary);
+    Require(correctionPrompt is not null
+        && correctionPrompt.Contains(rejectedEdit, StringComparison.Ordinal)
+        && correctionPrompt.Contains("未选择文件", StringComparison.Ordinal)
+        && correctionPrompt.Contains("受限源代码片段JSON", StringComparison.Ordinal)
+        && systemPrompts.Any(prompt => prompt.Contains("不得扩大文件、路径、片段、权限或操作范围", StringComparison.Ordinal)),
+        "纠正提示没有明确传达固定校验原因和不扩大的授权边界。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source
+        && File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")) == "class Sample { int Value = 3; }\n",
+        "纠正后的补丁修改了原项目或越过授权文件。");
+
+    var rejectedProject = CreateProject(root, "invalid-edit-retry-rejected", source);
+    var rejectedWorkspace = Path.Combine(root, "invalid-edit-retry-rejected-workspaces");
+    var rejectedInference = new ScriptedInference(rejectedEdit, rejectedEdit);
+    var rejectedReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var rejectedResult = await NewAgent(rejectedInference).ExecuteAsync(rejectedProject, rejectedWorkspace,
+        "只把 Value 改为 3", CancellationToken.None, rejectedReview);
+    Require(!rejectedResult.Success && rejectedResult.ErrorCode == "CODE_TASK_FAILED"
+        && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
+        && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
+        "第二次无效编辑没有失败关闭，或原项目被修改。");
 }
 
 static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
