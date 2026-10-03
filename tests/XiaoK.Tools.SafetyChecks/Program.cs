@@ -303,7 +303,7 @@ try
     passed.Add("本地历史清理删除 SQLite 个人记录并保留迁移标记，重启后不会从旧源重新导入");
 
     CheckLegacyAndManagedFilePrivacyCleanup(tempRoot);
-    passed.Add("旧设置仅移除联系人偏好副本，清理计划只删除核准的迁移/备份文件");
+    passed.Add("旧设置清理仅移除指定联系人偏好和桌宠坐标；文件清理保留相似名称备份");
 
     await CheckCodeVerificationCancellationPersistsAsync(tempRoot);
     passed.Add("取消已批准的隔离验证会持久化 cancelled 且不修改原项目");
