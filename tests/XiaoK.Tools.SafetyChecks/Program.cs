@@ -212,6 +212,9 @@ try
     await CheckNonUniqueEditGetsOneBoundedCorrectionAsync(tempRoot);
     passed.Add("精确编辑定位失败时只允许一次受限纠正，仍失败则不审阅也不修改原项目");
 
+    await CheckLineAnchoredEditDisambiguatesDuplicateTextAsync(tempRoot);
+    passed.Add("重复源码可用片段内绝对行号精确定位；错误行号仍失败关闭");
+
     await CheckInvalidEditGetsOneBoundedCorrectionAsync(tempRoot);
     passed.Add("精确编辑字段校验失败时同样只纠正一次，路径与源代码上下文权限不扩大");
 
@@ -1260,6 +1263,37 @@ static async Task CheckNonUniqueEditGetsOneBoundedCorrectionAsync(string root)
     Require(!rejectedResult.Success && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
         && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
         "第二次非唯一精确编辑没有失败关闭或进入了审阅。");
+}
+
+static async Task CheckLineAnchoredEditDisambiguatesDuplicateTextAsync(string root)
+{
+    const string source = "class Sample {\n    int Value = 1;\n    int Value = 1;\n}\n";
+    const string anchoredPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":3,\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}";
+    var project = CreateProject(root, "line-anchored-edit", source);
+    var workspaceRoot = Path.Combine(root, "line-anchored-edit-workspaces");
+    var inference = new ScriptedInference(anchoredPatch);
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot,
+        "只把第三行 Value 改为 3", CancellationToken.None, review);
+    var workspace = Path.Combine(Directory.GetDirectories(workspaceRoot).Single(), "workspace", "Sample.cs");
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+        && review.CallCount == 1
+        && File.ReadAllText(workspace) == "class Sample {\n    int Value = 1;\n    int Value = 3;\n}\n"
+        && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
+        "绝对行号没有只定位到授权片段中的重复源码实例，或修改了原项目。" + result.Summary);
+
+    var rejectedProject = CreateProject(root, "line-anchored-edit-outside", source);
+    var rejectedWorkspace = Path.Combine(root, "line-anchored-edit-outside-workspaces");
+    var rejectedInference = new ScriptedInference(
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}");
+    var rejectedReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var rejected = await NewAgent(rejectedInference).ExecuteAsync(rejectedProject, rejectedWorkspace,
+        "只把第三行 Value 改为 3", CancellationToken.None, rejectedReview);
+    Require(!rejected.Success && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
+        && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
+        "越出文件范围的 startLine 在一次纠正后仍进入审阅或修改原项目。");
 }
 
 static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
