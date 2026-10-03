@@ -38,6 +38,8 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 
 安装更新（2026-10-03）：当前账户已从 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe` 更新为 `MingKaiLin.XiaoK_0.1.1.0_neutral__g0ndt6g65c8pe`，包状态 `Ok`。SignTool 验签与 Authenticode 状态均为 `Valid`；包 SHA-256 为 `774954F84311E77812F20E56E351895163646827D57868A7548BBA2A7F8071D5`。安装脚本确认开发证书此前已在机器 `TrustedPeople` 中，本次没有新增信任项。后续首次正常启动已显示桌宠与任务面板，没有出现 .NET 错误或权限提示；程序空闲且未采集麦克风，包沙盒内未找到设置文件。唤醒词、通知监听和登录启动仍关闭；通知/麦克风授权、任务功能、多屏/DPI、登录恢复、长期运行、回滚仍待验收。
 
+MSIX 设置与首个启动链路实测（2026-10-03）：打包应用的 `Environment.SpecialFolder.LocalApplicationData` 被 Windows 重定向到包专属 `LocalCache\Local`，设置实际保存在 `%LOCALAPPDATA%\Packages\MingKaiLin.XiaoK_g0ndt6g65c8pe\LocalCache\Local\XiaoK\settings.json`；`LocalCache` 在本机是指向 `D:\WpSystem` 的目录联接。普通非打包开发运行仍使用 `%LOCALAPPDATA%\XiaoK\settings.json`，两者不会自动同步。为已安装版本配置了 VS Code `D:\VS Code\Code.exe`、项目 `D:\Desktop\learn\siri`、隔离工作区 `D:\XiaoK\Workspaces` 和本机应用白名单；唤醒词、微信/QQ通知监控均关闭，发布者 AUMID 列表为空。首次启动工具按钮因配置写在非打包目录而按白名单策略安全拒绝，移入包内设置位置并重启后，点击“打开 VS Code 项目”显示目标目录。窗口枚举仍见一个本地 `siri` 窗口和一个 `[SSH: Three]` 窗口；本地窗口句柄前后相同，所以这次只证明项目目标链路返回成功，未证明新建了额外窗口。没有查看聊天或发送消息。
+
 若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
 
 ~~~powershell
