@@ -1383,7 +1383,8 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
         && result.Summary.Contains("结论语义未经验证", StringComparison.Ordinal)
         && result.Summary.Contains("请对照源码复核", StringComparison.Ordinal),
         $"只读检索没有返回本地说明和完成状态：{result.ErrorCode} {result.Summary} {result.Data}");
-    Require(inference.CallCount == 2
+    Require(inference.CallCount == 2 && inference.RequestOptions.Count == 2
+        && inference.RequestOptions.All(options => options.DisableThinking)
         && inference.Prompts.Any(prompt => prompt.Contains("1|class Sample { int Value = 7; }", StringComparison.Ordinal))
         && inference.SystemPrompts.Any(prompt => prompt.Contains("严格JSON对象", StringComparison.Ordinal)
             && prompt.Contains("claims", StringComparison.Ordinal) && prompt.Contains("citations", StringComparison.Ordinal)
@@ -1399,6 +1400,16 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
         "只读检索未保留只读快照或没有记录完成状态。");
     Require(review.CallCount == 0 && runner.CallCount == 0,
         "只读检索意外进入补丁审阅或执行验证命令。");
+
+    var reasoningProject = CreateProject(root, "code-inspection-reasoning-option", original);
+    var reasoningInference = new ScriptedInference(
+        "{\"claims\":[{\"text\":\"Sample.Value 当前初始化为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}");
+    var reasoningResult = await NewAgent(reasoningInference, disableThinkingForInspection: false).InspectAsync(
+        reasoningProject, Path.Combine(root, "code-inspection-reasoning-workspaces"),
+        "说明 Value 当前在哪里定义", CancellationToken.None);
+    Require(reasoningResult.Success && reasoningInference.RequestOptions.Count == 1
+        && !reasoningInference.RequestOptions.Single().DisableThinking,
+        "离线评测不能单独为只读检索开启思考模式，或生产默认思考模式未被正确隔离。");
 }
 
 static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string root)
@@ -3907,9 +3918,9 @@ static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string r
 }
 
 static CodeTaskAgent NewAgent(IInferenceClient inference, IDotNetTestRunner? testRunner = null,
-    ICodePatchFileReplacer? patchFileReplacer = null) =>
+    ICodePatchFileReplacer? patchFileReplacer = null, bool disableThinkingForInspection = true) =>
     new(inference, new ModelBroker(), repositoryRoot: null, testRunner,
-        patchFileReplacer ?? new WindowsCodePatchFileReplacer());
+        patchFileReplacer ?? new WindowsCodePatchFileReplacer(), disableThinkingForInspection);
 
 static string CreateProject(string root, string name, string content)
 {
@@ -3942,6 +3953,7 @@ internal sealed class ScriptedInference : IInferenceClient
     public TaskCompletionSource FirstCallStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public ConcurrentBag<string> Prompts { get; } = [];
     public ConcurrentBag<string> SystemPrompts { get; } = [];
+    public ConcurrentBag<InferenceRequestOptions> RequestOptions { get; } = [];
     public int CallCount => Volatile.Read(ref _callCount);
 
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken)
@@ -3956,6 +3968,13 @@ internal sealed class ScriptedInference : IInferenceClient
         }
         if (!_responses.TryDequeue(out var response)) throw new InvalidOperationException("No scripted inference response remains.");
         return response;
+    }
+
+    public Task<string> CompleteAsync(string systemPrompt, string userPrompt, InferenceRequestOptions options,
+        CancellationToken cancellationToken)
+    {
+        RequestOptions.Add(options);
+        return CompleteAsync(systemPrompt, userPrompt, cancellationToken);
     }
 }
 
