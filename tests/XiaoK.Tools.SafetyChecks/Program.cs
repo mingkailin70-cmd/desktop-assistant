@@ -173,6 +173,21 @@ try
     await CheckValidPatchIsIsolatedAsync(tempRoot);
     passed.Add("单文件项目确定性选择唯一源文件；有效补丁只写隔离工作区、保留 CRLF，并记录待审阅状态");
 
+    await CheckLargeCodeTaskUsesBoundedContextAndExactEditsAsync(tempRoot);
+    passed.Add("大文件任务只暴露受限代码片段，并通过唯一精确编辑形成完整审阅补丁");
+
+    await CheckTargetPathListDoesNotBiasLargeContextAsync(tempRoot);
+    passed.Add("大文件索引从任务语义定位代码，不让授权路径清单把上下文带到文件头部");
+
+    await CheckLargeCodeTaskCoversEveryAuthorizedFileAsync(tempRoot);
+    passed.Add("大文件上下文即使模型漏选位置，也覆盖任务已授权的每个目标文件");
+
+    await CheckLargeCodeTaskRejectsEditOutsideContextAsync(tempRoot);
+    passed.Add("大文件任务拒绝片段外编辑和整文件重写，原项目保持不变");
+
+    await CheckLikelyCredentialIsRedactedBeforeModelContextAsync(tempRoot);
+    passed.Add("多行源码中的已识别凭证先脱敏再读取，唯一精确编辑保留基线原文");
+
     await CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(tempRoot);
     passed.Add("编程代理拒绝代码围栏、额外文本、未知字段和重复JSON字段，原项目保持不变");
 
@@ -737,11 +752,11 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
     var project = CreateProject(root, "valid", "class Sample {\r\n    int Value = 1;\r\n}\r\n");
     var workspaceRoot = Path.Combine(root, "valid-workspaces");
     var inference = new ScriptedInference(
-        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample {\\r\\n    int Value = 2;\\r\\n}\\r\\n\"}]}");
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"    int Value = 1;\",\"replace\":\"    int Value = 2;\"}]}");
     var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Value 改为 2", CancellationToken.None);
 
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval, "有效补丁未进入待审阅状态。");
-    Require(inference.CallCount == 1 && inference.Prompts.Single().Contains("所选源文件JSON", StringComparison.Ordinal),
+    Require(inference.CallCount == 1 && inference.Prompts.Single().Contains("受限源代码片段JSON", StringComparison.Ordinal),
         "唯一可读文件没有直接进入补丁步骤。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample {\r\n    int Value = 1;\r\n}\r\n", "原项目被改动。");
     var taskDirectory = Directory.GetDirectories(workspaceRoot).Single();
@@ -754,11 +769,172 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
     Require(state.Contains("awaiting_approval", StringComparison.Ordinal), "任务状态没有写入 awaiting_approval。");
 }
 
+static async Task CheckLargeCodeTaskUsesBoundedContextAndExactEditsAsync(string root)
+{
+    var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    const int targetLine = 351;
+    lines.Insert(targetLine - 1, "static void Target() { int marker = 1; }");
+    var original = string.Join("\n", lines) + "\n";
+    Require(original.Length > 10_000, "大文件夹具未超过上下文限制。");
+    var project = CreateProject(root, "large-context-edit", original);
+    var workspaceRoot = Path.Combine(root, "large-context-edit-workspaces");
+    var inference = new ScriptedInference(
+        $"{{\"locations\":[{{\"path\":\"Sample.cs\",\"line\":{targetLine}}}]}}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int marker = 1;\",\"replace\":\"int marker = 2;\"}]}");
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Target 的 marker 改为 2",
+        CancellationToken.None, review);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+        && inference.CallCount == 2 && review.CallCount == 1,
+        "大文件精确编辑没有进入待审阅状态。" + result.Summary);
+    var prompts = inference.Prompts.ToArray();
+    Require(prompts.Any(prompt => prompt.Contains("受限代码位置索引", StringComparison.Ordinal))
+        && prompts.Any(prompt => prompt.Contains("int marker = 1;", StringComparison.Ordinal)),
+        "大文件未先索引再提供所选代码片段。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
+        "大文件补丁生成期间修改了原项目。");
+    var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+    var workspaceText = File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs"));
+    Require(workspaceText.Contains("int marker = 2;", StringComparison.Ordinal)
+        && workspaceText.Contains("irrelevant-padding-0699", StringComparison.Ordinal)
+        && review.Diff?.Contains("int marker = 2;", StringComparison.Ordinal) == true,
+        "精确编辑没有保留未涉及的大文件内容，或完整差异未进入审阅。");
+
+    var fallbackProject = CreateProject(root, "large-context-fallback", original);
+    var fallbackInference = new ScriptedInference("{\"unexpected\":[]}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int marker = 1;\",\"replace\":\"int marker = 2;\"}]}");
+    var fallbackResult = await NewAgent(fallbackInference).ExecuteAsync(fallbackProject,
+        Path.Combine(root, "large-context-fallback-workspaces"), "把 Target 的 marker 改为 2", CancellationToken.None);
+    Require(fallbackResult.Success && fallbackResult.FinalState == TaskLifecycleState.AwaitingApproval
+        && fallbackInference.CallCount == 2
+        && File.ReadAllText(Path.Combine(fallbackProject, "Sample.cs")) == original,
+        "索引定位响应格式错误时，没有在已授权索引范围内回退并保持原项目只读。");
+}
+
+static async Task CheckTargetPathListDoesNotBiasLargeContextAsync(string root)
+{
+    var project = Path.Combine(root, "target-path-noise-context");
+    Directory.CreateDirectory(project);
+    var targetPaths = new[]
+    {
+        "src/XiaoK.Tools/ToolBroker.cs",
+        "src/XiaoK.Adapters.Windows/WindowsDesktopTools.cs",
+        "tests/XiaoK.Tools.SafetyChecks/Program.cs"
+    };
+    var padding = Enumerable.Range(0, 160)
+        .Select(index => $"// irrelevant-index-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToArray();
+    var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        [targetPaths[0]] = string.Join('\n', padding.Concat([
+            "private static ToolResult? ValidateFileSearch(ToolProposal proposal)",
+            "{", "    var rootId = proposal.Arguments.GetValueOrDefault(\"root_id\");",
+            "    return string.IsNullOrWhiteSpace(rootId) ? InvalidProposal() : null;", "}"])) + "\n",
+        [targetPaths[1]] = string.Join('\n', padding.Concat([
+            "private ToolResult SearchFiles(ToolProposal proposal, CancellationToken cancellationToken)",
+            "{", "    var matches = new List<string>();", "    while (matches.Count < maximumResults)",
+            "    {", "        matches.Add(\"match\");", "    }", "    return new(true, string.Join(Environment.NewLine, matches));", "}"])) + "\n",
+        [targetPaths[2]] = string.Join('\n', padding.Concat([
+            "static void CheckFileSearchResultLimit()", "{", "    var resultCount = 10;",
+            "    Require(resultCount <= 10, \"file search result limit\");", "}"])) + "\n"
+    };
+    foreach (var (relativePath, content) in sourceByPath)
+    {
+        var fullPath = Path.Combine(project, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllTextAsync(fullPath, content, new UTF8Encoding(false));
+    }
+
+    var instruction = $"本题允许修改的目标文件（超出此范围的修改按未通过）：{string.Join('、', targetPaths)}\n"
+        + "为文件搜索增加最大结果数并同步 ToolBroker、Windows 适配器和安全检查。";
+    var inference = new ScriptedInference("{\"locations\":[]}", "{\"edits\":[]}");
+    var result = await NewAgent(inference).ExecuteAsync(project,
+        Path.Combine(root, "target-path-noise-context-workspaces"), instruction, CancellationToken.None);
+    var sourcePrompt = inference.Prompts.Single(prompt => prompt.Contains("受限源代码片段JSON", StringComparison.Ordinal));
+
+    Require(!result.Success && result.ErrorCode == "NO_PATCH_GENERATED" && inference.CallCount == 2,
+        "空编辑诊断没有按预期停止并保持原项目不变。");
+    Require(inference.SystemPrompts.Any(prompt => prompt.Contains("最多4个相关位置", StringComparison.Ordinal)),
+        "上下文定位提示与每个任务最多4个位置的硬上限不一致。");
+    var expectedContext = new[] { "ValidateFileSearch", "SearchFiles(ToolProposal", "matches.Count", "maximumResults", "CheckFileSearchResultLimit" };
+    var missingContext = expectedContext.Where(text => !sourcePrompt.Contains(text, StringComparison.Ordinal));
+    Require(!missingContext.Any(),
+        $"显式目标路径清单压过了任务语义，导致受限上下文没有覆盖实际搜索与回归逻辑。缺失：{string.Join('、', missingContext)}；{result.Summary}");
+    Require(!sourcePrompt.Contains("irrelevant-index-padding-0000", StringComparison.Ordinal)
+        && sourceByPath.All(item => File.ReadAllText(Path.Combine(project,
+            item.Key.Replace('/', Path.DirectorySeparatorChar))) == item.Value),
+        "上下文提取泄漏了无关文件头部，或空补丁任务修改了原项目。");
+}
+
+static async Task CheckLargeCodeTaskRejectsEditOutsideContextAsync(string root)
+{
+    var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    const int targetLine = 351;
+    lines.Insert(targetLine - 1, "static void Target() { int marker = 1; }");
+    lines.Add("int hiddenMarker = 9;");
+    var original = string.Join("\n", lines) + "\n";
+    var project = CreateProject(root, "large-context-reject", original);
+    var workspaceRoot = Path.Combine(root, "large-context-reject-workspaces");
+    var inference = new ScriptedInference(
+        $"{{\"locations\":[{{\"path\":\"Sample.cs\",\"line\":{targetLine}}}]}}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int hiddenMarker = 9;\",\"replace\":\"int hiddenMarker = 0;\"}]}");
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "修改局部变量",
+        CancellationToken.None, review);
+
+    Require(!result.Success && result.ErrorCode == "CODE_TASK_FAILED" && review.CallCount == 0,
+        "模型对片段外的代码编辑没有失败关闭。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
+        "拒绝片段外编辑时原项目发生变化。");
+
+    var wholeFileProject = CreateProject(root, "large-context-whole-file", original);
+    var wholeFileInference = new ScriptedInference(
+        $"{{\"locations\":[{{\"path\":\"Sample.cs\",\"line\":{targetLine}}}]}}",
+        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"rewrite\"}]}");
+    var wholeFileReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var wholeFileResult = await NewAgent(wholeFileInference).ExecuteAsync(wholeFileProject,
+        Path.Combine(root, "large-context-whole-file-workspaces"), "修改局部变量", CancellationToken.None, wholeFileReview);
+    Require(!wholeFileResult.Success && wholeFileResult.ErrorCode == "CODE_TASK_FAILED"
+        && wholeFileReview.CallCount == 0
+        && File.ReadAllText(Path.Combine(wholeFileProject, "Sample.cs")) == original,
+        "大文件任务没有拒绝整文件重写输出。");
+}
+
+static async Task CheckLargeCodeTaskCoversEveryAuthorizedFileAsync(string root)
+{
+    var lines = Enumerable.Range(0, 700).Select(index => $"// irrelevant-padding-{index:D4}-abcdefghijklmnopqrstuvwxyz0123456789").ToList();
+    const int targetLine = 351;
+    lines.Insert(targetLine - 1, "static void Target() { int marker = 1; }");
+    var firstOriginal = string.Join("\n", lines) + "\n";
+    var secondOriginal = firstOriginal.Replace("int marker = 1;", "int secondMarker = 3;", StringComparison.Ordinal);
+    var project = CreateProject(root, "large-context-coverage", firstOriginal);
+    File.WriteAllText(Path.Combine(project, "Second.cs"), secondOriginal, new UTF8Encoding(false));
+    var workspaceRoot = Path.Combine(root, "large-context-coverage-workspaces");
+    var inference = new ScriptedInference(
+        $"{{\"locations\":[{{\"path\":\"Sample.cs\",\"line\":{targetLine}}}]}}",
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int marker = 1;\",\"replace\":\"int marker = 2;\"},{\"path\":\"Second.cs\",\"find\":\"int secondMarker = 3;\",\"replace\":\"int secondMarker = 4;\"}]}");
+
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot,
+        "同时修改 Sample.cs 和 Second.cs 中的目标标记", CancellationToken.None);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval && inference.CallCount == 2,
+        "大文件多目标精确编辑未进入审阅。" + result.Summary);
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == firstOriginal
+        && File.ReadAllText(Path.Combine(project, "Second.cs")) == secondOriginal,
+        "多目标上下文补齐期间修改了原项目。");
+    var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+    Require(File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")).Contains("int marker = 2;", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(taskRoot, "workspace", "Second.cs")).Contains("int secondMarker = 4;", StringComparison.Ordinal),
+        "遗漏位置的已授权目标文件没有被补入受限上下文。");
+}
+
 static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string root)
 {
     const string source = "class Sample { int Value = 1; }\n";
     const string validSelection = "{\"paths\":[\"Sample.cs\"]}";
-    const string validPatch = "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}";
+    const string validPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}";
     var cases = new (string Name, string Selection, string Patch, int ExpectedCalls)[]
     {
         ("selection markdown", "```json\n{\"paths\":[\"Sample.cs\"]}\n```", validPatch, 1),
@@ -766,9 +942,9 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
         ("selection unknown field", "{\"paths\":[\"Sample.cs\"],\"note\":\"ignored\"}", validPatch, 1),
         ("selection duplicate field", "{\"paths\":[],\"paths\":[\"Sample.cs\"]}", validPatch, 1),
         ("patch extra text", validSelection, validPatch + " done", 2),
-        ("patch unknown root field", validSelection, "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}],\"note\":\"ignored\"}", 2),
-        ("patch unknown item field", validSelection, "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\",\"mode\":\"write\"}]}", 2),
-        ("patch duplicate item field", validSelection, "{\"files\":[{\"path\":\"Sample.cs\",\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}", 2)
+        ("patch unknown root field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}],\"note\":\"ignored\"}", 2),
+        ("patch unknown item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\",\"mode\":\"write\"}]}", 2),
+        ("patch duplicate item field", validSelection, "{\"edits\":[{\"path\":\"Sample.cs\",\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}", 2)
     };
 
     for (var index = 0; index < cases.Length; index++)
@@ -836,7 +1012,7 @@ static async Task CheckCodeReviewCanKeepPatchWithoutRunningCommandsAsync(string 
     File.WriteAllText(Path.Combine(project, "Sample.csproj"), "<Project />", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "review-keep-workspaces");
     var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
-        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}");
     var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "synthetic success"));
     var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
 
@@ -949,10 +1125,10 @@ static ScriptedInference TwoFilePatchInference() => new(
     "{\"paths\":[\"Sample.cs\",\"Second.cs\"]}",
     System.Text.Json.JsonSerializer.Serialize(new
     {
-        files = new[]
+        edits = new[]
         {
-            new { path = "Sample.cs", content = "class Sample { int Value = 2; }\n" },
-            new { path = "Second.cs", content = "class Second { int Value = 20; }\n" }
+            new { path = "Sample.cs", find = "int Value = 1;", replace = "int Value = 2;" },
+            new { path = "Second.cs", find = "int Value = 10;", replace = "int Value = 20;" }
         }
     }));
 
@@ -963,7 +1139,7 @@ static async Task CheckApprovedDotNetVerificationUsesCapturedTargetAsync(string 
     File.WriteAllText(Path.Combine(project, "Sample.csproj"), "<Project />", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "review-run-workspaces");
     var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
-        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}");
     var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "synthetic tests passed"));
     var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
 
@@ -994,7 +1170,7 @@ static async Task CheckCodeVerificationCancellationPersistsAsync(string root)
     File.WriteAllText(Path.Combine(project, "Sample.csproj"), "<Project />", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "review-cancel-workspaces");
     var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
-        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}");
     var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "unused"), blockUntilCancelled: true);
     var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
     using var cancellation = new CancellationTokenSource();
@@ -1023,7 +1199,7 @@ static async Task CheckAmbiguousDotNetTargetFailsClosedAsync(string root)
     File.WriteAllText(Path.Combine(project, "B.sln"), "synthetic B", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "review-ambiguous-workspaces");
     var inference = new ScriptedInference("{\"paths\":[\"Sample.cs\"]}",
-        "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}");
     var runner = new FakeDotNetTestRunner(new(true, 0, true, 0, null, "unused"));
     var presenter = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.RunDotNetTests);
 
@@ -1729,7 +1905,7 @@ static async Task CheckModelCannotPatchOutsidePathAsync(string root)
     File.WriteAllText(outside, sentinel);
     var inference = new ScriptedInference(
         "{\"paths\":[\"Sample.cs\"]}",
-        "{\"files\":[{\"path\":\"../../outside-sentinel.txt\",\"content\":\"overwritten\"}]}");
+        "{\"edits\":[{\"path\":\"../../outside-sentinel.txt\",\"find\":\"class Sample {}\",\"replace\":\"overwritten\"}]}");
     var result = await NewAgent(inference).ExecuteAsync(project, Path.Combine(root, "bad-patch-workspaces"), "修改项目", CancellationToken.None);
     Require(!result.Success && result.ErrorCode == "CODE_TASK_FAILED", "未选路径补丁未被拒绝。");
     Require(File.ReadAllText(outside) == sentinel, "补丁覆盖了隔离目录外的哨兵文件。");
@@ -1743,6 +1919,32 @@ static async Task CheckLikelyCredentialIsNotSentAsync(string root)
     var result = await NewAgent(inference).ExecuteAsync(project, Path.Combine(root, "credential-workspaces"), "检查代码", CancellationToken.None);
     Require(!result.Success && result.ErrorCode == "NO_CODE_FILES", "包含已知格式凭证的文件未从模型清单中排除。");
     Require(inference.CallCount == 0, "疑似凭证文件进入了模型请求。");
+}
+
+static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string root)
+{
+    var secret = "sk-" + new string('7', 32);
+    var original = $"internal class Sample {{\n    private const string Key = \"{secret}\";\n    static void Target() {{ int value = 1; }}\n}}\n";
+    var project = CreateProject(root, "credential-redaction", original);
+    var workspaceRoot = Path.Combine(root, "credential-redaction-workspaces");
+    var inference = new ScriptedInference(
+        "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int value = 1;\",\"replace\":\"int value = 2;\"}]}");
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 value 改为 2",
+        CancellationToken.None, review);
+
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval && inference.CallCount == 1,
+        "含有可脱敏凭证的多行代码没有继续进行安全编辑。" + result.Summary);
+    Require(inference.Prompts.All(prompt => !prompt.Contains(secret, StringComparison.Ordinal)
+        && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)),
+        "原始凭证进入了本地模型提示，或没有显示脱敏占位符。");
+    Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
+        "凭证脱敏期间修改了原项目。");
+    var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
+    var updated = File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs"));
+    Require(updated.Contains(secret, StringComparison.Ordinal) && updated.Contains("int value = 2;", StringComparison.Ordinal),
+        "精确编辑没有保留隔离快照中的原始凭证字节内容。");
 }
 
 static async Task CheckCancellationPersistsAsync(string root)
@@ -2888,7 +3090,7 @@ static bool CheckDirectoryJunction(string root, out string skipReason)
     {
         var workspaceRoot = Path.Combine(root, "link-workspaces");
         var inference = new ScriptedInference(
-            "{\"files\":[{\"path\":\"Sample.cs\",\"content\":\"class Sample { int Value = 2; }\\n\"}]}");
+            "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 2;\"}]}");
         var result = NewAgent(inference).ExecuteAsync(project, workspaceRoot, "改值", CancellationToken.None).GetAwaiter().GetResult();
         Require(result.Success, "普通文件代码任务在项目含目录联接时失败。");
         Require(inference.Prompts.All(prompt => !prompt.Contains("directory-secret-marker", StringComparison.Ordinal)), "目录联接目标的正文泄露给模型。");

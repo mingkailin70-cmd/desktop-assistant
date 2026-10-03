@@ -19,7 +19,7 @@ internal static class Program
     private const long MinimumInitialGpuFreeMiB = 6_024;
     private const long MinimumRuntimeGpuFreeMiB = 1_024;
     private const int EvaluationContextTokens = 6144;
-    private const string PipelineVersion = "code-agent-json-object-v9-contained-nuget-paths-6144-no-thinking";
+    private const string PipelineVersion = "code-agent-redacted-keyword-index-exact-edits-v17-target-path-noise-contained-nuget-paths-6144-no-thinking";
     private const string ExpectedBenchmarkManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
