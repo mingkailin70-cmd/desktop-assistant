@@ -24,6 +24,8 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     private const string PrimaryModelFileName = "Qwen3.5-4B-Q4_K_M.gguf";
     private const string MiMoEvaluationModelId = "mimo-v2.6-distill-qwen-9b-gguf-q8-0";
     private const string MiMoEvaluationModelFileName = "MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf";
+    private const string Qwen9BEvaluationModelId = "qwen3.5-9b-q4km-eval";
+    private const string Qwen9BEvaluationModelFileName = "Qwen3.5-9B-Q4_K_M.gguf";
     private static readonly TimeSpan IdleUnloadDelay = TimeSpan.FromMinutes(4);
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(3);
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -89,12 +91,16 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
     public static LlamaCppModelRuntime? TryLoadEvaluationCandidate(string modelRoot, string runtimeDirectory,
         string endpoint, string modelId, IGpuMemoryProbe? gpuMemoryProbe = null, int? contextTokensOverride = null)
     {
-        if (!string.Equals(modelId, MiMoEvaluationModelId, StringComparison.Ordinal))
-            throw new InvalidDataException("仅允许通过评测入口加载固定的 MiMo Q8_0 候选模型。");
         if (!Path.IsPathFullyQualified(runtimeDirectory) || runtimeDirectory.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("评测运行时目录必须是本机绝对路径。");
-        return TryLoadCore(modelRoot, runtimeDirectory, endpoint, MiMoEvaluationModelId,
-            MiMoEvaluationModelFileName, gpuMemoryProbe, contextTokensOverride);
+        var candidate = modelId switch
+        {
+            MiMoEvaluationModelId => (MiMoEvaluationModelId, MiMoEvaluationModelFileName),
+            Qwen9BEvaluationModelId => (Qwen9BEvaluationModelId, Qwen9BEvaluationModelFileName),
+            _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0 或 Qwen3.5-9B Q4 候选模型。")
+        };
+        return TryLoadCore(modelRoot, runtimeDirectory, endpoint, candidate.Item1,
+            candidate.Item2, gpuMemoryProbe, contextTokensOverride);
     }
 
     private static LlamaCppModelRuntime? TryLoadCore(string modelRoot, string runtimeDirectory, string endpoint,

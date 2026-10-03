@@ -441,6 +441,31 @@
       "notes": "ggml-org官方从XiaomiMiMo原始9B模型转换的Q8_0版本；文字任务不需要同仓库中的视觉mmproj。2026-10-03使用llama.cpp b11259、8个GPU层、512上下文和16 token上限完成一次合成聊天，UTF-8提示‘用一句中文回答：7加5等于几？’返回‘7加5等于12。’；生成约8.5 token/s，采样最低空闲显存3,261 MiB。随后按固定评测profile先对照Qwen v23运行相同的M01、R01–R10共11题（3/11通过），再追加运行M02（未通过），累计3/12通过（25.0%）。12题运行时长中位数66.6秒、最长105.2秒，最低空闲显存3,086 MiB、采样峰值占用4,814 MiB，没有显存保护取消。当前固定管线剩余28题即使全通过也仅31/40（77.5%），停止该管线剩余评分，不接受为首版模型。结果摘要见MiMo与Qwen编码任务初筛记录。官方模型卡注明GGUF转换聊天模板仍带临时修补项，工具调用/JSON行为及长时稳定性仍待评估。",
       "localDirectory": "llm/mimo-v2.6-distill-qwen-9b-gguf-q8-0/81baddc39bc48924a88e87b8d31aceb03058e559",
       "requiredForP0": true
+    },
+    {
+      "id": "qwen3.5-9b-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF",
+      "baseModel": "Qwen/Qwen3.5-9B",
+      "baseModelRevision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "revision": "1379f25c6b505a3fc737bd7818cb09389cf807c1",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "lmstudio-community",
+      "conversionRuntime": "llama.cpp b8185",
+      "files": [
+        {
+          "name": "Qwen3.5-9B-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 5627044256,
+          "expectedUpstreamSha256": "cd76ec205963b3b33350093e6904d9de16c4e666fd104e1f632d25c7f15f2a13",
+          "localVerifiedSha256": null
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "candidate",
+      "notes": "独立离线编码质量候选，不得更改生产默认模型。采用 lmstudio-community 固定 GGUF revision 的 Q4_K_M 单文件，来源模型为 Qwen3.5-9B 官方权重；计划用仓库固定 llama.cpp b11259、受限 GPU 层和 6,144 上下文与相同 v23 工具管线比较。通过资源预检和短文本冒烟前不运行编码任务；达到独立验收门槛前不接受为首版模型。",
+      "localDirectory": "llm/qwen3.5-9b-q4km/1379f25c6b505a3fc737bd7818cb09389cf807c1",
+      "requiredForP0": false
     }
   ]
 }

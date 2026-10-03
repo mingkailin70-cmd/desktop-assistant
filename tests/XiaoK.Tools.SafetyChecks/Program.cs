@@ -308,8 +308,8 @@ try
     await CheckManagedRuntimeManifestIsStrictAsync(tempRoot);
     passed.Add("托管模型清单仅接受固定版本、模型、上下文与本机回环端点");
 
-    await CheckMiMoEvaluationRuntimeIsExplicitlyIsolatedAsync(tempRoot);
-    passed.Add("MiMo Q8_0 仅可经固定离线评测入口加载，生产默认入口仍只接受 Qwen");
+    await CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(tempRoot);
+    passed.Add("MiMo 与 Qwen3.5-9B 候选仅可经固定离线评测入口加载，生产默认入口仍只接受 Qwen 主模型");
 
     CheckGpuMemoryAdmissionRequiresReserve();
     passed.Add("GPU 推理准入要求模型预算之外保留至少 1 GiB 显存");
@@ -3213,7 +3213,7 @@ static async Task CheckManagedRuntimeManifestIsStrictAsync(string root)
     catch (InvalidDataException) { }
 }
 
-static async Task CheckMiMoEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
+static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
 {
     var modelRoot = Path.Combine(root, "mimo-evaluation-model-root");
     var runtimeRoot = Path.Combine(root, "mimo-evaluation-runtime");
@@ -3246,11 +3246,36 @@ static async Task CheckMiMoEvaluationRuntimeIsExplicitlyIsolatedAsync(string roo
     }
     catch (InvalidDataException) { }
 
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.5-9b-q4km-eval",
+          "modelSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "contextTokens": 6144,
+          "gpuLayers": 12,
+          "expectedGpuMemoryMiB": 3500
+        }
+        """);
+    var qwenCandidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "qwen3.5-9b-q4km-eval", contextTokensOverride: 6144);
+    if (qwenCandidate is null || qwenCandidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 Qwen3.5-9B 评测清单未能通过专用候选入口加载。");
+    await qwenCandidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 Qwen3.5-9B 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
     try
     {
         _ = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
             "http://127.0.0.1:8080/", "arbitrary-model-id");
-        throw new InvalidOperationException("MiMo评测入口接受了任意模型 ID。");
+        throw new InvalidOperationException("候选评测入口接受了任意模型 ID。");
     }
     catch (InvalidDataException) { }
 }
