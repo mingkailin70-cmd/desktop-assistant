@@ -36,7 +36,7 @@ $cert = Get-Content artifacts\signing\xiaok-development-certificate.json -Raw | 
 
 诊断启动记录（2026-10-03）：0.1.0.0 版本曾以 `--diagnostics-profile` 隔离配置启动并从小K界面退出；确认通知监听与模型均关闭、未请求 Windows 通知/麦克风授权、未读取常规设置。该结果不代表常规模式已启动。
 
-安装更新（2026-10-03）：当前账户已从 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe` 更新为 `MingKaiLin.XiaoK_0.1.1.0_neutral__g0ndt6g65c8pe`，包状态 `Ok`。SignTool 验签与 Authenticode 状态均为 `Valid`；包 SHA-256 为 `774954F84311E77812F20E56E351895163646827D57868A7548BBA2A7F8071D5`。安装脚本确认开发证书此前已在机器 `TrustedPeople` 中，本次没有新增信任项。小K没有启动，常规设置文件不存在，因此唤醒词和通知监听仍关闭；Windows 通知/麦克风授权、完整 UI、登录启动、重启恢复、真实功能和回滚仍待验收。
+安装更新（2026-10-03）：当前账户已从 `MingKaiLin.XiaoK_0.1.0.0_neutral__g0ndt6g65c8pe` 更新为 `MingKaiLin.XiaoK_0.1.1.0_neutral__g0ndt6g65c8pe`，包状态 `Ok`。SignTool 验签与 Authenticode 状态均为 `Valid`；包 SHA-256 为 `774954F84311E77812F20E56E351895163646827D57868A7548BBA2A7F8071D5`。安装脚本确认开发证书此前已在机器 `TrustedPeople` 中，本次没有新增信任项。后续首次正常启动已显示桌宠与任务面板，没有出现 .NET 错误或权限提示；程序空闲且未采集麦克风，包沙盒内未找到设置文件。唤醒词、通知监听和登录启动仍关闭；通知/麦克风授权、任务功能、多屏/DPI、登录恢复、长期运行、回滚仍待验收。
 
 若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
 
