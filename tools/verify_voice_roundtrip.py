@@ -5,18 +5,22 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import hashlib
 import io
 import json
+import math
 import os
 import pathlib
 import queue
+import statistics
 import subprocess
 import sys
 import threading
 import time
 import unicodedata
 import wave
+from ctypes import wintypes
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -29,7 +33,14 @@ EXPECTED = {
         "tts",
     ),
 }
-PHRASE = "你好，小K。请打开本地项目。"
+PHRASES = (
+    "你好，小K，请打开本地项目。",
+    "我先检查文件内容，再告诉你结果。",
+    "任务已经取消，我没有执行后续操作。",
+    "下午三点请提醒我保存文档。",
+    "发送前请再次核对联系人、正文和附件。",
+    "操作结果无法确认时，不要自动重试。",
+)
 MAX_PROTOCOL_LINE = 20 * 1024 * 1024
 
 
@@ -128,7 +139,106 @@ def read_line(stream, timeout_seconds: int) -> str:
     return line
 
 
-def run_worker(task: str, model_id: str, request: dict, models) -> tuple[dict, float, float]:
+class MemoryStatusEx(ctypes.Structure):
+    _fields_ = [
+        ("cb", wintypes.DWORD),
+        ("dwMemoryLoad", wintypes.DWORD),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+class FileTime(ctypes.Structure):
+    _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+
+class SystemResourceSampler:
+    def __init__(self) -> None:
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel32.GlobalMemoryStatusEx.argtypes = (ctypes.POINTER(MemoryStatusEx),)
+        self._kernel32.GlobalMemoryStatusEx.restype = wintypes.BOOL
+        self._kernel32.GetSystemTimes.argtypes = (
+            ctypes.POINTER(FileTime), ctypes.POINTER(FileTime), ctypes.POINTER(FileTime)
+        )
+        self._kernel32.GetSystemTimes.restype = wintypes.BOOL
+        self._initial_available_mib = 0
+        self._minimum_available_mib = 0
+        self._total_physical_mib = 0
+        self._cpu_samples: list[float] = []
+        self._previous_times: tuple[int, int, int] | None = None
+        self._result: dict[str, float | int] | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+        self._read()
+        self._thread.start()
+
+    def _read(self) -> None:
+        memory = MemoryStatusEx()
+        memory.cb = ctypes.sizeof(memory)
+        if not self._kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        available_mib = int(memory.ullAvailPhys / (1024 * 1024))
+        total_mib = int(memory.ullTotalPhys / (1024 * 1024))
+        if self._total_physical_mib == 0:
+            self._initial_available_mib = available_mib
+            self._minimum_available_mib = available_mib
+            self._total_physical_mib = total_mib
+        else:
+            self._minimum_available_mib = min(self._minimum_available_mib, available_mib)
+
+        idle = FileTime()
+        kernel = FileTime()
+        user = FileTime()
+        if not self._kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        current = (self._file_time_value(idle), self._file_time_value(kernel), self._file_time_value(user))
+        if self._previous_times is not None:
+            previous_idle, previous_kernel, previous_user = self._previous_times
+            idle_delta = current[0] - previous_idle
+            total_delta = (current[1] - previous_kernel) + (current[2] - previous_user)
+            if total_delta > 0:
+                self._cpu_samples.append(max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / total_delta)))
+        self._previous_times = current
+
+    @staticmethod
+    def _file_time_value(value: FileTime) -> int:
+        return (int(value.high) << 32) | int(value.low)
+
+    def _sample_loop(self) -> None:
+        while not self._stop.wait(0.5):
+            try:
+                self._read()
+            except OSError:
+                return
+
+    def close(self) -> dict[str, float | int]:
+        if self._result is not None:
+            return self._result
+        self._stop.set()
+        self._thread.join(timeout=2)
+        try:
+            self._read()
+        except OSError:
+            pass
+        self._result = {
+            "total_physical_mib": self._total_physical_mib,
+            "initial_available_mib": self._initial_available_mib,
+            "minimum_available_mib": self._minimum_available_mib,
+            "cpu_average_percent": round(statistics.mean(self._cpu_samples), 1) if self._cpu_samples else 0.0,
+            "cpu_peak_percent": round(max(self._cpu_samples), 1) if self._cpu_samples else 0.0,
+            "cpu_sample_count": len(self._cpu_samples),
+        }
+        return self._result
+
+
+def run_worker_batch(
+    task: str, model_id: str, requests: list[dict], models
+) -> tuple[list[dict], float, list[float]]:
     model_dir, python = models[model_id]
     errors: list[str] = []
     process = subprocess.Popen(
@@ -142,7 +252,6 @@ def run_worker(task: str, model_id: str, request: dict, models) -> tuple[dict, f
         errors="replace",
         bufsize=1,
     )
-
     def drain_stderr() -> None:
         for line in process.stderr:
             errors.append(line.rstrip()[:500])
@@ -156,14 +265,18 @@ def run_worker(task: str, model_id: str, request: dict, models) -> tuple[dict, f
         load_seconds = time.perf_counter() - started
         if ready.get("type") != "ready" or ready.get("ok") is not True:
             raise RuntimeError(f"{task} model failed to load: {ready}")
-        inference_started = time.perf_counter()
-        process.stdin.write(json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n")
-        process.stdin.flush()
-        response = json.loads(read_line(process.stdout, 360))
-        inference_seconds = time.perf_counter() - inference_started
-        if response.get("ok") is not True:
-            raise RuntimeError(f"{task} inference failed: {response}")
-        return response, load_seconds, inference_seconds
+        responses: list[dict] = []
+        inference_seconds: list[float] = []
+        for request in requests:
+            inference_started = time.perf_counter()
+            process.stdin.write(json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n")
+            process.stdin.flush()
+            response = json.loads(read_line(process.stdout, 360))
+            inference_seconds.append(time.perf_counter() - inference_started)
+            if response.get("ok") is not True:
+                raise RuntimeError(f"{task} inference failed: {response}")
+            responses.append(response)
+        return responses, load_seconds, inference_seconds
     except Exception as error:
         raise RuntimeError(f"{error}; worker stderr tail={errors[-20:]!r}") from error
     finally:
@@ -194,47 +307,72 @@ def main() -> int:
     if os.name != "nt":
         raise RuntimeError("This check targets the locked Windows speech environments")
     models = load_locked_models()
-    tts, tts_load, tts_inference = run_worker(
-        "tts",
-        "qwen3-tts-12hz-0.6b-customvoice",
-        {"command": "synthesize", "text": PHRASE},
-        models,
-    )
-    audio = base64.b64decode(tts["wavBase64"], validate=True)
-    with wave.open(io.BytesIO(audio), "rb") as wav:
-        sample_rate = wav.getframerate()
-        channels = wav.getnchannels()
-        duration = wav.getnframes() / sample_rate
-        if sample_rate not in range(8000, 96001) or channels not in (1, 2) or not 0 < duration <= 60:
-            raise RuntimeError("TTS returned an invalid WAV")
-    asr, asr_load, asr_inference = run_worker(
-        "asr",
-        "qwen3-asr-0.6b",
-        {
-            "command": "transcribe",
-            "language": "Chinese",
-            "wavBase64": base64.b64encode(audio).decode("ascii"),
-        },
-        models,
-    )
-    transcript = asr.get("text", "")
-    exact_match = normalize(transcript) == normalize(PHRASE)
-    summary = {
-        "result": "PASS" if not args.strict_transcript or exact_match else "TRANSCRIPT_MISMATCH",
-        "mode": "CPU-only, offline, synthetic TTS-to-ASR, no microphone, no audio persisted",
-        "model_revisions": {key: EXPECTED[key][0] for key in EXPECTED},
-        "tts_load_seconds": round(tts_load, 2),
-        "tts_inference_seconds": round(tts_inference, 2),
-        "tts_sample_rate": sample_rate,
-        "tts_channels": channels,
-        "tts_duration_seconds": round(duration, 2),
-        "tts_audio_bytes_in_memory": len(audio),
-        "asr_load_seconds": round(asr_load, 2),
-        "asr_inference_seconds": round(asr_inference, 2),
-        "asr_language": asr.get("language", ""),
-        "asr_text_unicode_escaped": transcript.encode("unicode_escape").decode("ascii"),
-        "normalized_transcript_match": exact_match,
-    }
+    system_resources = SystemResourceSampler()
+    try:
+        tts_responses, tts_load, tts_inferences = run_worker_batch(
+            "tts",
+            "qwen3-tts-12hz-0.6b-customvoice",
+            [{"command": "synthesize", "text": phrase} for phrase in PHRASES],
+            models,
+        )
+        audio_samples = []
+        audio_metadata = []
+        for response in tts_responses:
+            audio = base64.b64decode(response["wavBase64"], validate=True)
+            with wave.open(io.BytesIO(audio), "rb") as wav:
+                sample_rate = wav.getframerate()
+                channels = wav.getnchannels()
+                duration = wav.getnframes() / sample_rate
+                if sample_rate not in range(8000, 96001) or channels not in (1, 2) or not 0 < duration <= 60:
+                    raise RuntimeError("TTS returned an invalid WAV")
+            audio_samples.append(audio)
+            audio_metadata.append({"sample_rate": sample_rate, "channels": channels, "duration_seconds": duration, "bytes": len(audio)})
+        asr_responses, asr_load, asr_inferences = run_worker_batch(
+            "asr",
+            "qwen3-asr-0.6b",
+            [
+                {
+                    "command": "transcribe",
+                    "language": "Chinese",
+                    "wavBase64": base64.b64encode(audio).decode("ascii"),
+                }
+                for audio in audio_samples
+            ],
+            models,
+        )
+        matches = [normalize(response.get("text", "")) == normalize(phrase)
+            for response, phrase in zip(asr_responses, PHRASES, strict=True)]
+        audio_samples.clear()
+        resource_summary = system_resources.close()
+        tts_p50 = statistics.median(tts_inferences)
+        asr_p50 = statistics.median(asr_inferences)
+        tts_p95 = sorted(tts_inferences)[math.ceil(0.95 * len(tts_inferences)) - 1]
+        asr_p95 = sorted(asr_inferences)[math.ceil(0.95 * len(asr_inferences)) - 1]
+        summary = {
+            "result": "PASS" if not args.strict_transcript or all(matches) else "TRANSCRIPT_MISMATCH",
+            "mode": "CPU-only, offline, six synthetic TTS-to-ASR samples, no microphone, no audio persisted",
+            "resource_scope": "system-wide CPU and available RAM; includes unrelated background processes",
+            "model_revisions": {key: EXPECTED[key][0] for key in EXPECTED},
+            "tts_load_seconds": round(tts_load, 2),
+            "tts_inference_seconds": [round(value, 2) for value in tts_inferences],
+            "tts_inference_p50_seconds": round(tts_p50, 2),
+            "tts_inference_p95_nearest_rank_seconds": round(tts_p95, 2),
+            "audio_samples": [{**item, "duration_seconds": round(item["duration_seconds"], 2)} for item in audio_metadata],
+            "asr_load_seconds": round(asr_load, 2),
+            "asr_inference_seconds": [round(value, 2) for value in asr_inferences],
+            "asr_inference_p50_seconds": round(asr_p50, 2),
+            "asr_inference_p95_nearest_rank_seconds": round(asr_p95, 2),
+            "normalized_transcript_matches": sum(matches),
+            "sample_count": len(PHRASES),
+            "system_total_physical_mib": resource_summary["total_physical_mib"],
+            "system_available_before_mib": resource_summary["initial_available_mib"],
+            "system_available_minimum_mib": resource_summary["minimum_available_mib"],
+            "system_cpu_average_percent": resource_summary["cpu_average_percent"],
+            "system_cpu_peak_percent": resource_summary["cpu_peak_percent"],
+            "system_cpu_sample_count": resource_summary["cpu_sample_count"],
+        }
+    finally:
+        system_resources.close()
     print(json.dumps(summary, ensure_ascii=True, separators=(",", ":")), flush=True)
     return 0 if summary["result"] == "PASS" else 2
 
