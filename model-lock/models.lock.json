@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "p0-models-downloaded-and-verified-not-evaluated",
+  "status": "p0-models-partially-downloaded",
   "lastSourceReviewDate": "2026-10-03",
   "models": [
     {
@@ -458,11 +458,11 @@
           "name": "Qwen3.5-9B-Q4_K_M.gguf",
           "upstreamReportedSizeBytes": 5627044256,
           "expectedUpstreamSha256": "cd76ec205963b3b33350093e6904d9de16c4e666fd104e1f632d25c7f15f2a13",
-          "localVerifiedSha256": null
+          "localVerifiedSha256": "cd76ec205963b3b33350093e6904d9de16c4e666fd104e1f632d25c7f15f2a13"
         }
       ],
       "license": "apache-2.0",
-      "status": "candidate",
+      "status": "downloaded_and_verified",
       "notes": "独立离线编码质量候选，不得更改生产默认模型。采用 lmstudio-community 固定 GGUF revision 的 Q4_K_M 单文件，来源模型为 Qwen3.5-9B 官方权重；计划用仓库固定 llama.cpp b11259、受限 GPU 层和 6,144 上下文与相同 v23 工具管线比较。通过资源预检和短文本冒烟前不运行编码任务；达到独立验收门槛前不接受为首版模型。",
       "localDirectory": "llm/qwen3.5-9b-q4km/1379f25c6b505a3fc737bd7818cb09389cf807c1",
       "requiredForP0": false
