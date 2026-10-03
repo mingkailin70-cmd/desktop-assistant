@@ -149,7 +149,11 @@
                 <TextBlock x:Name="StartupStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="22,0,0,12"/>
                 <Border Background="White" BorderBrush="#E7EAF1" BorderThickness="1" CornerRadius="8" Padding="12">
                     <StackPanel>
-                        <TextBlock Text="麦克风：未接入，当前不会采集" Margin="0,0,0,5"/>
+                        <TextBlock Text="麦克风与唤醒词" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <CheckBox x:Name="WakeWordCheck" Content="启用本机唤醒词（嗨小K / 你好小K / Hi 小K）" Margin="0,0,0,4"/>
+                        <TextBlock Text="默认关闭。启用后仅用 Windows 本地中文短语语法检测唤醒；需要已安装 MSIX、麦克风权限和中文语音组件。唤醒后只展开面板，不自动录音、执行任务或发送消息。唤醒监听会在锁屏和按键录音期间暂停。"
+                                   FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="22,0,0,7"/>
+                        <TextBlock Text="“停麦”会关闭唤醒监听，并把设置恢复为关闭。未启用唤醒时，小K不会在后台持续使用麦克风。" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="22,0,0,8"/>
                         <TextBlock Text="微信 / QQ 通知监听" FontWeight="SemiBold" Margin="0,0,0,6"/>
                         <CheckBox x:Name="MonitorWeChatCheck" Content="监听微信通知" Margin="0,0,0,4"/>
                         <TextBlock Text="微信通知来源 AUMID（每行一个，须从真实通知元数据核实；桌面版可不含 !）" FontSize="11"/>
@@ -166,7 +170,7 @@
                                    FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
-                <TextBlock Text="数据、模型、评测、编程项目和隔离工作区路径及推理地址保存后需重启小K生效；登录启动设置立即生效。历史清理、备份恢复和评测样本清理都会先预览并等待确认。"
+                <TextBlock Text="数据、模型、评测、编程项目和隔离工作区路径及推理地址保存后需重启小K生效；登录启动、唤醒词和通知监听设置立即生效。历史清理、备份恢复和评测样本清理都会先预览并等待确认。"
                            FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,10,0,4"/>
             </StackPanel>
         </ScrollViewer>

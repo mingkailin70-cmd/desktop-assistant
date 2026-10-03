@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.Win32;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 using XiaoK.Inference;
@@ -24,6 +25,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly DotNetTestRunner _dotNetTestRunner;
     private readonly WindowsMicrophoneCapture _microphone = new();
+    private readonly WindowsLocalWakeWordListener? _wakeWordListener;
     private readonly VoiceInferenceService? _voiceInference;
     private readonly string _voiceStatus;
     private readonly ToolBroker _broker;
@@ -40,6 +42,13 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public AssistantRuntime(IApprovalPresenter approval)
     {
         _settings = XiaoKSettings.Load();
+        if (!XiaoKSettings.IsDiagnosticsMode)
+        {
+            _wakeWordListener = new WindowsLocalWakeWordListener();
+            _wakeWordListener.WakeWordDetected += () => WakeWordDetected?.Invoke();
+            _wakeWordListener.StatusChanged += message => WakeWordStatusChanged?.Invoke(message);
+            SystemEvents.SessionSwitch += OnSessionSwitch;
+        }
         _microphone.MaximumDurationReached += OnMicrophoneMaximumDurationReached;
         Directory.CreateDirectory(_settings.DataRoot);
         _store = new SqliteTaskStore(Path.Combine(_settings.DataRoot, "tasks.sqlite3"),
@@ -92,6 +101,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public string VoiceStatus => XiaoKSettings.IsDiagnosticsMode
         ? _voiceStatus
         : _microphone.IsActive ? "语音：正在采集麦克风（最长60秒）"
+        : _settings.WakeWordEnabled && _wakeWordListener is not null ? _wakeWordListener.Status
         : _voiceInference is null ? _voiceStatus : _voiceInference.Status;
     public bool IsMicrophoneActive => _microphone.IsActive;
     public string? StartupIsolationNotice => !_dotNetTestRunner.StartupIsolationRecovery.Success
@@ -102,11 +112,30 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public string ActiveDatabasePath => Path.Combine(_settings.DataRoot, "tasks.sqlite3");
     public event Action<PrivateNoticeAnalysisResult>? PrivateNoticeAnalysisCompleted;
     public event Action<byte[]>? SpeechCaptureMaximumDurationReached;
+    public event Action? WakeWordDetected;
+    public event Action<string>? WakeWordStatusChanged;
+    public event Action? MicrophoneStoppedForSessionLock;
 
     public Task StartMicrophoneAsync(CancellationToken cancellationToken)
     {
         if (_voiceInference is null) throw new InvalidOperationException(_voiceStatus);
-        return _microphone.StartAsync(cancellationToken);
+        return StartMicrophoneCoreAsync(cancellationToken);
+    }
+
+    private async Task StartMicrophoneCoreAsync(CancellationToken cancellationToken)
+    {
+        EnsureUnlockedMicrophoneSession();
+        if (_wakeWordListener is not null) await _wakeWordListener.PauseForDictationAsync(cancellationToken);
+        try
+        {
+            EnsureUnlockedMicrophoneSession();
+            await _microphone.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            await ResumeWakeWordAfterDictationAsync();
+            throw;
+        }
     }
 
     public Task<byte[]> StopMicrophoneAndReadAsync() => _microphone.StopAndReadAsync();
@@ -118,9 +147,53 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             MonitorWeChatNotifications = settings.MonitorWeChatNotifications,
             MonitorQQNotifications = settings.MonitorQQNotifications,
+            WakeWordEnabled = settings.WakeWordEnabled,
             WeChatPublisherAppIds = [.. settings.WeChatPublisherAppIds],
             QQPublisherAppIds = [.. settings.QQPublisherAppIds]
         };
+    }
+
+    public async Task<string> ApplyWakeWordSettingAsync(bool enabled)
+    {
+        if (_wakeWordListener is null) return "诊断模式已禁用唤醒监听。";
+        if (enabled && _microphone.IsActive)
+            return "当前语音采集完成后才会启动唤醒词监听；录音期间不会并行监听。";
+        return await _wakeWordListener.SetEnabledAsync(enabled);
+    }
+
+    public async Task ResumeWakeWordAfterDictationAsync()
+    {
+        if (_wakeWordListener is null || _microphone.IsActive || Volatile.Read(ref _stopping) != 0) return;
+        await _wakeWordListener.SetEnabledAsync(_settings.WakeWordEnabled);
+    }
+
+    public async Task<bool> StopAllMicrophoneAsync()
+    {
+        if (_wakeWordListener is not null) await _wakeWordListener.SetEnabledAsync(false);
+        var wasCapturing = StopMicrophone();
+        if (_settings.WakeWordEnabled)
+        {
+            _settings = _settings with { WakeWordEnabled = false };
+            try { _settings.Save(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                throw new InvalidOperationException("麦克风监听已立即停止，但未能保存唤醒词关闭状态；请在设置中核对。", ex);
+            }
+        }
+        return wasCapturing;
+    }
+
+    private static void EnsureUnlockedMicrophoneSession()
+    {
+        if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
+            throw new InvalidOperationException("Windows 会话已锁定；小K不会启动麦克风采集。");
+    }
+
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs args)
+    {
+        if (args.Reason != SessionSwitchReason.SessionLock) return;
+        _microphone.StopImmediatelyAndDiscard();
+        MicrophoneStoppedForSessionLock?.Invoke();
     }
 
     public bool QueueVerifiedPrivateNotice(MessageNotice notice, CancellationToken monitoringSession,
@@ -297,6 +370,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
+        SystemEvents.SessionSwitch -= OnSessionSwitch;
         CancelCurrent();
         _noticeAnalysisQueue.Writer.TryComplete();
         _noticeAnalysisStop.Cancel();
@@ -305,6 +379,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         await _executionGate.WaitAsync();
         try
         {
+            if (_wakeWordListener is not null) await _wakeWordListener.DisposeAsync();
             await _microphone.DisposeAsync();
             if (_voiceInference is not null) await _voiceInference.DisposeAsync();
             if (_managedModelRuntime is not null) await _managedModelRuntime.DisposeAsync();
@@ -649,6 +724,7 @@ internal sealed record XiaoKSettings
     public string InferenceEndpoint { get; init; } = "http://127.0.0.1:8080/";
     public bool MonitorWeChatNotifications { get; init; }
     public bool MonitorQQNotifications { get; init; }
+    public bool WakeWordEnabled { get; init; }
     public List<string> WeChatPublisherAppIds { get; init; } = [];
     public List<string> QQPublisherAppIds { get; init; } = [];
     public List<ContactReplyStylePreference> ContactReplyStyles { get; init; } = [];
@@ -684,6 +760,7 @@ internal sealed record XiaoKSettings
             InferenceEndpoint = "http://127.0.0.1:0/",
             MonitorWeChatNotifications = false,
             MonitorQQNotifications = false,
+            WakeWordEnabled = false,
             WeChatPublisherAppIds = [],
             QQPublisherAppIds = [],
             ContactReplyStyles = [],

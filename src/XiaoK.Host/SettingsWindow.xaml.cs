@@ -73,6 +73,7 @@ public partial class SettingsWindow : Window
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
         MonitorWeChatCheck.IsChecked = settings.MonitorWeChatNotifications;
         MonitorQQCheck.IsChecked = settings.MonitorQQNotifications;
+        WakeWordCheck.IsChecked = settings.WakeWordEnabled;
         WeChatAppIdsBox.Text = string.Join(Environment.NewLine, settings.WeChatPublisherAppIds);
         QQAppIdsBox.Text = string.Join(Environment.NewLine, settings.QQPublisherAppIds);
         NotificationStatusText.Text = notificationMonitor.Status;
@@ -535,6 +536,7 @@ public partial class SettingsWindow : Window
                 InferenceEndpoint = ValidateLoopbackEndpoint(InferenceEndpointBox.Text),
                 MonitorWeChatNotifications = MonitorWeChatCheck.IsChecked == true,
                 MonitorQQNotifications = MonitorQQCheck.IsChecked == true,
+                WakeWordEnabled = WakeWordCheck.IsChecked == true,
                 WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
                 QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
             };

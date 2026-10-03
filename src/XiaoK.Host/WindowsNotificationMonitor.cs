@@ -317,7 +317,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         return string.Join(Environment.NewLine, elements.Skip(1).Select(element => element.Text));
     }
 
-    private static bool IsUnlockedInputDesktop()
+    internal static bool IsUnlockedInputDesktop()
     {
         var desktop = OpenInputDesktop(0, false, DesktopReadObjects);
         if (desktop == IntPtr.Zero) return false;

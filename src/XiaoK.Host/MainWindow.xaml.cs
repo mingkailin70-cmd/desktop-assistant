@@ -38,11 +38,14 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         InitializeComponent();
         _runtime = new AssistantRuntime(this);
         _runtime.SpeechCaptureMaximumDurationReached += OnSpeechCaptureMaximumDurationReached;
+        _runtime.WakeWordDetected += OnWakeWordDetected;
+        _runtime.WakeWordStatusChanged += OnWakeWordStatusChanged;
+        _runtime.MicrophoneStoppedForSessionLock += OnMicrophoneStoppedForSessionLock;
         _notificationMonitor = new WindowsNotificationMonitor(Dispatcher);
         _notificationMonitor.StatusChanged += OnNotificationStatusChanged;
         _notificationMonitor.PrivateNoticeAccepted += OnPrivateNoticeAccepted;
         _runtime.PrivateNoticeAnalysisCompleted += OnPrivateNoticeAnalysisCompleted;
-        _ = _notificationMonitor.ApplySettingsAsync(_runtime.CurrentSettings);
+        _ = InitializeBackgroundCapabilitiesAsync();
         FooterText.Text = _runtime.ModelStatus;
         SetStatus(_runtime.VoiceStatus);
         OutputText.Text = (_runtime.StartupIsolationNotice is { } isolationNotice
@@ -178,11 +181,36 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             SetStatus("麦克风权限未授予");
             ResetSpeechCaptureState(cancellation);
         }
+        catch (InvalidOperationException ex)
+        {
+            OutputText.Text = ex.Message;
+            SetStatus("麦克风当前不可用");
+            ResetSpeechCaptureState(cancellation);
+        }
         catch (Exception)
         {
             OutputText.Text = "无法启动麦克风。请检查 Windows 麦克风隐私权限、输入设备和系统音频设置；没有保存录音。";
             SetStatus("麦克风设备不可用");
             ResetSpeechCaptureState(cancellation);
+        }
+    }
+
+    private async Task InitializeBackgroundCapabilitiesAsync()
+    {
+        try
+        {
+            var settings = _runtime.CurrentSettings;
+            await _notificationMonitor.ApplySettingsAsync(settings);
+            if (settings.WakeWordEnabled)
+            {
+                var status = await _runtime.ApplyWakeWordSettingAsync(enabled: true);
+                OnWakeWordStatusChanged(status);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException
+            or System.Runtime.InteropServices.COMException or NotSupportedException)
+        {
+            SetStatus("小K后台能力初始化失败；通知与唤醒监听状态请在设置中检查。");
         }
     }
 
@@ -246,6 +274,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             if (cancellation is not null) ResetSpeechCaptureState(cancellation);
             _speechProcessing = false;
             SpeechButton.IsEnabled = true;
+            if (!_exiting)
+            {
+                try { await _runtime.ResumeWakeWordAfterDictationAsync(); }
+                catch (Exception) { OutputText.Text += Environment.NewLine + "唤醒监听未能恢复；请在设置中查看状态。"; }
+            }
             SetStatus(_runtime.VoiceStatus);
         }
     }
@@ -487,27 +520,47 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
-        StopMicrophoneAndDiscard();
+        var wasCapturing = StopMicrophoneAndDiscard();
         try { _speechCaptureCancellation?.Cancel(); }
         catch (ObjectDisposedException) { }
         StopSpeechPlayback();
         _runtime.CancelCurrent();
+        if (wasCapturing) _ = _runtime.ResumeWakeWordAfterDictationAsync();
         SpeechButton.Content = "开始说话";
         SetStatus("已请求取消");
     }
 
-    private void StopMic_Click(object sender, RoutedEventArgs e)
+    private async void StopMic_Click(object sender, RoutedEventArgs e)
     {
-        var wasCapturing = StopMicrophoneAndDiscard();
+        bool wasCapturing;
+        try { wasCapturing = await StopAllMicrophoneAndDiscardAsync(); }
+        catch (InvalidOperationException ex)
+        {
+            OutputText.Text = ex.Message;
+            SetStatus("唤醒监听已停止，但设置保存失败");
+            return;
+        }
         SetStatus(_runtime.VoiceStatus);
         OutputText.Text = wasCapturing
-            ? "麦克风已立即停止；未完成的录音已丢弃，未送入识别。桌面任务继续运行。"
-            : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
+            ? "麦克风已立即停止，唤醒词已关闭并保存；未完成的录音已丢弃，未送入识别。桌面任务继续运行。"
+            : "唤醒词已关闭并保存；麦克风当前未采集，桌面任务继续运行。";
     }
 
     private bool StopMicrophoneAndDiscard()
     {
         var wasActive = _runtime.StopMicrophone();
+        if (wasActive)
+        {
+            try { _speechCaptureCancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            if (_speechCaptureCancellation is { } cancellation) ResetSpeechCaptureState(cancellation);
+        }
+        return wasActive;
+    }
+
+    private async Task<bool> StopAllMicrophoneAndDiscardAsync()
+    {
+        var wasActive = await _runtime.StopAllMicrophoneAsync();
         if (wasActive)
         {
             try { _speechCaptureCancellation?.Cancel(); }
@@ -572,7 +625,53 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         var settings = XiaoKSettings.Load();
         _runtime.UpdateNotificationSettings(settings);
         var notificationStatus = await _notificationMonitor.ApplySettingsAsync(settings);
-        OutputText.Text = $"设置已保存。登录启动和通知监听立即生效；数据与推理路径将在重启小K后生效。\n{notificationStatus}";
+        var wakeWordStatus = await _runtime.ApplyWakeWordSettingAsync(settings.WakeWordEnabled);
+        OutputText.Text = $"设置已保存。登录启动、唤醒词和通知监听立即生效；数据与推理路径将在重启小K后生效。\n{wakeWordStatus}\n{notificationStatus}";
+        SetStatus(wakeWordStatus);
+    }
+
+    private void OnWakeWordStatusChanged(string message)
+    {
+        if (_exiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            try { Dispatcher.BeginInvoke(new Action(() => OnWakeWordStatusChanged(message))); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+        if (!_runtime.IsMicrophoneActive && !_speechProcessing && !_userTaskRunning) SetStatus(message);
+    }
+
+    private void OnWakeWordDetected()
+    {
+        if (_exiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            try { Dispatcher.BeginInvoke(new Action(OnWakeWordDetected)); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+        RestoreFromTray();
+        OutputText.Text = "小K已唤醒。点击“开始说话”录入任务，识别文字仍需你检查并手动运行；没有自动录音或执行操作。";
+        SetStatus("已听到唤醒短语；麦克风监听已暂停");
+    }
+
+    private void OnMicrophoneStoppedForSessionLock()
+    {
+        if (_exiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        try
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_exiting) return;
+                try { _speechCaptureCancellation?.Cancel(); }
+                catch (ObjectDisposedException) { }
+                if (_speechCaptureCancellation is { } cancellation) ResetSpeechCaptureState(cancellation);
+                OutputText.Text = "Windows 会话已锁定；麦克风已停止，未完成录音已丢弃，语音转写已取消。解锁后不会自动继续录音。";
+                SetStatus("会话锁定；麦克风和语音任务已停止");
+            }));
+        }
+        catch (InvalidOperationException) { }
     }
 
     private void OnNotificationStatusChanged(string message)
@@ -662,22 +761,30 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         return menu;
     }
 
-    private void StopMicrophoneFromTray()
+    private async void StopMicrophoneFromTray()
     {
-        var wasCapturing = StopMicrophoneAndDiscard();
+        bool wasCapturing;
+        try { wasCapturing = await StopAllMicrophoneAndDiscardAsync(); }
+        catch (InvalidOperationException ex)
+        {
+            OutputText.Text = ex.Message;
+            SetStatus("唤醒监听已停止，但设置保存失败");
+            return;
+        }
         SetStatus(_runtime.VoiceStatus);
         OutputText.Text = wasCapturing
-            ? "麦克风已立即停止；未完成的录音已丢弃，未送入识别。桌面任务继续运行。"
-            : "已发出停麦信号；麦克风当前未采集，桌面任务继续运行。";
+            ? "麦克风已立即停止，唤醒词已关闭并保存；未完成的录音已丢弃，未送入识别。桌面任务继续运行。"
+            : "唤醒词已关闭并保存；麦克风当前未采集，桌面任务继续运行。";
     }
 
-    private void CancelFromTray()
+    private async void CancelFromTray()
     {
-        StopMicrophoneAndDiscard();
+        var wasCapturing = StopMicrophoneAndDiscard();
         try { _speechCaptureCancellation?.Cancel(); }
         catch (ObjectDisposedException) { }
         StopSpeechPlayback();
         _runtime.CancelCurrent();
+        if (wasCapturing) await _runtime.ResumeWakeWordAfterDictationAsync();
         SpeechButton.Content = "开始说话";
         SetStatus("已请求取消");
     }
@@ -832,12 +939,15 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         PetStatusText.Text = status;
         PetView.ToolTip = $"{status} · 单击展开任务面板，右键打开菜单";
         var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)
+            || status.Contains("未授予", StringComparison.Ordinal) || status.Contains("未能启动", StringComparison.Ordinal)
             ? System.Windows.Media.Color.FromRgb(205, 69, 69)
             : status.Contains("确认", StringComparison.Ordinal) || status.Contains("取消", StringComparison.Ordinal)
+                || status.Contains("暂停", StringComparison.Ordinal) || status.Contains("锁定", StringComparison.Ordinal)
                 ? System.Windows.Media.Color.FromRgb(216, 144, 38)
                 : status.Contains("运行", StringComparison.Ordinal) || status.Contains("正在", StringComparison.Ordinal)
                     ? System.Windows.Media.Color.FromRgb(63, 118, 232)
-                    : status.Contains("未安装", StringComparison.Ordinal) || status.Contains("未采集", StringComparison.Ordinal)
+                : status.Contains("未安装", StringComparison.Ordinal) || status.Contains("未采集", StringComparison.Ordinal)
+                    || status.Contains("保持关闭", StringComparison.Ordinal)
                         ? System.Windows.Media.Color.FromRgb(123, 132, 152)
                         : System.Windows.Media.Color.FromRgb(87, 163, 112);
         PetStatusDot.Fill = new SolidColorBrush(color);
