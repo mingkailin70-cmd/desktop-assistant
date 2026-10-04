@@ -1,5 +1,7 @@
 # MSIX 打包与权限验收
 
+桌宠视觉 v4 更新（2026-10-04）：固定 SDK Release 构建 0 警告、0 错误；签名 MSIX `0.1.21.0` 位于 `artifacts\msix-validation\7ec633edf9774ebe9fa030079c1027ec\XiaoK-signed-validation.msix`，SHA-256 为 `9130E73D260FE6DD304AE80311078A94099AD568372E7FCD641DA480A20E9248`，SignTool 验签通过且无警告。开发证书已在 `LocalMachine\TrustedPeople`，本次未增加证书信任。安装器请求旧进程正常退出并在等待期间确认进程退出，随后将 0.1.21.0 安装到当前账户；检查 `Get-AppxPackage` 状态为 `Ok`，并从新安装目录启动 Host。新版素材已在自包含发布程序集内确认，未启动推理或更改通知/麦克风权限。桌面实际窗口截图和透明合成仍待核验。
+
 [`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 Windows 通知监听能力和当前用户登录启动任务。设置页已使用 Windows `StartupTask` API 读取和请求任务状态；开发版仍使用当前用户注册表项。只有安装签名软件包并由用户明确授权后，才能注册通知监听器。尚未实测登录任务实际激活行为及启动时是否进入托盘。
 
 ## Host 发布模式
