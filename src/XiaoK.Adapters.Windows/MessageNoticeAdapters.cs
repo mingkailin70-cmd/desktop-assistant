@@ -2,6 +2,44 @@ using XiaoK.Core;
 
 namespace XiaoK.Adapters.Windows;
 
+public enum NotificationIdEnqueueResult { Added, AlreadyTracked, CapacityReached }
+
+/// <summary>Bounded single-dispatcher queue that retains only Windows notification IDs, never toast content.</summary>
+public sealed class BoundedNotificationIdQueue
+{
+    private readonly int _capacity;
+    private readonly Queue<uint> _pending = [];
+    private readonly HashSet<uint> _tracked = [];
+
+    public BoundedNotificationIdQueue(int capacity)
+    {
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        _capacity = capacity;
+    }
+
+    public int Count => _tracked.Count;
+
+    public NotificationIdEnqueueResult TryEnqueue(uint notificationId)
+    {
+        if (_tracked.Contains(notificationId)) return NotificationIdEnqueueResult.AlreadyTracked;
+        if (_tracked.Count >= _capacity) return NotificationIdEnqueueResult.CapacityReached;
+        _tracked.Add(notificationId);
+        _pending.Enqueue(notificationId);
+        return NotificationIdEnqueueResult.Added;
+    }
+
+    public bool TryDequeue(out uint notificationId) => _pending.TryDequeue(out notificationId);
+
+    /// <summary>Release a notification ID after processing; dequeued IDs remain tracked while in flight.</summary>
+    public void Complete(uint notificationId) => _tracked.Remove(notificationId);
+
+    public void Clear()
+    {
+        _pending.Clear();
+        _tracked.Clear();
+    }
+}
+
 public static class MessageNoticePublisherAssignments
 {
     public static bool HasOverlap(IEnumerable<string> wechatPublisherIds, IEnumerable<string> qqPublisherIds)

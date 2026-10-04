@@ -11,6 +11,7 @@ namespace XiaoK.Host;
 /// <summary>
 /// Foreground-only notification listener. Only source identity metadata is inspected;
 /// conversation classification remains fail-closed until verified against client samples.
+/// Added events are serialized through a bounded queue of notification IDs.
 /// </summary>
 internal sealed class WindowsNotificationMonitor : IDisposable
 {
@@ -19,7 +20,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly HashSet<string> _seenNotificationKeys = new(StringComparer.Ordinal);
     private readonly Queue<string> _seenNotificationOrder = [];
-    private readonly Queue<uint> _pendingAddedIds = [];
+    private readonly BoundedNotificationIdQueue _pendingAddedIds = new(MaximumPendingAddedNotifications);
     private UserNotificationListener? _listener;
     private MessageNoticePolicy? _policy;
     private IMessageNoticeAdapter? _wechatAdapter;
@@ -29,6 +30,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private HashSet<string> _qqPublisherIds = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _sessionCancellation;
     private bool _baselineReady;
+    private bool _processingAddedIds;
+    private bool _addedQueueOverflowReported;
     private bool _disposed;
 
     public WindowsNotificationMonitor(Dispatcher dispatcher) => _dispatcher = dispatcher;
@@ -116,9 +119,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
                 if (_allowedAppIds.Contains(sourceAppId)) RememberNotification(sourceAppId, notification.Id);
             }
             _baselineReady = true;
-            var pending = _pendingAddedIds.ToArray();
-            _pendingAddedIds.Clear();
-            foreach (var id in pending.Distinct()) await ProcessAddedAsync(id);
+            StartPendingAddedDrain();
 
             return SetStatus("Windows 通知监听已启用；只筛选配置的微信 / QQ 发布者。私聊格式仍待验证，当前不会读取正文或送模型。");
         }
@@ -155,13 +156,48 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private void QueueOrProcessAdded(uint id)
     {
         if (_disposed) return;
-        if (!_baselineReady)
+        switch (_pendingAddedIds.TryEnqueue(id))
         {
-            if (_pendingAddedIds.Count < MaximumPendingAddedNotifications) _pendingAddedIds.Enqueue(id);
-            else RaiseStatus("通知变化暂存数量达到上限；本次未处理更多通知。请手动查看会话。");
-            return;
+            case NotificationIdEnqueueResult.AlreadyTracked:
+                return;
+            case NotificationIdEnqueueResult.CapacityReached:
+                if (!_addedQueueOverflowReported)
+                {
+                    _addedQueueOverflowReported = true;
+                    RaiseStatus("通知事件队列达到上限；更多通知未自动处理，请手动查看微信 / QQ。");
+                }
+                return;
         }
-        _ = ProcessAddedAsync(id);
+        if (_baselineReady) StartPendingAddedDrain();
+    }
+
+    private void StartPendingAddedDrain()
+    {
+        if (_disposed || !_baselineReady || _processingAddedIds) return;
+        _processingAddedIds = true;
+        _ = DrainPendingAddedAsync();
+    }
+
+    private async Task DrainPendingAddedAsync()
+    {
+        try
+        {
+            while (!_disposed && _baselineReady && _pendingAddedIds.TryDequeue(out var id))
+            {
+                try { await ProcessAddedAsync(id); }
+                finally
+                {
+                    _pendingAddedIds.Complete(id);
+                    if (_pendingAddedIds.Count < MaximumPendingAddedNotifications)
+                        _addedQueueOverflowReported = false;
+                }
+            }
+        }
+        finally
+        {
+            _processingAddedIds = false;
+            if (!_disposed && _baselineReady && _pendingAddedIds.Count > 0) StartPendingAddedDrain();
+        }
     }
 
     private async Task ProcessAddedAsync(uint id)
@@ -274,6 +310,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         _qqAdapter = null;
         _baselineReady = false;
         _pendingAddedIds.Clear();
+        _addedQueueOverflowReported = false;
         _seenNotificationKeys.Clear();
         _seenNotificationOrder.Clear();
     }

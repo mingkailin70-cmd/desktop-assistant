@@ -402,6 +402,9 @@ try
     CheckNoticeBodyAccessGateRechecksVolatileState();
     passed.Add("读取通知正文前重新核对权限与解锁状态");
 
+    CheckNotificationEventQueueIsBoundedAndDeduplicated();
+    passed.Add("通知事件队列只保留有界去重的系统通知 ID，并串行跟踪在途项");
+
     CheckNoticePublisherAssignmentsAreUnambiguous();
     passed.Add("同一通知发布者不能同时归属微信和 QQ");
 
@@ -3052,6 +3055,36 @@ static void CheckNoticePublisherAssignmentsAreUnambiguous()
         "不同客户端的发布者被错误判定为归属歧义。");
     Require(!MessageNoticePublisherAssignments.HasOverlap([], []),
         "空发布者清单被错误判定为归属歧义。");
+}
+
+static void CheckNotificationEventQueueIsBoundedAndDeduplicated()
+{
+    var queue = new BoundedNotificationIdQueue(capacity: 2);
+    Require(queue.TryEnqueue(11) == NotificationIdEnqueueResult.Added,
+        "通知事件队列拒绝了可容纳的首个系统 ID。");
+    Require(queue.TryEnqueue(11) == NotificationIdEnqueueResult.AlreadyTracked,
+        "排队或正在处理的重复系统 ID 没有被合并。");
+    Require(queue.TryEnqueue(22) == NotificationIdEnqueueResult.Added,
+        "通知事件队列拒绝了容量内的第二个系统 ID。");
+    Require(queue.TryEnqueue(33) == NotificationIdEnqueueResult.CapacityReached && queue.Count == 2,
+        "通知事件队列超过容量后仍接受了新 ID。");
+
+    Require(queue.TryDequeue(out var first) && first == 11,
+        "通知事件队列没有保持先进先出顺序。");
+    Require(queue.TryEnqueue(11) == NotificationIdEnqueueResult.AlreadyTracked,
+        "出队但仍在处理中的 ID 未继续去重。");
+    queue.Complete(first);
+    Require(queue.TryEnqueue(33) == NotificationIdEnqueueResult.Added,
+        "处理完成释放容量后，通知事件队列未接受后续 ID。");
+
+    Require(queue.TryDequeue(out var second) && second == 22,
+        "通知事件队列第二个 ID 顺序错误。");
+    queue.Complete(second);
+    Require(queue.TryDequeue(out var third) && third == 33,
+        "通知事件队列未返回释放容量后加入的 ID。");
+    queue.Complete(third);
+    Require(queue.Count == 0 && !queue.TryDequeue(out _),
+        "通知事件队列清空后仍保留了跟踪项。");
 }
 
 static void CheckPackagedAndDesktopAppUserModelIds()
