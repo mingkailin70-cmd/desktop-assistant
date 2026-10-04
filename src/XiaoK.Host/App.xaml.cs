@@ -97,7 +97,8 @@ public partial class App : System.Windows.Application
 
         try
         {
-            return AppInstance.GetActivatedEventArgs().Kind == ActivationKind.StartupTask;
+            var activation = AppInstance.GetActivatedEventArgs();
+            return activation?.Kind == ActivationKind.StartupTask;
         }
         catch (Exception ex) when (ex is COMException or InvalidOperationException
             or UnauthorizedAccessException or NotSupportedException)
