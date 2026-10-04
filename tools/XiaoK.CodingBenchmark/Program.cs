@@ -18,7 +18,8 @@ internal static class Program
 {
     private const long MinimumRuntimeGpuFreeMiB = 1_024;
     private const int EvaluationContextTokens = 6144;
-    private const string PipelineVersion = "code-agent-inspect-call-boundary-order-reasoning-v39-v38-v37-inspect-operation-gates-v36-compact-line-citations-v35-structured-claim-citations-v34-specific-citation-feedback-v33-fixed-source-reference-line-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144";
+    private const string PipelineVersionNoThinking = "code-agent-inspect-call-boundary-order-v38-v37-inspect-operation-gates-v36-compact-line-citations-v35-structured-claim-citations-v34-specific-citation-feedback-v33-fixed-source-reference-line-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking";
+    private const string PipelineVersionThinking = "code-agent-inspect-call-boundary-order-reasoning-v39-v38-v37-inspect-operation-gates-v36-compact-line-citations-v35-structured-claim-citations-v34-specific-citation-feedback-v33-fixed-source-reference-line-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144";
     private const string V3ManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
     private const string V4ManifestSha256 = "9d5e09034231d119895fcc029b0fd6119d8993e24cb5fe116c4de88322208d5f";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -29,12 +30,7 @@ internal static class Program
         Console.InputEncoding = new UTF8Encoding(false);
         try
         {
-            if ((args.Length != 6 && args.Length != 8) || args[0] != "--repo" || args[2] != "--dataset"
-                || args[4] != "--task" || (args.Length == 8 && args[6] != "--model-id"))
-            {
-                Console.Error.WriteLine("用法：XiaoK.CodingBenchmark.exe --repo <仓库目录> --dataset <coding-zh-v3|coding-zh-v4> --task <R01|S01|M01|F01> [--model-id <qwen3.5-4b-q4km|mimo-v2.6-distill-qwen-9b-gguf-q8-0|qwen3.5-9b-q4km-eval|autotrust-jev-9b-q4km-eval>]");
-                return 2;
-            }
+            var options = ParseArguments(args);
 
             if (Console.IsInputRedirected)
             {
@@ -42,10 +38,10 @@ internal static class Program
                 return 2;
             }
 
-            var repoRoot = RequireLocalDirectory(args[1], "仓库目录");
-            var datasetVersion = args[3];
+            var repoRoot = RequireLocalDirectory(options.RepositoryRoot, "仓库目录");
+            var datasetVersion = options.DatasetVersion;
             var datasetLock = ResolveDatasetLock(datasetVersion);
-            var taskId = args[5].ToUpperInvariant();
+            var taskId = options.TaskId.ToUpperInvariant();
             if (taskId.Length != 3 || taskId[0] is not ('R' or 'S' or 'M' or 'F')
                 || !int.TryParse(taskId.AsSpan(1), out var taskNumber) || taskNumber is < 1 or > 10)
                 throw new ArgumentException("题目 ID 必须是 R01–R10、S01–S10、M01–M10 或 F01–F10。");
@@ -58,10 +54,11 @@ internal static class Program
 
             var baselineCommit = RequireGitCommit(manifest.BaselineCommit);
             await EnsureGitCommitExistsAsync(repoRoot, baselineCommit);
-            var modelId = args.Length == 8 ? args[7] : "qwen3.5-4b-q4km";
+            var modelId = options.ModelId;
             var model = ResolveModel(repoRoot, modelId);
+            var pipelineVersion = options.EnableThinking ? PipelineVersionThinking : PipelineVersionNoThinking;
             var resultFile = GetAggregateResultPath(manifest.Version);
-            EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision, PipelineVersion, taskId);
+            EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision, pipelineVersion, taskId);
             var gpuBaseline = await ReadGpuSnapshotAsync();
             if (gpuBaseline.FreeMiB < model.MinimumInitialGpuFreeMiB)
                 throw new InvalidOperationException($"启动前显存空闲 {gpuBaseline.FreeMiB} MiB，低于该模型预算 {model.ExpectedGpuMemoryMiB:N0} MiB 加 1,024 MiB 余量；本次未启动。");
@@ -121,7 +118,8 @@ internal static class Program
                 }
 
                 Directory.CreateDirectory(workspaceRoot);
-                var codeAgent = new CodeTaskAgent(inference, broker, repoRoot, disableThinkingForInspection: false);
+                var codeAgent = new CodeTaskAgent(inference, broker, repoRoot,
+                    disableThinkingForInspection: !options.EnableThinking);
                 var review = new KeepPatchAndDenyAllPresenter();
                 var toolBroker = new ToolBroker(new WindowsDesktopTools([], []), inference, broker, review,
                     codeAgent, taskRoot, workspaceRoot);
@@ -133,7 +131,7 @@ internal static class Program
                     [new KeyValuePair<string, string>("instruction", task.Prompt)], "configured-project", expected);
 
                 gpuMonitor = MonitorGpuAsync(gpuSamples, cancellation, stopReason);
-                Console.WriteLine($"固定评测题：{task.Id}（{task.Category}）；模型：{model.Id}；推理地址：127.0.0.1:{endpoint.Port}");
+                Console.WriteLine($"固定评测题：{task.Id}（{task.Category}）；模型：{model.Id}；只读检索思考模式：{(options.EnableThinking ? "开启（显式选择）" : "关闭（生产默认）")}；管线：{pipelineVersion}；推理地址：127.0.0.1:{endpoint.Port}");
                 Console.WriteLine("只发送本地模型的合成任务提示；不会访问账号、通知或发送任何消息。");
                 Console.WriteLine("执行中……按 Ctrl+C 可取消；若显存余量低于 1 GiB，运行器会自动取消并停止。");
                 var result = await toolBroker.ExecuteAsync(proposal, cancellation.Token);
@@ -186,7 +184,7 @@ internal static class Program
                 var reviewerPassed = automaticallySafe && string.Equals(Console.ReadLine()?.Trim(), "y", StringComparison.OrdinalIgnoreCase);
                 if (!automaticallySafe) _ = Console.ReadLine();
 
-                var aggregate = new AggregateResult(3, PipelineVersion, responseDiagnostics.Count,
+                var aggregate = new AggregateResult(3, pipelineVersion, responseDiagnostics.Count,
                     responseDiagnostics.Sum(item => item.PromptTokens), responseDiagnostics.Sum(item => item.CompletionTokens),
                     responseDiagnostics.Count(item => item.ContentCharacters == 0),
                     string.Join(",", responseDiagnostics.Select(item => item.FinishReason ?? "unknown")),
@@ -234,6 +232,45 @@ internal static class Program
             Console.Error.WriteLine("本次未完成评测：" + ex.Message);
             return 1;
         }
+    }
+
+    private static BenchmarkOptions ParseArguments(string[] args)
+    {
+        string? repositoryRoot = null;
+        string? datasetVersion = null;
+        string? taskId = null;
+        var modelId = "qwen3.5-4b-q4km";
+        var enableThinking = false;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var index = 0; index < args.Length; index++)
+        {
+            var option = args[index];
+            if (!seen.Add(option)) throw new ArgumentException("命令行选项不可重复：" + option);
+            if (option == "--enable-thinking")
+            {
+                enableThinking = true;
+                continue;
+            }
+
+            if (option is not ("--repo" or "--dataset" or "--task" or "--model-id") || index + 1 >= args.Length)
+                throw new ArgumentException("未知选项或缺少选项值：" + option);
+
+            var value = args[++index];
+            if (string.IsNullOrWhiteSpace(value) || value.StartsWith("--", StringComparison.Ordinal))
+                throw new ArgumentException("选项缺少有效值：" + option);
+            switch (option)
+            {
+                case "--repo": repositoryRoot = value; break;
+                case "--dataset": datasetVersion = value; break;
+                case "--task": taskId = value; break;
+                case "--model-id": modelId = value; break;
+            }
+        }
+
+        if (repositoryRoot is null || datasetVersion is null || taskId is null)
+            throw new ArgumentException("缺少必需选项 --repo、--dataset 或 --task。");
+        return new(repositoryRoot, datasetVersion, taskId, modelId, enableThinking);
     }
 
     private static BenchmarkTask ReadTask(string datasetRoot, string taskId, DatasetLock datasetLock)
@@ -657,6 +694,8 @@ internal static class Program
     }
 
     private sealed record GpuSnapshot(long FreeMiB, long UsedMiB);
+    private sealed record BenchmarkOptions(string RepositoryRoot, string DatasetVersion, string TaskId,
+        string ModelId, bool EnableThinking);
     private sealed record BenchmarkTask(string Id, string Category, string Acceptance, string Grading,
         bool NetworkAllowed, bool ExternalSideEffectsAllowed, IReadOnlyList<string> TargetFiles, string Prompt);
     private sealed record ReviewKey(string Expected, string Evidence);
