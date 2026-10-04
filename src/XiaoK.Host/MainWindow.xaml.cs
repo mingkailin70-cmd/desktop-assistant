@@ -877,10 +877,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             PetView.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
             ResizeMode = expanded ? ResizeMode.CanResizeWithGrip : ResizeMode.NoResize;
             ShellBorder.Background = expanded
-                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(247, 248, 252))
+                ? (System.Windows.Media.Brush)FindResource("PanelSurfaceBrush")
                 : System.Windows.Media.Brushes.Transparent;
             ShellBorder.BorderBrush = expanded
-                ? new SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 226, 239))
+                ? (System.Windows.Media.Brush)FindResource("PanelOutlineBrush")
                 : System.Windows.Media.Brushes.Transparent;
             ShellBorder.BorderThickness = expanded ? new Thickness(1) : new Thickness(0);
             ShellBorder.Padding = expanded ? new Thickness(14) : new Thickness(0);
@@ -1042,8 +1042,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private void SetStatus(string status)
     {
-        StatusText.Text = status;
-        PetStatusText.Text = status;
+        var compactStatus = GetCompactStatus(status);
+        StatusText.Text = compactStatus;
+        PetStatusText.Text = compactStatus;
+        StatusText.ToolTip = status;
+        PetStatusText.ToolTip = status;
         PetView.ToolTip = $"{status} · 单击展开任务面板，右键打开菜单";
         var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)
             || status.Contains("未授予", StringComparison.Ordinal) || status.Contains("未能启动", StringComparison.Ordinal)
@@ -1058,6 +1061,42 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
                         ? System.Windows.Media.Color.FromRgb(123, 132, 152)
                         : System.Windows.Media.Color.FromRgb(87, 163, 112);
         PetStatusDot.Fill = new SolidColorBrush(color);
+    }
+
+    private static string GetCompactStatus(string status)
+    {
+        if (status.Contains("快捷键不可用", StringComparison.Ordinal)) return "快捷键不可用";
+
+        if (status.Contains("失败", StringComparison.Ordinal)
+            || status.Contains("不可用", StringComparison.Ordinal)
+            || status.Contains("未授予", StringComparison.Ordinal)
+            || status.Contains("未完成", StringComparison.Ordinal)
+            || status.Contains("未能", StringComparison.Ordinal))
+            return "需要处理";
+
+        if (status.Contains("确认", StringComparison.Ordinal)) return "等待确认";
+        if (status.Contains("取消", StringComparison.Ordinal)) return "已取消";
+        if (status.Contains("暂停", StringComparison.Ordinal)) return "已暂停";
+        if (status.Contains("锁定", StringComparison.Ordinal)) return "会话锁定";
+        if (status.Contains("收到微信", StringComparison.Ordinal)) return "微信提醒";
+        if (status.Contains("收到 QQ", StringComparison.Ordinal)) return "QQ 提醒";
+        if (status.Contains("聆听", StringComparison.Ordinal)
+            || status.Contains("采集麦克风", StringComparison.Ordinal)
+            || status.Contains("识别中", StringComparison.Ordinal))
+            return "正在聆听";
+        if (status.Contains("播报中", StringComparison.Ordinal)
+            || status.Contains("合成中", StringComparison.Ordinal))
+            return "正在播报";
+        if (status.Contains("正在", StringComparison.Ordinal)
+            || status.Contains("运行中", StringComparison.Ordinal))
+            return "正在处理";
+        if (status.Contains("完成", StringComparison.Ordinal)
+            || status.Contains("已打开", StringComparison.Ordinal)
+            || status.Contains("已找到", StringComparison.Ordinal))
+            return "已完成";
+        if (status.Contains("待核对", StringComparison.Ordinal)) return "等待核对";
+
+        return status.Length <= 8 ? status : "待命";
     }
 
     private async void OnClosing(object? sender, CancelEventArgs e)
