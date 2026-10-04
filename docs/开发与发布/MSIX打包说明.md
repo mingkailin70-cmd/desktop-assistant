@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.40.0 桌宠 v15 银渐层形象更新（2026-10-05）
+
+固定 SDK Release 解决方案构建通过，0 警告、0 错误，使用 `--no-restore`；win-x64 自包含 Host 发布也使用已还原依赖。签名 MSIX 位于 `artifacts\msix-validation\6bb29ae8718143a99178c41adadf3c9e\XiaoK-signed-validation.msix`，大小 84,706,308 字节，SHA-256 `33EE5AC41370C2DFBDB4B5A5656EFDC6F80A0681169CBB0ACC1D01E6A095A124`。签名状态 `Valid`，SignTool 验证 0 警告、0 错误；开发证书已在 `LocalMachine\TrustedPeople`，本次没有变更证书信任。安装器请求旧版 PID 28464 正常退出，之后将 `0.1.40.0` 安装到当前账户，包状态 `Ok`；诊断模式 Host PID 9264 正在运行。诊断模式不加载真实设置、不连接模型、不启用通知监听或麦克风。当前会话没有可用的原生窗口截图，因此 v15 的像素布局、透明合成和实际桌面交互仍待目视验收。
+
 ## v0.1.39.0 桌宠 v14 银渐层形象与暖白鼠尾草绿界面（2026-10-05）
 
 固定 SDK Release 解决方案构建0警告、0错误；win-x64 自包含发布使用锁定依赖完成。签名 MSIX 位于 `artifacts\msix-validation\9cb81183d3044f67ba101470a80f421b\XiaoK-signed-validation.msix`，大小84,507,214字节，SHA-256 `C441AE564A6750B6A0ACEB51ACDD0DDADF0D6415DA088605A7F3B455DAAD6BF7`。Authenticode状态`Valid`，SignTool验证0警告、0错误；开发证书此前已位于 `LocalMachine\TrustedPeople`，本次没有改动信任。更新器确认旧版 PID 29460 正常退出，随后将 `0.1.39.0` 安装到当前账户，包状态`Ok`。安装后以 `--diagnostics-profile` 启动，新版 PID 28464 响应正常；该模式不加载真实设置、不连接模型、不启用通知监听或麦克风。桌面窗口工具未提供原生窗口截图，因此角色画面、DPI和透明合成尚未目视验收。旧版 `0.1.38.0` 包保留在本机忽略目录，可供回滚参考。

@@ -122,7 +122,7 @@
                                 </LinearGradientBrush>
                             </Border.Background>
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v14-wave.png"
+                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                        Width="59" Height="59" Margin="-3" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        AutomationProperties.Name="银渐层小猫小K"/>
@@ -182,7 +182,7 @@
                             <TextBlock Text="告诉我想做什么，我们一步一步完成。"
                                        FontSize="11" Foreground="#607565" Margin="0,5,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v14-wave.png"
+                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                Width="154" Height="154" Margin="0,-3,-3,-8" Stretch="Uniform"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
                                AutomationProperties.Name="小K银渐层小猫三维角色">
@@ -324,10 +324,10 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v14-wave.png"
+                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                    Width="284" Height="284" Margin="0,6,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
-                                   AutomationProperties.Name="三维银渐层小猫小K，抬爪问候">
+                                   AutomationProperties.Name="三维银渐层小猫小K，正面坐姿">
                                 <Image.Effect>
                                     <DropShadowEffect Color="#667768" BlurRadius="16" ShadowDepth="4" Opacity="0.20"/>
                                 </Image.Effect>
