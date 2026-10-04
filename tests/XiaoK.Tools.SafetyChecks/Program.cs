@@ -1407,6 +1407,9 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
         && patchSystemPrompt.Contains("必须逐字实现任务明确指定的输入和目标", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("不得把仅为JSON表示添加的反斜杠保留到最终源码中", StringComparison.Ordinal),
         "补丁系统提示没有要求修改条件时保留已有分支行为。");
+    Require(inference.RequestOptions.Single() is { DisableThinking: true, JsonObject: true,
+            Temperature: 0.1f, Seed: 42 },
+        "代码补丁生成没有使用已固定的低温和随机种子设置。");
 
     const string deleteSource = "first\r\nremove-me\r\nlast\r\n";
     const string deletePatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":2,\"endLine\":2,\"replacementLines\":[]}]}";
@@ -3120,13 +3123,17 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
 static void CheckAppResolverRejectsUnknownApplications()
 {
     var project = AppLaunchIntentResolver.Resolve("打开小K项目");
+    var codeProject = AppLaunchIntentResolver.Resolve("打开小K代码项目");
     var wechat = AppLaunchIntentResolver.Resolve("启动应用 微信");
+    var wechatDesktop = AppLaunchIntentResolver.Resolve("打开微信电脑版");
     var edge = AppLaunchIntentResolver.Resolve("打开 Edge");
     var fullWidthQq = AppLaunchIntentResolver.Resolve("打开ＱＱ");
     var unknown = AppLaunchIntentResolver.Resolve("打开记事本");
     var unsupportedVariant = AppLaunchIntentResolver.Resolve("打开 QQ音乐");
     Require(project is { AppId: "vscode", WorkspaceId: "xiaok" }
+        && codeProject is { AppId: "vscode", WorkspaceId: "xiaok" }
         && wechat is { AppId: "wechat", WorkspaceId: null }
+        && wechatDesktop is { AppId: "wechat", WorkspaceId: null }
         && edge is { AppId: "edge", WorkspaceId: null }
         && fullWidthQq is { AppId: "qq", WorkspaceId: null },
         "已支持应用别名没有映射到预期的固定应用 ID。");
@@ -4544,7 +4551,8 @@ static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
         LocalInferenceResponseDiagnostics? diagnostics = null;
         client.ResponseCompleted += value => diagnostics = value;
         var answer = await client.CompleteAsync("仅本地系统提示", "仅本地用户消息",
-            new InferenceRequestOptions(DisableThinking: true, JsonObject: true), requestTimeout.Token);
+            new InferenceRequestOptions(DisableThinking: true, JsonObject: true,
+                Temperature: 0.1f, Seed: 42), requestTimeout.Token);
         var request = await server.WaitAsync(TimeSpan.FromSeconds(3));
         using var payload = JsonDocument.Parse(request.Body);
         var messages = payload.RootElement.GetProperty("messages");
@@ -4555,8 +4563,20 @@ static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
             && messages[0].GetProperty("content").GetString() == "仅本地系统提示"
             && messages[1].GetProperty("content").GetString() == "仅本地用户消息"
             && payload.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").ValueKind == JsonValueKind.False
-            && payload.RootElement.GetProperty("response_format").GetProperty("type").GetString() == "json_object",
+            && payload.RootElement.GetProperty("response_format").GetProperty("type").GetString() == "json_object"
+            && payload.RootElement.GetProperty("temperature").GetSingle() == 0.1f
+            && payload.RootElement.GetProperty("seed").GetInt32() == 42,
             "本地推理客户端未向 loopback 发送预期接口请求，或未解析兼容响应。");
+
+        var invalidTemperatureRejected = false;
+        try
+        {
+            _ = await client.CompleteAsync("仅本地系统提示", "仅本地用户消息",
+                new InferenceRequestOptions(Temperature: float.NaN), requestTimeout.Token);
+        }
+        catch (ArgumentOutOfRangeException) { invalidTemperatureRejected = true; }
+        Require(invalidTemperatureRejected,
+            "本地推理客户端接受了非有限的温度设置。");
     }
     finally { listener.Stop(); }
 

@@ -41,6 +41,8 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
         ArgumentNullException.ThrowIfNull(systemPrompt);
         ArgumentNullException.ThrowIfNull(userPrompt);
         ArgumentNullException.ThrowIfNull(options);
+        if (options.Temperature is { } temperature && (!float.IsFinite(temperature) || temperature is < 0 or > 2))
+            throw new ArgumentOutOfRangeException(nameof(options), "Temperature must be a finite value from 0 through 2.");
         if (Encoding.UTF8.GetByteCount(systemPrompt) + Encoding.UTF8.GetByteCount(userPrompt) > MaximumPromptUtf8Bytes)
             throw new ArgumentException("Local inference prompt exceeds the configured size limit.");
 
@@ -50,6 +52,10 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
             ["stream"] = false,
             ["messages"] = new[] { new { role = "system", content = systemPrompt }, new { role = "user", content = userPrompt } }
         };
+        if (options.Temperature is { } configuredTemperature)
+            payload["temperature"] = configuredTemperature;
+        if (options.Seed is { } seed)
+            payload["seed"] = seed;
         if (options.DisableThinking)
             payload["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = false };
         if (options.JsonSchema is { } jsonSchema)

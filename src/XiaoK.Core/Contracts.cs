@@ -72,7 +72,7 @@ public interface IInferenceClient
 }
 
 public sealed record InferenceRequestOptions(bool DisableThinking = false, bool JsonObject = false,
-    JsonElement? JsonSchema = null);
+    JsonElement? JsonSchema = null, float? Temperature = null, int? Seed = null);
 public interface ITool
 {
     string Id { get; }

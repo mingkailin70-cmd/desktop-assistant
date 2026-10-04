@@ -34,7 +34,7 @@ public static class AppLaunchIntentResolver
         if (phrase.EndsWith("应用", StringComparison.Ordinal)) phrase = phrase[..^2];
 
         if (phrase.Contains("小k项目", StringComparison.Ordinal)
-            || phrase is "vscode项目" or "visualstudiocode项目" or "vs代码项目")
+            || phrase is "小k代码项目" or "vscode项目" or "visualstudiocode项目" or "vs代码项目")
             return new("vscode", "xiaok");
         if (phrase is "vscode" or "visualstudiocode" or "vs代码编辑器" or "代码编辑器")
             return new("vscode", "xiaok");
@@ -42,7 +42,7 @@ public static class AppLaunchIntentResolver
             return new("edge");
         if (phrase is "资源管理器" or "文件资源管理器" or "explorer" or "文件夹")
             return new("explorer");
-        if (phrase is "微信" or "微信客户端" or "wechat" or "weixin")
+        if (phrase is "微信" or "微信客户端" or "微信电脑版" or "wechat" or "weixin")
             return new("wechat");
         if (phrase is "qq" or "ｑｑ" or "ＱＱ" or "腾讯qq")
             return new("qq");
