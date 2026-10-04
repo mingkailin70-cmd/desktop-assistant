@@ -135,9 +135,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private async Task StartMicrophoneCoreAsync(CancellationToken cancellationToken)
     {
         EnsureUnlockedMicrophoneSession();
-        if (_wakeWordListener is not null) await _wakeWordListener.PauseForDictationAsync(cancellationToken);
         try
         {
+            if (_wakeWordListener is not null) await _wakeWordListener.PauseForDictationAsync(cancellationToken);
             EnsureUnlockedMicrophoneSession();
             await _microphone.StartAsync(cancellationToken);
         }
@@ -179,17 +179,47 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public async Task<bool> StopAllMicrophoneAsync()
     {
-        if (_wakeWordListener is not null) await _wakeWordListener.SetEnabledAsync(false);
-        var wasCapturing = StopMicrophone();
-        if (_settings.WakeWordEnabled)
+        var disableWakeWord = _settings.WakeWordEnabled;
+        // Prevent an in-flight dictation completion from re-enabling wake detection mid-stop.
+        if (disableWakeWord) _settings = _settings with { WakeWordEnabled = false };
+
+        // Signal the foreground recorder before waiting on Windows wake-word teardown.
+        var captureStop = _microphone.StopImmediatelyAndDiscardAsync();
+        var failures = new List<Exception>();
+        var issues = new List<string>();
+        if (_wakeWordListener is not null)
         {
-            _settings = _settings with { WakeWordEnabled = false };
-            try { _settings.Save(); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            try { await _wakeWordListener.SetEnabledAsync(false); }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
-                throw new InvalidOperationException("麦克风监听已立即停止，但未能保存唤醒词关闭状态；请在设置中核对。", ex);
+                failures.Add(ex);
+                issues.Add("唤醒监听未能确认关闭");
             }
         }
+
+        var wasCapturing = false;
+        try { wasCapturing = await captureStop; }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            failures.Add(ex);
+            issues.Add("Windows 未能确认录音设备已释放");
+        }
+
+        if (disableWakeWord)
+        {
+            try { _settings.Save(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                failures.Add(ex);
+                issues.Add("唤醒监听关闭状态未能保存");
+            }
+        }
+
+        if (failures.Count > 0)
+            throw new InvalidOperationException(
+                "已发出停麦请求，但操作未能完全确认：" + string.Join("；", issues)
+                + "。请核对小K状态和 Windows 麦克风隐私指示。",
+                new AggregateException(failures));
         return wasCapturing;
     }
 
@@ -352,9 +382,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         }
     }
 
-    public void CancelCurrent()
+    public Task<bool> StopMicrophoneAndDiscardAsync() => _microphone.StopImmediatelyAndDiscardAsync();
+
+    public void CancelCurrent(bool stopMicrophone = true)
     {
-        StopMicrophone();
+        if (stopMicrophone) StopMicrophone();
         try { Volatile.Read(ref _active)?.Cancel(); }
         catch (ObjectDisposedException) { }
         foreach (var work in _noticeAnalysisWorkItems.Keys)

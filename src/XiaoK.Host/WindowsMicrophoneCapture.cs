@@ -91,12 +91,18 @@ internal sealed class WindowsMicrophoneCapture : IAsyncDisposable
     /// <summary>Signals stop immediately; any partial recording is discarded and never sent to ASR.</summary>
     public bool StopImmediatelyAndDiscard()
     {
-        var wasActive = IsActive;
-        if (!wasActive) return false;
-        try { Volatile.Read(ref _startCancellation)?.Cancel(); }
-        catch (ObjectDisposedException) { }
-        _ = StopAndDiscardQuietlyAsync();
-        return true;
+        var wasActive = SignalImmediateStop();
+        if (wasActive) _ = StopAndDiscardQuietlyAsync();
+        return wasActive;
+    }
+
+    /// <summary>Signals stop synchronously, then waits until the recorder and stream are released.</summary>
+    public async Task<bool> StopImmediatelyAndDiscardAsync()
+    {
+        var wasActive = SignalImmediateStop();
+        // Join an in-flight StartAsync/StopCoreAsync even when IsActive has already changed.
+        await StopCoreAsync(discard: true).ConfigureAwait(false);
+        return wasActive;
     }
 
     public async ValueTask DisposeAsync()
@@ -111,6 +117,14 @@ internal sealed class WindowsMicrophoneCapture : IAsyncDisposable
     {
         try { await StopCoreAsync(discard: true).ConfigureAwait(false); }
         catch (Exception) { }
+    }
+
+    private bool SignalImmediateStop()
+    {
+        var wasActive = IsActive;
+        try { Volatile.Read(ref _startCancellation)?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        return wasActive;
     }
 
     private async Task StopAtMaximumDurationAsync(CancellationToken cancellationToken)
@@ -142,7 +156,6 @@ internal sealed class WindowsMicrophoneCapture : IAsyncDisposable
             var stream = _stream;
             _capture = null;
             _stream = null;
-            Volatile.Write(ref _isCapturing, 0);
             var durationCancellation = _durationCancellation;
             _durationCancellation = null;
             if (durationCancellation is not null)
@@ -151,7 +164,11 @@ internal sealed class WindowsMicrophoneCapture : IAsyncDisposable
                 catch (ObjectDisposedException) { }
                 durationCancellation.Dispose();
             }
-            if (capture is null || stream is null) return [];
+            if (capture is null || stream is null)
+            {
+                Volatile.Write(ref _isCapturing, 0);
+                return [];
+            }
 
             try
             {
@@ -179,8 +196,12 @@ internal sealed class WindowsMicrophoneCapture : IAsyncDisposable
             }
             finally
             {
-                capture.Dispose();
-                stream.Dispose();
+                try { capture.Dispose(); }
+                finally
+                {
+                    try { stream.Dispose(); }
+                    finally { Volatile.Write(ref _isCapturing, 0); }
+                }
             }
         }
         finally

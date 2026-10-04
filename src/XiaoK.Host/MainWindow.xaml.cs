@@ -22,6 +22,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private readonly Forms.NotifyIcon _tray;
     private HwndSource? _source;
     private bool _exiting;
+    private bool _cancelInProgress;
     private bool _shutdownInProgress;
     private bool _shutdownComplete;
     private bool _expanded = true;
@@ -31,6 +32,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private bool _speechProcessing;
     private int _speechMaximumDurationPending;
     private CancellationTokenSource? _speechCaptureCancellation;
+    private Task? _microphoneStartTask;
     private CancellationTokenSource? _speechPlaybackCancellation;
     private SoundPlayer? _soundPlayer;
     private readonly Queue<PrivateNoticeAnalysisResult> _pendingNoticeAnalyses = [];
@@ -168,9 +170,12 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _speechCaptureCancellation = cancellation;
         SpeechButton.IsEnabled = false;
         SpeechButton.Content = "正在启动麦克风…";
+        Task? microphoneStart = null;
         try
         {
-            await _runtime.StartMicrophoneAsync(cancellation.Token);
+            microphoneStart = _runtime.StartMicrophoneAsync(cancellation.Token);
+            _microphoneStartTask = microphoneStart;
+            await microphoneStart;
             SpeechButton.IsEnabled = true;
             SpeechButton.Content = "停止并转写";
             SetStatus("正在采集麦克风");
@@ -198,6 +203,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             OutputText.Text = "无法启动麦克风。请检查 Windows 麦克风隐私权限、输入设备和系统音频设置；没有保存录音。";
             SetStatus("麦克风设备不可用");
             ResetSpeechCaptureState(cancellation);
+        }
+        finally
+        {
+            if (microphoneStart is not null && ReferenceEquals(_microphoneStartTask, microphoneStart))
+                _microphoneStartTask = null;
         }
     }
 
@@ -279,7 +289,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             if (wav is not null) CryptographicOperations.ZeroMemory(wav);
             if (cancellation is not null) ResetSpeechCaptureState(cancellation);
             _speechProcessing = false;
-            SpeechButton.IsEnabled = true;
+            SpeechButton.IsEnabled = !_cancelInProgress;
             if (!_exiting)
             {
                 try { await _runtime.ResumeWakeWordAfterDictationAsync(); }
@@ -299,7 +309,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _speechCaptureCancellation = null;
         cancellation.Dispose();
         SpeechButton.Content = "开始说话";
-        SpeechButton.IsEnabled = true;
+        SpeechButton.IsEnabled = !_cancelInProgress && !_speechProcessing;
     }
 
     private void OnSpeechCaptureMaximumDurationReached(byte[] wav)
@@ -524,16 +534,58 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             : $"{application}私聊通知分析未完成：{Environment.NewLine}{result.Text}";
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e)
+    private async void Cancel_Click(object sender, RoutedEventArgs e) => await CancelCurrentAsync();
+
+    private async Task CancelCurrentAsync()
     {
-        var wasCapturing = StopMicrophoneAndDiscard();
+        if (_cancelInProgress || _exiting) return;
+        _cancelInProgress = true;
+        CancelButton.IsEnabled = false;
+        SpeechButton.IsEnabled = false;
+        SpeechButton.Content = "正在停止麦克风…";
+
+        // This call signals recorder cancellation before its first asynchronous wait.
+        var microphoneStart = _microphoneStartTask;
+        var microphoneStop = _runtime.StopMicrophoneAndDiscardAsync();
         try { _speechCaptureCancellation?.Cancel(); }
         catch (ObjectDisposedException) { }
         StopSpeechPlayback();
-        _runtime.CancelCurrent();
-        if (wasCapturing) _ = _runtime.ResumeWakeWordAfterDictationAsync();
-        SpeechButton.Content = "开始说话";
-        SetStatus("已请求取消");
+        _runtime.CancelCurrent(stopMicrophone: false);
+        SetStatus("已请求取消；正在确认麦克风停止");
+
+        try
+        {
+            var wasCapturing = await microphoneStop;
+            if (microphoneStart is not null)
+            {
+                try { await microphoneStart; }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { _ = ex; }
+            }
+
+            var wakeWordResumeFailed = false;
+            if (wasCapturing)
+            {
+                try { await _runtime.ResumeWakeWordAfterDictationAsync(); }
+                catch (Exception) { wakeWordResumeFailed = true; }
+            }
+
+            SpeechButton.Content = "开始说话";
+            SetStatus(wakeWordResumeFailed ? "任务已取消；唤醒监听未能恢复，请检查设置" : "已请求取消");
+            if (wakeWordResumeFailed)
+                OutputText.Text += Environment.NewLine + "唤醒监听未能恢复；请在设置中核对麦克风状态。";
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            SpeechButton.Content = "开始说话";
+            OutputText.Text = $"取消已请求，但无法确认麦克风录音设备已释放（0x{ex.HResult:X8}）。请检查 Windows 麦克风隐私指示后再继续；录音不会提交给识别。";
+            SetStatus("麦克风停止状态待核对");
+        }
+        finally
+        {
+            _cancelInProgress = false;
+            CancelButton.IsEnabled = !_exiting;
+            if (!_speechProcessing) SpeechButton.IsEnabled = true;
+        }
     }
 
     private async void StopMic_Click(object sender, RoutedEventArgs e)
@@ -543,7 +595,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         catch (InvalidOperationException ex)
         {
             OutputText.Text = ex.Message;
-            SetStatus("唤醒监听已停止，但设置保存失败");
+            SetStatus("停麦状态待核对");
             return;
         }
         SetStatus(_runtime.VoiceStatus);
@@ -566,7 +618,18 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private async Task<bool> StopAllMicrophoneAndDiscardAsync()
     {
+        // Cancellation must reach a pending capture start/ASR before stop waits on Windows teardown.
+        var microphoneStart = _microphoneStartTask;
+        try { _speechCaptureCancellation?.Cancel(); }
+        catch (ObjectDisposedException) { }
+
         var wasActive = await _runtime.StopAllMicrophoneAsync();
+        if (microphoneStart is not null)
+        {
+            try { await microphoneStart; }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { _ = ex; }
+        }
+
         if (wasActive)
         {
             try { _speechCaptureCancellation?.Cancel(); }
@@ -794,17 +857,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             : "唤醒词已关闭并保存；麦克风当前未采集，桌面任务继续运行。";
     }
 
-    private async void CancelFromTray()
-    {
-        var wasCapturing = StopMicrophoneAndDiscard();
-        try { _speechCaptureCancellation?.Cancel(); }
-        catch (ObjectDisposedException) { }
-        StopSpeechPlayback();
-        _runtime.CancelCurrent();
-        if (wasCapturing) await _runtime.ResumeWakeWordAfterDictationAsync();
-        SpeechButton.Content = "开始说话";
-        SetStatus("已请求取消");
-    }
+    private async void CancelFromTray() => await CancelCurrentAsync();
 
     private void SetExpandedView(bool expanded)
     {
