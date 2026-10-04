@@ -80,7 +80,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             else if (WindowsPackageIdentity.IsPresent)
             {
                 _voiceInference = VoiceInferenceService.TryCreateForInstallation(_settings.VoiceEnvironmentRoot,
-                    _settings.ModelRoot, AppContext.BaseDirectory, _models, out _voiceStatus);
+                    _settings.ModelRoot, AppContext.BaseDirectory, packageIdentityVerified: true, _models, out _voiceStatus);
             }
             else
             {
@@ -808,8 +808,10 @@ internal sealed record XiaoKSettings
         var temporaryPath = path + ".tmp";
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true };
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(this, options), new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        if (File.Exists(path)) File.Replace(temporaryPath, path, destinationBackupFileName: null);
-        else File.Move(temporaryPath, path);
+        // File.Replace can fail with ERROR_INVALID_PARAMETER for an MSIX app's
+        // redirected LocalCache settings path. Both files live in the same
+        // directory, so an overwrite move keeps the replacement on one volume.
+        File.Move(temporaryPath, path, overwrite: true);
     }
 
     internal static string GetSettingsPath() => _diagnosticsSettingsPath ?? Path.Combine(

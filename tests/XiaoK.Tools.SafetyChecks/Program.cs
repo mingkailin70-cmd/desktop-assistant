@@ -1768,19 +1768,65 @@ static async Task CheckInstalledVoiceDeploymentLayoutAsync(string root)
         JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
 
     var service = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot, packageRoot,
-        new ModelBroker(), out var status);
+        packageIdentityVerified: true, new ModelBroker(), out var status);
     Require(service is not null && status.Contains("已配置", StringComparison.Ordinal),
         "有效包内清单、外置模型与 ASR/TTS 环境应创建安装版语音服务。");
     Require(File.Exists(asrPython) && File.Exists(ttsPython), "语音工厂初始化时不应修改或启动外置 Python 文件。");
     await service!.DisposeAsync();
 
+    var trailingSeparatorService = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
+        packageRoot + Path.DirectorySeparatorChar, packageIdentityVerified: true, new ModelBroker(), out var trailingStatus);
+    Require(trailingSeparatorService is not null && trailingStatus.Contains("已配置", StringComparison.Ordinal),
+        "MSIX 基目录带结尾目录分隔符时仍应通过已验证的包根路径检查。");
+    await trailingSeparatorService!.DisposeAsync();
+
+    var aliasPackageRoot = Path.Combine(fixture, "package-root-alias");
+    Require(JunctionFixture.TryCreate(packageRoot, aliasPackageRoot, out var aliasFailure),
+        $"无法创建安装目录重解析点测试夹具：{aliasFailure}");
+    try
+    {
+        var aliasService = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
+            aliasPackageRoot, packageIdentityVerified: true, new ModelBroker(), out var aliasStatus);
+        Require(aliasService is not null && aliasStatus.Contains("已配置", StringComparison.Ordinal),
+            "已验证的 MSIX 安装根可以是 WindowsApps 使用的根级重解析点。");
+        await aliasService!.DisposeAsync();
+    }
+    finally { Directory.Delete(aliasPackageRoot, recursive: false); }
+
+    var nestedPackageRoot = Path.Combine(fixture, "package-with-nested-link");
+    var nestedManifestTarget = Path.Combine(fixture, "package-manifest-target");
+    Directory.CreateDirectory(nestedPackageRoot);
+    Directory.CreateDirectory(nestedManifestTarget);
+    File.Copy(Path.Combine(manifestDirectory, "models.lock.json"),
+        Path.Combine(nestedManifestTarget, "models.lock.json"));
+    File.Copy(workerPath, Path.Combine(nestedPackageRoot, "voice_worker.py"));
+    var nestedManifestLink = Path.Combine(nestedPackageRoot, "model-lock");
+    Require(JunctionFixture.TryCreate(nestedManifestTarget, nestedManifestLink, out var nestedFailure),
+        $"无法创建包内重解析点拒绝测试夹具：{nestedFailure}");
+    try
+    {
+        var nestedService = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
+            nestedPackageRoot, packageIdentityVerified: true, new ModelBroker(), out _);
+        Require(nestedService is null, "允许 MSIX 根目录重解析点时仍必须拒绝包内嵌套重解析点。");
+    }
+    finally
+    {
+        Directory.Delete(nestedManifestLink, recursive: false);
+        Directory.Delete(nestedPackageRoot, recursive: true);
+        Directory.Delete(nestedManifestTarget, recursive: true);
+    }
+
+    var unverifiedPackage = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
+        packageRoot, packageIdentityVerified: false, new ModelBroker(), out _);
+    Require(unverifiedPackage is null, "未经确认 MSIX 身份不得启用安装版语音路径。");
+
     var networkEnvironment = VoiceInferenceService.TryCreateForInstallation(@"\\server\share\voice",
-        modelsRoot, packageRoot, new ModelBroker(), out _);
+        modelsRoot, packageRoot, packageIdentityVerified: true, new ModelBroker(), out _);
     Require(networkEnvironment is null, "安装版语音环境不得从网络共享加载 Python 进程。");
 
     File.Delete(ttsPython);
     var missingEnvironment = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
-        packageRoot, new ModelBroker(), out var missingStatus);
+        packageRoot, packageIdentityVerified: true, new ModelBroker(), out var missingStatus);
     Require(missingEnvironment is null && missingStatus.Contains("不完整", StringComparison.Ordinal),
         "缺少其中一个独立 Python 环境时，安装版语音服务必须关闭并说明状态。");
 

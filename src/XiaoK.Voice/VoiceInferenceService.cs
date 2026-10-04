@@ -86,14 +86,17 @@ public sealed class VoiceInferenceService : IAsyncDisposable
 
     /// <summary>Creates installed runtimes from the signed package manifest and configured external roots.</summary>
     public static VoiceInferenceService? TryCreateForInstallation(string voiceEnvironmentRoot, string modelsRoot,
-        string packageRoot, ModelBroker broker, out string status)
+        string packageRoot, bool packageIdentityVerified, ModelBroker broker, out string status)
     {
         ArgumentNullException.ThrowIfNull(broker);
+        if (!packageIdentityVerified)
+            return Missing("语音：未确认 MSIX 安装身份；语音请求已关闭，麦克风未采集。", out status);
         try
         {
             var package = Path.GetFullPath(packageRoot);
             return TryCreateFromLayout(Path.Combine(package, "model-lock", "models.lock.json"), package,
-                modelsRoot, voiceEnvironmentRoot, Path.Combine(package, "voice_worker.py"), package, broker, out status);
+                modelsRoot, voiceEnvironmentRoot, Path.Combine(package, "voice_worker.py"), package, broker,
+                out status, allowedPackageRootReparse: package);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
                                    or ArgumentException or NotSupportedException)
@@ -104,16 +107,23 @@ public sealed class VoiceInferenceService : IAsyncDisposable
 
     private static VoiceInferenceService? TryCreateFromLayout(string modelsLockPath, string manifestRoot,
         string modelsRoot, string voiceEnvironmentRoot, string workerScriptPath, string workerRoot,
-        ModelBroker broker, out string status)
+        ModelBroker broker, out string status, string? allowedPackageRootReparse = null)
     {
         try
         {
-            var lockRoot = Path.GetFullPath(manifestRoot);
+            var lockRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(manifestRoot));
             var modelRoot = Path.GetFullPath(modelsRoot);
             var environmentRoot = Path.GetFullPath(voiceEnvironmentRoot);
             var lockPath = Path.GetFullPath(modelsLockPath);
             var worker = Path.GetFullPath(workerScriptPath);
-            var allowedWorkerRoot = Path.GetFullPath(workerRoot);
+            var allowedWorkerRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workerRoot));
+            var packageRootReparse = allowedPackageRootReparse is null
+                ? null
+                : Path.TrimEndingDirectorySeparator(Path.GetFullPath(allowedPackageRootReparse));
+            if (packageRootReparse is not null
+                && (!string.Equals(lockRoot, packageRootReparse, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(allowedWorkerRoot, packageRootReparse, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("允许的 MSIX 重解析根必须同时是清单根与工作进程根目录。");
             if (!LocalSearchRootPolicy.IsLocalDrivePath(lockRoot)
                 || !LocalSearchRootPolicy.IsLocalDrivePath(modelRoot)
                 || !LocalSearchRootPolicy.IsLocalDrivePath(environmentRoot)
@@ -126,10 +136,10 @@ public sealed class VoiceInferenceService : IAsyncDisposable
 
             var asrDefinition = ReadDefinition(lockPath, lockRoot, modelRoot, environmentRoot,
                 asrPython, allowedWorkerRoot, worker, "qwen3-asr-0.6b",
-                "5eb144179a02acc5e5ba31e748d22b0cf3e303b0");
+                "5eb144179a02acc5e5ba31e748d22b0cf3e303b0", packageRootReparse);
             var ttsDefinition = ReadDefinition(lockPath, lockRoot, modelRoot, environmentRoot,
                 ttsPython, allowedWorkerRoot, worker, "qwen3-tts-12hz-0.6b-customvoice",
-                "85e237c12c027371202489a0ec509ded67b5e4b5");
+                "85e237c12c027371202489a0ec509ded67b5e4b5", packageRootReparse);
             var asr = new PythonVoiceModelRuntime("asr", asrDefinition);
             var tts = new PythonVoiceModelRuntime("tts", ttsDefinition);
             status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；合成往返单样例通过，麦克风未采集，设备与语音质量仍待验收。";
@@ -225,12 +235,12 @@ public sealed class VoiceInferenceService : IAsyncDisposable
 
     private static VoiceModelDefinition ReadDefinition(string lockPath, string lockRoot, string modelsRoot,
         string environmentRoot, string pythonPath, string workerRoot, string workerPath, string modelId,
-        string expectedRevision)
+        string expectedRevision, string? allowedPackageRootReparse)
     {
         EnsureContained(lockRoot, lockPath);
         EnsureContained(environmentRoot, pythonPath);
         EnsureContained(workerRoot, workerPath);
-        EnsureNoReparseComponents(lockPath);
+        EnsureNoReparseComponents(lockPath, allowedPackageRootReparse);
         using var stream = new FileStream(lockPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (stream.Length is <= 0 or > 2 * 1024 * 1024) throw new InvalidDataException("模型锁清单大小无效。");
         using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { MaxDepth = 32 });
@@ -282,7 +292,7 @@ public sealed class VoiceInferenceService : IAsyncDisposable
         }
 
         EnsureNoReparseComponents(pythonPath);
-        EnsureNoReparseComponents(workerPath);
+        EnsureNoReparseComponents(workerPath, allowedPackageRootReparse);
         if (!File.Exists(pythonPath) || !File.Exists(workerPath)) throw new FileNotFoundException("语音运行时文件缺失。");
         return new VoiceModelDefinition(modelId, modelDirectory, pythonPath, workerPath, files);
     }
@@ -305,16 +315,20 @@ public sealed class VoiceInferenceService : IAsyncDisposable
             throw new InvalidDataException("语音模型路径越出模型目录。");
     }
 
-    private static void EnsureNoReparseComponents(string path)
+    private static void EnsureNoReparseComponents(string path, string? allowedPackageRootReparse = null)
     {
         var full = Path.GetFullPath(path);
+        var allowedRoot = allowedPackageRootReparse is null
+            ? null
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(allowedPackageRootReparse));
         var root = Path.GetPathRoot(full) ?? throw new InvalidDataException("本地路径无效。");
         var current = root;
         foreach (var component in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, component);
             if ((File.Exists(current) || Directory.Exists(current))
-                && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0
+                && !string.Equals(current, allowedRoot, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("语音运行路径不能包含重解析点。");
         }
     }
