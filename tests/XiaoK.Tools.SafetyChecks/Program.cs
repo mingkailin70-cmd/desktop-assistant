@@ -267,6 +267,9 @@ try
     await CheckLineAnchoredEditDisambiguatesDuplicateTextAsync(tempRoot);
     passed.Add("重复源码可用片段内绝对行号精确定位；错误行号仍失败关闭");
 
+    await CheckLineRangeEditUsesProgramNumberedSourceAsync(tempRoot);
+    passed.Add("新行范围补丁只接受同一授权片段内的程序编号行，并保留 CRLF 与删除语义");
+
     await CheckInvalidEditGetsOneBoundedCorrectionAsync(tempRoot);
     passed.Add("精确编辑字段校验失败时同样只纠正一次，路径与源代码上下文权限不扩大");
 
@@ -853,7 +856,7 @@ static async Task CheckValidPatchIsIsolatedAsync(string root)
     var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Value 改为 2", CancellationToken.None);
 
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval, "有效补丁未进入待审阅状态。");
-    Require(inference.CallCount == 1 && inference.Prompts.Single().Contains("受限源代码片段JSON", StringComparison.Ordinal),
+    Require(inference.CallCount == 1 && inference.Prompts.Single().Contains("按行编号的受限源码JSON", StringComparison.Ordinal),
         "唯一可读文件没有直接进入补丁步骤。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == "class Sample {\r\n    int Value = 1;\r\n}\r\n", "原项目被改动。");
     var taskDirectory = Directory.GetDirectories(workspaceRoot).Single();
@@ -948,7 +951,7 @@ static async Task CheckTargetPathListDoesNotBiasLargeContextAsync(string root)
     var inference = new ScriptedInference("{\"locations\":[]}", "{\"edits\":[]}");
     var result = await NewAgent(inference).ExecuteAsync(project,
         Path.Combine(root, "target-path-noise-context-workspaces"), instruction, CancellationToken.None);
-    var sourcePrompt = inference.Prompts.Single(prompt => prompt.Contains("受限源代码片段JSON", StringComparison.Ordinal));
+    var sourcePrompt = inference.Prompts.Single(prompt => prompt.Contains("按行编号的受限源码JSON", StringComparison.Ordinal));
 
     Require(!result.Success && result.ErrorCode == "NO_PATCH_GENERATED" && inference.CallCount == 2,
         "空编辑诊断没有按预期停止并保持原项目不变。");
@@ -1165,7 +1168,7 @@ static async Task CheckLargeContextIncludesDecisionBranchesAsync(string root)
     var instruction = $"本题只可改这些文件：{string.Join('、', paths)}。在解析器中增加终端应用别名，但必须使用用户配置的固定应用 ID。";
     var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, instruction, CancellationToken.None);
     var sourcePrompts = inference.Prompts
-        .Where(prompt => prompt.Contains("受限源代码片段JSON", StringComparison.Ordinal)).ToArray();
+        .Where(prompt => prompt.Contains("按行编号的受限源码JSON", StringComparison.Ordinal)).ToArray();
 
     Require(!result.Success && result.ErrorCode == "NO_PATCH_GENERATED" && inference.CallCount == 3,
         "空补丁任务没有按预期停止并保持原项目不变。" + result.Summary);
@@ -1378,11 +1381,55 @@ static async Task CheckLineAnchoredEditDisambiguatesDuplicateTextAsync(string ro
         "错误行锚下的唯一原文没有安全回退到唯一匹配，或回退修改了原项目。" + uniqueResult.Summary);
 }
 
+static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
+{
+    const string source = "class Sample {\r\n    int Value = 1;\r\n    int Value = 1;\r\n}\r\n";
+    const string patch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":3,\"endLine\":3,\"replacementLines\":[\"    int Value = 3;\"]}]}";
+    var project = CreateProject(root, "line-range-edit", source);
+    var workspaceRoot = Path.Combine(root, "line-range-edit-workspaces");
+    var inference = new ScriptedInference(patch);
+    var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot,
+        "只把第三行 Value 改为 3", CancellationToken.None, review);
+    var workspace = Path.Combine(Directory.GetDirectories(workspaceRoot).Single(), "workspace", "Sample.cs");
+    var expected = "class Sample {\r\n    int Value = 1;\r\n    int Value = 3;\r\n}\r\n";
+    var contextPrompt = inference.Prompts.Single(prompt => prompt.Contains("按行编号的受限源码JSON", StringComparison.Ordinal));
+    Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+        && review.CallCount == 1 && File.ReadAllText(workspace) == expected
+        && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
+        "按行范围编辑未只修改所选重复源码，或没有保留 CRLF/原项目未保持不变。" + result.Summary);
+    Require(contextPrompt.Contains("\"line\":3,\"text\":\"    int Value = 1;\"", StringComparison.Ordinal),
+        "补丁输入没有为重复源码提供程序生成的绝对行号。");
+
+    const string deleteSource = "first\r\nremove-me\r\nlast\r\n";
+    const string deletePatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":2,\"endLine\":2,\"replacementLines\":[]}]}";
+    var deleteProject = CreateProject(root, "line-range-delete", deleteSource);
+    var deleteWorkspaceRoot = Path.Combine(root, "line-range-delete-workspaces");
+    var deleteResult = await NewAgent(new ScriptedInference(deletePatch)).ExecuteAsync(deleteProject,
+        deleteWorkspaceRoot, "删除第二行", CancellationToken.None,
+        new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch));
+    var deleteWorkspace = Path.Combine(Directory.GetDirectories(deleteWorkspaceRoot).Single(), "workspace", "Sample.cs");
+    Require(deleteResult.Success && File.ReadAllText(deleteWorkspace) == "first\r\nlast\r\n"
+        && File.ReadAllText(Path.Combine(deleteProject, "Sample.cs")) == deleteSource,
+        "行范围删除没有保留相邻行与 CRLF，或修改了原项目。" + deleteResult.Summary);
+
+    const string invalidPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"endLine\":99,\"replacementLines\":[\"unsafe\"]}]}";
+    var invalidProject = CreateProject(root, "line-range-invalid", source);
+    var invalidWorkspaceRoot = Path.Combine(root, "line-range-invalid-workspaces");
+    var invalidInference = new ScriptedInference(invalidPatch, invalidPatch);
+    var invalidReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var invalidResult = await NewAgent(invalidInference).ExecuteAsync(invalidProject, invalidWorkspaceRoot,
+        "修改源码", CancellationToken.None, invalidReview);
+    Require(!invalidResult.Success && invalidInference.CallCount == 2 && invalidReview.CallCount == 0
+        && File.ReadAllText(Path.Combine(invalidProject, "Sample.cs")) == source,
+        "授权片段之外的行范围没有经一次纠正后失败关闭。");
+}
+
 static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
 {
     const string source = "class Sample { int Value = 1; }\n";
     const string rejectedEdit = "{\"edits\":[{\"path\":\"Other.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}";
-    const string acceptedEdit = "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}";
+    const string acceptedEdit = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":1,\"endLine\":1,\"replacementLines\":[\"class Sample { int Value = 3; }\"]}]}";
     var project = CreateProject(root, "invalid-edit-retry", source);
     var workspaceRoot = Path.Combine(root, "invalid-edit-retry-workspaces");
     var inference = new ScriptedInference(rejectedEdit, acceptedEdit);
@@ -1400,10 +1447,10 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
     Require(correctionPrompt is not null
         && correctionPrompt.Contains(rejectedEdit, StringComparison.Ordinal)
         && correctionPrompt.Contains("文件清单之外的路径", StringComparison.Ordinal)
-        && correctionPrompt.Contains("受限源代码片段JSON", StringComparison.Ordinal)
-        && systemPrompts.Any(prompt => prompt.Contains("不得扩大文件、路径、片段、权限或操作范围", StringComparison.Ordinal))
-        && systemPrompts.Any(prompt => prompt.Contains("优先不提供startLine", StringComparison.Ordinal))
-        && systemPrompts.Any(prompt => prompt.Contains("原文件中全文唯一出现，应省略startLine", StringComparison.Ordinal)),
+        && correctionPrompt.Contains("按行编号的受限源码JSON", StringComparison.Ordinal)
+        && systemPrompts.Any(prompt => prompt.Contains("不得扩大目标、权限或操作范围", StringComparison.Ordinal))
+        && systemPrompts.Any(prompt => prompt.Contains("每个编辑的起止行必须完整落在该文件提供的某一个源码片段中", StringComparison.Ordinal))
+        && systemPrompts.Any(prompt => prompt.Contains("行号必须直接取自所给lines数组", StringComparison.Ordinal)),
         "纠正提示没有明确传达固定校验原因和不扩大的授权边界。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source
         && File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")) == "class Sample { int Value = 3; }\n",
