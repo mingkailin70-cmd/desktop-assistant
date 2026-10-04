@@ -44,7 +44,7 @@
             </Setter>
         </Style>
     </Window.Resources>
-    <Border x:Name="ShellBorder" CornerRadius="26" Background="#FAFCFB" BorderBrush="#D9E7E1" BorderThickness="1"
+    <Border x:Name="ShellBorder" CornerRadius="26" Background="#FBFCFE" BorderBrush="#DDE4ED" BorderThickness="1"
             Padding="14" Margin="5">
         <Grid>
             <ScrollViewer x:Name="ExpandedViewScroller" Visibility="Visible"
@@ -73,12 +73,12 @@
                                 CornerRadius="18" Width="58" Height="58">
                             <Border.Background>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="#F4F8F5" Offset="0"/>
-                                    <GradientStop Color="#E5F0EA" Offset="1"/>
+                                    <GradientStop Color="#F7F9FC" Offset="0"/>
+                                    <GradientStop Color="#E5EBF3" Offset="1"/>
                                 </LinearGradientBrush>
                             </Border.Background>
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v6-wave.png"
+                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v7-wave.png"
                                        Width="62" Height="62" Margin="-4" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        AutomationProperties.Name="银渐层小猫小K"/>
@@ -102,14 +102,14 @@
                     </StackPanel>
                 </DockPanel>
 
-                <Border Grid.Row="1" BorderBrush="#D8E9E1" BorderThickness="1"
+                <Border Grid.Row="1" BorderBrush="#DCE3ED" BorderThickness="1"
                         CornerRadius="22" Padding="0" Margin="0,0,0,13" ClipToBounds="True">
                     <Grid>
                         <Grid.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#F4F9F6" Offset="0"/>
-                                <GradientStop Color="#E4F2EC" Offset="0.72"/>
-                                <GradientStop Color="#EAF0F8" Offset="1"/>
+                                <GradientStop Color="#F5F8FC" Offset="0"/>
+                                <GradientStop Color="#E6EDF5" Offset="0.72"/>
+                                <GradientStop Color="#EEF0F8" Offset="1"/>
                             </LinearGradientBrush>
                         </Grid.Background>
                         <Grid.ColumnDefinitions>
@@ -117,23 +117,23 @@
                             <ColumnDefinition Width="116"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="16,13,0,13">
-                            <Border Background="#FFFFFF" BorderBrush="#DFECE5" BorderThickness="1"
+                            <Border Background="#FFFFFF" BorderBrush="#DFE6EF" BorderThickness="1"
                                     CornerRadius="10" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,8">
                                 <StackPanel Orientation="Horizontal">
                                     <Ellipse Width="6" Height="6" Fill="#67A992" Margin="0,0,6,0" VerticalAlignment="Center"/>
                                     <TextBlock Text="银渐层小K · 本地助手" FontSize="10" Foreground="#587368"/>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="你好，我是小K" FontSize="17" FontWeight="SemiBold" Foreground="#29443B"/>
+                            <TextBlock Text="你好，我是小K" FontSize="17" FontWeight="SemiBold" Foreground="#354252"/>
                             <TextBlock Text="把想做的事告诉我，我们一起完成。"
                                        FontSize="11" Foreground="#60766D" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v6-wave.png"
+                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v7-wave.png"
                                Width="122" Height="122" Margin="0,-2,-2,-7" Stretch="Uniform"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
                                AutomationProperties.Name="小K银渐层小猫形象">
                             <Image.Effect>
-                                <DropShadowEffect Color="#527568" BlurRadius="12" ShadowDepth="3" Opacity="0.16"/>
+                                <DropShadowEffect Color="#667487" BlurRadius="12" ShadowDepth="3" Opacity="0.17"/>
                             </Image.Effect>
                         </Image>
                     </Grid>
@@ -257,12 +257,12 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v6-wave.png"
+                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v7-wave.png"
                                    Width="270" Height="270" Margin="0,9,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
                                    AutomationProperties.Name="3D银渐层小猫小K">
                                 <Image.Effect>
-                                    <DropShadowEffect Color="#557366" BlurRadius="18" ShadowDepth="6" Opacity="0.22"/>
+                                    <DropShadowEffect Color="#667487" BlurRadius="18" ShadowDepth="6" Opacity="0.22"/>
                                 </Image.Effect>
                             </Image>
                         </Grid>
@@ -274,9 +274,15 @@
                             <DropShadowEffect Color="#52617A" BlurRadius="14" ShadowDepth="3" Opacity="0.13"/>
                         </Border.Effect>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border Width="26" Height="26" CornerRadius="13" Background="#EAF4EF" Margin="0,0,9,0">
-                                <TextBlock Text="✦" FontSize="14" Foreground="#579A83"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Background="#EAF0F6" Margin="0,0,9,0"
+                                    AutomationProperties.Name="小K猫爪标记">
+                                <Canvas Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Ellipse Canvas.Left="1" Canvas.Top="4" Width="4.5" Height="5.5" Fill="#71889D"/>
+                                    <Ellipse Canvas.Left="5.5" Canvas.Top="0.5" Width="4.5" Height="5.5" Fill="#71889D"/>
+                                    <Ellipse Canvas.Left="10.5" Canvas.Top="0.5" Width="4.5" Height="5.5" Fill="#71889D"/>
+                                    <Ellipse Canvas.Left="14" Canvas.Top="4" Width="4" Height="5.5" Fill="#71889D"/>
+                                    <Ellipse Canvas.Left="4" Canvas.Top="8" Width="10.5" Height="8" Fill="#71889D"/>
+                                </Canvas>
                             </Border>
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="小K" FontSize="13" FontWeight="SemiBold" Foreground="#263247"/>
