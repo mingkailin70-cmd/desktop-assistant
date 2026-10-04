@@ -8,16 +8,16 @@
         <Style x:Key="QuickPromptButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Padding" Value="12,8"/>
             <Setter Property="Margin" Value="0,0,7,7"/>
-            <Setter Property="Background" Value="#F0F2FB"/>
-            <Setter Property="Foreground" Value="#394366"/>
+            <Setter Property="Background" Value="#EAF4F0"/>
+            <Setter Property="Foreground" Value="#35584F"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="AutomationProperties.HelpText" Value="填入任务开头，可继续编辑后运行"/>
         </Style>
         <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Padding" Value="12,8"/>
             <Setter Property="Margin" Value="0,0,7,0"/>
-            <Setter Property="Background" Value="#E9EDFA"/>
-            <Setter Property="Foreground" Value="#27314C"/>
+            <Setter Property="Background" Value="#E6F0EC"/>
+            <Setter Property="Foreground" Value="#2F4D45"/>
         </Style>
         <Style x:Key="PetExpandButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Background" Value="Transparent"/>
@@ -33,10 +33,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#1AACC7E5"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="#1A78B49D"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#34ACC7E5"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="#3478B49D"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -44,7 +44,7 @@
             </Setter>
         </Style>
     </Window.Resources>
-    <Border x:Name="ShellBorder" CornerRadius="26" Background="#F7F8FC" BorderBrush="#DCE2EF" BorderThickness="1"
+    <Border x:Name="ShellBorder" CornerRadius="26" Background="#FAFCFB" BorderBrush="#D9E7E1" BorderThickness="1"
             Padding="14" Margin="5">
         <Grid>
             <ScrollViewer x:Name="ExpandedViewScroller" Visibility="Visible"
@@ -69,16 +69,16 @@
                         <Button Content="×" Width="34" Height="32" Margin="5,0,0,0" Click="Hide_Click" ToolTip="隐藏到托盘"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border BorderBrush="#DDE4EC" BorderThickness="1"
+                        <Border BorderBrush="#DCE8E2" BorderThickness="1"
                                 CornerRadius="18" Width="58" Height="58">
                             <Border.Background>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="#F5F7FB" Offset="0"/>
-                                    <GradientStop Color="#E8EEF4" Offset="1"/>
+                                    <GradientStop Color="#F4F8F5" Offset="0"/>
+                                    <GradientStop Color="#E5F0EA" Offset="1"/>
                                 </LinearGradientBrush>
                             </Border.Background>
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v4.png"
+                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v5.png"
                                        Width="62" Height="62" Margin="-4" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        AutomationProperties.Name="银渐层小猫小K"/>
@@ -88,7 +88,7 @@
                         </Border>
                         <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="小K" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
-                            <TextBlock Text="银渐层猫咪桌宠" FontSize="11" Foreground="#68728A" Margin="0,2,0,0"/>
+                            <TextBlock Text="银渐层小猫 · 本地伙伴" FontSize="11" Foreground="#62796F" Margin="0,2,0,0"/>
                         </StackPanel>
                         <Border Background="#E8F3EC" CornerRadius="10" Width="98" Padding="7,5" Margin="8,0,0,0"
                                 VerticalAlignment="Center">
@@ -102,13 +102,14 @@
                     </StackPanel>
                 </DockPanel>
 
-                <Border Grid.Row="1" BorderBrush="#DDE4F5" BorderThickness="1"
+                <Border Grid.Row="1" BorderBrush="#D8E9E1" BorderThickness="1"
                         CornerRadius="22" Padding="0" Margin="0,0,0,13" ClipToBounds="True">
                     <Grid>
                         <Grid.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#F5F6FA" Offset="0"/>
-                                <GradientStop Color="#E8F1F5" Offset="1"/>
+                                <GradientStop Color="#F4F9F6" Offset="0"/>
+                                <GradientStop Color="#E4F2EC" Offset="0.72"/>
+                                <GradientStop Color="#EAF0F8" Offset="1"/>
                             </LinearGradientBrush>
                         </Grid.Background>
                         <Grid.ColumnDefinitions>
@@ -116,23 +117,23 @@
                             <ColumnDefinition Width="116"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="16,13,0,13">
-                            <Border Background="#FFFFFF" BorderBrush="#E4E8F4" BorderThickness="1"
+                            <Border Background="#FFFFFF" BorderBrush="#DFECE5" BorderThickness="1"
                                     CornerRadius="10" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,8">
                                 <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="6" Height="6" Fill="#8A83D8" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="银渐层小K · 本地助手" FontSize="10" Foreground="#5D6A7D"/>
+                                    <Ellipse Width="6" Height="6" Fill="#67A992" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="银渐层小K · 本地助手" FontSize="10" Foreground="#587368"/>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="你好，我是小K" FontSize="17" FontWeight="SemiBold" Foreground="#28334D"/>
+                            <TextBlock Text="你好，我是小K" FontSize="17" FontWeight="SemiBold" Foreground="#29443B"/>
                             <TextBlock Text="把想做的事告诉我，我们一起完成。"
-                                       FontSize="11" Foreground="#65718A" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                       FontSize="11" Foreground="#60766D" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v4.png"
+                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v5.png"
                                Width="122" Height="122" Margin="0,-2,-2,-7" Stretch="Uniform"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
                                AutomationProperties.Name="小K银渐层小猫形象">
                             <Image.Effect>
-                                <DropShadowEffect Color="#64718F" BlurRadius="12" ShadowDepth="3" Opacity="0.16"/>
+                                <DropShadowEffect Color="#527568" BlurRadius="12" ShadowDepth="3" Opacity="0.16"/>
                             </Image.Effect>
                         </Image>
                     </Grid>
@@ -159,7 +160,7 @@
                     </WrapPanel>
                     <WrapPanel Margin="0,1,0,0">
                         <Button x:Name="RunButton" Content="运行任务" MinWidth="82" Click="Run_Click"
-                                Background="#7068D9" Foreground="White" FontWeight="SemiBold"/>
+                                Background="#579A83" Foreground="White" FontWeight="SemiBold"/>
                         <Button x:Name="OpenProjectButton" Style="{StaticResource ToolButton}" Content="打开 VS Code 项目"
                                 Click="OpenProject_Click"/>
                         <Button x:Name="CancelButton" Style="{StaticResource ToolButton}" Content="取消任务" Click="Cancel_Click"/>
@@ -175,7 +176,7 @@
                     </WrapPanel>
                 </StackPanel>
 
-                <Border Grid.Row="3" Background="White" CornerRadius="15" BorderBrush="#E4E8F1"
+                <Border Grid.Row="3" Background="White" CornerRadius="15" BorderBrush="#E1EBE6"
                         BorderThickness="1" Margin="0,0,0,11">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -242,9 +243,9 @@
                             <Ellipse Width="250" Height="206" Margin="0,22,0,0" IsHitTestVisible="False">
                                 <Ellipse.Fill>
                                     <RadialGradientBrush>
-                                        <GradientStop Color="#55DAEAF8" Offset="0"/>
-                                        <GradientStop Color="#19D9E6F4" Offset="0.63"/>
-                                        <GradientStop Color="#00D9E6F4" Offset="1"/>
+                                        <GradientStop Color="#55D8EEE4" Offset="0"/>
+                                        <GradientStop Color="#19D8EEE4" Offset="0.63"/>
+                                        <GradientStop Color="#00D8EEE4" Offset="1"/>
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
@@ -256,12 +257,12 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v4.png"
+                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v5.png"
                                    Width="270" Height="270" Margin="0,9,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
                                    AutomationProperties.Name="3D银渐层小猫小K">
                                 <Image.Effect>
-                                    <DropShadowEffect Color="#586781" BlurRadius="18" ShadowDepth="6" Opacity="0.22"/>
+                                    <DropShadowEffect Color="#557366" BlurRadius="18" ShadowDepth="6" Opacity="0.22"/>
                                 </Image.Effect>
                             </Image>
                         </Grid>
@@ -273,8 +274,8 @@
                             <DropShadowEffect Color="#52617A" BlurRadius="14" ShadowDepth="3" Opacity="0.13"/>
                         </Border.Effect>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border Width="26" Height="26" CornerRadius="13" Background="#EEF1FF" Margin="0,0,9,0">
-                                <TextBlock Text="✦" FontSize="14" Foreground="#7773D7"
+                            <Border Width="26" Height="26" CornerRadius="13" Background="#EAF4EF" Margin="0,0,9,0">
+                                <TextBlock Text="✦" FontSize="14" Foreground="#579A83"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                             <StackPanel VerticalAlignment="Center">
