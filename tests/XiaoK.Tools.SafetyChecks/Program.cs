@@ -110,7 +110,8 @@ if (args.Length == 1 && args[0] == "--only-app-launch")
 if (args.Length == 1 && args[0] == "--only-cross-model-arbitration")
 {
     await CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync();
-    Console.WriteLine("通过：竞争模型共用交互优先队列，启动前卸载主模型，结束后不遗留租约。");
+    await CheckIdleRetainedModelRuntimeSwitchingAsync();
+    Console.WriteLine("通过：竞争模型共享交互队列；暖模型复用，切换模型前回收并释放租约。");
     return;
 }
 if (args.Length == 1 && args[0] == "--only-code-inspection")
@@ -343,6 +344,9 @@ try
 
     await CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync();
     passed.Add("ASR/TTS等竞争模型共用交互优先队列，主模型在竞争运行前卸载");
+
+    await CheckIdleRetainedModelRuntimeSwitchingAsync();
+    passed.Add("语音暖模型可在同模型请求间复用；切回主模型或其他模型前先回收");
 
     await CheckContactReplyStylesUseFixedUserPreferencesAsync();
     passed.Add("回复草稿仅使用用户确认的固定风格，且联系人名称不进入模型请求");
@@ -4361,6 +4365,43 @@ static async Task CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync()
         "主模型卸载失败后仍启动了竞争模型。");
 }
 
+static async Task CheckIdleRetainedModelRuntimeSwitchingAsync()
+{
+    var primary = new TrackingModelRuntime();
+    var asrRuntime = new IdleRetainingModelRuntime();
+    var ttsRuntime = new IdleRetainingModelRuntime();
+    var broker = new ModelBroker(primary);
+
+    await broker.RunCompetingModelInteractiveAsync(asrRuntime,
+        _ => Task.FromResult("asr-1"), CancellationToken.None);
+    await broker.RunCompetingModelInteractiveAsync(asrRuntime,
+        _ => Task.FromResult("asr-2"), CancellationToken.None);
+    Require(asrRuntime.Acquisitions == 2 && asrRuntime.ActiveLeases == 0
+        && asrRuntime.IdleScheduleCalls == 2 && asrRuntime.UnloadCalls == 0,
+        "同一个空闲保留模型没有在连续请求间复用，或卸载仍持有租约的进程。");
+
+    await broker.RunCompetingModelInteractiveAsync(ttsRuntime,
+        _ =>
+        {
+            Require(asrRuntime.UnloadCalls == 1 && asrRuntime.ActiveLeases == 0,
+                "从 ASR 切换 TTS 前没有回收 ASR 运行时。");
+            return Task.FromResult("tts");
+        }, CancellationToken.None);
+    Require(ttsRuntime.Acquisitions == 1 && ttsRuntime.IdleScheduleCalls == 1
+        && ttsRuntime.ActiveLeases == 0,
+        "切换到 TTS 后没有建立空闲保留窗口。");
+
+    var primaryRan = await broker.RunInteractiveAsync(_ =>
+    {
+        Require(ttsRuntime.UnloadCalls == 1 && ttsRuntime.ActiveLeases == 0,
+            "切回主模型前没有回收 TTS 运行时。");
+        Require(primary.ActiveLeases == 1, "切回主模型时主运行时租约未建立。");
+        return Task.FromResult(true);
+    }, CancellationToken.None);
+    Require(primaryRan && primary.ActiveLeases == 0 && primary.Acquisitions == 1,
+        "空闲保留运行时切换后主模型租约未能正常释放。");
+}
+
 static async Task CheckModelRuntimeLeaseWrapsEachInferenceStepAsync()
 {
     var runtime = new TrackingModelRuntime();
@@ -5307,6 +5348,53 @@ internal sealed class TrackingModelRuntime : IManagedModelRuntime
     private sealed class Lease(TrackingModelRuntime owner) : IAsyncDisposable
     {
         private TrackingModelRuntime? _owner = owner;
+        public ValueTask DisposeAsync()
+        {
+            var current = Interlocked.Exchange(ref _owner, null);
+            if (current is not null) Interlocked.Decrement(ref current._activeLeases);
+            return ValueTask.CompletedTask;
+        }
+    }
+}
+
+internal sealed class IdleRetainingModelRuntime : IIdleRetainedModelRuntime
+{
+    private int _activeLeases;
+    public string Status => "合成空闲保留运行时";
+    public int Acquisitions { get; private set; }
+    public int UnloadCalls { get; private set; }
+    public int IdleScheduleCalls { get; private set; }
+    public int ActiveLeases => Volatile.Read(ref _activeLeases);
+
+    public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Acquisitions++;
+        Interlocked.Increment(ref _activeLeases);
+        return ValueTask.FromResult<IAsyncDisposable>(new Lease(this));
+    }
+
+    public ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ActiveLeases != 0) throw new InvalidOperationException("暖模型仍有活动租约。");
+        UnloadCalls++;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask ScheduleIdleUnloadAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (ActiveLeases != 0) throw new InvalidOperationException("暖模型仍有活动租约。");
+        IdleScheduleCalls++;
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private sealed class Lease(IdleRetainingModelRuntime owner) : IAsyncDisposable
+    {
+        private IdleRetainingModelRuntime? _owner = owner;
         public ValueTask DisposeAsync()
         {
             var current = Interlocked.Exchange(ref _owner, null);

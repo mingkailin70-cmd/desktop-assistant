@@ -1070,7 +1070,7 @@ public sealed class CodeTaskAgent
         var queueFullResult = MatchSource(@"throw new ModelQueueFullException\(\);");
         var enqueueByMode = MatchSource(@"\(interactive\s*\?\s*_interactiveWaiters\s*:\s*_backgroundWaiters\)\.Enqueue\(waiter\);");
         var modelLease = MatchSource(@"using var lease\s*=\s*await AcquireAsync\(interactive,\s*cancellationToken\)");
-        var inferenceStep = MatchSource(@"return await operation\(cancellationToken\)");
+        var inferenceStep = MatchSource(@"(?:return await operation\(cancellationToken\)|var result = await operation\(cancellationToken\))");
         var releaseDispatch = MatchSource(@"while\s*\(TryTakeNext\(out var waiter\)\)");
         var takeInteractiveFirst = MatchSource(@"while\s*\(_interactiveWaiters\.TryDequeue\(out waiter!\)\)");
         var takeBackgroundSecond = MatchSource(@"while\s*\(_backgroundWaiters\.TryDequeue\(out waiter!\)\)");
@@ -1152,7 +1152,7 @@ public sealed class CodeTaskAgent
             @"throw new ModelQueueFullException\(\);",
             @"\(interactive\s*\?\s*_interactiveWaiters\s*:\s*_backgroundWaiters\)\.Enqueue\(waiter\);",
             @"using var lease\s*=\s*await AcquireAsync\(interactive,\s*cancellationToken\)",
-            @"return await operation\(cancellationToken\)",
+            @"(?:return await operation\(cancellationToken\)|var result = await operation\(cancellationToken\))",
             @"while\s*\(TryTakeNext\(out var waiter\)\)",
             @"while\s*\(_interactiveWaiters\.TryDequeue\(out waiter!\)\)",
             @"while\s*\(_backgroundWaiters\.TryDequeue\(out waiter!\)\)"

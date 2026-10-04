@@ -13,6 +13,15 @@ public interface IManagedModelRuntime : IAsyncDisposable
     ValueTask UnloadIfIdleAsync(CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// A competing runtime that may keep one verified model process warm for a bounded
+/// idle period. The broker unloads it before switching to a different runtime.
+/// </summary>
+public interface IIdleRetainedModelRuntime : IManagedModelRuntime
+{
+    ValueTask ScheduleIdleUnloadAsync(CancellationToken cancellationToken);
+}
+
 public sealed class ModelRuntimeUnavailableException(string message) : Exception(message);
 
 /// <summary>Blocks inference when an explicitly configured managed runtime is invalid.</summary>

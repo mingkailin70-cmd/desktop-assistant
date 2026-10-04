@@ -37,11 +37,13 @@ internal static class VoiceHostRoundTrip
         }
 
         var totalClock = Stopwatch.StartNew();
-        var ttsClockMs = 0d;
-        var asrClockMs = 0d;
+        var ttsColdClockMs = 0d;
+        var ttsWarmClockMs = 0d;
+        var asrColdClockMs = 0d;
+        var asrWarmClockMs = 0d;
         var audioBytes = 0;
-        var normalizedMatch = false;
-        var languageReported = false;
+        var normalizedMatchCount = 0;
+        var languageReportedCount = 0;
         var errorType = (string?)null;
         var modelBrokerWasUsed = false;
         var serviceCreated = false;
@@ -59,17 +61,32 @@ internal static class VoiceHostRoundTrip
                 throw new InvalidOperationException("VOICE_SERVICE_UNAVAILABLE");
 
             var ttsClock = Stopwatch.StartNew();
+            var firstWav = await voice.SynthesizeChineseWavAsync(SyntheticPhrase, deadline.Token);
+            ttsClock.Stop();
+            ttsColdClockMs = ttsClock.Elapsed.TotalMilliseconds;
+            CryptographicOperations.ZeroMemory(firstWav);
+
+            ttsClock.Restart();
             wav = await voice.SynthesizeChineseWavAsync(SyntheticPhrase, deadline.Token);
             ttsClock.Stop();
-            ttsClockMs = ttsClock.Elapsed.TotalMilliseconds;
+            ttsWarmClockMs = ttsClock.Elapsed.TotalMilliseconds;
             audioBytes = wav.Length;
 
             var asrClock = Stopwatch.StartNew();
             var recognition = await voice.TranscribeWavAsync(wav, forceChinese: true, deadline.Token);
             asrClock.Stop();
-            asrClockMs = asrClock.Elapsed.TotalMilliseconds;
-            languageReported = !string.IsNullOrWhiteSpace(recognition.Language);
-            normalizedMatch = Normalize(recognition.Text).Equals(Normalize(SyntheticPhrase), StringComparison.Ordinal);
+            asrColdClockMs = asrClock.Elapsed.TotalMilliseconds;
+            if (!string.IsNullOrWhiteSpace(recognition.Language)) languageReportedCount++;
+            if (Normalize(recognition.Text).Equals(Normalize(SyntheticPhrase), StringComparison.Ordinal))
+                normalizedMatchCount++;
+
+            asrClock.Restart();
+            recognition = await voice.TranscribeWavAsync(wav, forceChinese: true, deadline.Token);
+            asrClock.Stop();
+            asrWarmClockMs = asrClock.Elapsed.TotalMilliseconds;
+            if (!string.IsNullOrWhiteSpace(recognition.Language)) languageReportedCount++;
+            if (Normalize(recognition.Text).Equals(Normalize(SyntheticPhrase), StringComparison.Ordinal))
+                normalizedMatchCount++;
             modelBrokerWasUsed = broker.LastUseUtc is not null;
         }
         catch (Exception exception)
@@ -89,24 +106,28 @@ internal static class VoiceHostRoundTrip
 
         totalClock.Stop();
         var passed = errorType is null && serviceCreated && modelBrokerWasUsed && audioBytes > 44
-            && normalizedMatch && languageReported;
+            && normalizedMatchCount == 2 && languageReportedCount == 2
+            && ttsWarmClockMs < ttsColdClockMs && asrWarmClockMs < asrColdClockMs;
         var report = new
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             startedAtUtc = DateTimeOffset.UtcNow - totalClock.Elapsed,
             completedAtUtc = DateTimeOffset.UtcNow,
             path = "VoiceInferenceService -> ModelBroker -> locked local CPU TTS -> in-memory WAV -> locked local CPU ASR",
             modelRevisions = new { asr = AsrRevision, tts = TtsRevision },
-            sampleCount = 1,
+            ttsCallCount = 2,
+            asrCallCount = 2,
             syntheticTextAndAudioSaved = false,
             transcriptSaved = false,
             wavBytesInMemory = audioBytes,
             wavZeroedAfterUse = wav.Length == 0 || wav.All(value => value == 0),
             modelBrokerObservedUse = modelBrokerWasUsed,
-            ttsElapsedMs = ttsClockMs,
-            asrElapsedMs = asrClockMs,
-            transcriptNormalizedMatch = normalizedMatch,
-            languageFieldPresent = languageReported,
+            ttsColdElapsedMs = ttsColdClockMs,
+            ttsWarmElapsedMs = ttsWarmClockMs,
+            asrColdElapsedMs = asrColdClockMs,
+            asrWarmElapsedMs = asrWarmClockMs,
+            transcriptNormalizedMatchCount = normalizedMatchCount,
+            languageFieldPresentCount = languageReportedCount,
             totalElapsedMs = totalClock.Elapsed.TotalMilliseconds,
             errorType,
             diagnosticPassed = passed
@@ -115,8 +136,10 @@ internal static class VoiceHostRoundTrip
         Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
         await File.WriteAllTextAsync(reportPath,
             JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
-        Console.WriteLine($"Host 语音 CPU 合成往返：{(passed ? "通过" : "未通过")}；"
-            + $"TTS {ttsClockMs:F0} ms，ASR {asrClockMs:F0} ms，文本匹配 {normalizedMatch}。"
+        Console.WriteLine($"Host 语音 CPU 暖模型复用：{(passed ? "通过" : "未通过")}；"
+            + $"TTS 冷/暖 {ttsColdClockMs:F0}/{ttsWarmClockMs:F0} ms，"
+            + $"ASR 冷/暖 {asrColdClockMs:F0}/{asrWarmClockMs:F0} ms，"
+            + $"匹配 {normalizedMatchCount}/2。"
             + "没有保存音频或转写内容。");
         Console.WriteLine($"匿名报告：{reportPath}");
         return passed ? 0 : 1;

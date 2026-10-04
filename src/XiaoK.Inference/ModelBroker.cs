@@ -12,6 +12,7 @@ public sealed class ModelBroker
     private readonly Queue<Waiter> _interactiveWaiters = new();
     private readonly Queue<Waiter> _backgroundWaiters = new();
     private readonly IManagedModelRuntime? _runtime;
+    private IManagedModelRuntime? _lastRuntime;
     private bool _modelInUse;
     private Exception? _terminalFailure;
     private long _lastUseUtcTicks;
@@ -62,29 +63,21 @@ public sealed class ModelBroker
 
         using var lease = await AcquireAsync(interactive, cancellationToken).ConfigureAwait(false);
         IAsyncDisposable? runtimeLease = null;
+        var operationSucceeded = false;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (competingRuntime && _runtime is not null)
-            {
-                try
-                {
-                    await _runtime.UnloadIfIdleAsync(cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    Poison(ex);
-                    throw new ModelBrokerUnavailableException(ex);
-                }
-            }
+            await UnloadIncompatibleRuntimeAsync(operationRuntime, competingRuntime, cancellationToken)
+                .ConfigureAwait(false);
             if (operationRuntime is not null)
+            {
                 runtimeLease = await operationRuntime.AcquireAsync(cancellationToken).ConfigureAwait(false);
+                _lastRuntime = operationRuntime;
+            }
             cancellationToken.ThrowIfCancellationRequested();
-            return await operation(cancellationToken).ConfigureAwait(false);
+            var result = await operation(cancellationToken).ConfigureAwait(false);
+            operationSucceeded = true;
+            return result;
         }
         finally
         {
@@ -102,7 +95,14 @@ public sealed class ModelBroker
             {
                 try
                 {
-                    await operationRuntime.UnloadIfIdleAsync(CancellationToken.None).ConfigureAwait(false);
+                    if (operationSucceeded && operationRuntime is IIdleRetainedModelRuntime retainedRuntime)
+                        await retainedRuntime.ScheduleIdleUnloadAsync(CancellationToken.None).ConfigureAwait(false);
+                    else
+                        await operationRuntime.UnloadIfIdleAsync(CancellationToken.None).ConfigureAwait(false);
+                    if (operationRuntime is not IIdleRetainedModelRuntime || !operationSucceeded)
+                    {
+                        if (ReferenceEquals(_lastRuntime, operationRuntime)) _lastRuntime = null;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -116,6 +116,36 @@ public sealed class ModelBroker
                 Poison(cleanupFailure);
                 throw new ModelBrokerUnavailableException(cleanupFailure);
             }
+        }
+    }
+
+    private async Task UnloadIncompatibleRuntimeAsync(IManagedModelRuntime? operationRuntime,
+        bool competingRuntime, CancellationToken cancellationToken)
+    {
+        var previousRuntime = _lastRuntime;
+        try
+        {
+            if (competingRuntime && _runtime is not null && !ReferenceEquals(_runtime, operationRuntime))
+            {
+                await _runtime.UnloadIfIdleAsync(cancellationToken).ConfigureAwait(false);
+                if (ReferenceEquals(_lastRuntime, _runtime)) _lastRuntime = null;
+            }
+
+            if (previousRuntime is not null && !ReferenceEquals(previousRuntime, operationRuntime)
+                && !(competingRuntime && ReferenceEquals(previousRuntime, _runtime)))
+            {
+                await previousRuntime.UnloadIfIdleAsync(cancellationToken).ConfigureAwait(false);
+                if (ReferenceEquals(_lastRuntime, previousRuntime)) _lastRuntime = null;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Poison(ex);
+            throw new ModelBrokerUnavailableException(ex);
         }
     }
 

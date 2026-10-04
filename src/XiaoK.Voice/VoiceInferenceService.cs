@@ -14,7 +14,7 @@ namespace XiaoK.Voice;
 public sealed record SpeechRecognition(string Text, string Language);
 
 /// <summary>
-/// 本地语音推理入口。ASR 与 TTS 均由 ModelBroker 排队；当前首测强制使用 CPU，避免未经测量占用独显。
+/// 本地语音推理入口。ASR 与 TTS 由 ModelBroker 排队，强制使用 CPU；同一模型可保留两分钟，切换模型时立即回收。
 /// </summary>
 public sealed class VoiceInferenceService : IAsyncDisposable
 {
@@ -37,7 +37,7 @@ public sealed class VoiceInferenceService : IAsyncDisposable
         _tts = tts;
     }
 
-    public string Status => "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；合成往返单样例通过，麦克风未采集，设备与语音质量仍待验收。";
+    public string Status => "本地 ASR/TTS 工作进程已配置（CPU 按需加载，空闲两分钟卸载，切换模型时立即回收）；开发版冷/暖合成往返通过，麦克风未采集，设备与语音质量仍待验收。";
 
     /// <summary>Loads a verified local model only for the duration of this scheduled inference call.</summary>
     public Task<SpeechRecognition> TranscribeWavAsync(ReadOnlyMemory<byte> wav, bool forceChinese,
@@ -142,7 +142,7 @@ public sealed class VoiceInferenceService : IAsyncDisposable
                 "85e237c12c027371202489a0ec509ded67b5e4b5", packageRootReparse);
             var asr = new PythonVoiceModelRuntime("asr", asrDefinition);
             var tts = new PythonVoiceModelRuntime("tts", ttsDefinition);
-            status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载）；合成往返单样例通过，麦克风未采集，设备与语音质量仍待验收。";
+            status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载，空闲两分钟卸载，切换模型时立即回收）；开发版冷/暖合成往返通过，麦克风未采集，设备与语音质量仍待验收。";
             return new VoiceInferenceService(broker, asr, tts);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or JsonException
@@ -340,19 +340,24 @@ internal sealed record VoiceModelFile(string Name, long Size, string Sha256);
 internal sealed record VoiceModelDefinition(string ModelId, string ModelDirectory, string PythonPath,
     string WorkerPath, IReadOnlyList<VoiceModelFile> Files);
 
-internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition definition) : IManagedModelRuntime
+internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition definition) : IIdleRetainedModelRuntime
 {
     private const int MaximumProtocolLineCharacters = 20 * 1024 * 1024;
+    private static readonly TimeSpan IdleUnloadDelay = TimeSpan.FromMinutes(2);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Process? _process;
     private Task? _stderrDrain;
     private KillOnCloseJobHandle? _job;
     private readonly List<FileStream> _modelPins = [];
+    private CancellationTokenSource? _idleUnloadCancellation;
     private int _leases;
     private bool _disposed;
+    private string? _idleUnloadFailure;
     private readonly StringBuilder _stderrTail = new();
 
-    public string Status => $"本地 {task.ToUpperInvariant()} 模型：固定版本、CPU 工作进程、任务结束即卸载。";
+    public string Status => _idleUnloadFailure is null
+        ? $"本地 {task.ToUpperInvariant()} 模型：固定版本、CPU 工作进程，空闲两分钟后卸载；切换模型时立即回收。"
+        : $"本地 {task.ToUpperInvariant()} 模型空闲回收状态未确认：{_idleUnloadFailure}。";
 
     public async ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
     {
@@ -361,6 +366,7 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
         {
             if (_disposed) throw new ObjectDisposedException(nameof(PythonVoiceModelRuntime));
             if (_leases != 0) throw new InvalidOperationException("语音模型租约不可重入。");
+            CancelIdleUnload();
             if (_process is null || _process.HasExited)
             {
                 await StopProcessLockedAsync().ConfigureAwait(false);
@@ -379,7 +385,25 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
         try
         {
             if (_leases != 0) throw new InvalidOperationException("语音工作进程仍持有模型租约。");
+            CancelIdleUnload();
             await StopProcessLockedAsync().ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async ValueTask ScheduleIdleUnloadAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(PythonVoiceModelRuntime));
+            if (_leases != 0) throw new InvalidOperationException("语音工作进程仍持有模型租约。");
+            if (_process is null || _process.HasExited)
+            {
+                await StopProcessLockedAsync().ConfigureAwait(false);
+                return;
+            }
+            ScheduleIdleUnload();
         }
         finally { _gate.Release(); }
     }
@@ -421,6 +445,7 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
         {
             if (_disposed) return;
             if (_leases != 0) throw new InvalidOperationException("不能在语音推理租约活动时释放工作进程。");
+            CancelIdleUnload();
             await StopProcessLockedAsync().ConfigureAwait(false);
             _disposed = true;
         }
@@ -597,6 +622,45 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
         finally { _gate.Release(); }
     }
 
+    private void ScheduleIdleUnload()
+    {
+        CancelIdleUnload();
+        var cancellation = new CancellationTokenSource();
+        _idleUnloadCancellation = cancellation;
+        _ = StopAfterIdleAsync(cancellation);
+    }
+
+    private async Task StopAfterIdleAsync(CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(IdleUnloadDelay, cancellation.Token).ConfigureAwait(false);
+            await _gate.WaitAsync(cancellation.Token).ConfigureAwait(false);
+            try
+            {
+                if (!_disposed && _leases == 0 && ReferenceEquals(_idleUnloadCancellation, cancellation))
+                    await StopProcessLockedAsync().ConfigureAwait(false);
+            }
+            finally { _gate.Release(); }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception) { _idleUnloadFailure = exception.GetType().Name; }
+        finally
+        {
+            if (ReferenceEquals(_idleUnloadCancellation, cancellation)) _idleUnloadCancellation = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelIdleUnload()
+    {
+        var cancellation = _idleUnloadCancellation;
+        _idleUnloadCancellation = null;
+        if (cancellation is null) return;
+        try { cancellation.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
     private async Task StopProcessLockedAsync()
     {
         var process = _process;
@@ -630,6 +694,7 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
         _stderrDrain = null;
         foreach (var pin in _modelPins) await pin.DisposeAsync().ConfigureAwait(false);
         _modelPins.Clear();
+        _idleUnloadFailure = null;
     }
 
     private async ValueTask ReleaseLeaseAsync()

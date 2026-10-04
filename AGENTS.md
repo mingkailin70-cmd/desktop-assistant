@@ -4,6 +4,8 @@
 
 截至 2026-10-04，本仓库已有 .NET 10/WPF 桌面助手、隔离工具边界、SQLite 状态存储、语音接线和本地推理候选评测。当前账户已安装签名 MSIX `0.1.31.0`，Host 经 Windows 应用入口启动，桌宠窗口标题为“小K”；原生窗口截图未被当前自动化接口枚举，故新素材外观截图复验仍待完成。Windows 登录启动任务状态为启用，但实际注销/重启后的登录激活仍未验收。桌宠源码和当前安装版使用 v9 透明 3D 银渐层猫素材（1254×1254 BGRA、角点透明），收起态、头像和欢迎区使用同一图；Direct EXE 调用曾暴露空激活参数异常，源码已加空值保护并随0.1.31.0更新。固定 SDK Release 构建 0 警告、0 错误，Windows 安全检查95项通过、0项跳过。已安装版文件搜索 UI 复验找到了 `D:\Desktop\learn\siri\XiaoK.sln`；未命中测试明确提示扫描达到5,000项上限，因此结果可能不完整，不能据此宣称文件搜索全面验收。挥爪银渐层仍是静态 PNG 的 3D 渲染，不是实时网格或动画。编码代理源码事实管线 v70 的 R05–R07 均通过独立评分（3/40）；其余37题未测，v68 的 R05/R06、R01–R03等不同管线成绩不合并，P0编码门槛仍未通过。四组正式部署模型与 llama.cpp 运行时已迁入 `D:\XiaoK\Models`（87个文件、10,348,191,088字节，逐文件大小和 SHA-256 一致）；ASR/TTS 已在 `D:\XiaoK\Voice` 离线部署并通过97/91项依赖检查与导入，正式路径 CPU 合成往返6/6匹配。Host 能发现托管模型清单，但实际模型质量、GPU资源、语音设备、真实通知身份与私聊分类、外发适配器、登录/重启恢复及全部 P0/P4 验收仍未完成。开始工作时核对代码、文档、Git 状态与 P0/P1 证据，清楚区分“已实现”“待接入”“待本机验收”。
 
+本阶段工作树新增 CPU ASR/TTS 暖模型保留：同一模型成功调用后最多保留两分钟，切换到另一个模型时立即回收。ModelBroker 仲裁回归通过，Windows 安全套件96项通过、0项跳过，Release 解决方案构建0警告/0错误；开发版冷/暖单句回环中 TTS 为19.53/9.94秒、ASR为10.80/0.82秒，文本归一化匹配2/2。当前已安装 MSIX 仍为 `0.1.31.0`，没有本阶段改动；两分钟到期、长时间资源占用、安装版与真实音频设备验收仍待完成。
+
 本地工作目录由开发者自定；当前分支 main，远端为 https://github.com/mingkailin70-cmd/desktop-assistant.git。每完成一个阶段，整理一个聚焦提交并推送；不要强推或重写已发布历史。远端初始提交必须保留。
 
 ## 项目目标与首版边界
@@ -41,4 +43,4 @@
 
 ## 工程与进度
 
-解决方案 XiaoK.sln 包含 XiaoK.Host、XiaoK.Core、XiaoK.Tools、XiaoK.Adapters.Windows、XiaoK.Inference、XiaoK.Voice 与 XiaoK.Storage。运行本地构建前不隐式下载依赖，需使用明确的锁定安装流程和仓库固定 SDK；用户已授权本项目下载和必要联网操作，无需逐项确认。每个里程碑提交前检查 Git diff 和忽略规则；完成阶段后将该阶段提交推送至用户指定 origin。
+解决方案 XiaoK.sln 包含 XiaoK.Host、XiaoK.Core、XiaoK.Tools、XiaoK.Adapters.Windows、XiaoK.Inference、XiaoK.Voice、XiaoK.Storage，以及 `tools/` 下的 XiaoK.RuntimeDiagnostics 和 XiaoK.CodingBenchmark。运行本地构建前不隐式下载依赖，需使用明确的锁定安装流程和仓库固定 SDK；用户已授权本项目下载和必要联网操作，无需逐项确认。每个里程碑提交前检查 Git diff 和忽略规则；完成阶段后将该阶段提交推送至用户指定 origin。
