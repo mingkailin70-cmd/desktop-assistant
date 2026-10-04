@@ -1361,6 +1361,21 @@ static async Task CheckLineAnchoredEditDisambiguatesDuplicateTextAsync(string ro
     Require(!rejected.Success && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
         && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
         "越出文件范围的 startLine 在一次纠正后仍进入审阅或修改原项目。");
+
+    const string uniqueSource = "class Sample {\n    int Value = 1;\n}\n";
+    const string wrongUniqueAnchorPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"find\":\"int Value = 1;\",\"replace\":\"int Value = 3;\"}]}";
+    var uniqueProject = CreateProject(root, "line-anchored-edit-unique-fallback", uniqueSource);
+    var uniqueWorkspaceRoot = Path.Combine(root, "line-anchored-edit-unique-fallback-workspaces");
+    var uniqueInference = new ScriptedInference(wrongUniqueAnchorPatch);
+    var uniqueReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var uniqueResult = await NewAgent(uniqueInference).ExecuteAsync(uniqueProject, uniqueWorkspaceRoot,
+        "只把 Value 改为 3", CancellationToken.None, uniqueReview);
+    var uniqueWorkspace = Path.Combine(Directory.GetDirectories(uniqueWorkspaceRoot).Single(), "workspace", "Sample.cs");
+    Require(uniqueResult.Success && uniqueResult.FinalState == TaskLifecycleState.AwaitingApproval
+        && uniqueInference.CallCount == 1 && uniqueReview.CallCount == 1
+        && File.ReadAllText(uniqueWorkspace) == "class Sample {\n    int Value = 3;\n}\n"
+        && File.ReadAllText(Path.Combine(uniqueProject, "Sample.cs")) == uniqueSource,
+        "错误行锚下的唯一原文没有安全回退到唯一匹配，或回退修改了原项目。" + uniqueResult.Summary);
 }
 
 static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
@@ -1386,7 +1401,9 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
         && correctionPrompt.Contains(rejectedEdit, StringComparison.Ordinal)
         && correctionPrompt.Contains("文件清单之外的路径", StringComparison.Ordinal)
         && correctionPrompt.Contains("受限源代码片段JSON", StringComparison.Ordinal)
-        && systemPrompts.Any(prompt => prompt.Contains("不得扩大文件、路径、片段、权限或操作范围", StringComparison.Ordinal)),
+        && systemPrompts.Any(prompt => prompt.Contains("不得扩大文件、路径、片段、权限或操作范围", StringComparison.Ordinal))
+        && systemPrompts.Any(prompt => prompt.Contains("优先不提供startLine", StringComparison.Ordinal))
+        && systemPrompts.Any(prompt => prompt.Contains("原文件中全文唯一出现，应省略startLine", StringComparison.Ordinal)),
         "纠正提示没有明确传达固定校验原因和不扩大的授权边界。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source
         && File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs")) == "class Sample { int Value = 3; }\n",
