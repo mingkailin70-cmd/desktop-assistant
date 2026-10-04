@@ -1592,13 +1592,26 @@ static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string roo
         4 => "reader missing",
         _ => throw new ArgumentOutOfRangeException(nameof(number))
     };
-    string BuildAnswer(IEnumerable<int> topicNumbers, int? wrongOutcomeTopic = null) => JsonSerializer.Serialize(new
+    int SourceLineFor(int number)
+    {
+        var index = source.IndexOf(ConditionFor(number), StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException("The synthetic guard condition is missing from its source fixture.");
+        return source[..index].Count(character => character == '\n') + 1;
+    }
+    var targetCallIndex = source.IndexOf("visibleBodyReader()", StringComparison.Ordinal);
+    if (targetCallIndex < 0) throw new InvalidOperationException("The synthetic target call is missing from its source fixture.");
+    var targetCallLine = source[..targetCallIndex].Count(character => character == '\n') + 1;
+    string BuildAnswer(IEnumerable<int> topicNumbers, int? wrongOutcomeTopic = null, int? wrongCitationTopic = null) => JsonSerializer.Serialize(new
     {
         claims = topicNumbers.Select(number => new
         {
             topic = $"调用前门槛{number}",
             text = $"当`{ConditionFor(number)}`成立时，返回“{OutcomeFor(wrongOutcomeTopic == number ? number % 4 + 1 : number)}”；否则继续检查。",
-            citations = new[] { new { path = targetPath, line = 1 } }
+            citations = new[]
+            {
+                new { path = targetPath, line = SourceLineFor(wrongCitationTopic == number ? number % 4 + 1 : number) },
+                new { path = targetPath, line = targetCallLine }
+            }
         })
     });
 
@@ -1611,6 +1624,8 @@ static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string roo
     var missingInference = new ScriptedInference(missingAnswer, missingAnswer);
     var missingResult = await NewAgent(missingInference).InspectAsync(
         missingProject, missingWorkspace, prompt, CancellationToken.None);
+    var missingCorrectionPrompt = missingInference.Prompts.Single(promptText =>
+        promptText.Contains("本次结构校验反馈（固定诊断）", StringComparison.Ordinal));
     var missingSchemaEnums = missingInference.RequestOptions.Where(options => options.JsonSchema.HasValue)
         .Select(options => options.JsonSchema!.Value.GetProperty("properties").GetProperty("claims")
             .GetProperty("items").GetProperty("properties").GetProperty("topic").GetProperty("enum")
@@ -1622,8 +1637,10 @@ static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string roo
         && missingSchemaEnums.All(items => items.SequenceEqual(expectedTopics))
         && missingInference.Prompts.Any(promptText => promptText.Contains("必需主题覆盖不足", StringComparison.Ordinal)
             && promptText.Contains("调用前门槛3", StringComparison.Ordinal))
-        && missingInference.Prompts.Any(promptText => promptText.Contains("isPrivateConversation != true", StringComparison.Ordinal)),
-        "只读检索没有把私聊确认设为必答调用前门槛，或门槛缺失时没有失败关闭。");
+        && missingInference.Prompts.Any(promptText => promptText.Contains("isPrivateConversation != true", StringComparison.Ordinal))
+        && missingCorrectionPrompt.Contains("从头生成完整JSON", StringComparison.Ordinal)
+        && !missingCorrectionPrompt.Contains(missingAnswer, StringComparison.Ordinal),
+        "只读检索没有把私聊确认设为必答调用前门槛、缺项时失败关闭，或纠正请求携带了此前未通过的答案。");
 
     var orderProject = CreateProject(root, "code-inspection-pre-read-order", source);
     var orderTarget = Path.Combine(orderProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
@@ -1648,10 +1665,31 @@ static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string roo
     var semanticInference = new ScriptedInference(wrongOutcome, wrongOutcome);
     var semanticResult = await NewAgent(semanticInference).InspectAsync(
         semanticProject, semanticWorkspace, prompt, CancellationToken.None);
-    Require(!semanticResult.Success && semanticResult.ErrorCode == "INVALID_CODE_EXPLANATION"
-        && semanticInference.CallCount == 2
-        && semanticInference.Prompts.Any(promptText => promptText.Contains("主题“调用前门槛3”未逐字保留", StringComparison.Ordinal)),
-        "只读检索没有拒绝把其他门槛的返回结果移用到私聊判断条件。");
+    var semanticClaims = semanticResult.Data?.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries) ?? [];
+    var privateGuardClaim = semanticClaims.SingleOrDefault(line => line.StartsWith("调用前门槛3：", StringComparison.Ordinal));
+    Require(semanticResult.Success && semanticInference.CallCount == 1
+        && privateGuardClaim is not null
+        && privateGuardClaim.Contains("isPrivateConversation != true", StringComparison.Ordinal)
+        && privateGuardClaim.Contains("not private", StringComparison.Ordinal)
+        && !privateGuardClaim.Contains("source missing", StringComparison.Ordinal)
+        && semanticResult.Data!.Contains("调用前门槛1：", StringComparison.Ordinal)
+        && semanticResult.Data.Contains("source missing", StringComparison.Ordinal),
+        "只读检索没有按门槛自身的源码行生成固定条件和对应返回结果，或仍采用了模型的错误返回文本。");
+
+    var wrongCitationProject = CreateProject(root, "code-inspection-pre-read-wrong-guard-citation", source);
+    var wrongCitationTarget = Path.Combine(wrongCitationProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(wrongCitationTarget)!);
+    File.Move(Path.Combine(wrongCitationProject, "Sample.cs"), wrongCitationTarget);
+    var wrongCitationWorkspace = Path.Combine(root, "code-inspection-pre-read-wrong-guard-citation-workspaces");
+    var wrongCitationAnswer = BuildAnswer([1, 2, 3, 4], wrongCitationTopic: 3);
+    var wrongCitationInference = new ScriptedInference(wrongCitationAnswer, wrongCitationAnswer);
+    var wrongCitationResult = await NewAgent(wrongCitationInference).InspectAsync(
+        wrongCitationProject, wrongCitationWorkspace, prompt, CancellationToken.None);
+    Require(!wrongCitationResult.Success && wrongCitationResult.ErrorCode == "INVALID_CODE_EXPLANATION"
+        && wrongCitationInference.CallCount == 2
+        && wrongCitationInference.Prompts.Any(promptText => promptText.Contains("调用前门槛3", StringComparison.Ordinal)
+            && promptText.Contains("目标调用行", StringComparison.Ordinal)),
+        "只读检索接受了借用其他门槛源码行的引用，或没有要求同时引用被保护的目标调用行。");
 
     var validProject = CreateProject(root, "code-inspection-valid-pre-read-outcomes", source);
     var validTarget = Path.Combine(validProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
