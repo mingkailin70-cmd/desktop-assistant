@@ -1440,6 +1440,7 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 
     await CheckCodeInspectionRejectsInsufficientClaimsAsync(root);
     await CheckCodeInspectionRejectsMissingTopicsAsync(root);
+    await CheckCodeInspectionRequiresOrderedPreReadGatesAsync(root);
 }
 
 static void CheckExplanationClaimCountEstimator()
@@ -1542,6 +1543,113 @@ static async Task CheckCodeInspectionRejectsMissingTopicsAsync(string root)
     Require(File.ReadAllText(target) == original
         && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
         "缺失题目主题时没有失败关闭，或改写了原项目。");
+}
+
+static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string root)
+{
+    const string source = "namespace XiaoK.Core;\n"
+        + "internal static class Policy {\n"
+        + "    public static string? Inspect(string? sourceAppId, bool permissionGranted, bool? isPrivateConversation, Func<string?> visibleBodyReader) {\n"
+        + "        if (sourceAppId is null) return \"source missing\";\n"
+        + "        if (!permissionGranted) return \"permission denied\";\n"
+        + "        if (isPrivateConversation != true) return \"not private\";\n"
+        + "        if (visibleBodyReader is null) return \"reader missing\";\n"
+        + "        return visibleBodyReader();\n"
+        + "    }\n"
+        + "}\n";
+    const string prompt = "只依据目标文件回答：src/XiaoK.Core/MessageNoticePolicy.cs\n按顺序说明通知正文读取前的安全条件。";
+    const string targetPath = "src/XiaoK.Core/MessageNoticePolicy.cs";
+    var expectedTopics = new[] { "调用前门槛1", "调用前门槛2", "调用前门槛3", "调用前门槛4" };
+
+    string ConditionFor(int number) => number switch
+    {
+        1 => "sourceAppId is null",
+        2 => "!permissionGranted",
+        3 => "isPrivateConversation != true",
+        4 => "visibleBodyReader is null",
+        _ => throw new ArgumentOutOfRangeException(nameof(number))
+    };
+    string OutcomeFor(int number) => number switch
+    {
+        1 => "source missing",
+        2 => "permission denied",
+        3 => "not private",
+        4 => "reader missing",
+        _ => throw new ArgumentOutOfRangeException(nameof(number))
+    };
+    string BuildAnswer(IEnumerable<int> topicNumbers, int? wrongOutcomeTopic = null) => JsonSerializer.Serialize(new
+    {
+        claims = topicNumbers.Select(number => new
+        {
+            topic = $"调用前门槛{number}",
+            text = $"当`{ConditionFor(number)}`成立时，返回“{OutcomeFor(wrongOutcomeTopic == number ? number % 4 + 1 : number)}”；否则继续检查。",
+            citations = new[] { new { path = targetPath, line = 1 } }
+        })
+    });
+
+    var missingProject = CreateProject(root, "code-inspection-missing-pre-read-gate", source);
+    var missingTarget = Path.Combine(missingProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(missingTarget)!);
+    File.Move(Path.Combine(missingProject, "Sample.cs"), missingTarget);
+    var missingWorkspace = Path.Combine(root, "code-inspection-missing-pre-read-gate-workspaces");
+    var missingAnswer = BuildAnswer([1, 1, 2, 4]);
+    var missingInference = new ScriptedInference(missingAnswer, missingAnswer);
+    var missingResult = await NewAgent(missingInference).InspectAsync(
+        missingProject, missingWorkspace, prompt, CancellationToken.None);
+    var missingSchemaEnums = missingInference.RequestOptions.Where(options => options.JsonSchema.HasValue)
+        .Select(options => options.JsonSchema!.Value.GetProperty("properties").GetProperty("claims")
+            .GetProperty("items").GetProperty("properties").GetProperty("topic").GetProperty("enum")
+            .EnumerateArray().Select(item => item.GetString()).ToArray()).ToArray();
+
+    Require(!missingResult.Success && missingResult.ErrorCode == "INVALID_CODE_EXPLANATION"
+        && missingInference.CallCount == 2
+        && missingSchemaEnums.Length == 2
+        && missingSchemaEnums.All(items => items.SequenceEqual(expectedTopics))
+        && missingInference.Prompts.Any(promptText => promptText.Contains("必需主题覆盖不足", StringComparison.Ordinal)
+            && promptText.Contains("调用前门槛3", StringComparison.Ordinal))
+        && missingInference.Prompts.Any(promptText => promptText.Contains("isPrivateConversation != true", StringComparison.Ordinal)),
+        "只读检索没有把私聊确认设为必答调用前门槛，或门槛缺失时没有失败关闭。");
+
+    var orderProject = CreateProject(root, "code-inspection-pre-read-order", source);
+    var orderTarget = Path.Combine(orderProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(orderTarget)!);
+    File.Move(Path.Combine(orderProject, "Sample.cs"), orderTarget);
+    var orderWorkspace = Path.Combine(root, "code-inspection-pre-read-order-workspaces");
+    var reversedAnswer = BuildAnswer([2, 1, 3, 4]);
+    var orderInference = new ScriptedInference(reversedAnswer, reversedAnswer);
+    var orderResult = await NewAgent(orderInference).InspectAsync(
+        orderProject, orderWorkspace, prompt, CancellationToken.None);
+    Require(!orderResult.Success && orderResult.ErrorCode == "INVALID_CODE_EXPLANATION"
+        && orderInference.CallCount == 2
+        && orderInference.Prompts.Any(promptText => promptText.Contains("主题顺序与源码中的调用前门槛顺序不一致", StringComparison.Ordinal)),
+        "只读检索没有按源码实际顺序拒绝调用前门槛的倒序回答。");
+
+    var semanticProject = CreateProject(root, "code-inspection-pre-read-outcome-mismatch", source);
+    var semanticTarget = Path.Combine(semanticProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(semanticTarget)!);
+    File.Move(Path.Combine(semanticProject, "Sample.cs"), semanticTarget);
+    var semanticWorkspace = Path.Combine(root, "code-inspection-pre-read-outcome-mismatch-workspaces");
+    var wrongOutcome = BuildAnswer([1, 2, 3, 4], wrongOutcomeTopic: 3);
+    var semanticInference = new ScriptedInference(wrongOutcome, wrongOutcome);
+    var semanticResult = await NewAgent(semanticInference).InspectAsync(
+        semanticProject, semanticWorkspace, prompt, CancellationToken.None);
+    Require(!semanticResult.Success && semanticResult.ErrorCode == "INVALID_CODE_EXPLANATION"
+        && semanticInference.CallCount == 2
+        && semanticInference.Prompts.Any(promptText => promptText.Contains("主题“调用前门槛3”未逐字保留", StringComparison.Ordinal)),
+        "只读检索没有拒绝把其他门槛的返回结果移用到私聊判断条件。");
+
+    var validProject = CreateProject(root, "code-inspection-valid-pre-read-outcomes", source);
+    var validTarget = Path.Combine(validProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(validTarget)!);
+    File.Move(Path.Combine(validProject, "Sample.cs"), validTarget);
+    var validWorkspace = Path.Combine(root, "code-inspection-valid-pre-read-outcomes-workspaces");
+    var validInference = new ScriptedInference(BuildAnswer([1, 2, 3, 4]));
+    var validResult = await NewAgent(validInference).InspectAsync(
+        validProject, validWorkspace, prompt, CancellationToken.None);
+    Require(validResult.Success && validInference.CallCount == 1
+        && validResult.Data!.Contains("isPrivateConversation != true", StringComparison.Ordinal)
+        && validResult.Data.Contains("not private", StringComparison.Ordinal),
+        $"只读检索拒绝了同时准确复述源码条件和其对应返回结果的门槛说明。result={validResult.ErrorCode}:{validResult.Summary}; data={validResult.Data}; calls={validInference.CallCount}");
 }
 
 static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string root)
