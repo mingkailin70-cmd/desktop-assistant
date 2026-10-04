@@ -74,6 +74,12 @@ if (args.Length == 1 && args[0] == "--only-window-selection")
     Console.WriteLine("通过：窗口目标选择只接受唯一且非零的句柄。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-window-sizing")
+{
+    CheckWindowAreaSizingPolicy();
+    Console.WriteLine("通过：窗口尺寸按显示器工作区与 DPI 限制，并在空间不足时启用可滚动布局。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-pet-position-store")
 {
     var petPositionRoot = Path.Combine(Path.GetTempPath(), "XiaoK-PetPositionProbe-" + Guid.NewGuid().ToString("N"));
@@ -166,6 +172,9 @@ try
 
     CheckPetWindowPositionStore(Path.Combine(tempRoot, "PetWindowPosition"));
     passed.Add("桌宠位置使用独立原子文件保存；损坏和越界数据失败关闭，通用设置保持不变");
+
+    CheckWindowAreaSizingPolicy();
+    passed.Add("桌面窗口尺寸按工作区物理尺寸和 DPI 限制，小屏下最小尺寸随可用空间收缩");
 
     CheckAppContainerRecoveryRejectsCorruptManifest(tempRoot);
     passed.Add("隔离恢复记录损坏时失败关闭且保留证据");
@@ -2489,6 +2498,29 @@ static void CheckWindowMatchSelection()
         "重复出现的同一窗口句柄没有去重为唯一目标。");
     Require(ambiguousTarget.Status == WindowMatchStatus.Ambiguous && ambiguousTarget.Handle == IntPtr.Zero,
         "多个不同窗口句柄没有失败关闭并要求用户手动选择。");
+}
+
+static void CheckWindowAreaSizingPolicy()
+{
+    var standard = WindowAreaSizingPolicy.FitToWorkArea(500, 650, 440, 560, 1920, 1080, 144);
+    Require(standard.WidthDip == 500 && standard.HeightDip == 650
+        && standard.MaximumWidthDip == 1280 && standard.MaximumHeightDip == 720,
+        "正常工作区下窗口尺寸或 DIP/物理像素换算错误。");
+
+    var constrained = WindowAreaSizingPolicy.FitToWorkArea(500, 650, 440, 560, 1200, 900, 192);
+    Require(constrained.WidthDip == 500 && constrained.HeightDip == 450
+        && constrained.MinimumHeightDip == 450 && constrained.MaximumHeightDip == 450,
+        "高 DPI 小屏下窗口没有缩至可用高度。");
+
+    var verySmall = WindowAreaSizingPolicy.FitToWorkArea(500, 650, 440, 560, 640, 480, 192);
+    Require(verySmall.WidthDip == 320 && verySmall.HeightDip == 240
+        && verySmall.MinimumWidthDip == 320 && verySmall.MinimumHeightDip == 240,
+        "工作区小于首选最小尺寸时未缩至实际可用范围。");
+
+    var rejectedInvalidDpi = false;
+    try { _ = WindowAreaSizingPolicy.FitToWorkArea(500, 650, 440, 560, 1920, 1080, 0); }
+    catch (ArgumentOutOfRangeException) { rejectedInvalidDpi = true; }
+    Require(rejectedInvalidDpi, "无效 DPI 被用于窗口工作区换算。");
 }
 
 static void CheckPetWindowPositionStore(string root)

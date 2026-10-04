@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\..\src\XiaoK.Tools\XiaoK.Tools.csproj" />
+    <ProjectReference Include="..\..\src\XiaoK.Core\XiaoK.Core.csproj" />
     <ProjectReference Include="..\..\src\XiaoK.Storage\XiaoK.Storage.csproj" />
     <ProjectReference Include="..\..\src\XiaoK.Voice\XiaoK.Voice.csproj" />
   </ItemGroup>

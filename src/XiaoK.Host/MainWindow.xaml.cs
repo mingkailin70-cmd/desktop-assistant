@@ -407,7 +407,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         {
             try { DragMove(); }
             catch (InvalidOperationException) { return; }
-            ClampWindowToMonitorWorkArea();
+            FitWindowToMonitorWorkArea();
             SaveWindowPosition();
         }
     }
@@ -741,7 +741,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         else if (msg is WmDisplayChange or WmDpiChanged)
         {
             _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
-                new Action(ClampWindowToMonitorWorkArea));
+                new Action(FitWindowToMonitorWorkArea));
         }
         return IntPtr.Zero;
     }
@@ -819,6 +819,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             }
 
             _expanded = expanded;
+            ExpandedViewScroller.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
             ExpandedView.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
             PetView.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
             ResizeMode = expanded ? ResizeMode.CanResizeWithGrip : ResizeMode.NoResize;
@@ -831,11 +832,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             ShellBorder.BorderThickness = expanded ? new Thickness(1) : new Thickness(0);
             ShellBorder.Padding = expanded ? new Thickness(14) : new Thickness(0);
             ShellBorder.Margin = expanded ? new Thickness(5) : new Thickness(0);
-            MinWidth = expanded ? 440 : PetWindowWidth;
-            MinHeight = expanded ? 560 : PetWindowHeight;
-            Width = expanded ? _expandedWidth : PetWindowWidth;
-            Height = expanded ? _expandedHeight : PetWindowHeight;
-            ClampWindowToMonitorWorkArea();
+            FitWindowToMonitorWorkArea();
             if (expanded)
             {
                 ExpandButton.Content = "收起";
@@ -854,7 +851,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         {
             _expandedWidth = Width;
             _expandedHeight = Height;
-            ClampWindowToMonitorWorkArea();
+            FitWindowToMonitorWorkArea();
         }
     }
 
@@ -867,7 +864,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             try
             {
                 DragMove();
-                ClampWindowToMonitorWorkArea();
+                FitWindowToMonitorWorkArea();
                 SaveWindowPosition();
             }
             catch (InvalidOperationException) { }
@@ -908,10 +905,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             }
         }
 
-        ClampWindowToMonitorWorkArea();
+        FitWindowToMonitorWorkArea();
     }
 
-    private void ClampWindowToMonitorWorkArea()
+    private void FitWindowToMonitorWorkArea()
     {
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect)) return;
@@ -921,6 +918,40 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         var info = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfo(monitor, ref info)) return;
 
+        var workAreaWidth = info.Work.Right - info.Work.Left;
+        var workAreaHeight = info.Work.Bottom - info.Work.Top;
+        if (workAreaWidth <= 0 || workAreaHeight <= 0) return;
+
+        var requestedWidth = _expanded ? _expandedWidth : PetWindowWidth;
+        var requestedHeight = _expanded ? _expandedHeight : PetWindowHeight;
+        var preferredMinimumWidth = _expanded ? 440d : PetWindowWidth;
+        var preferredMinimumHeight = _expanded ? 560d : PetWindowHeight;
+        var layout = WindowAreaSizingPolicy.FitToWorkArea(
+            requestedWidth,
+            requestedHeight,
+            preferredMinimumWidth,
+            preferredMinimumHeight,
+            workAreaWidth,
+            workAreaHeight,
+            GetEffectiveDpi(handle));
+
+        var previousChangingState = _changingWindowMode;
+        _changingWindowMode = true;
+        try
+        {
+            MinWidth = layout.MinimumWidthDip;
+            MinHeight = layout.MinimumHeightDip;
+            MaxWidth = layout.MaximumWidthDip;
+            MaxHeight = layout.MaximumHeightDip;
+            Width = layout.WidthDip;
+            Height = layout.HeightDip;
+        }
+        finally
+        {
+            _changingWindowMode = previousChangingState;
+        }
+
+        if (!GetWindowRect(handle, out rect)) return;
         var width = rect.Right - rect.Left;
         var height = rect.Bottom - rect.Top;
         var rightmostLeft = Math.Max(info.Work.Left, info.Work.Right - width);
