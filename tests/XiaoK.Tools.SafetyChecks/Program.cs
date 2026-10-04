@@ -1387,9 +1387,10 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
 
 static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 {
+    CheckExplanationClaimCountEstimator();
     const string original = "class Sample { int Value = 7; }\n";
-    const string explanation = "Sample.Value 在第 1 行定义，初值为 7。[Sample.cs:1]";
-    const string explanationJson = "{\"claims\":[{\"text\":\"Sample.Value 在第 1 行定义，初值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
+    const string explanation = "Sample.Value 的初始值为 7。[Sample.cs:1]";
+    const string explanationJson = "{\"claims\":[{\"text\":\"Sample.Value 的初始值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
     var project = CreateProject(root, "code-inspection", original);
     File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "code-inspection-workspaces");
@@ -1414,9 +1415,9 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
         && inference.Prompts.Any(prompt => prompt.Contains("1|class Sample { int Value = 7; }", StringComparison.Ordinal))
         && inference.SystemPrompts.Any(prompt => prompt.Contains("严格JSON对象", StringComparison.Ordinal)
             && prompt.Contains("claims", StringComparison.Ordinal) && prompt.Contains("citations", StringComparison.Ordinal)
-            && prompt.Contains("回看入口之后的分支", StringComparison.Ordinal)
-            && prompt.Contains("不得把调用后的结果检查写成调用前条件", StringComparison.Ordinal)
-            && prompt.Contains("按源码行号从小到大排列", StringComparison.Ordinal)),
+            && prompt.Contains("检查入口之后的分支时留意直接返回的路径", StringComparison.Ordinal)
+            && prompt.Contains("不得把调用后的结果检查列为调用前条件", StringComparison.Ordinal)
+            && prompt.Contains("按源码行号升序排列", StringComparison.Ordinal)),
         "只读检索没有提供绝对行号上下文、要求结构化逐条来源引用，或要求准确区分、排序目标调用前后的控制流检查。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
         "只读代码检索修改了用户所选的原项目。");
@@ -1436,13 +1437,67 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
     Require(reasoningResult.Success && reasoningInference.RequestOptions.Count == 1
         && !reasoningInference.RequestOptions.Single().DisableThinking,
         "离线评测不能单独为只读检索开启思考模式，或生产默认思考模式未被正确隔离。");
+
+    await CheckCodeInspectionRejectsInsufficientClaimsAsync(root);
+}
+
+static void CheckExplanationClaimCountEstimator()
+{
+    var cases = new (string Prompt, int Expected)[]
+    {
+        ("只依据目标文件回答：src/XiaoK.Core/Resolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。", 4),
+        ("按顺序说明通知正文读取前的安全条件。", 1),
+        ("说明通知去重、限速默认值和集合上限。", 3),
+        ("列出固定工具ID，并说明代码任务的目标和参数。", 3),
+        ("说明发送确认展示什么，以及拒绝/不确定结果如何处理。", 3),
+        ("说明编程代理的文件/字符上限及其是否运行命令或改原项目。", 4),
+        ("说明交互/后台推理排队和后台让位方式。", 3),
+        ("说明模型启动显存准入条件。", 1),
+        ("说明重启后旧任务和代码任务中断如何处理。", 2),
+        ("说明通知监听身份条件和当前是否会自动读取微信/QQ正文。", 3),
+        ("说明 A、B、C、D、E、F、G。", 5),
+        ("没有明确请求动词的自由文本", 1)
+    };
+
+    foreach (var (prompt, expected) in cases)
+    {
+        var actual = CodeTaskAgent.EstimateMinimumExplanationClaimCount(prompt);
+        Require(actual == expected, $"只读说明 claim 数估算不符合边界：预期 {expected}，实际 {actual}，题目={prompt}");
+    }
+}
+
+static async Task CheckCodeInspectionRejectsInsufficientClaimsAsync(string root)
+{
+    const string original = "namespace XiaoK.Core;\ninternal static class Resolver { }\n";
+    const string prompt = "只依据目标文件回答：src/XiaoK.Core/AppLaunchIntentResolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。";
+    const string oneClaim = "{\"claims\":[{\"text\":\"空输入返回空值。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
+    var project = CreateProject(root, "code-inspection-minimum-claims", original);
+    var target = Path.Combine(project, "src", "XiaoK.Core", "AppLaunchIntentResolver.cs");
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    File.Move(Path.Combine(project, "Sample.cs"), target);
+    var workspaces = Path.Combine(root, "code-inspection-minimum-claims-workspaces");
+    var inference = new ScriptedInference(oneClaim, oneClaim);
+
+    var result = await NewAgent(inference).InspectAsync(project, workspaces, prompt, CancellationToken.None);
+    var schemaRequests = inference.RequestOptions.Where(options => options.JsonSchema.HasValue).ToArray();
+    var schemaMinimums = schemaRequests.Select(options => options.JsonSchema!.Value
+        .GetProperty("properties").GetProperty("claims").GetProperty("minItems").GetInt32()).ToArray();
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+
+    Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION" && inference.CallCount == 2
+        && schemaMinimums.SequenceEqual([4, 4])
+        && inference.SystemPrompts.All(systemPrompt => systemPrompt.Contains("至少 4 条独立 claims", StringComparison.Ordinal)),
+        "只读检索未在生成与纠正请求中强制题目列出的四个询问点分别成项，或低于最低条数的响应未失败关闭。");
+    Require(File.ReadAllText(target) == original
+        && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
+        "claim 数不足时没有失败关闭，或改写了原项目。");
 }
 
 static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string root)
 {
     const string original = "class Sample { int Value = 7; }\n";
-    const string correctedAnswer = "Sample.Value 在第 1 行定义，初值为 7。[Sample.cs:1]";
-    const string correctedAnswerJson = "{\"claims\":[{\"text\":\"Sample.Value 在第 1 行定义，初值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
+    const string correctedAnswer = "Sample.Value 的初始值为 7。[Sample.cs:1]";
+    const string correctedAnswerJson = "{\"claims\":[{\"text\":\"Sample.Value 的初始值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
     var correctedProject = CreateProject(root, "code-inspection-citation-correction", original);
     var correctedWorkspace = Path.Combine(root, "code-inspection-citation-correction-workspaces");
     var correctionInference = new ScriptedInference(
