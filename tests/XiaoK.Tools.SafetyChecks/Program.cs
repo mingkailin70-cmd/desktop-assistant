@@ -1456,6 +1456,7 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
     await CheckCodeInspectionRejectsInsufficientClaimsAsync(root);
     await CheckCodeInspectionRejectsMissingTopicsAsync(root);
     await CheckCodeInspectionRendersSourceMappingsAsync(root);
+    await CheckCodeInspectionRendersNoticePolicyFactsAsync(root);
     await CheckCodeInspectionRequiresOrderedPreReadGatesAsync(root);
 }
 
@@ -1655,6 +1656,114 @@ static async Task CheckCodeInspectionRendersSourceMappingsAsync(string root)
         && invalidInference.Prompts.Any(promptText => promptText.Contains("所有输入条件与固定目标返回行", StringComparison.Ordinal))
         && File.ReadAllText(invalidTarget) == source,
         "映射校验接受了其他目标的源码引用，或引用不足时没有失败关闭。");
+}
+
+static async Task CheckCodeInspectionRendersNoticePolicyFactsAsync(string root)
+{
+    const string source = "namespace XiaoK.Core;\n"
+        + "internal sealed record Decision(bool Success, bool ShouldAnalyze, string Reason);\n"
+        + "internal sealed class MessageNoticePolicy {\n"
+        + "    private const int MaximumRememberedDedupeKeys = 4096;\n"
+        + "    private const int MaximumRateLimitedConversations = 512;\n"
+        + "    private readonly TimeSpan _dedupeWindow;\n"
+        + "    private readonly TimeSpan _rateWindow;\n"
+        + "    private readonly int _maximumPrivateNoticesPerWindow;\n"
+        + "    public MessageNoticePolicy(TimeSpan? dedupeWindow = null, int maximumPrivateNoticesPerWindow = 10, TimeSpan? rateWindow = null) {\n"
+        + "        _dedupeWindow = dedupeWindow ?? TimeSpan.FromMinutes(2);\n"
+        + "        _rateWindow = rateWindow ?? TimeSpan.FromMinutes(1);\n"
+        + "        _maximumPrivateNoticesPerWindow = maximumPrivateNoticesPerWindow;\n"
+        + "    }\n"
+        + "    Decision Inspect(string dedupeId, string safeConversationId, string safeSender) {\n"
+        + "        if (_recent.ContainsKey(dedupeId)) return new(false, false, \"duplicate\");\n"
+        + "        if (_recent.Count >= MaximumRememberedDedupeKeys) return new(true, false, \"dedupe capacity\");\n"
+        + "        var rateIdentity = safeConversationId ?? safeSender ?? \"unknown-conversation\";\n"
+        + "        if (_conversationRates.Count >= MaximumRateLimitedConversations) return new(true, false, \"rate capacity\");\n"
+        + "        if (timestamps.Count >= _maximumPrivateNoticesPerWindow) return new(true, false, \"rate limited\");\n"
+        + "    }\n"
+        + "}\n";
+    const string prompt = "只依据目标文件回答：src/XiaoK.Core/MessageNoticePolicy.cs\n说明通知去重、限速默认值和集合上限。";
+    const string targetPath = "src/XiaoK.Core/MessageNoticePolicy.cs";
+    int LineFor(string fragment)
+    {
+        var index = source.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The synthetic notice-policy fragment '{fragment}' is missing.");
+        return source[..index].Count(character => character == '\n') + 1;
+    }
+
+    var factLines = new Dictionary<string, int[]>
+    {
+        ["通知去重"] =
+        [
+            LineFor("_dedupeWindow ="), LineFor("_recent.ContainsKey"),
+            LineFor("MaximumRememberedDedupeKeys ="), LineFor("_recent.Count >=")
+        ],
+        ["限速默认值"] =
+        [
+            LineFor("maximumPrivateNoticesPerWindow = 10"), LineFor("_rateWindow ="),
+            LineFor("var rateIdentity ="), LineFor("timestamps.Count >=")
+        ],
+        ["集合上限"] =
+        [
+            LineFor("MaximumRememberedDedupeKeys ="), LineFor("MaximumRateLimitedConversations ="),
+            LineFor("_recent.Count >="), LineFor("_conversationRates.Count >=")
+        ]
+    };
+    string BuildAnswer(bool borrowWrongPolicyLine) => JsonSerializer.Serialize(new
+    {
+        claims = factLines.Select((fact, index) => new
+        {
+            topic = fact.Key,
+            text = index switch
+            {
+                0 => "去重窗口为5小时，集合上限为2。",
+                1 => "限速窗口为1小时，每会话99条。",
+                _ => "两个集合上限分别为1和2，超过后仍继续处理。"
+            },
+            citations = fact.Value.Select((line, lineIndex) => new
+            {
+                path = targetPath,
+                line = borrowWrongPolicyLine && fact.Key == "通知去重" && lineIndex == 0
+                    ? factLines["限速默认值"][1]
+                    : line
+            }).ToArray()
+        }).ToArray()
+    });
+
+    var validProject = CreateProject(root, "code-inspection-notice-policy-render", source);
+    var validTarget = Path.Combine(validProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(validTarget)!);
+    File.Move(Path.Combine(validProject, "Sample.cs"), validTarget);
+    var validWorkspace = Path.Combine(root, "code-inspection-notice-policy-render-workspaces");
+    var validAnswer = BuildAnswer(borrowWrongPolicyLine: false);
+    var validInference = new ScriptedInference(validAnswer, validAnswer);
+    var validResult = await NewAgent(validInference).InspectAsync(
+        validProject, validWorkspace, prompt, CancellationToken.None);
+
+    Require(validResult.Success && validInference.CallCount == 1
+        && validResult.Data!.Contains("2分钟", StringComparison.Ordinal)
+        && validResult.Data.Contains("1分钟", StringComparison.Ordinal)
+        && validResult.Data.Contains("10 条", StringComparison.Ordinal)
+        && validResult.Data.Contains("4096", StringComparison.Ordinal)
+        && validResult.Data.Contains("512", StringComparison.Ordinal)
+        && !validResult.Data.Contains("5小时", StringComparison.Ordinal)
+        && !validResult.Data.Contains("99条", StringComparison.Ordinal),
+        $"通知去重/限速默认值及集合上限没有由源码确定性展示，或仍信任了模型编造的数字。结果={validResult.ErrorCode}，输出={validResult.Data}");
+
+    var invalidProject = CreateProject(root, "code-inspection-notice-policy-wrong-citation", source);
+    var invalidTarget = Path.Combine(invalidProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(invalidTarget)!);
+    File.Move(Path.Combine(invalidProject, "Sample.cs"), invalidTarget);
+    var invalidWorkspace = Path.Combine(root, "code-inspection-notice-policy-wrong-citation-workspaces");
+    var wrongCitationAnswer = BuildAnswer(borrowWrongPolicyLine: true);
+    var invalidInference = new ScriptedInference(wrongCitationAnswer, wrongCitationAnswer);
+    var invalidResult = await NewAgent(invalidInference).InspectAsync(
+        invalidProject, invalidWorkspace, prompt, CancellationToken.None);
+
+    Require(!invalidResult.Success && invalidResult.ErrorCode == "INVALID_CODE_EXPLANATION"
+        && invalidInference.CallCount == 2
+        && invalidInference.Prompts.Any(promptText => promptText.Contains("全部策略事实源码行", StringComparison.Ordinal))
+        && File.ReadAllText(invalidTarget) == source,
+        "通知策略事实接受了错误源码引用，或引用不足时没有失败关闭。");
 }
 
 static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string root)
