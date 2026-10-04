@@ -69,6 +69,8 @@ public sealed class CodeTaskAgent
     private sealed record SourceStringMapping(string Topic, string Target, IReadOnlyList<string> Inputs,
         string SourcePath, IReadOnlyList<int> SourceLines);
     private sealed record SourcePolicyFact(string Topic, string Text, string SourcePath, IReadOnlyList<int> SourceLines);
+    private sealed record SourceSendFact(string Topic, string Text, string SourcePath, IReadOnlyList<int> SourceLines);
+    private sealed record SourceTextMatch(Match Match, string SourcePath, int Line);
     private sealed record SourcePreCallGuard(string Topic, string Condition, string Outcome, int SourceLine,
         int TargetCallLine, string SourcePath);
     private readonly IInferenceClient _inference;
@@ -341,11 +343,12 @@ public sealed class CodeTaskAgent
 
             var sourceFiles = snapshot.ReadSelectedTextFiles(chosenPaths, candidates, cancellationToken).ToArray();
             phase = "整理受限源代码上下文";
+            var requiredTopics = ExtractExplanationTopics(instruction);
             var context = await CreateModelContextAsync(sourceFiles, instruction, cancellationToken);
+            context = IncludeMessageSendSourceEvidence(context, sourceFiles, requiredTopics);
 
             await snapshot.WriteStateAsync("running", CancellationToken.None);
             var numberedSource = FormatNumberedSourceContext(context);
-            var requiredTopics = ExtractExplanationTopics(instruction);
             var sourceMappings = requiredTopics.Any(topic => IsAliasOrMappingTopic(topic.Label))
                 ? ExtractExplicitStringMappings(context)
                 : [];
@@ -358,6 +361,18 @@ public sealed class CodeTaskAgent
                 return await FailAsync(snapshot,
                     "无法从已提供的通知策略源码中完整提取所询问的去重、限速和集合上限事实；为避免猜测已停止说明。",
                     "CODE_INSPECTION_FAILED");
+            var sendFacts = ExtractMessageSendFacts(context, requiredTopics);
+            var sendTopics = requiredTopics.Where(topic => IsMessageSendTopic(topic.Label)).ToArray();
+            if (sendTopics.Length > 0
+                && context.Any(excerpt => Path.GetFileName(excerpt.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase))
+                && sendFacts.Count != sendTopics.Length)
+            {
+                var missingTopics = sendTopics.Where(topic => !sendFacts.Any(fact =>
+                    fact.Topic.Equals(topic.Label, StringComparison.Ordinal))).Select(topic => topic.Label);
+                return await FailAsync(snapshot,
+                    $"无法从已提供的发送工具源码中完整提取主题“{string.Join("、", missingTopics)}”的预览、拒绝或发送结果处理事实；为避免猜测已停止说明。",
+                    "CODE_INSPECTION_FAILED");
+            }
             var preCallGuards = ExtractOrderedPreCallGuards(context, instruction);
             requiredTopics = ExpandPreCallTopics(requiredTopics, preCallGuards);
             var enforceTopicOrder = preCallGuards.Count > 1;
@@ -393,6 +408,13 @@ public sealed class CodeTaskAgent
                     path = fact.SourcePath,
                     sourceLines = fact.SourceLines
                 }),
+                sendFacts = sendFacts.Select(fact => new
+                {
+                    topic = fact.Topic,
+                    text = fact.Text,
+                    path = fact.SourcePath,
+                    sourceLines = fact.SourceLines
+                }),
                 orderedPreCallGuards = preCallGuards.Select(guard => new
                 {
                     topic = guard.Topic,
@@ -408,6 +430,9 @@ public sealed class CodeTaskAgent
                 + (enforceTopicOrder ? "topic必须按主题清单的顺序输出，不能调换调用前门槛。" : string.Empty)
                 + (noticePolicyFacts.Count > 0
                     ? "通知策略数值与超限结果必须引用清单列出的该主题全部源码行；说明文字由本地程序依据源码生成。"
+                    : string.Empty)
+                + (sendFacts.Count > 0
+                    ? "发送预览、拒绝和结果处理说明由本地程序依据源码生成；每条必须引用清单列出的全部相关源码行。"
                     : string.Empty)
                 + (preCallGuards.Count > 1
                     ? "每条调用前门槛claim必须引用主题清单中该门槛自己的path和line，并引用目标调用行；条件与返回结果由本地程序按引用源码生成。"
@@ -430,7 +455,7 @@ public sealed class CodeTaskAgent
             if (answer.Contains('\0'))
                 return await FailAsync(snapshot, "本地模型返回的代码说明包含空字符。", "INVALID_CODE_EXPLANATION");
             var explanation = ParseStructuredCodeExplanation(
-                answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, preCallGuards);
+                answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, sendFacts, preCallGuards);
             if (!explanation.IsValid)
             {
                 answer = await _models.RunBackgroundStepAsync(
@@ -444,7 +469,7 @@ public sealed class CodeTaskAgent
                     || answer.Contains('\0')
                     ? new(false, null, "纠正响应为空、超长或包含无效字符。")
                     : ParseStructuredCodeExplanation(
-                        answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, preCallGuards);
+                        answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, sendFacts, preCallGuards);
                 if (!explanation.IsValid)
                     return await FailAsync(snapshot,
                         $"本地模型说明未通过结构化来源校验：{explanation.Feedback} 原项目未修改。",
@@ -654,6 +679,191 @@ public sealed class CodeTaskAgent
         }
 
         return facts;
+    }
+
+    private static bool IsMessageSendTopic(string label) =>
+        label.Contains("发送", StringComparison.Ordinal)
+        || label.Contains("拒绝", StringComparison.Ordinal)
+        || label.Contains("不确定", StringComparison.Ordinal);
+
+    private static List<SourceSendFact> ExtractMessageSendFacts(
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+    {
+        var requestedTopics = requiredTopics.Where(topic => IsMessageSendTopic(topic.Label)).ToArray();
+        if (requestedTopics.Length == 0) return [];
+
+        var facts = new List<SourceSendFact>();
+        var sourceExcerpts = context.Where(excerpt =>
+            Path.GetFileName(excerpt.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        SourceTextMatch? MatchSource(string pattern)
+        {
+            foreach (var excerpt in sourceExcerpts)
+            {
+                var match = Regex.Match(excerpt.Content, pattern,
+                    RegexOptions.CultureInvariant | RegexOptions.Singleline);
+                if (match.Success)
+                    return new(match, excerpt.Path,
+                        excerpt.StartLine + excerpt.Content[..match.Index].Count(character => character == '\n'));
+            }
+            return null;
+        }
+
+        var validationCall = MatchSource(@"var invalidProposal\s*=\s*ValidateProposal\(proposal\);");
+        var validationReject = MatchSource(@"if\s*\(\s*invalidProposal is not null\s*\)\s*return invalidProposal;");
+        var recipientPolicy = MatchSource(@"if\s*\(!MessageSendRecipientPolicy\.IsPreviewAllowed\(applicationId,\s*recipient\)\)");
+        var recipientReject = MatchSource(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_RECIPIENT_NOT_ALLOWED""\);");
+        var attachmentPolicy = MatchSource(@"if\s*\(\s*attachments\s*!=\s*""none""\s*\)");
+        var attachmentReject = MatchSource(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ATTACHMENTS_UNSUPPORTED""\);");
+        var previewCreate = MatchSource(@"var preview\s*=\s*new MessageSendPreview\(applicationId,\s*recipient,\s*text,\s*\[\]\);");
+        var previewShow = MatchSource(@"await _messageSendPreview\.ShowMessageSendPreviewAsync\(preview,\s*token\);");
+        var previewOnlyComment = MatchSource(@"Preview-only mode deliberately does not request approval: no sender is available to carry out the action\.");
+        var unavailableReturn = MatchSource(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ADAPTER_UNAVAILABLE""\);");
+        var recipientValue = MatchSource(@"var recipient\s*=\s*proposal\.Arguments\.GetValueOrDefault\(""recipient""\);");
+        var textValue = MatchSource(@"var text\s*=\s*proposal\.Arguments\.GetValueOrDefault\(""text""\);");
+        var attachmentsValue = MatchSource(@"var attachments\s*=\s*proposal\.Arguments\.GetValueOrDefault\(""attachments"",\s*""[^""]*""\);");
+        var confirmationCall = MatchSource(@"var confirmed\s*=\s*await _approval\.ConfirmAsync\(\s*""确认发送""\s*,\s*\$""(?=[^""]*\{recipient\})(?=[^""]*\{text\})(?=[^""]*\{attachments\})[^""]*""\s*,\s*token\s*\);");
+        var declinedReturn = MatchSource(@"if\s*\(\s*!confirmed\s*\)\s*return new\(false,\s*""[^""]*""\s*,\s*""USER_DECLINED""\);");
+        var legacyNoSenderComment = MatchSource(@"No WeChat/QQ sender is implemented; approval alone must never imply an external side effect\.");
+
+        foreach (var topic in requestedTopics)
+        {
+            if (topic.Label.Contains("发送", StringComparison.Ordinal))
+            {
+                if (previewCreate is not null && previewShow is not null && attachmentPolicy is not null
+                    && attachmentReject is not null && previewOnlyComment is not null && unavailableReturn is not null)
+                {
+                    var lines = new[] { attachmentPolicy.Line, attachmentReject.Line, previewCreate.Line,
+                        previewShow.Line, previewOnlyComment.Line, unavailableReturn.Line }
+                        .Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "预览以最终应用、收件人和正文构造内容；附件参数只接受 none，因此附件列表为空。当前只展示预览，不请求发送确认，也不发送；随后返回 SEND_ADAPTER_UNAVAILABLE。",
+                        previewCreate.SourcePath, lines));
+                }
+                else if (recipientValue is not null && textValue is not null && attachmentsValue is not null
+                    && confirmationCall is not null && legacyNoSenderComment is not null && unavailableReturn is not null)
+                {
+                    var lines = new[] { recipientValue.Line, textValue.Line, attachmentsValue.Line, confirmationCall.Line,
+                        legacyNoSenderComment.Line, unavailableReturn.Line }
+                        .Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "确认窗口展示最终收件人、正文和附件并等待确认；即使用户确认，此代码也没有微信/QQ发送适配器，随后返回 SEND_ADAPTER_UNAVAILABLE，不会外发。",
+                        confirmationCall.SourcePath, lines));
+                }
+            }
+            else if (topic.Label.Contains("拒绝", StringComparison.Ordinal))
+            {
+                if (validationCall is not null && validationReject is not null && recipientPolicy is not null
+                    && recipientReject is not null && attachmentPolicy is not null && attachmentReject is not null)
+                {
+                    var lines = new[] { validationCall.Line, validationReject.Line, recipientPolicy.Line,
+                        recipientReject.Line, attachmentPolicy.Line, attachmentReject.Line }.Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "ToolBroker 在派发工具前校验提案；不在收件人白名单内或附件不是 none 时返回拒绝结果，不进入发送预览，也不发送消息。",
+                        recipientPolicy.SourcePath, lines));
+                }
+                else if (declinedReturn is not null && legacyNoSenderComment is not null && unavailableReturn is not null)
+                {
+                    var lines = new[] { declinedReturn.Line, legacyNoSenderComment.Line, unavailableReturn.Line }
+                        .Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "用户拒绝确认时返回 USER_DECLINED；用户确认也不会直接外发，因为代码明确没有微信/QQ发送适配器，随后返回 SEND_ADAPTER_UNAVAILABLE 并说明未发送。",
+                        declinedReturn.SourcePath, lines));
+                }
+            }
+            else if (topic.Label.Contains("不确定", StringComparison.Ordinal))
+            {
+                if (previewShow is not null && previewOnlyComment is not null && unavailableReturn is not null)
+                {
+                    var lines = new[] { previewShow.Line, previewOnlyComment.Line, unavailableReturn.Line }.Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "当前代码只显示预览，不请求发送批准，也没有发送适配器；预览后返回 SEND_ADAPTER_UNAVAILABLE 并明确未发送。因此此版本不会产生外发结果，也没有自动重发路径。",
+                        previewShow.SourcePath, lines));
+                }
+                else if (confirmationCall is not null && legacyNoSenderComment is not null && unavailableReturn is not null)
+                {
+                    var lines = new[] { confirmationCall.Line, legacyNoSenderComment.Line, unavailableReturn.Line }
+                        .Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "确认操作只影响本地审批界面；此源码没有微信/QQ发送适配器，确认后立即返回 SEND_ADAPTER_UNAVAILABLE 并明确未发送。不会产生外发结果，也没有自动重发路径。",
+                        confirmationCall.SourcePath, lines));
+                }
+            }
+        }
+
+        return facts;
+    }
+
+    private static IReadOnlyList<CodeContextExcerpt> IncludeMessageSendSourceEvidence(
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<CodeFileContent> sourceFiles,
+        IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+    {
+        var requestedTopics = requiredTopics.Where(topic => IsMessageSendTopic(topic.Label)).ToArray();
+        if (requestedTopics.Length == 0) return context;
+
+        var messageSources = sourceFiles.Where(file =>
+            Path.GetFileName(file.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (messageSources.Length == 0) return context;
+
+        var patterns = new List<string>();
+        if (requestedTopics.Any(topic => topic.Label.Contains("发送", StringComparison.Ordinal)))
+        {
+            patterns.Add(@"if\s*\(\s*attachments\s*!=\s*""none""\s*\)");
+            patterns.Add(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ATTACHMENTS_UNSUPPORTED""\);");
+            patterns.Add(@"var preview\s*=\s*new MessageSendPreview\(applicationId,\s*recipient,\s*text,\s*\[\]\);");
+            patterns.Add(@"await _messageSendPreview\.ShowMessageSendPreviewAsync\(preview,\s*token\);");
+            patterns.Add(@"Preview-only mode deliberately does not request approval: no sender is available to carry out the action\.");
+            patterns.Add(@"No WeChat/QQ sender is implemented; approval alone must never imply an external side effect\.");
+            patterns.Add(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ADAPTER_UNAVAILABLE""\);");
+            patterns.Add(@"var recipient\s*=\s*proposal\.Arguments\.GetValueOrDefault\(""recipient""\);");
+            patterns.Add(@"var text\s*=\s*proposal\.Arguments\.GetValueOrDefault\(""text""\);");
+            patterns.Add(@"var attachments\s*=\s*proposal\.Arguments\.GetValueOrDefault\(""attachments"",\s*""[^""]*""\);");
+            patterns.Add(@"var confirmed\s*=\s*await _approval\.ConfirmAsync\(\s*""确认发送""\s*,\s*\$""(?=[^""]*\{recipient\})(?=[^""]*\{text\})(?=[^""]*\{attachments\})[^""]*""\s*,\s*token\s*\);");
+        }
+        if (requestedTopics.Any(topic => topic.Label.Contains("拒绝", StringComparison.Ordinal)))
+        {
+            patterns.Add(@"var invalidProposal\s*=\s*ValidateProposal\(proposal\);");
+            patterns.Add(@"if\s*\(\s*invalidProposal is not null\s*\)\s*return invalidProposal;");
+            patterns.Add(@"if\s*\(!MessageSendRecipientPolicy\.IsPreviewAllowed\(applicationId,\s*recipient\)\)");
+            patterns.Add(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_RECIPIENT_NOT_ALLOWED""\);");
+            patterns.Add(@"if\s*\(\s*attachments\s*!=\s*""none""\s*\)");
+            patterns.Add(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ATTACHMENTS_UNSUPPORTED""\);");
+            patterns.Add(@"if\s*\(\s*!confirmed\s*\)\s*return new\(false,\s*""[^""]*""\s*,\s*""USER_DECLINED""\);");
+            patterns.Add(@"No WeChat/QQ sender is implemented; approval alone must never imply an external side effect\.");
+            patterns.Add(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ADAPTER_UNAVAILABLE""\);");
+        }
+        if (requestedTopics.Any(topic => topic.Label.Contains("不确定", StringComparison.Ordinal)))
+        {
+            patterns.Add(@"await _messageSendPreview\.ShowMessageSendPreviewAsync\(preview,\s*token\);");
+            patterns.Add(@"Preview-only mode deliberately does not request approval: no sender is available to carry out the action\.");
+            patterns.Add(@"return new\(false,\s*""[^""]*""\s*,\s*""SEND_ADAPTER_UNAVAILABLE""\);");
+            patterns.Add(@"var confirmed\s*=\s*await _approval\.ConfirmAsync\(\s*""确认发送""\s*,\s*\$""(?=[^""]*\{recipient\})(?=[^""]*\{text\})(?=[^""]*\{attachments\})[^""]*""\s*,\s*token\s*\);");
+            patterns.Add(@"No WeChat/QQ sender is implemented; approval alone must never imply an external side effect\.");
+        }
+
+        var added = new List<CodeContextExcerpt>();
+        foreach (var source in messageSources)
+        foreach (var pattern in patterns.Distinct(StringComparer.Ordinal))
+        {
+            var match = Regex.Match(source.Content, pattern,
+                RegexOptions.CultureInvariant | RegexOptions.Singleline);
+            if (!match.Success) continue;
+            var start = source.Content.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
+            var afterMatch = match.Index + match.Length;
+            var end = source.Content.IndexOf('\n', afterMatch);
+            if (end < 0) end = source.Content.Length;
+            var startLine = source.Content[..start].Count(character => character == '\n') + 1;
+            var evidence = source.Content[start..end].TrimEnd('\r');
+            if (evidence.Length > 0) added.Add(new(source.Path, startLine, evidence));
+        }
+
+        if (added.Count == 0) return context;
+        var combined = context.Concat(added)
+            .DistinctBy(excerpt => (excerpt.Path.ToUpperInvariant(), excerpt.StartLine, excerpt.Content), EqualityComparer<(string, int, string)>.Default)
+            .ToArray();
+        if (combined.Sum(excerpt => excerpt.Content.Length) > MaximumSourceCharacters)
+            throw new InvalidDataException("发送策略必需源码证据超过本地上下文上限；原项目未修改。");
+        return combined.OrderBy(excerpt => excerpt.Path, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(excerpt => excerpt.StartLine).ToArray();
     }
 
     private static List<SourceStringMapping> ExtractExplicitStringMappings(
@@ -984,6 +1194,7 @@ public sealed class CodeTaskAgent
         IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<ExplanationTopicRequirement> requiredTopics,
         bool enforceTopicOrder, IReadOnlyList<SourceStringMapping> sourceMappings,
         IReadOnlyList<SourcePolicyFact> sourcePolicyFacts,
+        IReadOnlyList<SourceSendFact> sourceSendFacts,
         IReadOnlyList<SourcePreCallGuard> preCallGuards)
     {
         var minimumClaimCount = requiredTopics.Sum(topic => topic.MinimumClaims);
@@ -1040,8 +1251,33 @@ public sealed class CodeTaskAgent
                 var sourceGuard = preCallGuards.FirstOrDefault(guard => guard.Topic.Equals(topic, StringComparison.Ordinal));
                 var sourceMapping = sourceMappings.FirstOrDefault(mapping => mapping.Topic.Equals(topic, StringComparison.Ordinal));
                 var sourcePolicyFact = sourcePolicyFacts.FirstOrDefault(fact => fact.Topic.Equals(topic, StringComparison.Ordinal));
+                var sourceSendFact = sourceSendFacts.FirstOrDefault(fact => fact.Topic.Equals(topic, StringComparison.Ordinal));
                 if (citations.GetArrayLength() is < 1 or > 8)
                     return new(false, null, "每条claim必须包含1至8条源码引用；没有依据时应删除该claim。");
+
+                if (sourceSendFact is not null)
+                {
+                    foreach (var citation in citations.EnumerateArray())
+                    {
+                        JsonElement lineElement = default;
+                        var hasLine = citation.ValueKind == JsonValueKind.Object
+                            && citation.TryGetProperty("line", out lineElement);
+                        RequireExactObjectProperties(citation, hasLine ? ["path", "line"] : ["path", "startLine", "endLine"]);
+                        if (!hasLine || !citation.TryGetProperty("path", out var pathElement)
+                            || pathElement.ValueKind != JsonValueKind.String
+                            || string.IsNullOrWhiteSpace(pathElement.GetString()) || pathElement.GetString()!.Length > 512
+                            || !lineElement.TryGetInt32(out var line) || line is < 1 or > 1_000_000)
+                            return new(false, null, "发送说明仍须符合path与正整数line的结构；程序会从源码生成最终引用。");
+                    }
+
+                    if (sourceSendFact.SourceLines.Count is < 1 or > 8
+                        || totalCitations + sourceSendFact.SourceLines.Count > 40)
+                        return new(false, null, "从发送源码生成的引用数量超过单次说明上限。");
+                    totalCitations += sourceSendFact.SourceLines.Count;
+                    builder.Append("- ").Append(topic).Append('：').Append(sourceSendFact.Text).Append(' ')
+                        .AppendJoin(' ', sourceSendFact.SourceLines.Select(line => $"[{sourceSendFact.SourcePath}:{line}]")).AppendLine();
+                    continue;
+                }
 
                 var citesGuardSourceLine = false;
                 var citesTargetCallLine = false;

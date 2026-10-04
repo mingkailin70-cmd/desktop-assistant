@@ -1457,6 +1457,7 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
     await CheckCodeInspectionRejectsMissingTopicsAsync(root);
     await CheckCodeInspectionRendersSourceMappingsAsync(root);
     await CheckCodeInspectionRendersNoticePolicyFactsAsync(root);
+    await CheckCodeInspectionRendersMessageSendFactsAsync(root);
     await CheckCodeInspectionRequiresOrderedPreReadGatesAsync(root);
 }
 
@@ -1764,6 +1765,238 @@ static async Task CheckCodeInspectionRendersNoticePolicyFactsAsync(string root)
         && invalidInference.Prompts.Any(promptText => promptText.Contains("全部策略事实源码行", StringComparison.Ordinal))
         && File.ReadAllText(invalidTarget) == source,
         "通知策略事实接受了错误源码引用，或引用不足时没有失败关闭。");
+}
+
+static async Task CheckCodeInspectionRendersMessageSendFactsAsync(string root)
+{
+    var padding = string.Concat(Enumerable.Range(0, 180)
+        .Select(index => $"// unrelated filler {index:D3}: {new string('x', 64)}\n"));
+    var source = padding + "internal sealed record MessageSendPreview(string ApplicationId, string Recipient, string Text, string[] Attachments);\n"
+        + "internal sealed class ToolBroker {\n"
+        + "    public async Task<Result> ExecuteAsync(ToolProposal proposal) {\n"
+        + "        var invalidProposal = ValidateProposal(proposal);\n"
+        + "        if (invalidProposal is not null) return invalidProposal;\n"
+        + "        return proposal.ToolId switch { \"message.send.v1\" => await SendAsync(proposal, token) };\n"
+        + "    }\n"
+        + "    private static Result? ValidateSend(ToolProposal proposal) {\n"
+        + "        var applicationId = args[\"application_id\"];\n"
+        + "        var recipient = args[\"recipient\"];\n"
+        + "        var text = args[\"text\"];\n"
+        + "        var attachments = args[\"attachments\"];\n"
+        + "        if (!MessageSendRecipientPolicy.IsPreviewAllowed(applicationId, recipient)) return new(false, \"denied\", \"SEND_RECIPIENT_NOT_ALLOWED\");\n"
+        + "        if (attachments != \"none\") return new(false, \"unsupported\", \"SEND_ATTACHMENTS_UNSUPPORTED\");\n"
+        + "    }\n"
+        + "    private async Task<Result> SendAsync(ToolProposal proposal, CancellationToken token) {\n"
+        + "        if (_messageSendPreview is null) return new(false, \"missing\", \"SEND_PREVIEW_UNAVAILABLE\");\n"
+        + "        var preview = new MessageSendPreview(applicationId, recipient, text, []);\n"
+        + "        await _messageSendPreview.ShowMessageSendPreviewAsync(preview, token);\n"
+        + "        // Preview-only mode deliberately does not request approval: no sender is available to carry out the action.\n"
+        + "        return new(false, \"not sent\", \"SEND_ADAPTER_UNAVAILABLE\");\n"
+        + "    }\n"
+        + "}\n";
+    const string prompt = "只依据目标文件回答：src/XiaoK.Tools/ToolBroker.cs\n说明发送确认展示什么，以及拒绝/不确定结果如何处理。";
+    const string targetPath = "src/XiaoK.Tools/ToolBroker.cs";
+    int LineFor(string fragment)
+    {
+        var index = source.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The synthetic send-policy fragment '{fragment}' is missing.");
+        return source[..index].Count(character => character == '\n') + 1;
+    }
+
+    var sendFactLines = new Dictionary<string, int[]>
+    {
+        ["发送确认展示什么"] =
+        [
+            LineFor("if (attachments != \"none\")"), LineFor("var preview = new MessageSendPreview"),
+            LineFor("ShowMessageSendPreviewAsync"), LineFor("Preview-only mode deliberately"),
+            LineFor("SEND_ADAPTER_UNAVAILABLE")
+        ],
+        ["拒绝"] =
+        [
+            LineFor("var invalidProposal = ValidateProposal"), LineFor("if (invalidProposal is not null)"),
+            LineFor("if (!MessageSendRecipientPolicy"), LineFor("SEND_RECIPIENT_NOT_ALLOWED"),
+            LineFor("if (attachments != \"none\")"), LineFor("SEND_ATTACHMENTS_UNSUPPORTED")
+        ],
+        ["不确定结果如何处理"] =
+        [
+            LineFor("ShowMessageSendPreviewAsync"), LineFor("Preview-only mode deliberately"),
+            LineFor("SEND_ADAPTER_UNAVAILABLE")
+        ]
+    };
+    string BuildAnswer(bool borrowWrongLine) => JsonSerializer.Serialize(new
+    {
+        claims = sendFactLines.Select((fact, index) => new
+        {
+            topic = fact.Key,
+            text = index switch
+            {
+                0 => "确认页显示application、recipient、正文和附件，并执行发送。",
+                1 => "白名单外收件人会被拒绝。",
+                _ => "发送结果不确定时自动重试。"
+            },
+            citations = fact.Value.Select((line, lineIndex) => new
+            {
+                path = targetPath,
+                line = borrowWrongLine && fact.Key == "发送确认展示什么" && lineIndex == 0
+                    ? sendFactLines["拒绝"][2]
+                    : line
+            }).ToArray()
+        }).ToArray()
+    });
+
+    var validProject = CreateProject(root, "code-inspection-send-facts-render", source);
+    var validTarget = Path.Combine(validProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(validTarget)!);
+    File.Move(Path.Combine(validProject, "Sample.cs"), validTarget);
+    var validWorkspace = Path.Combine(root, "code-inspection-send-facts-render-workspaces");
+    var validAnswer = BuildAnswer(borrowWrongLine: false);
+    var validInference = new ScriptedInference("{\"locations\":[]}", validAnswer);
+    var validResult = await NewAgent(validInference).InspectAsync(
+        validProject, validWorkspace, prompt, CancellationToken.None);
+
+    Require(validResult.Success && validInference.CallCount == 2
+        && validResult.Data!.Contains("最终应用、收件人和正文", StringComparison.Ordinal)
+        && validResult.Data.Contains("附件列表为空", StringComparison.Ordinal)
+        && validResult.Data.Contains("不在收件人白名单内", StringComparison.Ordinal)
+        && validResult.Data.Contains("SEND_ADAPTER_UNAVAILABLE", StringComparison.Ordinal)
+        && validResult.Data.Contains("没有自动重发路径", StringComparison.Ordinal)
+        && !validResult.Data.Contains("自动重试", StringComparison.Ordinal),
+        "发送预览、拒绝或当前无发送适配器的行为没有从源码确定性说明，或仍信任模型编造的外发/重试结论。");
+
+    var invalidProject = CreateProject(root, "code-inspection-send-facts-model-citation", source);
+    var invalidTarget = Path.Combine(invalidProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(invalidTarget)!);
+    File.Move(Path.Combine(invalidProject, "Sample.cs"), invalidTarget);
+    var invalidWorkspace = Path.Combine(root, "code-inspection-send-facts-model-citation-workspaces");
+    var wrongCitationAnswer = BuildAnswer(borrowWrongLine: true);
+    var invalidInference = new ScriptedInference("{\"locations\":[]}", wrongCitationAnswer);
+    var invalidResult = await NewAgent(invalidInference).InspectAsync(
+        invalidProject, invalidWorkspace, prompt, CancellationToken.None);
+    var displayedTargetPath = targetPath.Replace('/', Path.DirectorySeparatorChar);
+    var renderedSendClaim = invalidResult.Data!.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
+        .Single(line => line.StartsWith("- 发送确认展示什么：", StringComparison.Ordinal));
+
+    Require(invalidResult.Success && invalidInference.CallCount == 2
+        && renderedSendClaim.Contains($"[{displayedTargetPath}:{sendFactLines["发送确认展示什么"][0]}]", StringComparison.Ordinal)
+        && !renderedSendClaim.Contains($"[{displayedTargetPath}:{sendFactLines["拒绝"][2]}]", StringComparison.Ordinal)
+        && File.ReadAllText(invalidTarget) == source,
+        $"发送事实展示了模型错配的引用，而不是由本地程序按该主题源码行重新生成引用。实际claim：{renderedSendClaim}");
+
+    var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var actualSource = File.ReadAllText(Path.Combine(repositoryRoot, targetPath.Replace('/', Path.DirectorySeparatorChar)));
+    int ActualLineFor(string fragment)
+    {
+        var index = actualSource.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The actual ToolBroker source fragment '{fragment}' is missing.");
+        return actualSource[..index].Count(character => character == '\n') + 1;
+    }
+
+    var actualFactLines = new Dictionary<string, int[]>
+    {
+        ["发送确认展示什么"] =
+        [
+            ActualLineFor("if (attachments != \"none\")"), ActualLineFor("SEND_ATTACHMENTS_UNSUPPORTED"),
+            ActualLineFor("var preview = new MessageSendPreview"), ActualLineFor("ShowMessageSendPreviewAsync"),
+            ActualLineFor("Preview-only mode deliberately"), ActualLineFor("SEND_ADAPTER_UNAVAILABLE")
+        ],
+        ["拒绝"] =
+        [
+            ActualLineFor("var invalidProposal = ValidateProposal"), ActualLineFor("if (invalidProposal is not null)"),
+            ActualLineFor("if (!MessageSendRecipientPolicy"), ActualLineFor("return new(false, \"当前只允许 QQ 联系人 K"),
+            ActualLineFor("if (attachments != \"none\")"), ActualLineFor("SEND_ATTACHMENTS_UNSUPPORTED")
+        ],
+        ["不确定结果如何处理"] =
+        [
+            ActualLineFor("ShowMessageSendPreviewAsync"), ActualLineFor("Preview-only mode deliberately"),
+            ActualLineFor("SEND_ADAPTER_UNAVAILABLE")
+        ]
+    };
+    var actualAnswer = JsonSerializer.Serialize(new
+    {
+        claims = actualFactLines.Select(fact => new
+        {
+            topic = fact.Key,
+            text = "只用于验证本地源码事实渲染。",
+            citations = fact.Value.Select(line => new { path = targetPath, line }).ToArray()
+        }).ToArray()
+    });
+    var actualProject = CreateProject(root, "code-inspection-actual-send-source", actualSource);
+    var actualTarget = Path.Combine(actualProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(actualTarget)!);
+    File.Move(Path.Combine(actualProject, "Sample.cs"), actualTarget);
+    var actualPrompt = "只依据以下目标文件回答，不要猜测仓库外上下文：src/XiaoK.Tools/ToolBroker.cs\n说明发送确认展示什么，以及拒绝/不确定结果如何处理。";
+    var actualInference = new ScriptedInference("{\"locations\":[]}", actualAnswer, actualAnswer);
+    var actualResult = await NewAgent(actualInference).InspectAsync(actualProject,
+        Path.Combine(root, "code-inspection-actual-send-source-workspaces"), actualPrompt, CancellationToken.None);
+    Require(actualResult.Success && actualInference.CallCount == 2
+        && actualResult.Data!.Contains("最终应用、收件人和正文", StringComparison.Ordinal)
+        && actualResult.Data.Contains("没有自动重发路径", StringComparison.Ordinal),
+        $"真实 ToolBroker.cs 发送分支未能从分散片段中确定性提取。错误={actualResult.ErrorCode}，摘要={actualResult.Summary}");
+
+    var legacyPadding = string.Concat(Enumerable.Range(0, 180)
+        .Select(index => $"// unrelated legacy filler {index:D3}: {new string('y', 64)}\n"));
+    var legacySource = legacyPadding
+        + "internal sealed class ToolBroker {\n"
+        + "    private async Task<Result> SendAsync(ToolProposal proposal, CancellationToken token) {\n"
+        + "        var recipient = proposal.Arguments.GetValueOrDefault(\"recipient\");\n"
+        + "        var text = proposal.Arguments.GetValueOrDefault(\"text\");\n"
+        + "        var attachments = proposal.Arguments.GetValueOrDefault(\"attachments\", \"无\");\n"
+        + "        if (string.IsNullOrWhiteSpace(recipient) || string.IsNullOrWhiteSpace(text)) return new(false, \"missing\", \"INVALID_SEND_PREVIEW\");\n"
+        + "        var confirmed = await _approval.ConfirmAsync(\"确认发送\", $\"收件人：{recipient}{Environment.NewLine}{Environment.NewLine}正文：{text}{Environment.NewLine}{Environment.NewLine}附件：{attachments}\", token);\n"
+        + "        if (!confirmed) return new(false, \"用户取消发送。\", \"USER_DECLINED\");\n"
+        + "        // No WeChat/QQ sender is implemented; approval alone must never imply an external side effect.\n"
+        + "        return new(false, \"预览已确认但未发送。\", \"SEND_ADAPTER_UNAVAILABLE\");\n"
+        + "    }\n"
+        + "}\n";
+    int LegacyLineFor(string fragment)
+    {
+        var index = legacySource.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The legacy send-policy fragment '{fragment}' is missing.");
+        return legacySource[..index].Count(character => character == '\n') + 1;
+    }
+
+    var legacyFactLines = new Dictionary<string, int[]>
+    {
+        ["发送确认展示什么"] =
+        [
+            LegacyLineFor("var recipient ="), LegacyLineFor("var text ="), LegacyLineFor("var attachments ="),
+            LegacyLineFor("var confirmed = await _approval.ConfirmAsync"),
+            LegacyLineFor("No WeChat/QQ sender is implemented"), LegacyLineFor("SEND_ADAPTER_UNAVAILABLE")
+        ],
+        ["拒绝"] =
+        [
+            LegacyLineFor("if (!confirmed)"), LegacyLineFor("No WeChat/QQ sender is implemented"),
+            LegacyLineFor("SEND_ADAPTER_UNAVAILABLE")
+        ],
+        ["不确定结果如何处理"] =
+        [
+            LegacyLineFor("var confirmed = await _approval.ConfirmAsync"),
+            LegacyLineFor("No WeChat/QQ sender is implemented"), LegacyLineFor("SEND_ADAPTER_UNAVAILABLE")
+        ]
+    };
+    var legacyAnswer = JsonSerializer.Serialize(new
+    {
+        claims = legacyFactLines.Select(fact => new
+        {
+            topic = fact.Key,
+            text = "确认后会自动发送；结果不确定时自动重试。",
+            citations = fact.Value.Select(line => new { path = targetPath, line }).ToArray()
+        }).ToArray()
+    });
+    var legacyProject = CreateProject(root, "code-inspection-legacy-send-policy", legacySource);
+    var legacyTarget = Path.Combine(legacyProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(legacyTarget)!);
+    File.Move(Path.Combine(legacyProject, "Sample.cs"), legacyTarget);
+    var legacyInference = new ScriptedInference("{\"locations\":[]}", legacyAnswer);
+    var legacyResult = await NewAgent(legacyInference).InspectAsync(legacyProject,
+        Path.Combine(root, "code-inspection-legacy-send-policy-workspaces"), actualPrompt, CancellationToken.None);
+    Require(legacyResult.Success && legacyInference.CallCount == 2
+        && legacyResult.Data!.Contains("确认窗口展示最终收件人、正文和附件", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("用户拒绝确认时返回 USER_DECLINED", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("没有微信/QQ发送适配器", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("没有自动重发路径", StringComparison.Ordinal)
+        && !legacyResult.Data.Contains("自动重试", StringComparison.Ordinal),
+        $"锁定基线的确认与无发送适配器分支未能从分散片段中确定性提取。错误={legacyResult.ErrorCode}，摘要={legacyResult.Summary}");
 }
 
 static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string root)
