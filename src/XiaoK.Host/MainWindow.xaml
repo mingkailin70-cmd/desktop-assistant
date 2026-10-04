@@ -74,11 +74,11 @@
                             <Border.Background>
                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                     <GradientStop Color="#F7F9FC" Offset="0"/>
-                                    <GradientStop Color="#E5EBF3" Offset="1"/>
+                                    <GradientStop Color="#E5EAF4" Offset="1"/>
                                 </LinearGradientBrush>
                             </Border.Background>
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v10-wave.png"
+                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v11-chibi-wave.png"
                                        Width="62" Height="62" Margin="-4" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        AutomationProperties.Name="银渐层小猫小K"/>
@@ -107,9 +107,9 @@
                     <Grid>
                         <Grid.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#F5F8FC" Offset="0"/>
-                                <GradientStop Color="#E6EDF5" Offset="0.72"/>
-                                <GradientStop Color="#EEF0F8" Offset="1"/>
+                                <GradientStop Color="#F5F8FD" Offset="0"/>
+                                <GradientStop Color="#E8EEF8" Offset="0.72"/>
+                                <GradientStop Color="#F0EDF8" Offset="1"/>
                             </LinearGradientBrush>
                         </Grid.Background>
                         <Grid.ColumnDefinitions>
@@ -128,8 +128,8 @@
                             <TextBlock Text="把想做的事告诉我，我们一起完成。"
                                        FontSize="11" Foreground="#60766D" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v10-wave.png"
-                               Width="122" Height="122" Margin="0,-2,-2,-7" Stretch="Uniform"
+                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v11-chibi-wave.png"
+                               Width="132" Height="132" Margin="0,-3,-4,-8" Stretch="Uniform"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
                                AutomationProperties.Name="小K银渐层小猫形象">
                             <Image.Effect>
@@ -243,9 +243,9 @@
                             <Ellipse Width="250" Height="206" Margin="0,22,0,0" IsHitTestVisible="False">
                                 <Ellipse.Fill>
                                     <RadialGradientBrush>
-                                        <GradientStop Color="#55D8EEE4" Offset="0"/>
-                                        <GradientStop Color="#19D8EEE4" Offset="0.63"/>
-                                        <GradientStop Color="#00D8EEE4" Offset="1"/>
+                                        <GradientStop Color="#557A9CCB" Offset="0"/>
+                                        <GradientStop Color="#19DDE7F8" Offset="0.63"/>
+                                        <GradientStop Color="#00DDE7F8" Offset="1"/>
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
@@ -257,8 +257,8 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v10-wave.png"
-                                   Width="270" Height="270" Margin="0,9,0,0" Stretch="Uniform"
+                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v11-chibi-wave.png"
+                                   Width="278" Height="278" Margin="0,7,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
                                    AutomationProperties.Name="3D银渐层小猫小K">
                                 <Image.Effect>
