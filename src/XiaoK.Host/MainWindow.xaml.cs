@@ -14,6 +14,8 @@ namespace XiaoK.Host;
 
 public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
+    private const double PetWindowWidth = 224;
+    private const double PetWindowHeight = 280;
     private readonly AssistantRuntime _runtime;
     private readonly PetWindowPositionStore _petWindowPositionStore;
     private readonly WindowsNotificationMonitor _notificationMonitor;
@@ -829,10 +831,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             ShellBorder.BorderThickness = expanded ? new Thickness(1) : new Thickness(0);
             ShellBorder.Padding = expanded ? new Thickness(14) : new Thickness(0);
             ShellBorder.Margin = expanded ? new Thickness(5) : new Thickness(0);
-            MinWidth = expanded ? 440 : 176;
-            MinHeight = expanded ? 560 : 176;
-            Width = expanded ? _expandedWidth : 176;
-            Height = expanded ? _expandedHeight : 176;
+            MinWidth = expanded ? 440 : PetWindowWidth;
+            MinHeight = expanded ? 560 : PetWindowHeight;
+            Width = expanded ? _expandedWidth : PetWindowWidth;
+            Height = expanded ? _expandedHeight : PetWindowHeight;
             ClampWindowToMonitorWorkArea();
             if (expanded)
             {
