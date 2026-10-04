@@ -1,5 +1,8 @@
 # MSIX 打包与权限验收
 
+## v0.1.33.0 桌宠 v10 视觉更新（2026-10-04）
+
+自包含签名 MSIX 位于 artifacts/msix-validation/9fae0290c2ab4cbc979f74d643a455ce/XiaoK-signed-validation.msix，大小84,531,000字节，SHA-256 64F7C5A9D2E13D8BFB8F3803D5FA01708874843D2D3B07496A11AE6F64298850。SignTool验签Valid（0警告、0错误）；证书此前已在LocalMachine/TrustedPeople，未修改证书信任。更新后当前账户包状态Ok、版本0.1.33.0；正常应用入口启动后进程响应正常。收起桌宠、头像与欢迎横幅已使用v10透明PNG。CUA未枚举原生应用，未取得窗口截图；没有启动模型、麦克风或通知监听。
 ## v0.1.32.0 语音运行时更新（2026-10-04）
 
 签名 MSIX 位于 artifacts/msix-validation/fa41ed3a1282442289ffe08246944563/XiaoK-signed-validation.msix，大小84,543,798字节，SHA-256 F75D019FF998D6FD408203F6F91CC89B25D1F42623C7591F4A88F689A8CCD3A5。SignTool验签Valid（0警告、0错误）；开发证书此前已在LocalMachine/TrustedPeople，本次没有修改信任。更新后当前账户包状态为Ok，版本0.1.32.0；安装版Host/ModelBroker的六句CPU语音回环6/6匹配，并观察到ASR两分钟闲置卸载及成功重载。该包仍包含桌宠v9角色素材；后续视觉更新单独升级包版本。没有启用麦克风或通知监听。
