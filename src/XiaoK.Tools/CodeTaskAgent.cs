@@ -70,6 +70,8 @@ public sealed class CodeTaskAgent
         string SourcePath, IReadOnlyList<int> SourceLines);
     private sealed record SourcePolicyFact(string Topic, string Text, string SourcePath, IReadOnlyList<int> SourceLines);
     private sealed record SourceSendFact(string Topic, string Text, string SourcePath, IReadOnlyList<int> SourceLines);
+    private sealed record SourceCodeAgentFact(string Topic, string Text, string SourcePath, IReadOnlyList<int> SourceLines);
+    private sealed record SourceModelBrokerFact(string Topic, string Text, string SourcePath, IReadOnlyList<int> SourceLines);
     private sealed record SourceTextMatch(Match Match, string SourcePath, int Line);
     private sealed record SourcePreCallGuard(string Topic, string Condition, string Outcome, int SourceLine,
         int TargetCallLine, string SourcePath);
@@ -346,6 +348,8 @@ public sealed class CodeTaskAgent
             var requiredTopics = ExtractExplanationTopics(instruction);
             var context = await CreateModelContextAsync(sourceFiles, instruction, cancellationToken);
             context = IncludeMessageSendSourceEvidence(context, sourceFiles, requiredTopics);
+            context = IncludeCodeAgentPolicyEvidence(context, sourceFiles, requiredTopics);
+            context = IncludeModelBrokerPolicyEvidence(context, sourceFiles, requiredTopics);
 
             await snapshot.WriteStateAsync("running", CancellationToken.None);
             var numberedSource = FormatNumberedSourceContext(context);
@@ -375,6 +379,30 @@ public sealed class CodeTaskAgent
             }
             var preCallGuards = ExtractOrderedPreCallGuards(context, instruction);
             requiredTopics = ExpandPreCallTopics(requiredTopics, preCallGuards);
+            var codeAgentFacts = ExtractCodeAgentPolicyFacts(context, requiredTopics);
+            var codeAgentTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(topic.Label)).ToArray();
+            if (codeAgentTopics.Length > 0
+                && context.Any(excerpt => Path.GetFileName(excerpt.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase))
+                && codeAgentFacts.Count != codeAgentTopics.Length)
+            {
+                var missingTopics = codeAgentTopics.Where(topic => !codeAgentFacts.Any(fact =>
+                    fact.Topic.Equals(topic.Label, StringComparison.Ordinal))).Select(topic => topic.Label);
+                return await FailAsync(snapshot,
+                    $"无法从已提供的编程代理源码中完整提取主题“{string.Join("、", missingTopics)}”的文件/字符上限或命令/原项目边界事实；为避免猜测已停止说明。",
+                    "CODE_INSPECTION_FAILED");
+            }
+            var modelBrokerFacts = ExtractModelBrokerPolicyFacts(context, requiredTopics);
+            var modelBrokerTopics = requiredTopics.Where(topic => IsModelBrokerPolicyTopic(topic.Label)).ToArray();
+            if (modelBrokerTopics.Length > 0
+                && context.Any(excerpt => Path.GetFileName(excerpt.Path).Equals("ModelBroker.cs", StringComparison.OrdinalIgnoreCase))
+                && modelBrokerFacts.Count != modelBrokerTopics.Length)
+            {
+                var missingTopics = modelBrokerTopics.Where(topic => !modelBrokerFacts.Any(fact =>
+                    fact.Topic.Equals(topic.Label, StringComparison.Ordinal))).Select(topic => topic.Label);
+                return await FailAsync(snapshot,
+                    $"无法从已提供的 ModelBroker 源码中完整提取交互/后台队列优先级、租约释放或排队上限事实；为避免猜测已停止说明。缺失主题：{string.Join("、", missingTopics)}",
+                    "CODE_INSPECTION_FAILED");
+            }
             var enforceTopicOrder = preCallGuards.Count > 1;
             var minimumClaimCount = requiredTopics.Sum(topic => topic.MinimumClaims);
             if (minimumClaimCount > MaximumExplanationClaims)
@@ -415,6 +443,20 @@ public sealed class CodeTaskAgent
                     path = fact.SourcePath,
                     sourceLines = fact.SourceLines
                 }),
+                codeAgentFacts = codeAgentFacts.Select(fact => new
+                {
+                    topic = fact.Topic,
+                    text = fact.Text,
+                    path = fact.SourcePath,
+                    sourceLines = fact.SourceLines
+                }),
+                modelBrokerFacts = modelBrokerFacts.Select(fact => new
+                {
+                    topic = fact.Topic,
+                    text = fact.Text,
+                    path = fact.SourcePath,
+                    sourceLines = fact.SourceLines
+                }),
                 orderedPreCallGuards = preCallGuards.Select(guard => new
                 {
                     topic = guard.Topic,
@@ -433,6 +475,12 @@ public sealed class CodeTaskAgent
                     : string.Empty)
                 + (sendFacts.Count > 0
                     ? "发送预览、拒绝和结果处理说明由本地程序依据源码生成；每条必须引用清单列出的全部相关源码行。"
+                    : string.Empty)
+                + (codeAgentFacts.Count > 0
+                    ? "编程代理的文件/字符上限及命令/原项目写入边界由本地程序依据目标源码生成；必须引用清单列出的全部相关源码行。"
+                    : string.Empty)
+                + (modelBrokerFacts.Count > 0
+                    ? "ModelBroker 交互/后台队列、租约让位和抢占语义由本地程序依据源码生成；必须引用清单列出的全部相关源码行，不得调换交互与后台角色。"
                     : string.Empty)
                 + (preCallGuards.Count > 1
                     ? "每条调用前门槛claim必须引用主题清单中该门槛自己的path和line，并引用目标调用行；条件与返回结果由本地程序按引用源码生成。"
@@ -455,7 +503,8 @@ public sealed class CodeTaskAgent
             if (answer.Contains('\0'))
                 return await FailAsync(snapshot, "本地模型返回的代码说明包含空字符。", "INVALID_CODE_EXPLANATION");
             var explanation = ParseStructuredCodeExplanation(
-                answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, sendFacts, preCallGuards);
+                answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, sendFacts,
+                codeAgentFacts, modelBrokerFacts, preCallGuards);
             if (!explanation.IsValid)
             {
                 answer = await _models.RunBackgroundStepAsync(
@@ -469,7 +518,8 @@ public sealed class CodeTaskAgent
                     || answer.Contains('\0')
                     ? new(false, null, "纠正响应为空、超长或包含无效字符。")
                     : ParseStructuredCodeExplanation(
-                        answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, sendFacts, preCallGuards);
+                        answer, context, requiredTopics, enforceTopicOrder, sourceMappings, noticePolicyFacts, sendFacts,
+                        codeAgentFacts, modelBrokerFacts, preCallGuards);
                 if (!explanation.IsValid)
                     return await FailAsync(snapshot,
                         $"本地模型说明未通过结构化来源校验：{explanation.Feedback} 原项目未修改。",
@@ -791,6 +841,359 @@ public sealed class CodeTaskAgent
         }
 
         return facts;
+    }
+
+    private static bool IsCodeAgentLimitTopic(string label) =>
+        label.Contains("文件", StringComparison.Ordinal)
+        || label.Contains("字符", StringComparison.Ordinal)
+        || label.Contains("上限", StringComparison.Ordinal);
+
+    private static bool IsCodeAgentPolicyTopic(string label) =>
+        IsCodeAgentLimitTopic(label)
+        || label.Contains("命令", StringComparison.Ordinal)
+        || label.Contains("项目", StringComparison.Ordinal);
+
+    private static List<SourceCodeAgentFact> ExtractCodeAgentPolicyFacts(
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+    {
+        var requestedTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(topic.Label)).ToArray();
+        if (requestedTopics.Length == 0) return [];
+
+        var sourceExcerpts = context.Where(excerpt =>
+            Path.GetFileName(excerpt.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        SourceTextMatch? MatchSource(string pattern)
+        {
+            foreach (var excerpt in sourceExcerpts)
+            {
+                var match = Regex.Match(excerpt.Content, pattern,
+                    RegexOptions.CultureInvariant | RegexOptions.Singleline);
+                if (match.Success)
+                    return new(match, excerpt.Path,
+                        excerpt.StartLine + excerpt.Content[..match.Index].Count(character => character == '\n'));
+            }
+            return null;
+        }
+
+        static int ConstantValue(SourceTextMatch match) => int.Parse(
+            match.Match.Groups["value"].Value.Replace("_", string.Empty, StringComparison.Ordinal),
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        var candidateFiles = MatchSource(@"private\s+const\s+int\s+MaximumCandidateFiles\s*=\s*(?<value>[0-9_]+)\s*;");
+        var selectedFiles = MatchSource(@"private\s+const\s+int\s+MaximumSelectedFiles\s*=\s*(?<value>[0-9_]+)\s*;");
+        var manifestCharacters = MatchSource(@"private\s+const\s+int\s+MaximumManifestCharacters\s*=\s*(?<value>[0-9_]+)\s*;");
+        var sourceCharacters = MatchSource(@"private\s+const\s+int\s+MaximumSourceCharacters\s*=\s*(?<value>[0-9_]+)\s*;");
+        var generatedCharacters = MatchSource(@"private\s+const\s+int\s+MaximumGeneratedCharacters\s*=\s*(?<value>[0-9_]+)\s*;");
+        var displayedDiffCharacters = MatchSource(@"private\s+const\s+int\s+MaximumDisplayedDiffCharacters\s*=\s*(?<value>[0-9_]+)\s*;");
+
+        var legacySnapshot = MatchSource(@"Produces a reviewable patch in a private snapshot\.");
+        var legacyNoCommand = MatchSource(@"It never launches a command,");
+        var legacyNoProjectWrite = MatchSource(@"writes to the selected source project, or merges the result back\.");
+        var commandRunnerImplementation = MatchSource(@"(?:IDotNetTestRunner|_dotNetTestRunner|ProcessStartInfo|Process\.Start)");
+
+        var reviewDecision = MatchSource(@"var decision\s*=\s*reviewPresenter is null");
+        var reviewPresenterCall = MatchSource(@"await reviewPresenter\.ReviewAsync\(");
+        var testTarget = MatchSource(@"var testTarget\s*=\s*snapshot\.GetDotNetTestTarget\(\);");
+        var executablePath = MatchSource(@"var dotNetExecutablePath\s*=\s*_dotNetTestRunner\.ExecutablePath;");
+        var runTestDecision = MatchSource(@"if\s*\(\s*decision\s*==\s*CodeTaskReviewDecision\.RunDotNetTests");
+        var testRunnerCall = MatchSource(@"await _dotNetTestRunner\.RunAsync\(");
+        var confirmedRunMessage = MatchSource(@"按你的确认运行固定验证命令");
+
+        var applyDecision = MatchSource(@"if\s*\(\s*decision\s*==\s*CodeTaskReviewDecision\.ApplyPatchToProject\s*\)");
+        var applyReviewedPatch = MatchSource(@"snapshot\.ApplyReviewedPatch\(changes,\s*_patchFileReplacer,\s*cancellationToken\);?");
+        var unchangedProjectMessage = MatchSource(@"原项目未修改。请审阅完整差异");
+
+        var allLimitMatches = new[]
+        {
+            candidateFiles, selectedFiles, manifestCharacters, sourceCharacters, generatedCharacters, displayedDiffCharacters
+        };
+        var facts = new List<SourceCodeAgentFact>();
+        foreach (var topic in requestedTopics)
+        {
+            if (IsCodeAgentLimitTopic(topic.Label)
+                && allLimitMatches.All(match => match is not null)
+                && allLimitMatches.Select(match => match!.SourcePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+            {
+                var lines = allLimitMatches.Select(match => match!.Line).Distinct().Order().ToArray();
+                facts.Add(new(topic.Label,
+                    $"每任务最多选定 {ConstantValue(selectedFiles!):N0} 个目标文件；项目候选文件上限 {ConstantValue(candidateFiles!):N0}。所选源码总字符上限 {ConstantValue(sourceCharacters!):N0}，生成补丁字符上限 {ConstantValue(generatedCharacters!):N0}；文件清单字符上限 {ConstantValue(manifestCharacters!):N0}、差异展示字符上限 {ConstantValue(displayedDiffCharacters!):N0} 是独立限制。",
+                    selectedFiles!.SourcePath, lines));
+            }
+            else if (topic.Label.Contains("命令", StringComparison.Ordinal))
+            {
+                if (legacySnapshot is not null && legacyNoCommand is not null && legacyNoProjectWrite is not null
+                    && commandRunnerImplementation is null)
+                {
+                    facts.Add(new(topic.Label,
+                        "该源码版本的类注释说明：代理在私有快照中生成可审阅补丁，不启动命令。",
+                        legacyNoCommand.SourcePath, new[] { legacySnapshot.Line, legacyNoCommand.Line }.Distinct().Order().ToArray()));
+                }
+                else if (reviewDecision is not null && reviewPresenterCall is not null && testTarget is not null
+                    && executablePath is not null && runTestDecision is not null && testRunnerCall is not null
+                    && confirmedRunMessage is not null)
+                {
+                    var lines = new[] { reviewDecision.Line, reviewPresenterCall.Line, testTarget.Line,
+                        executablePath.Line, runTestDecision.Line, testRunnerCall.Line, confirmedRunMessage.Line }
+                        .Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "当前实现会显示固定 .NET 验证命令；只有审阅界面返回 RunDotNetTests 且测试目标和执行程序均存在时，才按用户确认调用固定测试运行器。",
+                        reviewDecision.SourcePath, lines));
+                }
+            }
+            else if (topic.Label.Contains("项目", StringComparison.Ordinal))
+            {
+                if (legacySnapshot is not null && legacyNoCommand is not null && legacyNoProjectWrite is not null
+                    && commandRunnerImplementation is null)
+                {
+                    facts.Add(new(topic.Label,
+                        "该源码版本的类注释说明：补丁只在私有快照中生成，不写入所选源项目，也不把结果合并回原项目。",
+                        legacySnapshot.SourcePath, new[] { legacySnapshot.Line, legacyNoProjectWrite.Line }.Distinct().Order().ToArray()));
+                }
+                else if (reviewDecision is not null && applyDecision is not null && applyReviewedPatch is not null
+                    && unchangedProjectMessage is not null)
+                {
+                    var lines = new[] { reviewDecision.Line, applyDecision.Line, applyReviewedPatch.Line,
+                        unchangedProjectMessage.Line }.Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "补丁先在隔离快照中等待审阅，默认路径明确说明原项目未修改；只有审阅选择 ApplyPatchToProject 时才调用 ApplyReviewedPatch 写回项目。",
+                        applyDecision.SourcePath, lines));
+                }
+            }
+        }
+
+        return facts;
+    }
+
+    private static IReadOnlyList<CodeContextExcerpt> IncludeCodeAgentPolicyEvidence(
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<CodeFileContent> sourceFiles,
+        IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+    {
+        var requestedTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(topic.Label)).ToArray();
+        if (requestedTopics.Length == 0) return context;
+
+        var agentSources = sourceFiles.Where(file =>
+            Path.GetFileName(file.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (agentSources.Length == 0) return context;
+
+        var patterns = new List<string>();
+        if (requestedTopics.Any(topic => IsCodeAgentLimitTopic(topic.Label)))
+        {
+            patterns.Add(@"private\s+const\s+int\s+MaximumCandidateFiles\s*=\s*[0-9_]+\s*;");
+            patterns.Add(@"private\s+const\s+int\s+MaximumSelectedFiles\s*=\s*[0-9_]+\s*;");
+            patterns.Add(@"private\s+const\s+int\s+MaximumManifestCharacters\s*=\s*[0-9_]+\s*;");
+            patterns.Add(@"private\s+const\s+int\s+MaximumSourceCharacters\s*=\s*[0-9_]+\s*;");
+            patterns.Add(@"private\s+const\s+int\s+MaximumGeneratedCharacters\s*=\s*[0-9_]+\s*;");
+            patterns.Add(@"private\s+const\s+int\s+MaximumDisplayedDiffCharacters\s*=\s*[0-9_]+\s*;");
+        }
+        if (requestedTopics.Any(topic => topic.Label.Contains("命令", StringComparison.Ordinal)
+            || topic.Label.Contains("项目", StringComparison.Ordinal)))
+        {
+            patterns.Add(@"Produces a reviewable patch in a private snapshot\.");
+            patterns.Add(@"It never launches a command,");
+            patterns.Add(@"writes to the selected source project, or merges the result back\.");
+            patterns.Add(@"var decision\s*=\s*reviewPresenter is null");
+            patterns.Add(@"await reviewPresenter\.ReviewAsync\(");
+            patterns.Add(@"var testTarget\s*=\s*snapshot\.GetDotNetTestTarget\(\);");
+            patterns.Add(@"var dotNetExecutablePath\s*=\s*_dotNetTestRunner\.ExecutablePath;");
+            patterns.Add(@"if\s*\(\s*decision\s*==\s*CodeTaskReviewDecision\.RunDotNetTests");
+            patterns.Add(@"await _dotNetTestRunner\.RunAsync\(");
+            patterns.Add(@"按你的确认运行固定验证命令");
+            patterns.Add(@"if\s*\(\s*decision\s*==\s*CodeTaskReviewDecision\.ApplyPatchToProject\s*\)");
+            patterns.Add(@"snapshot\.ApplyReviewedPatch\(changes,\s*_patchFileReplacer,\s*cancellationToken\);?");
+            patterns.Add(@"原项目未修改。请审阅完整差异");
+        }
+
+        var added = new List<CodeContextExcerpt>();
+        foreach (var source in agentSources)
+        foreach (var pattern in patterns.Distinct(StringComparer.Ordinal))
+        {
+            var match = Regex.Match(source.Content, pattern,
+                RegexOptions.CultureInvariant | RegexOptions.Singleline);
+            if (!match.Success) continue;
+            var start = source.Content.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
+            var afterMatch = match.Index + match.Length;
+            var end = source.Content.IndexOf('\n', afterMatch);
+            if (end < 0) end = source.Content.Length;
+            var startLine = source.Content[..start].Count(character => character == '\n') + 1;
+            var evidence = source.Content[start..end].TrimEnd('\r');
+            if (evidence.Length > 0) added.Add(new(source.Path, startLine, evidence));
+        }
+
+        if (added.Count == 0) return context;
+        var combined = context.Concat(added)
+            .DistinctBy(excerpt => (excerpt.Path.ToUpperInvariant(), excerpt.StartLine, excerpt.Content), EqualityComparer<(string, int, string)>.Default)
+            .ToArray();
+        if (combined.Sum(excerpt => excerpt.Content.Length) > MaximumSourceCharacters)
+            throw new InvalidDataException("编程代理策略必需源码证据超过本地上下文上限；原项目未修改。");
+        return combined.OrderBy(excerpt => excerpt.Path, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(excerpt => excerpt.StartLine).ToArray();
+    }
+
+    private static bool IsModelBrokerPolicyTopic(string label) =>
+        label.Contains("交互", StringComparison.Ordinal)
+        || label.Contains("后台", StringComparison.Ordinal)
+        || label.Contains("排队", StringComparison.Ordinal)
+        || label.Contains("让位", StringComparison.Ordinal)
+        || label.Contains("抢占", StringComparison.Ordinal)
+        || label.Contains("租约", StringComparison.Ordinal);
+
+    private static List<SourceModelBrokerFact> ExtractModelBrokerPolicyFacts(
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+    {
+        var requestedTopics = requiredTopics.Where(topic => IsModelBrokerPolicyTopic(topic.Label)).ToArray();
+        if (requestedTopics.Length == 0) return [];
+
+        var sourceExcerpts = context.Where(excerpt =>
+            Path.GetFileName(excerpt.Path).Equals("ModelBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        SourceTextMatch? MatchSource(string pattern)
+        {
+            foreach (var excerpt in sourceExcerpts)
+            {
+                var match = Regex.Match(excerpt.Content, pattern,
+                    RegexOptions.CultureInvariant | RegexOptions.Singleline);
+                if (match.Success)
+                    return new(match, excerpt.Path,
+                        excerpt.StartLine + excerpt.Content[..match.Index].Count(character => character == '\n'));
+            }
+            return null;
+        }
+
+        var singleCallSummary = MatchSource(@"Grants one model call at a time\.");
+        var backgroundStepSummary = MatchSource(@"background callers must release the lease between tool steps\.");
+        var perStepYieldSummary = MatchSource(@"Runs one background inference step and yields the model lease when it completes\.");
+        var interactiveMethod = MatchSource(@"public Task<T> RunInteractiveAsync<T>\(");
+        var interactiveMode = MatchSource(@"RunAsync\(operation,\s*cancellationToken,\s*interactive:\s*true\b");
+        var backgroundMethod = MatchSource(@"public Task<T> RunBackgroundStepAsync<T>\(");
+        var backgroundMode = MatchSource(@"RunAsync\(operation,\s*cancellationToken,\s*interactive:\s*false\b");
+        var queueLimitValue = MatchSource(@"private const int MaximumQueuedRequests\s*=\s*[0-9_]+\s*;");
+        var queueHasCapacity = MatchSource(@"if\s*\(!_modelInUse\s*&&\s*_interactiveWaiters\.Count\s*==\s*0\s*&&\s*_backgroundWaiters\.Count\s*==\s*0\s*\)");
+        var queueIsFull = MatchSource(@"if\s*\(_interactiveWaiters\.Count\s*\+\s*_backgroundWaiters\.Count\s*>=\s*MaximumQueuedRequests\s*\)");
+        var queueFullResult = MatchSource(@"throw new ModelQueueFullException\(\);");
+        var enqueueByMode = MatchSource(@"\(interactive\s*\?\s*_interactiveWaiters\s*:\s*_backgroundWaiters\)\.Enqueue\(waiter\);");
+        var modelLease = MatchSource(@"using var lease\s*=\s*await AcquireAsync\(interactive,\s*cancellationToken\)");
+        var inferenceStep = MatchSource(@"return await operation\(cancellationToken\)");
+        var releaseDispatch = MatchSource(@"while\s*\(TryTakeNext\(out var waiter\)\)");
+        var takeInteractiveFirst = MatchSource(@"while\s*\(_interactiveWaiters\.TryDequeue\(out waiter!\)\)");
+        var takeBackgroundSecond = MatchSource(@"while\s*\(_backgroundWaiters\.TryDequeue\(out waiter!\)\)");
+
+        var facts = new List<SourceModelBrokerFact>();
+        foreach (var topic in requestedTopics)
+        {
+            if (topic.Label.Contains("让位", StringComparison.Ordinal) || topic.Label.Contains("抢占", StringComparison.Ordinal))
+            {
+                var yieldSummary = backgroundStepSummary ?? perStepYieldSummary;
+                if (yieldSummary is not null && backgroundMethod is not null && backgroundMode is not null
+                    && modelLease is not null && inferenceStep is not null && releaseDispatch is not null
+                    && takeInteractiveFirst is not null && takeBackgroundSecond is not null)
+                {
+                    var lines = new[] { yieldSummary.Line, backgroundMethod.Line, backgroundMode.Line,
+                        modelLease.Line, inferenceStep.Line, releaseDispatch.Line,
+                        takeInteractiveFirst.Line, takeBackgroundSecond.Line }.Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "后台调用应逐步让出租约：每次 RunBackgroundStepAsync 只运行一个持有租约的推理步骤，步骤完成后才释放；运行中的步骤不会被抢占。租约释放后，排队的交互请求先于后台请求获得下一步。",
+                        backgroundMethod.SourcePath, lines));
+                }
+            }
+            else if (topic.Label.Contains("交互", StringComparison.Ordinal))
+            {
+                if (singleCallSummary is not null && interactiveMethod is not null && interactiveMode is not null
+                    && modelLease is not null && inferenceStep is not null && releaseDispatch is not null
+                    && takeInteractiveFirst is not null && takeBackgroundSecond is not null)
+                {
+                    var lines = new[] { singleCallSummary.Line, interactiveMethod.Line, interactiveMode.Line,
+                        modelLease.Line, inferenceStep.Line, releaseDispatch.Line,
+                        takeInteractiveFirst.Line, takeBackgroundSecond.Line }.Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "RunInteractiveAsync 将调用标记为 interactive=true。Broker 一次只授予一个模型调用租约；当前推理完成并释放后，调度器先取交互等待者，再取后台等待者，因此交互请求不会抢占正在运行的步骤。",
+                        interactiveMethod.SourcePath, lines));
+                }
+            }
+            else if (topic.Label.Contains("后台", StringComparison.Ordinal) || topic.Label.Contains("排队", StringComparison.Ordinal))
+            {
+                if (backgroundMethod is not null && backgroundMode is not null && queueLimitValue is not null
+                    && queueHasCapacity is not null && queueIsFull is not null && queueFullResult is not null
+                    && enqueueByMode is not null)
+                {
+                    var lines = new[] { queueLimitValue.Line, backgroundMethod.Line, backgroundMode.Line,
+                        queueHasCapacity.Line, queueIsFull.Line, queueFullResult.Line, enqueueByMode.Line }
+                        .Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "RunBackgroundStepAsync 将请求标记为 interactive=false。模型空闲且无等待者时立即取得租约；否则按交互/后台类型进入相应队列。两类队列合计最多128项，达到上限会抛出 ModelQueueFullException。",
+                        backgroundMethod.SourcePath, lines));
+                }
+            }
+        }
+
+        return facts;
+    }
+
+    private static IReadOnlyList<CodeContextExcerpt> IncludeModelBrokerPolicyEvidence(
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<CodeFileContent> sourceFiles,
+        IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+    {
+        var requestedTopics = requiredTopics.Where(topic => IsModelBrokerPolicyTopic(topic.Label)).ToArray();
+        if (requestedTopics.Length == 0) return context;
+
+        var brokerSources = sourceFiles.Where(file =>
+            Path.GetFileName(file.Path).Equals("ModelBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (brokerSources.Length == 0) return context;
+
+        var patterns = new[]
+        {
+            @"Grants one model call at a time\.",
+            @"background callers must release the lease between tool steps\.",
+            @"public Task<T> RunInteractiveAsync<T>\(",
+            @"RunAsync\(operation,\s*cancellationToken,\s*interactive:\s*true\b",
+            @"public Task<T> RunBackgroundStepAsync<T>\(",
+            @"RunAsync\(operation,\s*cancellationToken,\s*interactive:\s*false\b",
+            @"Runs one background inference step and yields the model lease when it completes\.",
+            @"private const int MaximumQueuedRequests\s*=\s*[0-9_]+\s*;",
+            @"if\s*\(!_modelInUse\s*&&\s*_interactiveWaiters\.Count\s*==\s*0\s*&&\s*_backgroundWaiters\.Count\s*==\s*0\s*\)",
+            @"if\s*\(_interactiveWaiters\.Count\s*\+\s*_backgroundWaiters\.Count\s*>=\s*MaximumQueuedRequests\s*\)",
+            @"throw new ModelQueueFullException\(\);",
+            @"\(interactive\s*\?\s*_interactiveWaiters\s*:\s*_backgroundWaiters\)\.Enqueue\(waiter\);",
+            @"using var lease\s*=\s*await AcquireAsync\(interactive,\s*cancellationToken\)",
+            @"return await operation\(cancellationToken\)",
+            @"while\s*\(TryTakeNext\(out var waiter\)\)",
+            @"while\s*\(_interactiveWaiters\.TryDequeue\(out waiter!\)\)",
+            @"while\s*\(_backgroundWaiters\.TryDequeue\(out waiter!\)\)"
+        };
+
+        var added = new List<CodeContextExcerpt>();
+        foreach (var source in brokerSources)
+        foreach (var pattern in patterns)
+        {
+            var match = Regex.Match(source.Content, pattern,
+                RegexOptions.CultureInvariant | RegexOptions.Singleline);
+            if (!match.Success) continue;
+            var start = source.Content.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
+            var afterMatch = match.Index + match.Length;
+            var end = source.Content.IndexOf('\n', afterMatch);
+            if (end < 0) end = source.Content.Length;
+            var startLine = source.Content[..start].Count(character => character == '\n') + 1;
+            var evidence = source.Content[start..end].TrimEnd('\r');
+            if (evidence.Length > 0) added.Add(new(source.Path, startLine, evidence));
+        }
+
+        if (added.Count == 0) return context;
+        var combined = context.Concat(added)
+            .DistinctBy(excerpt => (excerpt.Path.ToUpperInvariant(), excerpt.StartLine, excerpt.Content), EqualityComparer<(string, int, string)>.Default)
+            .ToArray();
+        if (combined.Sum(excerpt => excerpt.Content.Length) > MaximumSourceCharacters)
+        {
+            if (!requiredTopics.All(topic => IsModelBrokerPolicyTopic(topic.Label)))
+                throw new InvalidDataException("ModelBroker 调度策略必需源码证据超过本地上下文上限；原项目未修改。");
+
+            combined = context.Where(excerpt =>
+                    !Path.GetFileName(excerpt.Path).Equals("ModelBroker.cs", StringComparison.OrdinalIgnoreCase))
+                .Concat(added)
+                .DistinctBy(excerpt => (excerpt.Path.ToUpperInvariant(), excerpt.StartLine, excerpt.Content),
+                    EqualityComparer<(string, int, string)>.Default)
+                .ToArray();
+            if (combined.Sum(excerpt => excerpt.Content.Length) > MaximumSourceCharacters)
+                throw new InvalidDataException("ModelBroker 调度策略精确源码证据超过本地上下文上限；原项目未修改。");
+        }
+        return combined.OrderBy(excerpt => excerpt.Path, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(excerpt => excerpt.StartLine).ToArray();
     }
 
     private static IReadOnlyList<CodeContextExcerpt> IncludeMessageSendSourceEvidence(
@@ -1195,6 +1598,8 @@ public sealed class CodeTaskAgent
         bool enforceTopicOrder, IReadOnlyList<SourceStringMapping> sourceMappings,
         IReadOnlyList<SourcePolicyFact> sourcePolicyFacts,
         IReadOnlyList<SourceSendFact> sourceSendFacts,
+        IReadOnlyList<SourceCodeAgentFact> sourceCodeAgentFacts,
+        IReadOnlyList<SourceModelBrokerFact> sourceModelBrokerFacts,
         IReadOnlyList<SourcePreCallGuard> preCallGuards)
     {
         var minimumClaimCount = requiredTopics.Sum(topic => topic.MinimumClaims);
@@ -1252,6 +1657,8 @@ public sealed class CodeTaskAgent
                 var sourceMapping = sourceMappings.FirstOrDefault(mapping => mapping.Topic.Equals(topic, StringComparison.Ordinal));
                 var sourcePolicyFact = sourcePolicyFacts.FirstOrDefault(fact => fact.Topic.Equals(topic, StringComparison.Ordinal));
                 var sourceSendFact = sourceSendFacts.FirstOrDefault(fact => fact.Topic.Equals(topic, StringComparison.Ordinal));
+                var sourceCodeAgentFact = sourceCodeAgentFacts.FirstOrDefault(fact => fact.Topic.Equals(topic, StringComparison.Ordinal));
+                var sourceModelBrokerFact = sourceModelBrokerFacts.FirstOrDefault(fact => fact.Topic.Equals(topic, StringComparison.Ordinal));
                 if (citations.GetArrayLength() is < 1 or > 8)
                     return new(false, null, "每条claim必须包含1至8条源码引用；没有依据时应删除该claim。");
 
@@ -1276,6 +1683,54 @@ public sealed class CodeTaskAgent
                     totalCitations += sourceSendFact.SourceLines.Count;
                     builder.Append("- ").Append(topic).Append('：').Append(sourceSendFact.Text).Append(' ')
                         .AppendJoin(' ', sourceSendFact.SourceLines.Select(line => $"[{sourceSendFact.SourcePath}:{line}]")).AppendLine();
+                    continue;
+                }
+
+                if (sourceCodeAgentFact is not null)
+                {
+                    foreach (var citation in citations.EnumerateArray())
+                    {
+                        JsonElement lineElement = default;
+                        var hasLine = citation.ValueKind == JsonValueKind.Object
+                            && citation.TryGetProperty("line", out lineElement);
+                        RequireExactObjectProperties(citation, hasLine ? ["path", "line"] : ["path", "startLine", "endLine"]);
+                        if (!hasLine || !citation.TryGetProperty("path", out var pathElement)
+                            || pathElement.ValueKind != JsonValueKind.String
+                            || string.IsNullOrWhiteSpace(pathElement.GetString()) || pathElement.GetString()!.Length > 512
+                            || !lineElement.TryGetInt32(out var line) || line is < 1 or > 1_000_000)
+                            return new(false, null, "编程代理事实说明仍须符合path与正整数line的结构；程序会从源码生成最终引用。");
+                    }
+
+                    if (sourceCodeAgentFact.SourceLines.Count is < 1 or > 8
+                        || totalCitations + sourceCodeAgentFact.SourceLines.Count > 40)
+                        return new(false, null, "从编程代理源码生成的引用数量超过单次说明上限。");
+                    totalCitations += sourceCodeAgentFact.SourceLines.Count;
+                    builder.Append("- ").Append(topic).Append('：').Append(sourceCodeAgentFact.Text).Append(' ')
+                        .AppendJoin(' ', sourceCodeAgentFact.SourceLines.Select(line => $"[{sourceCodeAgentFact.SourcePath}:{line}]")).AppendLine();
+                    continue;
+                }
+
+                if (sourceModelBrokerFact is not null)
+                {
+                    foreach (var citation in citations.EnumerateArray())
+                    {
+                        JsonElement lineElement = default;
+                        var hasLine = citation.ValueKind == JsonValueKind.Object
+                            && citation.TryGetProperty("line", out lineElement);
+                        RequireExactObjectProperties(citation, hasLine ? ["path", "line"] : ["path", "startLine", "endLine"]);
+                        if (!hasLine || !citation.TryGetProperty("path", out var pathElement)
+                            || pathElement.ValueKind != JsonValueKind.String
+                            || string.IsNullOrWhiteSpace(pathElement.GetString()) || pathElement.GetString()!.Length > 512
+                            || !lineElement.TryGetInt32(out var line) || line is < 1 or > 1_000_000)
+                            return new(false, null, "ModelBroker 事实说明仍须符合path与正整数line的结构；程序会从源码生成最终引用。");
+                    }
+
+                    if (sourceModelBrokerFact.SourceLines.Count is < 1 or > 8
+                        || totalCitations + sourceModelBrokerFact.SourceLines.Count > 40)
+                        return new(false, null, "从 ModelBroker 源码生成的引用数量超过单次说明上限。");
+                    totalCitations += sourceModelBrokerFact.SourceLines.Count;
+                    builder.Append("- ").Append(topic).Append('：').Append(sourceModelBrokerFact.Text).Append(' ')
+                        .AppendJoin(' ', sourceModelBrokerFact.SourceLines.Select(line => $"[{sourceModelBrokerFact.SourcePath}:{line}]")).AppendLine();
                     continue;
                 }
 

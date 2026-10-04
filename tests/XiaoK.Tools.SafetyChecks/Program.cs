@@ -1458,6 +1458,8 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
     await CheckCodeInspectionRendersSourceMappingsAsync(root);
     await CheckCodeInspectionRendersNoticePolicyFactsAsync(root);
     await CheckCodeInspectionRendersMessageSendFactsAsync(root);
+    await CheckCodeInspectionRendersCodeAgentPolicyFactsAsync(root);
+    await CheckCodeInspectionRendersModelBrokerPriorityFactsAsync(root);
     await CheckCodeInspectionRequiresOrderedPreReadGatesAsync(root);
 }
 
@@ -1997,6 +1999,144 @@ static async Task CheckCodeInspectionRendersMessageSendFactsAsync(string root)
         && legacyResult.Data.Contains("没有自动重发路径", StringComparison.Ordinal)
         && !legacyResult.Data.Contains("自动重试", StringComparison.Ordinal),
         $"锁定基线的确认与无发送适配器分支未能从分散片段中确定性提取。错误={legacyResult.ErrorCode}，摘要={legacyResult.Summary}");
+}
+
+static async Task CheckCodeInspectionRendersCodeAgentPolicyFactsAsync(string root)
+{
+    const string targetPath = "src/XiaoK.Tools/CodeTaskAgent.cs";
+    const string prompt = "只依据以下目标文件回答，不要猜测仓库外上下文：src/XiaoK.Tools/CodeTaskAgent.cs\n说明编程代理的文件/字符上限及其是否运行命令或改原项目。";
+    var topics = new[] { "编程代理的文件", "字符上限", "其是否运行命令", "改原项目" };
+    string BuildAnswer() => JsonSerializer.Serialize(new
+    {
+        claims = topics.Select(topic => new
+        {
+            topic,
+            text = topic.Contains("文件", StringComparison.Ordinal) || topic.Contains("字符", StringComparison.Ordinal)
+                ? "MaximumCandidateFiles是3000个已选文件；清单字符就是源码字符。"
+                : "代理会运行任意命令并直接修改原项目，无需用户确认。",
+            citations = new[] { new { path = "outside/forged.cs", line = 999999 } }
+        }).ToArray()
+    });
+
+    var padding = string.Concat(Enumerable.Range(0, 90)
+        .Select(index => $"// unrelated limits filler {index:D3}: {new string('z', 52)}\n"));
+    var legacySource = padding
+        + "namespace XiaoK.Tools;\n"
+        + "/// <summary>\n"
+        + "/// Produces a reviewable patch in a private snapshot. It never launches a command,\n"
+        + "/// writes to the selected source project, or merges the result back.\n"
+        + "/// </summary>\n"
+        + "public sealed class CodeTaskAgent {\n"
+        + "    private const int MaximumCandidateFiles = 3_000;\n"
+        + "    private const int MaximumSelectedFiles = 4;\n"
+        + "    private const int MaximumManifestCharacters = 12_000;\n"
+        + "    private const int MaximumSourceCharacters = 10_000;\n"
+        + "    private const int MaximumGeneratedCharacters = 40_000;\n"
+        + "    private const int MaximumDisplayedDiffCharacters = 30_000;\n"
+        + "}\n";
+    int LineFor(string fragment)
+    {
+        var index = legacySource.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The synthetic code-agent fragment '{fragment}' is missing.");
+        return legacySource[..index].Count(character => character == '\n') + 1;
+    }
+
+    var legacyProject = CreateProject(root, "code-inspection-code-agent-legacy-facts", legacySource);
+    var legacyTarget = Path.Combine(legacyProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(legacyTarget)!);
+    File.Move(Path.Combine(legacyProject, "Sample.cs"), legacyTarget);
+    var legacyInference = new ScriptedInference(BuildAnswer());
+    var legacyResult = await NewAgent(legacyInference).InspectAsync(legacyProject,
+        Path.Combine(root, "code-inspection-code-agent-legacy-facts-workspaces"), prompt, CancellationToken.None);
+    var displayedTargetPath = targetPath.Replace('/', Path.DirectorySeparatorChar);
+    Require(legacyResult.Success && legacyResult.Data!.Contains("最多选定 4 个目标文件", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("项目候选文件上限 3,000", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("所选源码总字符上限 10,000", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("生成补丁字符上限 40,000", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("文件清单字符上限 12,000", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("差异展示字符上限 30,000", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("不启动命令", StringComparison.Ordinal)
+        && legacyResult.Data.Contains("不写入所选源项目", StringComparison.Ordinal)
+        && !legacyResult.Data.Contains("outside/forged.cs", StringComparison.Ordinal)
+        && !legacyResult.Data.Contains("任意命令", StringComparison.Ordinal)
+        && legacyResult.Data.Contains($"[{displayedTargetPath}:{LineFor("private const int MaximumSelectedFiles")}]")
+        && legacyResult.Data.Contains($"[{displayedTargetPath}:{LineFor("It never launches a command,")}]")
+        && legacyResult.Data.Contains($"[{displayedTargetPath}:{LineFor("writes to the selected source project")}]")
+        && File.ReadAllText(legacyTarget) == legacySource,
+        $"锁定版编程代理的数值限制或只读边界未由源码确定性生成。错误={legacyResult.ErrorCode}，摘要={legacyResult.Summary}");
+
+    var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var currentSource = File.ReadAllText(Path.Combine(repositoryRoot, targetPath.Replace('/', Path.DirectorySeparatorChar)));
+    var currentProject = CreateProject(root, "code-inspection-code-agent-current-facts", currentSource);
+    var currentTarget = Path.Combine(currentProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(currentTarget)!);
+    File.Move(Path.Combine(currentProject, "Sample.cs"), currentTarget);
+    var currentInference = new ScriptedInference("{\"locations\":[]}", "{\"locations\":[]}", BuildAnswer(), BuildAnswer());
+    var currentResult = await NewAgent(currentInference).InspectAsync(currentProject,
+        Path.Combine(root, "code-inspection-code-agent-current-facts-workspaces"), prompt, CancellationToken.None);
+    Require(currentResult.Success && currentResult.Data!.Contains("最多选定 4 个目标文件", StringComparison.Ordinal)
+        && currentResult.Data.Contains("所选源码总字符上限 10,000", StringComparison.Ordinal)
+        && currentResult.Data.Contains("生成补丁字符上限 40,000", StringComparison.Ordinal)
+        && currentResult.Data.Contains("只有审阅界面返回 RunDotNetTests", StringComparison.Ordinal)
+        && currentResult.Data.Contains("固定测试运行器", StringComparison.Ordinal)
+        && currentResult.Data.Contains("默认路径明确说明原项目未修改", StringComparison.Ordinal)
+        && currentResult.Data.Contains("ApplyPatchToProject", StringComparison.Ordinal)
+        && File.ReadAllText(currentTarget) == currentSource,
+        $"当前编程代理的固定验证/原项目写入流程未由源码准确说明。错误={currentResult.ErrorCode}，摘要={currentResult.Summary}");
+}
+
+static async Task CheckCodeInspectionRendersModelBrokerPriorityFactsAsync(string root)
+{
+    const string targetPath = "src/XiaoK.Inference/ModelBroker.cs";
+    const string prompt = "只依据以下目标文件回答，不要猜测仓库外上下文：src/XiaoK.Inference/ModelBroker.cs\n说明交互/后台推理排队和后台让位方式。";
+    var topics = new[] { "交互", "后台推理排队", "后台让位方式" };
+    var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var source = File.ReadAllText(Path.Combine(repositoryRoot, targetPath.Replace('/', Path.DirectorySeparatorChar)));
+    int LineFor(string fragment)
+    {
+        var index = source.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The actual ModelBroker fragment '{fragment}' is missing.");
+        return source[..index].Count(character => character == '\n') + 1;
+    }
+
+    var answer = JsonSerializer.Serialize(new
+    {
+        claims = topics.Select(topic => new
+        {
+            topic,
+            text = topic == "交互"
+                ? "交互调用者必须在工具步骤之间释放租约。"
+                : topic == "后台推理排队"
+                    ? "后台调用使用 interactive=true，最多排队3000项。"
+                    : "后台会立即抢占交互调用，交互请求排在后台后面。",
+            citations = new[] { new { path = "forged/ModelBroker.cs", line = 999999 } }
+        }).ToArray()
+    });
+
+    var project = CreateProject(root, "code-inspection-model-broker-priority-facts", source);
+    var target = Path.Combine(project, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    File.Move(Path.Combine(project, "Sample.cs"), target);
+    var inference = new ScriptedInference(answer, answer, answer);
+    var result = await NewAgent(inference).InspectAsync(project,
+        Path.Combine(root, "code-inspection-model-broker-priority-facts-workspaces"), prompt, CancellationToken.None);
+    var displayedTargetPath = targetPath.Replace('/', Path.DirectorySeparatorChar);
+
+    Require(result.Success && result.Data!.Contains("interactive=true", StringComparison.Ordinal)
+        && result.Data.Contains("interactive=false", StringComparison.Ordinal)
+        && result.Data.Contains("后台调用应逐步让出租约", StringComparison.Ordinal)
+        && result.Data.Contains("一次只授予一个模型调用租约", StringComparison.Ordinal)
+        && result.Data.Contains("先取交互等待者，再取后台等待者", StringComparison.Ordinal)
+        && result.Data.Contains("队列合计最多128项", StringComparison.Ordinal)
+        && result.Data.Contains("不会被抢占", StringComparison.Ordinal)
+        && !result.Data.Contains("交互调用者必须在工具步骤之间释放租约", StringComparison.Ordinal)
+        && !result.Data.Contains("forged/ModelBroker.cs", StringComparison.Ordinal)
+        && result.Data.Contains($"[{displayedTargetPath}:{LineFor("background callers must release the lease between tool steps.")}]")
+        && result.Data.Contains($"[{displayedTargetPath}:{LineFor("private const int MaximumQueuedRequests")}]")
+        && result.Data.Contains($"[{displayedTargetPath}:{LineFor("while (_interactiveWaiters.TryDequeue")}]")
+        && result.Data.Contains($"[{displayedTargetPath}:{LineFor("while (_backgroundWaiters.TryDequeue")}]")
+        && File.ReadAllText(target) == source,
+        $"ModelBroker 的租约、优先级与逐步骤让位事实未从源码重建。错误={result.ErrorCode}，摘要={result.Summary}");
 }
 
 static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string root)
