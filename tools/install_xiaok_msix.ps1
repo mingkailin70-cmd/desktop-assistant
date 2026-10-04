@@ -117,6 +117,7 @@ if ($null -ne $previousPackage) {
             Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace XiaoK.MsixInstaller
 {
@@ -125,8 +126,15 @@ namespace XiaoK.MsixInstaller
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint RegisterWindowMessage(string messageName);
 
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+        private delegate bool EnumWindowsProc(IntPtr window, IntPtr state);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
+
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern IntPtr FindWindow(string className, string windowName);
+        private static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -135,7 +143,7 @@ namespace XiaoK.MsixInstaller
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
-        public static bool TryRequestShutdown(uint expectedProcessId, out bool windowFound,
+        public static bool TryRequestShutdown(uint expectedProcessId, string expectedWindowTitle, out bool windowFound,
             out uint windowProcessId, out int lastError)
         {
             windowFound = false;
@@ -149,16 +157,42 @@ namespace XiaoK.MsixInstaller
                 return false;
             }
 
-            IntPtr window = FindWindow(null, "小K");
-            if (window == IntPtr.Zero)
+            IntPtr window = IntPtr.Zero;
+            int matchingWindows = 0;
+            EnumWindowsProc callback = (candidate, _) =>
+            {
+                uint processId;
+                GetWindowThreadProcessId(candidate, out processId);
+                if (processId != expectedProcessId) return true;
+
+                var title = new StringBuilder(256);
+                GetWindowText(candidate, title, title.Capacity);
+                if (!string.Equals(title.ToString(), expectedWindowTitle, StringComparison.Ordinal)) return true;
+
+                matchingWindows++;
+                window = candidate;
+                return true;
+            };
+
+            if (!EnumWindows(callback, IntPtr.Zero))
             {
                 lastError = Marshal.GetLastWin32Error();
                 return false;
             }
 
+            if (matchingWindows == 0)
+            {
+                lastError = 1168; // ERROR_NOT_FOUND
+                return false;
+            }
+
             windowFound = true;
-            GetWindowThreadProcessId(window, out windowProcessId);
-            if (windowProcessId != expectedProcessId) return false;
+            windowProcessId = expectedProcessId;
+            if (matchingWindows != 1)
+            {
+                lastError = 183; // ERROR_ALREADY_EXISTS: ambiguous matching windows
+                return false;
+            }
             if (PostMessage(window, message, IntPtr.Zero, IntPtr.Zero)) return true;
 
             lastError = Marshal.GetLastWin32Error();
@@ -178,6 +212,7 @@ namespace XiaoK.MsixInstaller
             $candidateError = 0
             $posted = [XiaoK.MsixInstaller.ShutdownWindowMessage]::TryRequestShutdown(
                 [uint32]$hostProcess.Id,
+                '小K',
                 [ref]$windowFound,
                 [ref]$candidateWindowProcessId,
                 [ref]$candidateError)

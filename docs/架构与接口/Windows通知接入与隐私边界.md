@@ -22,7 +22,7 @@
 
 项目将目标框架固定为 `net10.0-windows10.0.26100.0`，通过 `WindowsSdkPackageVersion` 使用 `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87。`NuGet.Config` 仅映射该获准包；这不是客户端发送/读取接口，也不提供微信或 QQ 私聊元数据。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。截至 2026-10-04，本机清单与当前账户安装包版本均为 `0.1.31.0`，包全名为 `MingKaiLin.XiaoK_0.1.31.0_neutral__g0ndt6g65c8pe`；当前 Host 进程路径位于该版本 WindowsApps 安装目录。只读检查包外设置确认微信/QQ监控开关均为关闭、两款应用的发布者 AUMID 列表均为空，唤醒词也关闭；本轮没有请求通知权限或读取系统通知。Windows 通知系统权限状态没有重新查询，微信/QQ通知来源 AUMID 仍无真实样本核验，所以不能据设置开关推断系统权限状态，也不能宣称通知监听已验收。编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。截至 2026-10-04，本机清单与当前账户安装包版本均为 `0.1.32.0`，包全名为 `MingKaiLin.XiaoK_0.1.32.0_neutral__g0ndt6g65c8pe`；当前 Host 进程路径位于该版本 WindowsApps 安装目录。只读检查包外设置确认微信/QQ监控开关均为关闭、两款应用的发布者 AUMID 列表均为空，唤醒词也关闭；本轮没有请求通知权限或读取系统通知。Windows 通知系统权限状态没有重新查询，微信/QQ通知来源 AUMID 仍无真实样本核验，所以不能据设置开关推断系统权限状态，也不能宣称通知监听已验收。编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 

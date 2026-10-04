@@ -1,5 +1,8 @@
 # MSIX 打包与权限验收
 
+## v0.1.32.0 语音运行时更新（2026-10-04）
+
+签名 MSIX 位于 artifacts/msix-validation/fa41ed3a1282442289ffe08246944563/XiaoK-signed-validation.msix，大小84,543,798字节，SHA-256 F75D019FF998D6FD408203F6F91CC89B25D1F42623C7591F4A88F689A8CCD3A5。SignTool验签Valid（0警告、0错误）；开发证书此前已在LocalMachine/TrustedPeople，本次没有修改信任。更新后当前账户包状态为Ok，版本0.1.32.0；安装版Host/ModelBroker的六句CPU语音回环6/6匹配，并观察到ASR两分钟闲置卸载及成功重载。该包仍包含桌宠v9角色素材；后续视觉更新单独升级包版本。没有启用麦克风或通知监听。
 # 小K桌宠 v9 更新包（2026-10-04）
 
 桌宠主视觉切换到透明底 3D 银渐层幼猫 `xiaok-silver-shaded-3d-v9-wave.png`，收起态、标题头像和欢迎横幅共用同一素材。WPF 解码确认素材为 1254×1254 BGRA，角点透明且主体不透明。固定 SDK Release 解决方案构建 0 警告、0 错误；自包含 MSIX `0.1.31.0` 位于 `artifacts\msix-validation\81f8959eb03240ed85d85193b458604b\XiaoK-signed-validation.msix`，大小 84,541,805 字节，SHA-256 `FC3F389E48CB915BF30BA0F026CCAEB6FF8B9A929A754EA51722CC70AF4D6D28`。签名者 SHA-1 指纹 `B96A02547ABA84523619E11EB7788AE9850A5C60`；证书此前已在 `LocalMachine\TrustedPeople`，本次未改信任。安装前签名状态 `Valid`，SignTool 验证 0 警告、0 错误；更新器正常请求 0.1.30.0 Host 退出后将新包安装到当前账户，`Get-AppxPackage` 状态为 `Ok`。安装目录 EXE 直接启动成功，窗口标题“小K”；此路径暴露的空激活参数异常已在源码防护并随 0.1.31.0 修复。Open Computer Use 未枚举任何原生应用，因此未捕获安装版窗口截图；运行进程已确认，桌面上的最终像素效果、不同背景的透明边缘仍待人工目视复验。没有启动模型、麦克风或通知监听。

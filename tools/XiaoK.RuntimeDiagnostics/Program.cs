@@ -6,11 +6,19 @@ using XiaoK.Inference;
 if (args.Length == 4 && args[0] == "--voice-host-roundtrip")
     return await VoiceHostRoundTrip.RunAsync(args[1], args[2], args[3]);
 
+if (args.Length == 5 && args[0] == "--voice-installed-idle-roundtrip")
+    return await VoiceHostRoundTrip.RunInstalledAsync(args[1], args[2], args[3], args[4]);
+
+if (args.Length == 5 && args[0] == "--voice-installed-batch-roundtrip")
+    return await VoiceInstalledBatchRoundTrip.RunAsync(args[1], args[2], args[3], args[4]);
+
 if (args.Length != 4 || args[0] != "--managed-qwen")
 {
     Console.Error.WriteLine("用法：");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --managed-qwen <模型目录> <回环端点> <报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-host-roundtrip <仓库目录> <语音环境目录> <仓库外报告路径>");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-installed-idle-roundtrip <已安装包目录> <模型目录> <语音环境目录> <仓库外报告路径>");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-installed-batch-roundtrip <已安装包目录> <模型目录> <语音环境目录> <仓库外报告路径>");
     return 2;
 }
 
