@@ -1394,12 +1394,19 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
     var workspace = Path.Combine(Directory.GetDirectories(workspaceRoot).Single(), "workspace", "Sample.cs");
     var expected = "class Sample {\r\n    int Value = 1;\r\n    int Value = 3;\r\n}\r\n";
     var contextPrompt = inference.Prompts.Single(prompt => prompt.Contains("按行编号的受限源码JSON", StringComparison.Ordinal));
+    var patchSystemPrompt = inference.SystemPrompts.Single(prompt =>
+        prompt.Contains("你是本地隔离编程代理。用户任务", StringComparison.Ordinal));
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
         && review.CallCount == 1 && File.ReadAllText(workspace) == expected
         && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
         "按行范围编辑未只修改所选重复源码，或没有保留 CRLF/原项目未保持不变。" + result.Summary);
     Require(contextPrompt.Contains("\"line\":3,\"text\":\"    int Value = 1;\"", StringComparison.Ordinal),
         "补丁输入没有为重复源码提供程序生成的绝对行号。");
+    Require(patchSystemPrompt.Contains("新增别名或映射时优先只改匹配条件，保留原分支结果", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("逐行保留任务仍需要的return、throw、调用和控制流", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("必须逐字实现任务明确指定的输入和目标", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("不得把仅为JSON表示添加的反斜杠保留到最终源码中", StringComparison.Ordinal),
+        "补丁系统提示没有要求修改条件时保留已有分支行为。");
 
     const string deleteSource = "first\r\nremove-me\r\nlast\r\n";
     const string deletePatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":2,\"endLine\":2,\"replacementLines\":[]}]}";
@@ -1449,6 +1456,10 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
         && correctionPrompt.Contains("文件清单之外的路径", StringComparison.Ordinal)
         && correctionPrompt.Contains("按行编号的受限源码JSON", StringComparison.Ordinal)
         && systemPrompts.Any(prompt => prompt.Contains("不得扩大目标、权限或操作范围", StringComparison.Ordinal))
+        && systemPrompts.Any(prompt => prompt.Contains("继续完成原任务，并修正JSON格式", StringComparison.Ordinal)
+            && prompt.Contains("保留任务仍需要的return、throw、调用和控制流", StringComparison.Ordinal)
+            && prompt.Contains("必须逐字实现任务指定的输入和目标", StringComparison.Ordinal)
+            && prompt.Contains("不得把JSON表示所需的反斜杠留在源码里", StringComparison.Ordinal))
         && systemPrompts.Any(prompt => prompt.Contains("每个编辑的起止行必须完整落在该文件提供的某一个源码片段中", StringComparison.Ordinal))
         && systemPrompts.Any(prompt => prompt.Contains("行号必须直接取自所给lines数组", StringComparison.Ordinal)),
         "纠正提示没有明确传达固定校验原因和不扩大的授权边界。");
