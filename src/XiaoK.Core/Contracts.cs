@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 
 namespace XiaoK.Core;
 
@@ -70,7 +71,8 @@ public interface IInferenceClient
         CancellationToken cancellationToken) => CompleteAsync(systemPrompt, userPrompt, cancellationToken);
 }
 
-public sealed record InferenceRequestOptions(bool DisableThinking = false, bool JsonObject = false);
+public sealed record InferenceRequestOptions(bool DisableThinking = false, bool JsonObject = false,
+    JsonElement? JsonSchema = null);
 public interface ITool
 {
     string Id { get; }

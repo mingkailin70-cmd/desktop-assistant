@@ -52,8 +52,21 @@ public sealed class LocalInferenceClient : IInferenceClient, IDisposable
         };
         if (options.DisableThinking)
             payload["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = false };
-        if (options.JsonObject)
+        if (options.JsonSchema is { } jsonSchema)
+        {
+            if (!options.JsonObject || jsonSchema.ValueKind != JsonValueKind.Object
+                || Encoding.UTF8.GetByteCount(jsonSchema.GetRawText()) > 16 * 1024)
+                throw new ArgumentException("JSON response schema must be a bounded object used with JSON mode.", nameof(options));
+            payload["response_format"] = new Dictionary<string, object>
+            {
+                ["type"] = "json_object",
+                ["schema"] = jsonSchema
+            };
+        }
+        else if (options.JsonObject)
+        {
             payload["response_format"] = new Dictionary<string, string> { ["type"] = "json_object" };
+        }
         using var request = new HttpRequestMessage(HttpMethod.Post, "v1/chat/completions")
         {
             Content = JsonContent.Create(payload)
