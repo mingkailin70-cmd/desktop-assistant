@@ -273,6 +273,9 @@ try
     await CheckInvalidEditGetsOneBoundedCorrectionAsync(tempRoot);
     passed.Add("精确编辑字段校验失败时同样只纠正一次，路径与源代码上下文权限不扩大");
 
+    await CheckAdditiveMappingPatchGuardAsync(tempRoot);
+    passed.Add("新增别名必须逐字包含指定输入、不得引入额外映射值，并保留原有控制流");
+
     await CheckCodeTaskInspectionIsReadOnlyAsync(tempRoot);
     passed.Add("只读代码检索经 ToolBroker 选择并解释项目文件，不改写、审阅或测试原项目");
 
@@ -1217,6 +1220,26 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
             $"模型输出 {testCase.Name} 未按严格 JSON 架构失败关闭。");
         Require(inference.CallCount == testCase.ExpectedCalls && review.CallCount == 0,
             $"模型输出 {testCase.Name} 没有按允许的纠正次数失败关闭，或展示了待审阅补丁。");
+        var requestSchemas = inference.RequestOptions
+            .Select(option => option.JsonSchema)
+            .Where(schema => schema.HasValue)
+            .Select(schema => schema!.Value)
+            .ToArray();
+        var selectionSchemas = requestSchemas.Where(schema =>
+            schema.GetProperty("required").GetArrayLength() == 1
+            && schema.GetProperty("required")[0].GetString() == "paths").ToArray();
+        var patchSchemas = requestSchemas.Where(schema =>
+            schema.GetProperty("required").GetArrayLength() == 1
+            && schema.GetProperty("required")[0].GetString() == "edits").ToArray();
+        Require(selectionSchemas.Length >= 1
+            && selectionSchemas.All(schema => schema.GetProperty("properties").GetProperty("paths")
+                .GetProperty("maxItems").GetInt32() == 4
+                && !schema.GetProperty("additionalProperties").GetBoolean())
+            && (testCase.ExpectedCalls == 1
+                || (patchSchemas.Length >= 1 && patchSchemas.All(schema =>
+                    schema.GetProperty("properties").GetProperty("edits").GetProperty("items")
+                        .GetProperty("required").GetArrayLength() == 4))),
+            "文件选择与补丁生成没有各自使用正确的严格 JSON Schema。");
         Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
             $"模型输出 {testCase.Name} 修改了原项目。");
 
@@ -1404,11 +1427,19 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
         "补丁输入没有为重复源码提供程序生成的绝对行号。");
     Require(patchSystemPrompt.Contains("新增别名或映射时优先只改匹配条件，保留原分支结果", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("逐行保留任务仍需要的return、throw、调用和控制流", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("不得添加解释、描述、近义词或“相关”等扩展字符串", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("若源码会先将输入转为小写或大写，别名只能沿用该源码已有的规范化规则", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("必须逐字实现任务明确指定的输入和目标", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("不得把仅为JSON表示添加的反斜杠保留到最终源码中", StringComparison.Ordinal),
         "补丁系统提示没有要求修改条件时保留已有分支行为。");
-    Require(inference.RequestOptions.Single() is { DisableThinking: true, JsonObject: true,
-            Temperature: 0.1f, Seed: 42 },
+    var patchOptions = inference.RequestOptions.Single();
+    Require(patchOptions.DisableThinking && patchOptions.JsonObject
+        && patchOptions.Temperature == 0.1f && patchOptions.Seed == 42
+        && patchOptions.JsonSchema is { } patchSchema
+        && patchSchema.GetProperty("required").GetArrayLength() == 1
+        && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
+            .GetProperty("required").GetArrayLength() == 4
+        && !patchSchema.GetProperty("additionalProperties").GetBoolean(),
         "代码补丁生成没有使用已固定的低温和随机种子设置。");
 
     const string deleteSource = "first\r\nremove-me\r\nlast\r\n";
@@ -1461,6 +1492,7 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
         && systemPrompts.Any(prompt => prompt.Contains("不得扩大目标、权限或操作范围", StringComparison.Ordinal))
         && systemPrompts.Any(prompt => prompt.Contains("继续完成原任务，并修正JSON格式", StringComparison.Ordinal)
             && prompt.Contains("保留任务仍需要的return、throw、调用和控制流", StringComparison.Ordinal)
+            && prompt.Contains("不得添加解释、描述、近义词或“相关”等扩展字符串", StringComparison.Ordinal)
             && prompt.Contains("必须逐字实现任务指定的输入和目标", StringComparison.Ordinal)
             && prompt.Contains("不得把JSON表示所需的反斜杠留在源码里", StringComparison.Ordinal))
         && systemPrompts.Any(prompt => prompt.Contains("每个编辑的起止行必须完整落在该文件提供的某一个源码片段中", StringComparison.Ordinal))
@@ -1480,6 +1512,68 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
         && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
         && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
         "第二次无效编辑没有失败关闭，或原项目被修改。");
+}
+
+static async Task CheckAdditiveMappingPatchGuardAsync(string root)
+{
+    const string source = "internal static class Resolver\n{\n    static string Resolve(string phrase)\n    {\n        if (phrase == \"微信\")\n        {\n            return \"wechat\";\n        }\n        return \"unknown\";\n    }\n}\n";
+    const string instruction = "加入‘微信电脑版’别名，解析为wechat。";
+    const string wrongAliasPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":5,\"endLine\":8,\"replacementLines\":[\"        if (phrase == \\\"微信\\\" || phrase == \\\"微信十字版\\\")\",\"        {\",\"            return \\\"wechat\\\";\",\"        }\"]}]}";
+    const string removedReturnPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":5,\"endLine\":8,\"replacementLines\":[\"        if (phrase == \\\"微信\\\" || phrase == \\\"微信电脑版\\\")\",\"        {\",\"        }\"]}]}";
+    const string validPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":5,\"endLine\":8,\"replacementLines\":[\"        if (phrase == \\\"微信\\\" || phrase == \\\"微信电脑版\\\")\",\"        {\",\"            return \\\"wechat\\\";\",\"        }\"]}]}";
+
+    async Task VerifyCorrectionAsync(string caseName, string rejectedPatch, string expectedReason)
+    {
+        var project = CreateProject(root, "mapping-guard-" + caseName, source);
+        var workspaceRoot = Path.Combine(root, "mapping-guard-" + caseName + "-workspaces");
+        var inference = new ScriptedInference(rejectedPatch, validPatch);
+        var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+        var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, instruction,
+            CancellationToken.None, review);
+        var correctionPrompt = inference.Prompts.SingleOrDefault(prompt => prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+        var workspace = Path.Combine(Directory.GetDirectories(workspaceRoot).Single(), "workspace", "Sample.cs");
+        var expected = source.Replace("phrase == \"微信\"", "phrase == \"微信\" || phrase == \"微信电脑版\"", StringComparison.Ordinal);
+        var rejectedLiteralIsClearlyUntrusted = caseName != "wrong-literal"
+            || (correctionPrompt?.Contains("被拒绝的字符串字面量（不可信数据", StringComparison.Ordinal) == true
+                && correctionPrompt.Contains("微信十字版", StringComparison.Ordinal));
+        Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
+            && inference.CallCount == 2 && review.CallCount == 1
+            && correctionPrompt?.Contains(expectedReason, StringComparison.Ordinal) == true
+            && rejectedLiteralIsClearlyUntrusted
+            && File.ReadAllText(workspace) == expected
+            && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
+            $"{caseName} 的错误映射补丁没有经一次受限纠正后保留为可审阅隔离补丁：{result.Summary}");
+    }
+
+    await VerifyCorrectionAsync("wrong-literal", wrongAliasPatch, "用户请求未指定的字符串值");
+    await VerifyCorrectionAsync("lost-return", removedReturnPatch, "删除或改写了原有 return");
+
+    const string normalizedSource = "internal static class Resolver\n{\n    static string Resolve(string phrase)\n    {\n        phrase = phrase.ToLowerInvariant();\n        if (phrase == \"小k项目\")\n        {\n            return \"vscode/xiaok\";\n        }\n        return \"unknown\";\n    }\n}\n";
+    const string normalizedInstruction = "加入‘小K代码项目’别名，解析为vscode/xiaok。";
+    const string normalizedPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":6,\"endLine\":9,\"replacementLines\":[\"        if (phrase == \\\"小k项目\\\" || phrase == \\\"小k代码项目\\\")\",\"        {\",\"            return \\\"vscode/xiaok\\\";\",\"        }\"]}]}";
+    var normalizedProject = CreateProject(root, "mapping-guard-normalized-alias", normalizedSource);
+    var normalizedWorkspaceRoot = Path.Combine(root, "mapping-guard-normalized-alias-workspaces");
+    var normalizedInference = new ScriptedInference(normalizedPatch);
+    var normalizedReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var normalizedResult = await NewAgent(normalizedInference).ExecuteAsync(normalizedProject,
+        normalizedWorkspaceRoot, normalizedInstruction, CancellationToken.None, normalizedReview);
+    var normalizedWorkspace = Path.Combine(Directory.GetDirectories(normalizedWorkspaceRoot).Single(),
+        "workspace", "Sample.cs");
+    Require(normalizedResult.Success && normalizedResult.FinalState == TaskLifecycleState.AwaitingApproval
+        && normalizedInference.CallCount == 1 && normalizedReview.CallCount == 1
+        && File.ReadAllText(normalizedWorkspace).Contains("小k代码项目", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(normalizedProject, "Sample.cs")) == normalizedSource,
+        "源码已统一转为小写时，新增别名未按既有规范化规则实现或改变了原项目。");
+
+    var rejectedProject = CreateProject(root, "mapping-guard-still-invalid", source);
+    var rejectedWorkspace = Path.Combine(root, "mapping-guard-still-invalid-workspaces");
+    var rejectedInference = new ScriptedInference(removedReturnPatch, removedReturnPatch);
+    var rejectedReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var rejectedResult = await NewAgent(rejectedInference).ExecuteAsync(rejectedProject, rejectedWorkspace,
+        instruction, CancellationToken.None, rejectedReview);
+    Require(!rejectedResult.Success && rejectedInference.CallCount == 2 && rejectedReview.CallCount == 0
+        && File.ReadAllText(Path.Combine(rejectedProject, "Sample.cs")) == source,
+        "新增别名的第二次控制流违规补丁没有失败关闭，或修改了原项目。");
 }
 
 static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
@@ -4548,11 +4642,12 @@ static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
         var server = ServeOneLoopbackHttpRequestAsync(listener, HttpStatusCode.OK, responseBody, null,
             requestTimeout.Token);
         using var client = new LocalInferenceClient($"http://127.0.0.1:{port}/");
+        using var requestSchema = JsonDocument.Parse("""{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}""");
         LocalInferenceResponseDiagnostics? diagnostics = null;
         client.ResponseCompleted += value => diagnostics = value;
         var answer = await client.CompleteAsync("仅本地系统提示", "仅本地用户消息",
             new InferenceRequestOptions(DisableThinking: true, JsonObject: true,
-                Temperature: 0.1f, Seed: 42), requestTimeout.Token);
+                JsonSchema: requestSchema.RootElement, Temperature: 0.1f, Seed: 42), requestTimeout.Token);
         var request = await server.WaitAsync(TimeSpan.FromSeconds(3));
         using var payload = JsonDocument.Parse(request.Body);
         var messages = payload.RootElement.GetProperty("messages");
@@ -4564,6 +4659,8 @@ static async Task CheckLocalInferenceClientRequestAndRedirectBoundaryAsync()
             && messages[1].GetProperty("content").GetString() == "仅本地用户消息"
             && payload.RootElement.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").ValueKind == JsonValueKind.False
             && payload.RootElement.GetProperty("response_format").GetProperty("type").GetString() == "json_object"
+            && payload.RootElement.GetProperty("response_format").GetProperty("schema")
+                .GetProperty("properties").GetProperty("ok").GetProperty("type").GetString() == "boolean"
             && payload.RootElement.GetProperty("temperature").GetSingle() == 0.1f
             && payload.RootElement.GetProperty("seed").GetInt32() == 42,
             "本地推理客户端未向 loopback 发送预期接口请求，或未解析兼容响应。");
