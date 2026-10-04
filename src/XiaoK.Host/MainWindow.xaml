@@ -66,11 +66,17 @@
                         <Button Content="×" Width="34" Height="32" Margin="5,0,0,0" Click="Hide_Click" ToolTip="隐藏到托盘"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Background="#EEF2F8" BorderBrush="#DDE4EC" BorderThickness="1"
+                        <Border BorderBrush="#DDE4EC" BorderThickness="1"
                                 CornerRadius="18" Width="58" Height="58">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#F5F7FB" Offset="0"/>
+                                    <GradientStop Color="#E8EEF4" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v3.png"
-                                       Width="58" Height="58" Margin="-3" Stretch="Uniform"
+                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v4.png"
+                                       Width="62" Height="62" Margin="-4" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        AutomationProperties.Name="银渐层小猫小K"/>
                                 <Ellipse Width="6" Height="6" Fill="#FFD66B" HorizontalAlignment="Right"
@@ -98,8 +104,8 @@
                     <Grid>
                         <Grid.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#F1F3FF" Offset="0"/>
-                                <GradientStop Color="#EAF6FB" Offset="1"/>
+                                <GradientStop Color="#F5F6FA" Offset="0"/>
+                                <GradientStop Color="#E8F1F5" Offset="1"/>
                             </LinearGradientBrush>
                         </Grid.Background>
                         <Grid.ColumnDefinitions>
@@ -118,8 +124,8 @@
                             <TextBlock Text="把想做的事告诉我，我们一起完成。"
                                        FontSize="11" Foreground="#65718A" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v3.png"
-                               Width="116" Height="116" Margin="0,-2,-2,-7" Stretch="Uniform"
+                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v4.png"
+                               Width="122" Height="122" Margin="0,-2,-2,-7" Stretch="Uniform"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
                                AutomationProperties.Name="小K银渐层小猫形象">
                             <Image.Effect>
@@ -246,8 +252,8 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v3.png"
-                                   Width="252" Height="252" Margin="0,9,0,0" Stretch="Uniform"
+                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v4.png"
+                                   Width="270" Height="270" Margin="0,9,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
                                    AutomationProperties.Name="3D银渐层小猫小K">
                                 <Image.Effect>
