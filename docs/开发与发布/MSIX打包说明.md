@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.34.0 桌宠 v11 与登录启动状态（2026-10-05）
+
+当前账户 `Get-AppxPackage` 返回包状态 `Ok`、版本 `0.1.34.0`；正常启动后的安装版 `XiaoK.Host` 进程响应正常。通过小K设置页读取 Windows `StartupTask` API，状态文案为“Windows 登录启动任务已启用；可以在此关闭”；未更改该设置。包入口同时列于 `Get-StartApps`，AUMID 为 `MingKaiLin.XiaoK_g0ndt6g65c8pe!App`。这证明启动任务当前已启用，不证明下一次登录时实际进入托盘；Windows 重启后的启动、托盘状态和恢复行为仍待实测。
+
 ## v0.1.33.0 桌宠 v10 视觉更新（2026-10-04）
 
 自包含签名 MSIX 位于 artifacts/msix-validation/9fae0290c2ab4cbc979f74d643a455ce/XiaoK-signed-validation.msix，大小84,531,000字节，SHA-256 64F7C5A9D2E13D8BFB8F3803D5FA01708874843D2D3B07496A11AE6F64298850。SignTool验签Valid（0警告、0错误）；证书此前已在LocalMachine/TrustedPeople，未修改证书信任。更新后当前账户包状态Ok、版本0.1.33.0；正常应用入口启动后进程响应正常。收起桌宠、头像与欢迎横幅已使用v10透明PNG。CUA未枚举原生应用，未取得窗口截图；没有启动模型、麦克风或通知监听。
