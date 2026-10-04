@@ -14,8 +14,8 @@ namespace XiaoK.Host;
 
 public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
-    private const double PetWindowWidth = 224;
-    private const double PetWindowHeight = 280;
+    private const double PetWindowWidth = 272;
+    private const double PetWindowHeight = 336;
     private readonly AssistantRuntime _runtime;
     private readonly PetWindowPositionStore _petWindowPositionStore;
     private readonly WindowsNotificationMonitor _notificationMonitor;

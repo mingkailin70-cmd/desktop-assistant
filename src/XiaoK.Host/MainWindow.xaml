@@ -69,7 +69,7 @@
                         <Border Background="#F0F3F7" BorderBrush="#DDE4EC" BorderThickness="1"
                                 CornerRadius="16" Width="48" Height="48">
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d.png"
+                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v2.png"
                                        Width="44" Height="44" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        AutomationProperties.Name="银渐层小猫小K"/>
@@ -179,53 +179,50 @@
                         <MenuItem Header="退出小K" Click="Exit_Click"/>
                     </ContextMenu>
                 </Border.ContextMenu>
-                <Grid Margin="8">
-                    <Border CornerRadius="25" Background="#F8FAFD" BorderBrush="#DFE6F0" BorderThickness="1">
-                        <Border.Effect>
-                            <DropShadowEffect Color="#8492A8" BlurRadius="20" ShadowDepth="4" Opacity="0.22"/>
-                        </Border.Effect>
+                <Grid Margin="4,2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Top"
+                            Background="#EFFFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1"
+                            CornerRadius="14" Padding="10,5" Margin="0,9,0,0" MaxWidth="242">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="PetStatusDot" Width="7" Height="7" Fill="#7B8498"
+                                     VerticalAlignment="Center" Margin="0,0,7,0"/>
+                            <TextBlock x:Name="PetStatusText" Text="待命" FontSize="10" Foreground="#4F5D70"
+                                       VerticalAlignment="Center" Width="202" TextTrimming="CharacterEllipsis"
+                                       TextAlignment="Center"/>
+                        </StackPanel>
                     </Border>
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <Border Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Top"
-                                Background="#FFFFFF" BorderBrush="#E4EAF2" BorderThickness="1"
-                                CornerRadius="12" Padding="10,5" Margin="0,10,0,0" MaxWidth="194">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Ellipse x:Name="PetStatusDot" Width="7" Height="7" Fill="#7B8498"
-                                         VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <TextBlock x:Name="PetStatusText" Text="待命" FontSize="10" Foreground="#5D687B"
-                                           VerticalAlignment="Center" Width="150" TextTrimming="CharacterEllipsis"
-                                           TextAlignment="Center"/>
-                            </StackPanel>
-                        </Border>
-                        <Button Grid.Row="1" Style="{StaticResource PetExpandButton}" Click="ShowPanel_Click"
-                                Focusable="True" AutomationProperties.Name="展开小K任务面板" ToolTip="展开任务面板">
-                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Ellipse Width="168" Height="150" Margin="0,13,0,0">
-                                    <Ellipse.Fill>
-                                        <RadialGradientBrush>
-                                            <GradientStop Color="#FFFFFFFF" Offset="0"/>
-                                            <GradientStop Color="#FFEFF4FA" Offset="1"/>
-                                        </RadialGradientBrush>
-                                    </Ellipse.Fill>
-                                </Ellipse>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d.png"
-                                       Width="176" Height="174" Stretch="Uniform"
-                                       RenderOptions.BitmapScalingMode="HighQuality"
-                                       AutomationProperties.Name="3D银渐层小猫小K"/>
-                            </Grid>
-                        </Button>
-                        <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,0,0,12">
-                            <TextBlock Text="小K" FontSize="16" FontWeight="SemiBold" Foreground="#263247"
+                    <Button Grid.Row="1" Style="{StaticResource PetExpandButton}" Click="ShowPanel_Click"
+                            Focusable="True" AutomationProperties.Name="展开小K任务面板" ToolTip="展开任务面板">
+                        <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Ellipse Width="224" Height="196" Margin="0,22,0,0" IsHitTestVisible="False">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush>
+                                        <GradientStop Color="#22D9E6F4" Offset="0"/>
+                                        <GradientStop Color="#00D9E6F4" Offset="1"/>
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                            </Ellipse>
+                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v2.png"
+                                   Width="232" Height="232" Margin="0,10,0,0" Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                   AutomationProperties.Name="3D银渐层小猫小K"/>
+                        </Grid>
+                    </Button>
+                    <Border Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                            Background="#EFFFFFFF" BorderBrush="#55FFFFFF" BorderThickness="1"
+                            CornerRadius="13" Padding="13,4" Margin="0,0,0,9">
+                        <StackPanel>
+                            <TextBlock Text="小K" FontSize="14" FontWeight="SemiBold" Foreground="#263247"
                                        HorizontalAlignment="Center"/>
-                            <TextBlock Text="你的桌面伙伴" FontSize="9" Foreground="#8590A2"
+                            <TextBlock Text="点我开始 · 右键菜单" FontSize="9" Foreground="#768397"
                                        HorizontalAlignment="Center" Margin="0,1,0,0"/>
                         </StackPanel>
-                    </Grid>
+                    </Border>
                 </Grid>
             </Border>
         </Grid>
