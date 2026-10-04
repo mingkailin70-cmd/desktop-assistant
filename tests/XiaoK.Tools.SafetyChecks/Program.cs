@@ -1389,8 +1389,8 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 {
     CheckExplanationClaimCountEstimator();
     const string original = "class Sample { int Value = 7; }\n";
-    const string explanation = "Sample.Value 的初始值为 7。[Sample.cs:1]";
-    const string explanationJson = "{\"claims\":[{\"text\":\"Sample.Value 的初始值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
+    const string explanation = "Value 当前在哪里定义：Sample.Value 的初始值为 7。[Sample.cs:1]";
+    const string explanationJson = "{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"Sample.Value 的初始值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
     var project = CreateProject(root, "code-inspection", original);
     File.WriteAllText(Path.Combine(project, "Context.cs"), "class Context {}\n", new UTF8Encoding(false));
     var workspaces = Path.Combine(root, "code-inspection-workspaces");
@@ -1430,7 +1430,7 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 
     var reasoningProject = CreateProject(root, "code-inspection-reasoning-option", original);
     var reasoningInference = new ScriptedInference(
-        "{\"claims\":[{\"text\":\"Sample.Value 当前初始化为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}");
+        "{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"Sample.Value 当前初始化为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}");
     var reasoningResult = await NewAgent(reasoningInference, disableThinkingForInspection: false).InspectAsync(
         reasoningProject, Path.Combine(root, "code-inspection-reasoning-workspaces"),
         "说明 Value 当前在哪里定义", CancellationToken.None);
@@ -1439,13 +1439,14 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
         "离线评测不能单独为只读检索开启思考模式，或生产默认思考模式未被正确隔离。");
 
     await CheckCodeInspectionRejectsInsufficientClaimsAsync(root);
+    await CheckCodeInspectionRejectsMissingTopicsAsync(root);
 }
 
 static void CheckExplanationClaimCountEstimator()
 {
     var cases = new (string Prompt, int Expected)[]
     {
-        ("只依据目标文件回答：src/XiaoK.Core/Resolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。", 4),
+        ("只依据目标文件回答：src/XiaoK.Core/Resolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。", 5),
         ("按顺序说明通知正文读取前的安全条件。", 1),
         ("说明通知去重、限速默认值和集合上限。", 3),
         ("列出固定工具ID，并说明代码任务的目标和参数。", 3),
@@ -1455,7 +1456,7 @@ static void CheckExplanationClaimCountEstimator()
         ("说明模型启动显存准入条件。", 1),
         ("说明重启后旧任务和代码任务中断如何处理。", 2),
         ("说明通知监听身份条件和当前是否会自动读取微信/QQ正文。", 3),
-        ("说明 A、B、C、D、E、F、G。", 5),
+        ("说明 A、B、C、D、E、F、G。", 7),
         ("没有明确请求动词的自由文本", 1)
     };
 
@@ -1470,7 +1471,7 @@ static async Task CheckCodeInspectionRejectsInsufficientClaimsAsync(string root)
 {
     const string original = "namespace XiaoK.Core;\ninternal static class Resolver { }\n";
     const string prompt = "只依据目标文件回答：src/XiaoK.Core/AppLaunchIntentResolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。";
-    const string oneClaim = "{\"claims\":[{\"text\":\"空输入返回空值。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
+    const string oneClaim = "{\"claims\":[{\"topic\":\"空输入\",\"text\":\"空输入返回空值。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
     var project = CreateProject(root, "code-inspection-minimum-claims", original);
     var target = Path.Combine(project, "src", "XiaoK.Core", "AppLaunchIntentResolver.cs");
     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -1485,23 +1486,58 @@ static async Task CheckCodeInspectionRejectsInsufficientClaimsAsync(string root)
     var taskRoot = Directory.GetDirectories(workspaces).Single();
 
     Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION" && inference.CallCount == 2
-        && schemaMinimums.SequenceEqual([4, 4])
-        && inference.SystemPrompts.All(systemPrompt => systemPrompt.Contains("至少 4 条独立 claims", StringComparison.Ordinal)),
-        "只读检索未在生成与纠正请求中强制题目列出的四个询问点分别成项，或低于最低条数的响应未失败关闭。");
+        && schemaMinimums.SequenceEqual([5, 5])
+        && inference.SystemPrompts.All(systemPrompt => systemPrompt.Contains("本题至少需要 5 条独立 claims", StringComparison.Ordinal)),
+        "只读检索未在生成与纠正请求中强制题目列出的主题和别名重复项分别成项，或低于最低条数的响应未失败关闭。");
     Require(File.ReadAllText(target) == original
         && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
         "claim 数不足时没有失败关闭，或改写了原项目。");
 }
 
+static async Task CheckCodeInspectionRejectsMissingTopicsAsync(string root)
+{
+    const string original = "namespace XiaoK.Core;\ninternal static class Resolver { }\n";
+    const string prompt = "只依据目标文件回答：src/XiaoK.Core/AppLaunchIntentResolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。";
+    const string missingUnknownNameTopic = "{\"claims\":["
+        + "{\"topic\":\"空输入\",\"text\":\"空输入分支返回空结果。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"前缀\",\"text\":\"动作前缀会从输入中删除。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"别名\",\"text\":\"别名规则之一映射到固定应用ID。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"别名\",\"text\":\"另一个别名也映射到固定应用ID。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"别名\",\"text\":\"剩余别名映射到预设目标。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
+    var project = CreateProject(root, "code-inspection-missing-topic", original);
+    var target = Path.Combine(project, "src", "XiaoK.Core", "AppLaunchIntentResolver.cs");
+    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+    File.Move(Path.Combine(project, "Sample.cs"), target);
+    var workspaces = Path.Combine(root, "code-inspection-missing-topic-workspaces");
+    var inference = new ScriptedInference(missingUnknownNameTopic, missingUnknownNameTopic);
+
+    var result = await NewAgent(inference).InspectAsync(project, workspaces, prompt, CancellationToken.None);
+    var schemaRequests = inference.RequestOptions.Where(options => options.JsonSchema.HasValue).ToArray();
+    var topicEnums = schemaRequests.Select(options => options.JsonSchema!.Value
+        .GetProperty("properties").GetProperty("claims").GetProperty("items").GetProperty("properties")
+        .GetProperty("topic").GetProperty("enum").EnumerateArray().Select(item => item.GetString()).ToArray()).ToArray();
+    var taskRoot = Directory.GetDirectories(workspaces).Single();
+
+    Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION" && inference.CallCount == 2
+        && topicEnums.Length == 2
+        && topicEnums.All(items => items.SequenceEqual(["空输入", "前缀", "别名", "未知名称"]))
+        && inference.Prompts.Any(promptText => promptText.Contains("必需主题覆盖不足", StringComparison.Ordinal))
+        && inference.Prompts.Any(promptText => promptText.Contains("未知名称", StringComparison.Ordinal)),
+        "只读检索未在条数足够时继续拒绝缺失的主题，或JSON Schema没有传入固定主题标签枚举。");
+    Require(File.ReadAllText(target) == original
+        && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
+        "缺失题目主题时没有失败关闭，或改写了原项目。");
+}
+
 static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string root)
 {
     const string original = "class Sample { int Value = 7; }\n";
-    const string correctedAnswer = "Sample.Value 的初始值为 7。[Sample.cs:1]";
-    const string correctedAnswerJson = "{\"claims\":[{\"text\":\"Sample.Value 的初始值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
+    const string correctedAnswer = "Value 当前在哪里定义：Sample.Value 的初始值为 7。[Sample.cs:1]";
+    const string correctedAnswerJson = "{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"Sample.Value 的初始值为 7。\",\"citations\":[{\"path\":\"Sample.cs\",\"line\":1}]}]}";
     var correctedProject = CreateProject(root, "code-inspection-citation-correction", original);
     var correctedWorkspace = Path.Combine(root, "code-inspection-citation-correction-workspaces");
     var correctionInference = new ScriptedInference(
-        "{\"claims\":[{\"text\":\"Sample.Value 当前初始化为 7。\",\"citations\":[]}]}", correctedAnswerJson);
+        "{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"Sample.Value 当前初始化为 7。\",\"citations\":[]}]}", correctedAnswerJson);
     var corrected = await NewAgent(correctionInference).InspectAsync(correctedProject, correctedWorkspace,
         "说明 Value 当前在哪里定义", CancellationToken.None);
     Require(corrected.Success && corrected.Data == correctedAnswer && correctionInference.CallCount == 2
@@ -1510,9 +1546,9 @@ static async Task CheckInspectionCitationsAreBoundToProvidedSourceAsync(string r
 
     var invalidAnswers = new (string Answer, string Feedback)[]
     {
-        ("{\"claims\":[{\"text\":\"结论没有源码引用。\",\"citations\":[]}]}", "每条claim必须包含1至8条源码引用"),
-        ("{\"claims\":[{\"text\":\"字段定义见。\",\"citations\":[{\"path\":\"Other.cs\",\"startLine\":1,\"endLine\":1}]}]}", "源码引用的路径不在本次提供的上下文中"),
-        ("{\"claims\":[{\"text\":\"字段定义见。\",\"citations\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"endLine\":99}]}]}", "源码引用行号超出本次提供的源码片段")
+        ("{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"结论没有源码引用。\",\"citations\":[]}]}", "每条claim必须包含1至8条源码引用"),
+        ("{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"字段定义见。\",\"citations\":[{\"path\":\"Other.cs\",\"startLine\":1,\"endLine\":1}]}]}", "源码引用的路径不在本次提供的上下文中"),
+        ("{\"claims\":[{\"topic\":\"Value 当前在哪里定义\",\"text\":\"字段定义见。\",\"citations\":[{\"path\":\"Sample.cs\",\"startLine\":99,\"endLine\":99}]}]}", "源码引用行号超出本次提供的源码片段")
     };
     for (var index = 0; index < invalidAnswers.Length; index++)
     {
