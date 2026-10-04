@@ -1455,6 +1455,7 @@ static async Task CheckCodeTaskInspectionIsReadOnlyAsync(string root)
 
     await CheckCodeInspectionRejectsInsufficientClaimsAsync(root);
     await CheckCodeInspectionRejectsMissingTopicsAsync(root);
+    await CheckCodeInspectionRendersSourceMappingsAsync(root);
     await CheckCodeInspectionRequiresOrderedPreReadGatesAsync(root);
 }
 
@@ -1526,9 +1527,9 @@ static async Task CheckCodeInspectionRejectsMissingTopicsAsync(string root)
     const string missingMappingTopic = "{\"claims\":["
         + "{\"topic\":\"空输入\",\"text\":\"空输入分支返回空结果。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
         + "{\"topic\":\"前缀\",\"text\":\"动作前缀会从输入中删除。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
-        + "{\"topic\":\"别名映射：one\",\"text\":\"one和uno都映射到one。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
-        + "{\"topic\":\"别名映射：two\",\"text\":\"two和dos都映射到two。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
-        + "{\"topic\":\"别名映射：one\",\"text\":\"one分支再次核对。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"别名映射：one\",\"text\":\"one和uno都映射到one。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":5}]},"
+        + "{\"topic\":\"别名映射：two\",\"text\":\"two和dos都映射到two。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":6}]},"
+        + "{\"topic\":\"别名映射：one\",\"text\":\"one分支再次核对。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":5}]},"
         + "{\"topic\":\"未知名称\",\"text\":\"未知名称返回null。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
     var project = CreateProject(root, "code-inspection-missing-topic", original);
     var target = Path.Combine(project, "src", "XiaoK.Core", "AppLaunchIntentResolver.cs");
@@ -1551,13 +1552,109 @@ static async Task CheckCodeInspectionRejectsMissingTopicsAsync(string root)
     Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION" && inference.CallCount == 2
         && topicEnums.Length == 2
         && topicEnums.All(items => items.SequenceEqual(expectedTopics))
-        && inference.Prompts.Any(promptText => promptText.Contains("必需主题覆盖不足", StringComparison.Ordinal))
-        && inference.Prompts.Any(promptText => promptText.Contains("别名映射：three", StringComparison.Ordinal))
+        && inference.Prompts.Any(promptText => promptText.Contains("必需主题覆盖不足", StringComparison.Ordinal)),
+        "只读检索未在条数足够时拒绝缺失的源码映射目标，或主题Schema没有覆盖固定目标。");
+    Require(inference.Prompts.Any(promptText => promptText.Contains("别名映射：three", StringComparison.Ordinal))
         && inference.Prompts.Any(promptText => promptText.Contains("\"inputs\":[\"three\"]", StringComparison.Ordinal)),
-        "只读检索未在条数足够时拒绝缺失的源码映射目标，或主题Schema/清单没有覆盖固定目标与输入成员。");
+        "只读检索的映射主题清单没有包含对应的固定目标或输入成员。");
     Require(File.ReadAllText(target) == original
         && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
         "缺失题目主题时没有失败关闭，或改写了原项目。");
+}
+
+static async Task CheckCodeInspectionRendersSourceMappingsAsync(string root)
+{
+    const string source = "namespace XiaoK.Core;\n"
+        + "internal sealed record LaunchIntent(string AppId, string? WorkspaceId = null);\n"
+        + "internal static class Resolver {\n"
+        + "    static LaunchIntent? Resolve(string phrase) {\n"
+        + "        if (string.IsNullOrWhiteSpace(phrase)) return null;\n"
+        + "        if (phrase.StartsWith(\"open\")) phrase = phrase[4..];\n"
+        + "        if (phrase == \"edge\" || phrase == \"browser\") return new(\"edge\");\n"
+        + "        if (phrase == \"vscode\" || phrase == \"xiaok\") return new(\"vscode\", \"xiaok\");\n"
+        + "        return null;\n"
+        + "    }\n"
+        + "}\n";
+    const string prompt = "只依据目标文件回答：src/XiaoK.Core/AppLaunchIntentResolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。";
+    const string targetPath = "src/XiaoK.Core/AppLaunchIntentResolver.cs";
+    int LineFor(string fragment)
+    {
+        var index = source.IndexOf(fragment, StringComparison.Ordinal);
+        if (index < 0) throw new InvalidOperationException($"The synthetic mapping fragment '{fragment}' is missing.");
+        return source[..index].Count(character => character == '\n') + 1;
+    }
+
+    var emptyLine = LineFor("string.IsNullOrWhiteSpace(phrase)");
+    var prefixLine = LineFor("phrase.StartsWith(\"open\")");
+    var edgeConditionLine = LineFor("phrase == \"edge\"");
+    var edgeResultLine = LineFor("return new(\"edge\")");
+    var vscodeConditionLine = LineFor("phrase == \"vscode\"");
+    var vscodeResultLine = LineFor("return new(\"vscode\", \"xiaok\")");
+    var unknownLine = LineFor("return null;");
+
+    string BuildAnswer(bool borrowWrongMappingLine) => JsonSerializer.Serialize(new
+    {
+        claims = new object[]
+        {
+            new { topic = "空输入", text = "空输入返回null。", citations = new[] { new { path = targetPath, line = emptyLine } } },
+            new { topic = "前缀", text = "前缀从输入中移除。", citations = new[] { new { path = targetPath, line = prefixLine } } },
+            new
+            {
+                topic = "别名映射：edge",
+                text = "这些名称都返回unsupported目标。",
+                citations = new[]
+                {
+                    new { path = targetPath, line = borrowWrongMappingLine ? vscodeConditionLine : edgeConditionLine },
+                    new { path = targetPath, line = borrowWrongMappingLine ? vscodeResultLine : edgeResultLine }
+                }
+            },
+            new
+            {
+                topic = "别名映射：vscode/xiaok",
+                text = "这些名称都返回unsupported目标。",
+                citations = new[]
+                {
+                    new { path = targetPath, line = vscodeConditionLine },
+                    new { path = targetPath, line = vscodeResultLine }
+                }
+            },
+            new { topic = "未知名称", text = "其他名称返回null。", citations = new[] { new { path = targetPath, line = unknownLine } } }
+        }
+    });
+
+    var validProject = CreateProject(root, "code-inspection-source-mapping-render", source);
+    var validTarget = Path.Combine(validProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(validTarget)!);
+    File.Move(Path.Combine(validProject, "Sample.cs"), validTarget);
+    var validWorkspace = Path.Combine(root, "code-inspection-source-mapping-render-workspaces");
+    var validAnswer = BuildAnswer(borrowWrongMappingLine: false);
+    var validInference = new ScriptedInference(validAnswer, validAnswer);
+    var validResult = await NewAgent(validInference).InspectAsync(
+        validProject, validWorkspace, prompt, CancellationToken.None);
+
+    Require(validResult.Success && validInference.CallCount == 1
+        && validResult.Data!.Contains("目标 `edge`", StringComparison.Ordinal)
+        && validResult.Data.Contains("目标 `vscode/xiaok`", StringComparison.Ordinal)
+        && !validResult.Data.Contains("unsupported", StringComparison.Ordinal)
+        && validResult.Data.Contains("“edge”、“browser”", StringComparison.Ordinal)
+        && validResult.Data.Contains("“vscode”、“xiaok”", StringComparison.Ordinal),
+        "映射说明未从源码确定性呈现完整输入与精确目标，或仍信任模型自述的目标值。");
+
+    var invalidProject = CreateProject(root, "code-inspection-source-mapping-wrong-citation", source);
+    var invalidTarget = Path.Combine(invalidProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
+    Directory.CreateDirectory(Path.GetDirectoryName(invalidTarget)!);
+    File.Move(Path.Combine(invalidProject, "Sample.cs"), invalidTarget);
+    var invalidWorkspace = Path.Combine(root, "code-inspection-source-mapping-wrong-citation-workspaces");
+    var wrongCitationAnswer = BuildAnswer(borrowWrongMappingLine: true);
+    var invalidInference = new ScriptedInference(wrongCitationAnswer, wrongCitationAnswer);
+    var invalidResult = await NewAgent(invalidInference).InspectAsync(
+        invalidProject, invalidWorkspace, prompt, CancellationToken.None);
+
+    Require(!invalidResult.Success && invalidResult.ErrorCode == "INVALID_CODE_EXPLANATION"
+        && invalidInference.CallCount == 2
+        && invalidInference.Prompts.Any(promptText => promptText.Contains("所有输入条件与固定目标返回行", StringComparison.Ordinal))
+        && File.ReadAllText(invalidTarget) == source,
+        "映射校验接受了其他目标的源码引用，或引用不足时没有失败关闭。");
 }
 
 static async Task CheckCodeInspectionRequiresOrderedPreReadGatesAsync(string root)
