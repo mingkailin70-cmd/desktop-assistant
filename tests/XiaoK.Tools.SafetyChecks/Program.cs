@@ -1496,20 +1496,30 @@ static async Task CheckCodeInspectionRejectsInsufficientClaimsAsync(string root)
 
 static async Task CheckCodeInspectionRejectsMissingTopicsAsync(string root)
 {
-    const string original = "namespace XiaoK.Core;\ninternal static class Resolver { }\n";
+    const string original = "namespace XiaoK.Core;\n"
+        + "internal sealed record LaunchIntent(string AppId);\n"
+        + "internal static class Resolver {\n"
+        + "    static LaunchIntent? Resolve(string phrase) {\n"
+        + "        if (phrase == \"one\" || phrase == \"uno\") return new(\"one\");\n"
+        + "        if (phrase == \"two\" || phrase == \"dos\") return new(\"two\");\n"
+        + "        if (phrase == \"three\") return new(\"three\");\n"
+        + "        return null;\n"
+        + "    }\n"
+        + "}\n";
     const string prompt = "只依据目标文件回答：src/XiaoK.Core/AppLaunchIntentResolver.cs\n说明应用解析器如何处理空输入、前缀、别名和未知名称。";
-    const string missingUnknownNameTopic = "{\"claims\":["
+    const string missingMappingTopic = "{\"claims\":["
         + "{\"topic\":\"空输入\",\"text\":\"空输入分支返回空结果。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
         + "{\"topic\":\"前缀\",\"text\":\"动作前缀会从输入中删除。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
-        + "{\"topic\":\"别名\",\"text\":\"别名规则之一映射到固定应用ID。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
-        + "{\"topic\":\"别名\",\"text\":\"另一个别名也映射到固定应用ID。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
-        + "{\"topic\":\"别名\",\"text\":\"剩余别名映射到预设目标。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
+        + "{\"topic\":\"别名映射：one\",\"text\":\"one和uno都映射到one。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"别名映射：two\",\"text\":\"two和dos都映射到two。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"别名映射：one\",\"text\":\"one分支再次核对。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]},"
+        + "{\"topic\":\"未知名称\",\"text\":\"未知名称返回null。\",\"citations\":[{\"path\":\"src/XiaoK.Core/AppLaunchIntentResolver.cs\",\"line\":1}]}]}";
     var project = CreateProject(root, "code-inspection-missing-topic", original);
     var target = Path.Combine(project, "src", "XiaoK.Core", "AppLaunchIntentResolver.cs");
     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
     File.Move(Path.Combine(project, "Sample.cs"), target);
     var workspaces = Path.Combine(root, "code-inspection-missing-topic-workspaces");
-    var inference = new ScriptedInference(missingUnknownNameTopic, missingUnknownNameTopic);
+    var inference = new ScriptedInference(missingMappingTopic, missingMappingTopic);
 
     var result = await NewAgent(inference).InspectAsync(project, workspaces, prompt, CancellationToken.None);
     var schemaRequests = inference.RequestOptions.Where(options => options.JsonSchema.HasValue).ToArray();
@@ -1517,13 +1527,18 @@ static async Task CheckCodeInspectionRejectsMissingTopicsAsync(string root)
         .GetProperty("properties").GetProperty("claims").GetProperty("items").GetProperty("properties")
         .GetProperty("topic").GetProperty("enum").EnumerateArray().Select(item => item.GetString()).ToArray()).ToArray();
     var taskRoot = Directory.GetDirectories(workspaces).Single();
+    var expectedTopics = new[]
+    {
+        "空输入", "前缀", "别名映射：one", "别名映射：two", "别名映射：three", "未知名称"
+    };
 
     Require(!result.Success && result.ErrorCode == "INVALID_CODE_EXPLANATION" && inference.CallCount == 2
         && topicEnums.Length == 2
-        && topicEnums.All(items => items.SequenceEqual(["空输入", "前缀", "别名", "未知名称"]))
+        && topicEnums.All(items => items.SequenceEqual(expectedTopics))
         && inference.Prompts.Any(promptText => promptText.Contains("必需主题覆盖不足", StringComparison.Ordinal))
-        && inference.Prompts.Any(promptText => promptText.Contains("未知名称", StringComparison.Ordinal)),
-        "只读检索未在条数足够时继续拒绝缺失的主题，或JSON Schema没有传入固定主题标签枚举。");
+        && inference.Prompts.Any(promptText => promptText.Contains("别名映射：three", StringComparison.Ordinal))
+        && inference.Prompts.Any(promptText => promptText.Contains("\"inputs\":[\"three\"]", StringComparison.Ordinal)),
+        "只读检索未在条数足够时拒绝缺失的源码映射目标，或主题Schema/清单没有覆盖固定目标与输入成员。");
     Require(File.ReadAllText(target) == original
         && File.ReadAllText(Path.Combine(taskRoot, "task-state.json")).Contains("failed", StringComparison.Ordinal),
         "缺失题目主题时没有失败关闭，或改写了原项目。");
