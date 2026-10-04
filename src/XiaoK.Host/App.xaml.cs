@@ -4,6 +4,9 @@ using System.Security;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows;
+using Windows.ApplicationModel;
+using Windows.ApplicationModel.Activation;
+using XiaoK.Core;
 
 namespace XiaoK.Host;
 
@@ -41,7 +44,8 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var startInTray = e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase);
+        var startInTray = StartupWindowVisibilityPolicy.ShouldStartHidden(
+            e.Args, IsStartupTaskActivation());
         if (!_ownsMutex)
         {
             if (!startInTray) RestoreExistingInstance();
@@ -85,6 +89,21 @@ public partial class App : System.Windows.Application
         }
         _instanceMutex?.Dispose();
         base.OnExit(e);
+    }
+
+    private static bool IsStartupTaskActivation()
+    {
+        if (!WindowsPackageIdentity.IsPresent) return false;
+
+        try
+        {
+            return AppInstance.GetActivatedEventArgs().Kind == ActivationKind.StartupTask;
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException
+            or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     private static void RestoreExistingInstance()

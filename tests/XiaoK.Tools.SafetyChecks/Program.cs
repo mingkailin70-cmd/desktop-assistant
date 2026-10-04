@@ -405,6 +405,9 @@ try
     CheckNotificationEventQueueIsBoundedAndDeduplicated();
     passed.Add("通知事件队列只保留有界去重的系统通知 ID，并串行跟踪在途项");
 
+    CheckStartupWindowVisibilityPolicy();
+    passed.Add("MSIX 登录启动激活进入托盘，普通启动保持可见");
+
     CheckNoticePublisherAssignmentsAreUnambiguous();
     passed.Add("同一通知发布者不能同时归属微信和 QQ");
 
@@ -3085,6 +3088,16 @@ static void CheckNotificationEventQueueIsBoundedAndDeduplicated()
     queue.Complete(third);
     Require(queue.Count == 0 && !queue.TryDequeue(out _),
         "通知事件队列清空后仍保留了跟踪项。");
+}
+
+static void CheckStartupWindowVisibilityPolicy()
+{
+    Require(StartupWindowVisibilityPolicy.ShouldStartHidden([], isStartupTaskActivation: true),
+        "MSIX StartupTask 激活没有被识别为后台启动。");
+    Require(StartupWindowVisibilityPolicy.ShouldStartHidden(["--BACKGROUND"], isStartupTaskActivation: false),
+        "显式后台启动参数未忽略大小写。");
+    Require(!StartupWindowVisibilityPolicy.ShouldStartHidden([], isStartupTaskActivation: false),
+        "普通前台启动被错误隐藏到托盘。");
 }
 
 static void CheckPackagedAndDesktopAppUserModelIds()
