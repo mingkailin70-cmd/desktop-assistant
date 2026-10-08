@@ -2,7 +2,7 @@
 
 ## v0.1.45.0 R1任务输入保留修复验证包（2026-10-08）
 
-固定 SDK Release解决方案构建0警告、0错误；Windows安全回归101项通过、0项跳过，桌宠体验专项55项通过。win-x64锁定还原成功并完成自包含发布。签名验证包位于 `artifacts\msix-validation\f4774fd2e6634738aa9136d5074c5e04\XiaoK-signed-validation.msix`，大小84,730,869字节，SHA-256 `B180539E483B23B36952C4E9E599E6FAB9E30D763D5799304B79F9F95881DF6E`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`。打包未导入/修改证书信任、未安装或启动软件包，当前账户仍运行旧安装版本。新增输入保护确保队列拒绝或满载时保留请求，并防止异步回调清除用户后来输入的文字。此包的远端CI结果待提交后核对；原生窗口验收仍未进行。
+固定 SDK Release解决方案构建0警告、0错误；Windows安全回归101项通过、0项跳过，桌宠体验专项55项通过。win-x64锁定还原成功并完成自包含发布。签名验证包位于 `artifacts\msix-validation\f4774fd2e6634738aa9136d5074c5e04\XiaoK-signed-validation.msix`，大小84,730,869字节，SHA-256 `B180539E483B23B36952C4E9E599E6FAB9E30D763D5799304B79F9F95881DF6E`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`。打包未导入/修改证书信任、未安装或启动软件包。只读检查发现账户仍安装并运行`0.1.40.0` Host，但没有可核验窗口标题；因此没有向旧版发退出请求，也没有强制终止，避免中断当前会话。新增输入保护确保队列拒绝或满载时保留请求，并防止异步回调清除用户后来输入的文字。GitHub Actions Build #251 对提交 `6621d3e` 执行成功：[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37727424370)。原生窗口验收仍未进行。
 
 ## v0.1.44.0 R1任务中心源码验证包（2026-10-08）
 
