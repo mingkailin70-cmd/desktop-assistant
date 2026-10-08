@@ -873,6 +873,16 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.FileCopiedToConfiguredExport), token);
         }
 
+        if (category == "file-delete")
+        {
+            if (!LocalFileRecycleBinPolicy.TryParseRequest(request, out var sourcePath))
+                return new(false, "请按“移入回收站：本机完整文件路径”输入。仅支持设置中搜索目录内的单个普通文件，且会先在任务中心显示目标并等待确认。", "INVALID_RECYCLE_REQUEST");
+            var arguments = ImmutableDictionary<string, string>.Empty.Add("source_path", sourcePath);
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.delete.recycle-bin.v1", arguments,
+                "configured-search-root", ToolPrecondition.ConfiguredSearchRoot,
+                ToolExpectedOutcome.FileSentToRecycleBin), token);
+        }
+
         if (category == "file-archive")
         {
             var sourcePath = ExtractFileArchiveSource(request);
@@ -1016,6 +1026,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
+        if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";
         if (lower.StartsWith("下载文件") || lower.StartsWith("下载网页文件")) return "web-download";
         if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
@@ -1037,7 +1048,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-content-search" => "文件内容查找", "file-copy" => "文件复制", "file-archive" => "文件压缩", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-content-search" => "文件内容查找", "file-copy" => "文件复制", "file-archive" => "文件压缩", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-delete" => "移入回收站", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 

@@ -12,6 +12,7 @@ public static class TaskHistoryDisplayPolicy
         "file-archive" => "配置搜索根中的源文件与小K导出目录",
         "file-move" => "配置搜索根中的源文件和同卷目标目录",
         "file-rename" => "配置搜索根中的单个文件",
+        "file-delete" => "配置搜索根中的单个文件；批准后移入 Windows 回收站",
         "file-classify" => "用户指定的本机目录（只读）",
         "file-content-search" => "用户指定的文本查询（只返回路径与行号）",
         "web-read" => "用户提供的公开 HTTPS 页面",
@@ -27,6 +28,7 @@ public static class TaskHistoryDisplayPolicy
     public static string ExecutionMode(string taskKind) => taskKind switch
     {
         "app" or "window" => "前台交互：可能打开或切换窗口并改变焦点",
+        "file-delete" => "后台执行；任务中心逐项确认，文件目标变化时停止",
         "send" => "需要检查预览；当前未接入真实发送适配器",
         "code" => "后台隔离执行；补丁写回或命令需人工审批",
         _ => "后台处理：不发送键鼠输入，不改变前台窗口"

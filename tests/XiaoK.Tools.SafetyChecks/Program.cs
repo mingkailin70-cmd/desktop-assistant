@@ -153,6 +153,21 @@ if (args.Length == 1 && args[0] == "--only-file-move")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-recycle-bin")
+{
+    var recycleRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileRecycleProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(recycleRoot);
+    try
+    {
+        await CheckFileRecycleBinAsync(recycleRoot);
+        Console.WriteLine("通过：回收站命令固定为单个搜索根内普通文件；拒绝、等待审批时取消、越界和缺少审批器均不改变源文件，审批目标不写入历史。");
+    }
+    finally
+    {
+        if (Directory.Exists(recycleRoot)) Directory.Delete(recycleRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-classification")
 {
     var fileClassificationRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileClassificationProbe-" + Guid.NewGuid().ToString("N"));
@@ -350,6 +365,9 @@ try
         skipped.Add("小K文件移动的链接夹具无法创建，用例跳过：" + moveLinkSkipReason);
     else passed.Add("小K文件移动拒绝重解析点源路径和目标目录");
 
+    await CheckFileRecycleBinAsync(tempRoot);
+    passed.Add("移入回收站仅允许单个搜索根内普通文件，任务中心拒绝/无审批/越界时不改变源文件且审批审计不含路径");
+
     await CheckFileClassificationAsync(tempRoot);
     passed.Add("后台文件分类只按扩展名读取配置搜索根内普通文件，拒绝越界和目录联接且不读取/改写文件内容");
 
@@ -495,7 +513,7 @@ try
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
     await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
-    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1/v2/v3 到 v4 架构备份迁移");
+    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1/v2/v3/v4 到 v5 架构备份迁移");
 
     await CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(tempRoot);
     passed.Add("本地历史清理删除 SQLite 个人记录并保留迁移标记，重启后不会从旧源重新导入");
@@ -3183,17 +3201,25 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         ApprovalAuditCatalog.Declined, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodePatchApplyAction,
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.FileRecycleAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.FileRecycleAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     const string untrustedAuditSentinel = "PRIVATE_APPROVAL_DETAILS_MUST_NOT_BE_STORED";
     var untrustedActionRejected = false;
     try { await store.AppendApprovalAuditAsync(untrustedAuditSentinel, "confirmed", CancellationToken.None); }
     catch (ArgumentException) { untrustedActionRejected = true; }
     var audit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
-    Require(untrustedActionRejected && audit.Count == 3
+    Require(untrustedActionRejected && audit.Count == 5
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodeTaskAction
             && row.Outcome == ApprovalAuditCatalog.RunDotNetTests)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.MessageSendAction
             && row.Outcome == ApprovalAuditCatalog.Declined)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodePatchApplyAction
+            && row.Outcome == ApprovalAuditCatalog.Confirmed)
+        && audit.Any(row => row.ActionId == ApprovalAuditCatalog.FileRecycleAction
+            && row.Outcome == ApprovalAuditCatalog.Declined)
+        && audit.Any(row => row.ActionId == ApprovalAuditCatalog.FileRecycleAction
             && row.Outcome == ApprovalAuditCatalog.Confirmed)
         && DatabaseFilesOmitSentinel(databasePath, untrustedAuditSentinel),
         "审批审计接受了自由文本，或没有按固定动作/结果保存审核痕迹。");
@@ -3203,7 +3229,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
     var backedUpAudit = await backup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal"
-        && backedUpAudit.Count == 3,
+        && backedUpAudit.Count == 5,
         "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
     var changedAfterBackup = new ContactReplyStylePreference("Charlie", "casual",
@@ -3218,8 +3244,8 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var safetyPreferences = await safetyBackup.GetContactReplyStylesAsync(CancellationToken.None);
     var safetyAudit = await safetyBackup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(restoredPreferences.Count == 1 && restoredPreferences[0].ContactName == "Bob"
-        && restoredAudit.Count == 3 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
-        && safetyAudit.Count == 4,
+        && restoredAudit.Count == 5 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
+        && safetyAudit.Count == 6,
         "数据库恢复未恢复所选快照，或恢复前的活动数据库没有留下可用保护副本。");
 
     var incompatibleBackupPath = Path.Combine(directory, "incompatible.sqlite3");
@@ -3268,7 +3294,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     Require(v2UpgradePreferences.Count == 1 && v2UpgradePreferences[0].ContactName == "Bob"
         && v2UpgradeAudit.Count == 0
         && Directory.EnumerateFiles(v2Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
-        "v2 到 v4 升级未保留偏好、建立审批表或在变更前备份。");
+        "v2 到 v5 升级未保留偏好、建立审批表或在变更前备份。");
 
     var v3Directory = Path.Combine(directory, "v3-upgrade");
     Directory.CreateDirectory(v3Directory);
@@ -3288,7 +3314,25 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         && v3AuditAfterAppend.Any(row => row.ActionId == ApprovalAuditCatalog.CodePatchApplyAction
             && row.Outcome == ApprovalAuditCatalog.Confirmed)
         && Directory.EnumerateFiles(v3Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
-        "v3 到 v4 升级没有保留既有审计、加入固定补丁批准事件或先建立迁移备份。");
+        "v3 到 v5 升级没有保留既有审计、加入固定补丁批准事件或先建立迁移备份。");
+
+    var v4Directory = Path.Combine(directory, "v4-upgrade");
+    Directory.CreateDirectory(v4Directory);
+    var v4DatabasePath = Path.Combine(v4Directory, "tasks.sqlite3");
+    var v4Seed = new SqliteTaskStore(v4DatabasePath);
+    await v4Seed.AppendApprovalAuditAsync(ApprovalAuditCatalog.CodePatchApplyAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    SqliteSchemaFixture.RevertToVersionFour(v4DatabasePath);
+    var upgradedFromV4 = new SqliteTaskStore(v4DatabasePath);
+    var v4UpgradeAudit = await upgradedFromV4.GetRecentApprovalAuditAsync(10, CancellationToken.None);
+    await upgradedFromV4.AppendApprovalAuditAsync(ApprovalAuditCatalog.FileRecycleAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    var v4AuditAfterAppend = await upgradedFromV4.GetRecentApprovalAuditAsync(10, CancellationToken.None);
+    Require(v4UpgradeAudit.Count == 1 && v4AuditAfterAppend.Count == 2
+        && v4AuditAfterAppend.Any(row => row.ActionId == ApprovalAuditCatalog.FileRecycleAction
+            && row.Outcome == ApprovalAuditCatalog.Confirmed)
+        && Directory.EnumerateFiles(v4Directory, "tasks.sqlite3.before-migration-*.bak").Any(),
+        "v4 到 v5 升级未保留既有审计、加入固定回收站确认事件或先建立迁移备份。");
 }
 
 static async Task CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(string root)
@@ -3439,7 +3483,9 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
 static void CheckTaskHistoryDisplayPolicy()
 {
     Require(TaskHistoryDisplayPolicy.TargetScope("file-move").Contains("同卷目标目录", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("file-delete").Contains("回收站", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("file-delete").Contains("任务中心逐项确认", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file").Contains("不改变前台窗口", StringComparison.Ordinal),
         "任务中心没有显示准确的固定目标范围或执行模式。");
@@ -3451,6 +3497,7 @@ static void CheckTaskHistoryDisplayPolicy()
         "任务中心的取消、待核对或失败后指引错误，可能引导重复执行。");
 
     Require(TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: true)
+        && TaskFailureSafetyPolicy.RequiresManualVerification("file-delete", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("app", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("code", routeStarted: true)
         && !TaskFailureSafetyPolicy.RequiresManualVerification("file", routeStarted: true)
@@ -6424,6 +6471,83 @@ static async Task CheckFileMoveAsync(string root)
     Require(cancelled && File.Exists(conflictSource), "预取消的后台文件移动仍修改了源文件。");
 }
 
+static async Task CheckFileRecycleBinAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "file-recycle");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    Directory.CreateDirectory(allowedRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    var source = Path.Combine(allowedRoot, "synthetic-recycle-target.txt");
+    var payload = "synthetic content; not user data";
+    await File.WriteAllTextAsync(source, payload, new UTF8Encoding(false));
+    Require(LocalFileRecycleBinPolicy.TryParseRequest($"移入回收站：\"{source}\"", out var parsed)
+        && parsed == source
+        && !LocalFileRecycleBinPolicy.TryParseRequest($@"移入回收站：\\server\share\sample.txt", out _)
+        && !LocalFileRecycleBinPolicy.TryParseRequest($"移入回收站：{source}:secret", out _)
+        && !LocalFileRecycleBinPolicy.TryParseRequest($"移入回收站：{allowedRoot}", out _)
+        && !LocalFileRecycleBinPolicy.TryParseRequest($"移入回收站：{source}*", out _),
+        "固定回收站命令接受了目录、UNC、备用数据流或通配符，或无法解析引号路径。");
+    Require(ToolInteractionPolicy.GetMode("file.delete.recycle-bin.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("file.delete.recycle-bin.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "移入回收站工具未登记为后台执行。");
+
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+    var approval = new RecordingApprovalPresenter(confirmed: false);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), approval, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.delete.recycle-bin.v1", [new("source_path", source)],
+        "configured-search-root", ToolExpectedOutcome.FileSentToRecycleBin);
+    var declined = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(!declined.Success && declined.ErrorCode == "FILE_RECYCLE_DECLINED"
+        && approval.CallCount == 1 && approval.LastActionId == ApprovalAuditCatalog.FileRecycleAction
+        && approval.LastTitle == "确认移入回收站"
+        && approval.LastDetails?.Contains(Path.GetFullPath(source), StringComparison.OrdinalIgnoreCase) == true
+        && !declined.Summary.Contains(source, StringComparison.OrdinalIgnoreCase)
+        && await File.ReadAllTextAsync(source) == payload,
+        "拒绝后文件被改变、审批未展示准确完整目标，或路径泄露至固定结果摘要。");
+
+    var outside = Path.Combine(outsideRoot, "outside.txt");
+    await File.WriteAllTextAsync(outside, "outside sentinel", new UTF8Encoding(false));
+    var outsideResult = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", outside)
+    }, CancellationToken.None);
+    Require(!outsideResult.Success && outsideResult.ErrorCode == "RECYCLE_SOURCE_OUTSIDE_ALLOWED_ROOT"
+        && approval.CallCount == 1 && await File.ReadAllTextAsync(outside) == "outside sentinel",
+        "搜索根外的文件进入审批或被改动。");
+
+    var noApprovalBroker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var noApproval = await noApprovalBroker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(!noApproval.Success && noApproval.ErrorCode == "FILE_RECYCLE_APPROVAL_UNAVAILABLE"
+        && await File.ReadAllTextAsync(source) == payload,
+        "缺少任务中心审批器时仍执行了回收站动作。");
+
+    using var cancelApprovalSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+    var cancelApprovalPresenter = new CancellableApprovalPresenter();
+    var cancelApprovalBroker = new ToolBroker(desktop, null!, new ModelBroker(), cancelApprovalPresenter, null!, "", "");
+    var cancelled = await cancelApprovalBroker.ExecuteBackgroundAsync(proposal, cancelApprovalSource.Token);
+    Require(!cancelled.Success && cancelled.FinalState == TaskLifecycleState.Cancelled
+        && cancelled.ErrorCode == "FILE_RECYCLE_CANCELLED_BEFORE_OPERATION"
+        && cancelApprovalPresenter.CallCount == 1 && await File.ReadAllTextAsync(source) == payload,
+        "任务在等待审批期间取消后仍提交了回收站操作，或没有显示已取消状态。");
+
+    using var cancelAfterApprovalSource = new CancellationTokenSource();
+    var cancelAfterApprovalPresenter = new CancelAfterApprovalPresenter(cancelAfterApprovalSource);
+    var cancelAfterApprovalBroker = new ToolBroker(desktop, null!, new ModelBroker(), cancelAfterApprovalPresenter, null!, "", "");
+    var cancelledAfterApproval = await cancelAfterApprovalBroker.ExecuteBackgroundAsync(proposal, cancelAfterApprovalSource.Token);
+    Require(!cancelledAfterApproval.Success && cancelledAfterApproval.FinalState == TaskLifecycleState.Cancelled
+        && cancelledAfterApproval.ErrorCode == "FILE_RECYCLE_CANCELLED_BEFORE_OPERATION"
+        && cancelAfterApprovalPresenter.CallCount == 1 && await File.ReadAllTextAsync(source) == payload,
+        "用户批准后、Shell调用前取消时未返回已取消状态，或提交了回收站操作。");
+
+    var mismatch = await broker.ExecuteBackgroundAsync(proposal with { Preconditions = ToolPrecondition.None },
+        CancellationToken.None);
+    Require(!mismatch.Success && mismatch.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && approval.CallCount == 1 && await File.ReadAllTextAsync(source) == payload,
+        "ToolBroker 接受了缺少固定范围的回收站动作提案。");
+}
+
 static bool CheckFileMoveRejectsLinkedPaths(string root, out string skipReason)
 {
     var fixtureRoot = Path.Combine(root, "file-move-links");
@@ -6732,6 +6856,51 @@ internal sealed class FakePublicFileDownloader(PublicFileDownloadResult result) 
         CallCount++;
         LastUrl = url;
         return Task.FromResult(Result);
+    }
+}
+
+internal sealed class CancellableApprovalPresenter : IApprovalPresenter
+{
+    public int CallCount { get; private set; }
+
+    public async Task<bool> ConfirmAsync(string actionId, string title, string details,
+        CancellationToken cancellationToken)
+    {
+        CallCount++;
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return false;
+    }
+}
+
+internal sealed class CancelAfterApprovalPresenter(CancellationTokenSource cancellationSource) : IApprovalPresenter
+{
+    public int CallCount { get; private set; }
+
+    public Task<bool> ConfirmAsync(string actionId, string title, string details,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        cancellationSource.Cancel();
+        return Task.FromResult(true);
+    }
+}
+
+internal sealed class RecordingApprovalPresenter(bool confirmed) : IApprovalPresenter
+{
+    public int CallCount { get; private set; }
+    public string? LastActionId { get; private set; }
+    public string? LastTitle { get; private set; }
+    public string? LastDetails { get; private set; }
+
+    public Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        LastActionId = actionId;
+        LastTitle = title;
+        LastDetails = details;
+        return Task.FromResult(confirmed);
     }
 }
 
@@ -7086,6 +7255,20 @@ internal static class SqliteSchemaFixture
             + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
             + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v4; "
             + "DROP TABLE approval_audit_v4; PRAGMA user_version=3; COMMIT;");
+    }
+
+    public static void RevertToVersionFour(string databasePath)
+    {
+        Execute(databasePath, "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
+            + "ALTER TABLE approval_audit RENAME TO approval_audit_v5; "
+            + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
+            + "outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+            + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+            + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+            + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed'))); "
+            + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
+            + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v5; "
+            + "DROP TABLE approval_audit_v5; PRAGMA user_version=4; COMMIT;");
     }
 
     public static void RevertToVersionOne(string databasePath)

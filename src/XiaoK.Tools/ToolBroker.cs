@@ -60,6 +60,7 @@ public sealed class ToolBroker
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
+            "file.delete.recycle-bin.v1" => await RecycleFileToBinAsync(proposal, cancellationToken),
             "file.archive.single.v1" => await _desktop.ArchiveSingleFileToExportAsync(proposal, cancellationToken),
             "file.classify.preview.v1" => await _desktop.ClassifyFilesAsync(proposal, cancellationToken),
             "browser.read.public.v1" => _publicWebPageReader is null
@@ -104,6 +105,7 @@ public sealed class ToolBroker
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
+            "file.delete.recycle-bin.v1" => ValidateFileRecycleBin(proposal),
             "file.archive.single.v1" => ValidateFileArchive(proposal),
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
@@ -269,6 +271,45 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("文件移动只接受本机普通文件和已配置搜索范围内的完整目标目录；不会覆盖目标文件。");
 
+    private static ToolResult? ValidateFileRecycleBin(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("source_path", out var sourcePath)
+        && LocalFileRecycleBinPolicy.IsValidSourcePath(sourcePath)
+        && proposal.Target == "configured-search-root"
+            ? null
+            : InvalidProposal("回收站操作只接受搜索范围内的单个本机普通文件；目标会在执行前由用户确认。");
+
+    private async Task<ToolResult> RecycleFileToBinAsync(ToolProposal proposal, CancellationToken cancellationToken)
+    {
+        if (_approval is null)
+            return new(false, "任务中心确认功能不可用；为安全起见没有移动文件。", "FILE_RECYCLE_APPROVAL_UNAVAILABLE");
+        if (!_desktop.TryPrepareFileForRecycleBin(proposal.Arguments["source_path"], out var prepared, out var failure)
+            || prepared is null)
+            return failure ?? new(false, "目标文件检查失败；没有移动文件。", "RECYCLE_TARGET_UNAVAILABLE");
+
+        var details = $"操作：移入 Windows 回收站{Environment.NewLine}完整目标路径：{prepared.CanonicalTargetPath}"
+            + $"{Environment.NewLine}{Environment.NewLine}仅处理这一个普通文件，不递归，不会永久删除。"
+            + $"{Environment.NewLine}确认后会重新核验文件身份与目录；确认期间目标变化时停止。"
+            + $"{Environment.NewLine}请选择批准或拒绝。";
+        bool confirmed;
+        try
+        {
+            confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.FileRecycleAction,
+                "确认移入回收站", details, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(false, "等待确认时任务已取消；回收站操作尚未提交。", "FILE_RECYCLE_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        }
+        if (!confirmed) return new(false, "已拒绝移入回收站；文件未被小K移动。", "FILE_RECYCLE_DECLINED");
+
+        if (cancellationToken.IsCancellationRequested)
+            return new(false, "确认后、提交回收站请求前任务已取消；没有移动文件。", "FILE_RECYCLE_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        return await _desktop.RecyclePreparedFileAsync(prepared, cancellationToken).ConfigureAwait(false);
+    }
+
     private static ToolResult? ValidateFileClassification(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
         && proposal.Arguments.TryGetValue("directory_path", out var directoryPath)
@@ -369,6 +410,7 @@ public sealed class ToolBroker
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
+        "file.delete.recycle-bin.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.archive.single.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
@@ -389,6 +431,7 @@ public sealed class ToolBroker
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
+        "file.delete.recycle-bin.v1" => ToolExpectedOutcome.FileSentToRecycleBin,
         "file.archive.single.v1" => ToolExpectedOutcome.FileArchivedToConfiguredExport,
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,

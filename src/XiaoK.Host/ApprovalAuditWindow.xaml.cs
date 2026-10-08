@@ -15,6 +15,7 @@ public partial class ApprovalAuditWindow : Window
                 ApprovalAuditCatalog.MessageSendAction => "消息发送预览",
                 ApprovalAuditCatalog.CodeTaskAction => "隔离代码验证",
                 ApprovalAuditCatalog.CodePatchApplyAction => "隔离补丁应用",
+                ApprovalAuditCatalog.FileRecycleAction => "文件移入回收站",
                 _ => "未知动作"
             },
             record.Outcome switch

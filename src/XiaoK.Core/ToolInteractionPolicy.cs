@@ -9,6 +9,7 @@ public static class ToolInteractionPolicy
     public static ToolInteractionMode GetMode(string toolId) => toolId switch
     {
         "file.search.v1" or "file.search.content.v1" or "file.copy.v1" or "file.rename.v1" or "file.move.v1"
+            or "file.delete.recycle-bin.v1"
             or "file.classify.preview.v1" or "file.archive.single.v1"
             or "browser.read.public.v1" or "browser.download.public.v1"
             or "code.inspect.v1" or "code.task.create.v1" or "message.analyze.v1"

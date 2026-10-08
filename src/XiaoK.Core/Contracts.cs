@@ -46,7 +46,8 @@ public enum ToolExpectedOutcome
     FileMovedWithinConfiguredSearchRoots = 14,
     PublicFileDownloadedToConfiguredExport = 15,
     FileArchivedToConfiguredExport = 16,
-    MatchingFileContentLocationsListed = 17
+    MatchingFileContentLocationsListed = 17,
+    FileSentToRecycleBin = 18
 }
 
 public static class ApprovalAuditCatalog
@@ -54,6 +55,7 @@ public static class ApprovalAuditCatalog
     public const string MessageSendAction = "message.send.v1";
     public const string CodeTaskAction = "code.task.create.v1";
     public const string CodePatchApplyAction = "code.patch.apply.v1";
+    public const string FileRecycleAction = "file.delete.recycle-bin.v1";
     public const string Confirmed = "confirmed";
     public const string Declined = "declined";
     public const string RunDotNetTests = "run_dotnet_tests";
