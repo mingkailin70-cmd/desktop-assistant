@@ -5843,8 +5843,11 @@ static async Task CheckStaticBrowserRenderingAsync()
     var port = ((IPEndPoint)listener.LocalEndpoint).Port;
     var html = $"""
         <!doctype html><html><head><meta charset="utf-8"><title>静态测试页</title>
-        <script>document.body.innerText = '脚本不应执行';</script></head><body><main><h1>静态页面正文</h1>
-        <p>这段文字应由独立浏览器读取。</p><img src="http://127.0.0.1:{port}/must-be-blocked"></main>
+        <script>document.body.innerText = '脚本不应执行';</script></head><body><main>
+        <h1>静态页面正文</h1><p>这段文字应由独立浏览器读取。</p>
+        <a href="/help" aria-label="帮助文档">帮助</a><button aria-label="展开选项">选项</button>
+        <label for="query">搜索关键词</label><input id="query" type="text">
+        <img src="http://127.0.0.1:{port}/must-be-blocked"></main>
         <script>document.body.append('脚本不应执行');</script></body></html>
         """;
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -5854,6 +5857,11 @@ static async Task CheckStaticBrowserRenderingAsync()
         && result.BodyText.Contains("这段文字应由独立浏览器读取", StringComparison.Ordinal)
         && !result.BodyText.Contains("脚本不应执行", StringComparison.Ordinal),
         "独立无头 Edge 没有提取静态正文，或执行了网页脚本。");
+    Require(result.AriaSnapshot.Contains("heading \"静态页面正文\"", StringComparison.Ordinal)
+        && result.AriaSnapshot.Contains("link \"帮助文档\"", StringComparison.Ordinal)
+        && result.AriaSnapshot.Contains("button \"展开选项\"", StringComparison.Ordinal)
+        && result.AriaSnapshot.Contains("textbox \"搜索关键词\"", StringComparison.Ordinal),
+        $"静态网页 ARIA 结构没有保留标题、链接、按钮和标注输入框：{result.AriaSnapshot}");
     Require(!listener.Pending(), "静态网页解析器连接了 HTML 中的本机图片地址。");
 }
 
