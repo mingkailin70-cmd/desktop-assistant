@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.44.0 R1任务中心源码验证包（2026-10-08）
+
+固定 SDK Release 解决方案构建0警告、0错误；Windows 安全回归100项通过、0项跳过，桌宠体验专项55项通过。win-x64锁定还原成功并完成自包含发布。签名验证包位于 `artifacts\msix-validation\9ea1c0a9b62247819546d61ee94e72fb\XiaoK-signed-validation.msix`，大小84,730,754字节，SHA-256 `FDFFD38934A968B7BD1F4AE428C3457B8403CC73BA8A001C6FFF62FAAC20EFE1`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`。打包未导入/修改证书信任、未安装或启动软件包，当前账户仍运行旧安装版本。GitHub Actions Build #249 对提交 `aad5748` 执行成功：[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37726574586)。任务中心的真实窗口布局、焦点影响、取消操作及关闭/重启恢复仍待安装版验收；本验证不代表R1完成。
+
 ## v0.1.40.0 桌宠 v15 银渐层形象更新（2026-10-05）
 
 固定 SDK Release 解决方案构建通过，0 警告、0 错误，使用 `--no-restore`；win-x64 自包含 Host 发布也使用已还原依赖。签名 MSIX 位于 `artifacts\msix-validation\6bb29ae8718143a99178c41adadf3c9e\XiaoK-signed-validation.msix`，大小 84,706,308 字节，SHA-256 `33EE5AC41370C2DFBDB4B5A5656EFDC6F80A0681169CBB0ACC1D01E6A095A124`。签名状态 `Valid`，SignTool 验证 0 警告、0 错误；开发证书已在 `LocalMachine\TrustedPeople`，本次没有变更证书信任。安装器请求旧版 PID 28464 正常退出，之后将 `0.1.40.0` 安装到当前账户，包状态 `Ok`；诊断模式 Host PID 9264 正在运行。诊断模式不加载真实设置、不连接模型、不启用通知监听或麦克风。当前会话没有可用的原生窗口截图，因此 v15 的像素布局、透明合成和实际桌面交互仍待目视验收。
