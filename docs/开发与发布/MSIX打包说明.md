@@ -2,7 +2,7 @@
 
 ## v0.1.49.0 R3只读文件分类源码验证包（2026-10-08）
 
-新增 `file.classify.preview.v1` 只读扩展名统计。固定SDK Release解决方案构建0警告、0错误；文件分类定向检查通过；完整Windows安全套件106项通过、0项跳过；桌宠体验专项57项通过。签名验证包位于 `artifacts\msix-validation\a0c19f696e1441da9292cdcce9756e03\XiaoK-signed-validation.msix`，大小124,601,655字节，SHA-256 `B805D81276E34CB694E3EC5C861EC8ED3D711C6E65FB0AB1E81777032CCA9FAA`；SignTool验签成功，0警告、0错误，签名者 `CN=XiaoK Local Development`，证书SHA-1指纹 `B96A02547ABA84523619E11EB7788AE9850A5C60`。打包和签名未改变证书信任，未安装或启动新包。核对时当前账户仍运行 MSIX `0.1.40.0`/PID `29988`，因此保留现状以避免打断。此工具只分类预览，不整理、复制或移动文件；本阶段提交和GitHub CI待完成。
+新增 `file.classify.preview.v1` 只读扩展名统计。固定SDK Release解决方案构建0警告、0错误；文件分类定向检查通过；完整Windows安全套件106项通过、0项跳过；桌宠体验专项57项通过。签名验证包位于 `artifacts\msix-validation\a0c19f696e1441da9292cdcce9756e03\XiaoK-signed-validation.msix`，大小124,601,655字节，SHA-256 `B805D81276E34CB694E3EC5C861EC8ED3D711C6E65FB0AB1E81777032CCA9FAA`；SignTool验签成功，0警告、0错误，签名者 `CN=XiaoK Local Development`，证书SHA-1指纹 `B96A02547ABA84523619E11EB7788AE9850A5C60`。提交 `5e76f57` 已推送至 `origin/main`，GitHub Actions [Build #258](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37738758800) 成功。打包和签名未改变证书信任，未安装或启动新包。核对时当前账户仍运行 MSIX `0.1.40.0`/PID `29988`，因此保留现状以避免打断。此工具只分类预览，不整理、复制或移动文件。
 
 ## v0.1.48.0 R3静态公开网页读取源码验证包（2026-10-08）
 
