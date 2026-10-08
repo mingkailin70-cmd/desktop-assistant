@@ -1,3 +1,11 @@
+## v0.1.56.0 R3搜索命令路由安装包（2026-10-08）
+
+本版包含阶段提交`29b402e`中的Core固定提案工厂：用户搜索命令通过同一工厂生成`file.search.content.v1`提案，Host与安全检查共用构造规则。固定SDK Release解决方案构建0警告、0错误，定向内容搜索检查通过，完整Windows安全套件113项通过、0项跳过。版本号提交`1f0dedf`已推送至`origin/main`；GitHub Actions [Build #281](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37772765036)和[Build #282](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37773908609)均成功。
+
+使用固定SDK发布为win-x64自包含Host，包内含.NET 10.0.12与Windows Desktop 10.0.12，共614个载荷文件；MSIX结构检查通过。签名包位于`artifacts\msix-validation\ff2026ccc9f34dc1bd12f541c4903fcb\XiaoK-signed-validation.msix`，124,630,093字节，SHA-256为`0FEEF23F06BC452EFA22457CD8406557333DB6DF9BAE199BA51E9132AFEFBB1D`。签名者为`CN=XiaoK Local Development`，证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`；SignTool验签通过，0警告、0错误。证书已在`LocalMachine\TrustedPeople`，本次未改变信任设置。签名MSIX已安装到当前账户，包`MingKaiLin.XiaoK_0.1.56.0_neutral__g0ndt6g65c8pe`状态为`Ok`，安装目录为`C:\Program Files\WindowsApps\MingKaiLin.XiaoK_0.1.56.0_neutral__g0ndt6g65c8pe`。
+
+安装后只读确认当前没有`XiaoK.Host`进程。本轮未启动0.1.56.0，故安装成功不等于启动、Host命令路由、搜索界面或真实用户目录验收通过；这些项目仍待后续在不打断桌面工作的条件下核验。没有打开任务面板、读取真实目录、启动模型/麦克风/通知或访问微信/QQ。
+
 ## v0.1.55.0 R3本机文本内容搜索（2026-10-08）
 
 固定SDK Release解决方案构建0警告、0错误；完整Windows安全套件113项通过、0项跳过，桌宠体验专项60项通过。定向合成检查覆盖路径范围、敏感扩展名、二进制与坏编码拒绝、文件大小和总量上限、结果不含正文、固定工具调用及取消。自包含签名MSIX位于`artifacts\msix-validation\c89c870a0b4047d28a9eebf0400884b6\XiaoK-signed-validation.msix`，124,631,554字节，SHA-256 `1C1F0A11CB46B5B7554160CE3120E25DD150F97CAC220A887A2A274304C15596`；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书原已受信任，本次未改变信任。当前账户安装包`MingKaiLin.XiaoK_0.1.55.0_neutral__g0ndt6g65c8pe`状态`Ok`。阶段提交`8b481e7`已推送至`origin/main`，GitHub Actions [Build #276](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37767506879)成功。之后从安装目录以`--diagnostics-profile --background`启动Host，确认隐藏窗口、前台焦点句柄未变，并按注册消息正常退出。没有使用常规用户配置、打开任务面板或搜索真实目录；隔离诊断配置留存在系统临时目录，未接触用户数据。
