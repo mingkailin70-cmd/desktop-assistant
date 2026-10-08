@@ -1,5 +1,6 @@
 using XiaoK.Core;
 using XiaoK.Storage;
+using System.Text.RegularExpressions;
 
 var checks = 0;
 void Require(bool passed, string message)
@@ -79,4 +80,29 @@ Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.Expli
     "未知工具被放行。");
 Require(ToolInteractionPolicy.Check("file.search.v1", (ToolExecutionAccess)999)?.ErrorCode == "INVALID_EXECUTION_CONTEXT",
     "无效执行上下文被放行。");
+
+var repositoryDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+while (repositoryDirectory is not null && !File.Exists(Path.Combine(repositoryDirectory.FullName, "XiaoK.sln")))
+    repositoryDirectory = repositoryDirectory.Parent;
+Require(repositoryDirectory is not null, "无法从桌面交互检查目录定位仓库根目录。");
+var assistantRuntimeSource = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
+    "src", "XiaoK.Host", "AssistantRuntime.cs"));
+var directToolRoutes = Regex.Matches(assistantRuntimeSource,
+        @"_broker\.ExecuteAsync\(new ToolProposal\(""([^""]+)""")
+    .Select(match => match.Groups[1].Value)
+    .ToArray();
+Require(directToolRoutes.SequenceEqual(new[] { "window.activate.v1", "app.launch.v1" }),
+    "后台任务路由出现前台兼容执行入口；只有明确窗口切换和应用启动可走该入口。");
+var requiredBackgroundRoutes = new[]
+{
+    "ExecuteBackgroundAsync(proposal, token)",
+    "ExecuteBackgroundAsync(new ToolProposal(\"file.search.v1\"",
+    "var tool = category == \"draft\" ? \"message.draft.v1\" : \"message.analyze.v1\";",
+    "ExecuteBackgroundAsync(new ToolProposal(tool, arguments,",
+    "ExecuteBackgroundAsync(new ToolProposal(\"message.send.v1\"",
+    "ExecuteBackgroundAsync(new ToolProposal(\"code.inspect.v1\"",
+    "ExecuteBackgroundAsync(new ToolProposal(\"code.task.create.v1\""
+};
+Require(requiredBackgroundRoutes.All(route => assistantRuntimeSource.Contains(route, StringComparison.Ordinal)),
+    "文件、消息或代码路由没有固定使用后台执行入口。");
 Console.WriteLine($"桌宠缩放/保存/后台交互策略：{checks} 项通过。");
