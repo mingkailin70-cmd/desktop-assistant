@@ -1,6 +1,16 @@
 using XiaoK.Core;
 using XiaoK.Storage;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Threading;
 
 var checks = 0;
 void Require(bool passed, string message)
@@ -117,4 +127,63 @@ Require(taskCenterSource.Contains("SetCurrentValue(UIElement.IsEnabledProperty, 
     && taskCenterSource.Contains("button.SetCurrentValue(UIElement.IsEnabledProperty,", StringComparison.Ordinal)
     && !taskCenterSource.Contains("button.IsEnabled =", StringComparison.Ordinal),
     "任务中心取消按钮应临时更新有效状态并保留CanCancel绑定，避免任务完成后按钮仍可点击。");
-Console.WriteLine($"桌宠缩放/保存/后台交互策略：{checks} 项通过。");
+
+var bindingResults = new List<(bool Passed, string Message)>();
+Exception? bindingFailure = null;
+var bindingThread = new Thread(() =>
+{
+    try
+    {
+        var state = new CancelButtonState { CanCancel = true };
+        var button = new Button();
+        BindingOperations.SetBinding(button, UIElement.IsEnabledProperty, new Binding(nameof(CancelButtonState.CanCancel))
+        {
+            Source = state,
+            Mode = BindingMode.OneWay
+        });
+        bindingResults.Add((button.IsEnabled, "取消按钮初始值没有来自CanCancel绑定。"));
+        bindingResults.Add((BindingOperations.IsDataBound(button, UIElement.IsEnabledProperty), "取消按钮没有建立IsEnabled绑定。"));
+
+        button.SetCurrentValue(UIElement.IsEnabledProperty, false);
+        bindingResults.Add((!button.IsEnabled, "SetCurrentValue没有暂时禁用取消按钮。"));
+        bindingResults.Add((BindingOperations.IsDataBound(button, UIElement.IsEnabledProperty), "暂时禁用取消按钮移除了IsEnabled绑定。"));
+
+        state.CanCancel = false;
+        Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.DataBind, new Action(() => { }));
+        bindingResults.Add((!button.IsEnabled, "CanCancel变为false后按钮未同步禁用。"));
+        state.CanCancel = true;
+        Dispatcher.CurrentDispatcher.Invoke(DispatcherPriority.DataBind, new Action(() => { }));
+        bindingResults.Add((button.IsEnabled, "任务恢复可取消时，原绑定没有重新启用按钮。"));
+    }
+    catch (Exception ex)
+    {
+        bindingFailure = ex;
+    }
+});
+bindingThread.SetApartmentState(ApartmentState.STA);
+bindingThread.Start();
+bindingThread.Join();
+if (bindingFailure is not null)
+    throw new InvalidOperationException("WPF取消按钮绑定行为检查失败。", bindingFailure);
+foreach (var result in bindingResults)
+    Require(result.Passed, result.Message);
+
+Console.WriteLine($"桌宠缩放/保存/后台交互策略/WPF取消按钮绑定：{checks} 项通过。");
+
+sealed class CancelButtonState : INotifyPropertyChanged
+{
+    private bool _canCancel;
+
+    public bool CanCancel
+    {
+        get => _canCancel;
+        set
+        {
+            if (_canCancel == value) return;
+            _canCancel = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanCancel)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
