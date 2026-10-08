@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
@@ -12,6 +13,7 @@ using System.Text;
 using System.Text.Json;
 using System.Net.Sockets;
 using Microsoft.Win32.SafeHandles;
+using XiaoK.Adapters.Browser;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 using XiaoK.Inference;
@@ -110,6 +112,25 @@ if (args.Length == 1 && args[0] == "--only-file-rename")
     {
         if (Directory.Exists(fileRenameRoot)) Directory.Delete(fileRenameRoot, recursive: true);
     }
+    return;
+}
+if (args.Length == 1 && args[0] == "--only-public-web-read")
+{
+    await CheckPublicWebPageReadPolicyAsync();
+    Console.WriteLine("通过：网页读取只接受明确提供的 HTTPS 公网地址，并固定为静态后台读取。");
+    return;
+}
+if (args.Length == 1 && args[0] == "--only-browser-render")
+{
+    await CheckStaticBrowserRenderingAsync();
+    Console.WriteLine("通过：独立无头 Edge 只解析静态 HTML，脚本未执行且网页外连被阻止。");
+    return;
+}
+if (args.Length == 2 && args[0] == "--probe-public-web-read")
+{
+    var pageResult = await new PlaywrightPublicWebPageReader().ReadPageAsync(args[1], CancellationToken.None);
+    if (!pageResult.Success) throw new InvalidOperationException(pageResult.Summary + " [" + pageResult.ErrorCode + "]");
+    Console.WriteLine("通过：只读 HTTPS 网页端到端快照；正文未写入诊断输出。 " + pageResult.Summary);
     return;
 }
 if (args.Length == 1 && args[0] == "--only-pet-position-store")
@@ -232,6 +253,9 @@ try
 
     await CheckFileRenameAsync(tempRoot);
     passed.Add("后台文件重命名只在配置搜索根内同目录执行，拒绝越界/链接/无效名/冲突且核验文件身份和元数据");
+
+    await CheckPublicWebPageReadPolicyAsync();
+    passed.Add("网页读取固定为用户明确提供的 HTTPS 公网地址，拒绝内网/文件/非标准端口并核验动作范围");
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
@@ -5484,6 +5508,74 @@ static async Task CheckFileSearchFailureAndCancellationAsync(string root)
     Require(cancelled, "已经取消的文件搜索仍继续返回结果。");
 }
 
+static async Task CheckPublicWebPageReadPolicyAsync()
+{
+    Require(PublicWebUrlPolicy.IsAllowedUrlShape("https://example.com/"), "HTTPS 公网页面地址被意外拒绝。");
+    foreach (var url in new[]
+    {
+        "http://example.com/", "file:///C:/Windows/win.ini", "https://localhost/",
+        "https://service.local/", "https://127.0.0.1/", "https://192.168.1.1/",
+        "https://user:secret@example.com/", "https://example.com:8443/", "not a url"
+    })
+        Require(!PublicWebUrlPolicy.IsAllowedUrlShape(url), $"不安全网页地址未被拒绝：{url}");
+
+    foreach (var address in new[] { "0.0.0.0", "10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.1.2",
+                 "172.16.0.1", "192.168.1.1", "198.18.0.1", "203.0.113.10", "224.0.0.1", "255.255.255.255",
+                 "::", "::1", "::8.8.8.8", "64:ff9b::808:808", "fc00::1", "fe80::1", "2001::1",
+                 "2001:db8::1", "2002::1", "3fff::1" })
+        Require(!PublicWebUrlPolicy.IsPubliclyRoutable(IPAddress.Parse(address)), $"非公网地址未被网络策略拒绝：{address}");
+    Require(PublicWebUrlPolicy.IsPubliclyRoutable(IPAddress.Parse("8.8.8.8"))
+        && PublicWebUrlPolicy.IsPubliclyRoutable(IPAddress.Parse("2606:4700:4700::1111")),
+        "公网 IPv4 或 IPv6 地址被错误拒绝。");
+
+    var reader = new FakePublicWebPageReader();
+    var broker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "",
+        publicWebPageReader: reader);
+    var proposal = ToolBroker.Proposal("browser.read.public.v1", [new("url", "https://example.com/")],
+        "public-web-page", ToolExpectedOutcome.PublicWebPageSnapshotReturned);
+    Require(ToolInteractionPolicy.GetMode("browser.read.public.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("browser.read.public.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "只读网页工具没有登记为后台操作。");
+    var success = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(success.Success && reader.CallCount == 1 && reader.LastUrl == "https://example.com/",
+        "有效的用户 HTTPS 网页地址没有交给独立网页读取接口。");
+
+    foreach (var invalid in new[]
+    {
+        proposal with { Arguments = proposal.Arguments.SetItem("url", "http://example.com/") },
+        proposal with { Target = "arbitrary-target" },
+        proposal with { Preconditions = ToolPrecondition.ConfiguredSearchRoot },
+        proposal with { ExpectedOutcome = ToolExpectedOutcome.MatchingFilesListed },
+        proposal with { Arguments = proposal.Arguments.Add("script", "run") }
+    })
+    {
+        var rejected = await broker.ExecuteBackgroundAsync(invalid, CancellationToken.None);
+        Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && reader.CallCount == 1,
+            "网页目标、参数或固定前置条件错误时仍调用了读取器。");
+    }
+}
+
+static async Task CheckStaticBrowserRenderingAsync()
+{
+    using var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+    var html = $"""
+        <!doctype html><html><head><meta charset="utf-8"><title>静态测试页</title>
+        <script>document.body.innerText = '脚本不应执行';</script></head><body><main><h1>静态页面正文</h1>
+        <p>这段文字应由独立浏览器读取。</p><img src="http://127.0.0.1:{port}/must-be-blocked"></main>
+        <script>document.body.append('脚本不应执行');</script></body></html>
+        """;
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+    var result = await PlaywrightPublicWebPageReader.RenderStaticHtmlAsync(html, timeout.Token);
+    Require(result.Title == "静态测试页"
+        && result.BodyText.Contains("静态页面正文", StringComparison.Ordinal)
+        && result.BodyText.Contains("这段文字应由独立浏览器读取", StringComparison.Ordinal)
+        && !result.BodyText.Contains("脚本不应执行", StringComparison.Ordinal),
+        "独立无头 Edge 没有提取静态正文，或执行了网页脚本。");
+    Require(!listener.Pending(), "静态网页解析器连接了 HTML 中的本机图片地址。");
+}
+
 static async Task CheckFileCopyToExportAsync(string root)
 {
     var fixtureRoot = Path.Combine(root, "file-copy");
@@ -5807,6 +5899,20 @@ internal sealed class CapturingMessageSendPreviewPresenter : IMessageSendPreview
         cancellationToken.ThrowIfCancellationRequested();
         Previews.Add(preview);
         return Task.CompletedTask;
+    }
+}
+
+internal sealed class FakePublicWebPageReader : IPublicWebPageReader
+{
+    public int CallCount { get; private set; }
+    public string? LastUrl { get; private set; }
+
+    public Task<ToolResult> ReadPageAsync(string url, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        LastUrl = url;
+        return Task.FromResult(new ToolResult(true, "合成静态网页读取结果。", Data: "合成网页正文"));
     }
 }
 

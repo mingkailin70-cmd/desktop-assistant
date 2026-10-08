@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Channels;
+using XiaoK.Adapters.Browser;
 using Microsoft.Win32;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
@@ -112,7 +113,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
                 exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
-            approval as IMessageSendPreviewPresenter);
+            approval as IMessageSendPreviewPresenter, new PlaywrightPublicWebPageReader());
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -762,6 +763,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.FileCopiedToConfiguredExport), token);
         }
 
+        if (category == "web-read")
+        {
+            var url = ExtractPublicWebPageUrl(request);
+            if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
+                return new(false, "请使用“读取网页：https://公开网站/页面”格式。只支持 HTTPS 公网地址，不会读取内网、文件或用户 Edge 会话。", "WEB_URL_NOT_ALLOWED");
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("browser.read.public.v1",
+                ImmutableDictionary<string, string>.Empty.Add("url", url), "public-web-page",
+                ToolPrecondition.UserProvidedPublicWebPageUrl,
+                ToolExpectedOutcome.PublicWebPageSnapshotReturned), token);
+        }
+
         if (category == "analyze" || category == "draft")
         {
             var body = ExtractPayload(request, category == "draft"
@@ -860,6 +872,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
         if (lower.StartsWith("重命名文件")) return "file-rename";
         if (lower.StartsWith("复制文件") || lower.StartsWith("把文件复制到小k导出目录")) return "file-copy";
         if (lower.StartsWith("找文件") || lower.StartsWith("查找文件") || lower.StartsWith("搜索文件") || lower.StartsWith("搜索") || lower.StartsWith("帮我找文件")) return "file";
@@ -876,7 +889,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-rename" => "文件重命名", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-rename" => "文件重命名", "web-read" => "静态网页读取", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
@@ -918,6 +931,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             return request[prefix.Length..].Trim(' ', '，', ',', '：', ':', '“', '”', '"', '\'');
+        }
+        return string.Empty;
+    }
+
+    private static string ExtractPublicWebPageUrl(string request)
+    {
+        foreach (var prefix in new[] { "查看网页内容", "读取网页", "浏览网页" })
+        {
+            if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();
+            if (value.Length >= 2 && ((value[0] == '<' && value[^1] == '>')
+                || (value[0] == '“' && value[^1] == '”')
+                || (value[0] == '"' && value[^1] == '"')))
+                value = value[1..^1].Trim();
+            return value;
         }
         return string.Empty;
     }

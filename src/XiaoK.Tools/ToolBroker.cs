@@ -14,10 +14,11 @@ public sealed class ToolBroker
     private readonly CodeTaskAgent _codeAgent;
     private readonly string _codeProjectRoot;
     private readonly string _codeWorkspaceRoot;
+    private readonly IPublicWebPageReader? _publicWebPageReader;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
         IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot,
-        IMessageSendPreviewPresenter? messageSendPreview = null)
+        IMessageSendPreviewPresenter? messageSendPreview = null, IPublicWebPageReader? publicWebPageReader = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -27,6 +28,7 @@ public sealed class ToolBroker
         _codeAgent = codeAgent;
         _codeProjectRoot = codeProjectRoot;
         _codeWorkspaceRoot = codeWorkspaceRoot;
+        _publicWebPageReader = publicWebPageReader;
     }
 
     // 兼容直接由用户发起的交互入口；后台调用必须使用 ExecuteBackgroundAsync。
@@ -53,6 +55,9 @@ public sealed class ToolBroker
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
+            "browser.read.public.v1" => _publicWebPageReader is null
+                ? new(false, "独立网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
+                : await _publicWebPageReader.ReadPageAsync(proposal.Arguments["url"], cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
@@ -89,6 +94,7 @@ public sealed class ToolBroker
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
+            "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
             "message.draft.v1" => ValidateDraft(proposal),
@@ -229,6 +235,14 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("文件重命名只接受搜索范围内的本机完整源路径和单个新文件名；不会接受任意目标目录或覆盖。");
 
+    private static ToolResult? ValidatePublicWebPageRead(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("url", out var url)
+        && PublicWebUrlPolicy.IsAllowedUrlShape(url)
+        && proposal.Target == "public-web-page"
+            ? null
+            : InvalidProposal("网页读取只接受用户明确提供的 HTTPS 公网地址；文件、内网和其他协议不会交给浏览器。");
+
     private Task<ToolResult> AnalyzeAsync(ToolProposal proposal, CancellationToken token) =>
         CompleteAsync(proposal, "请用中文分析用户提供的单条聊天通知。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "message", token);
 
@@ -285,6 +299,7 @@ public sealed class ToolBroker
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
+        "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
         "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
         "message.send.v1" => ToolPrecondition.CompleteMessagePreview,
@@ -299,6 +314,7 @@ public sealed class ToolBroker
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
+        "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,

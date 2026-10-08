@@ -20,7 +20,8 @@ public enum ToolPrecondition
     CompleteMessagePreview = 16,
     ConfiguredProjectAndIsolatedWorkspace = 32,
     VerifiedPrivateNotice = 64,
-    ConfiguredFileExportRoot = 128
+    ConfiguredFileExportRoot = 128,
+    UserProvidedPublicWebPageUrl = 256
 }
 
 public enum ToolExpectedOutcome
@@ -36,7 +37,8 @@ public enum ToolExpectedOutcome
     CodeExplanationReturned = 8,
     MessageSendPreviewShown = 9,
     FileCopiedToConfiguredExport = 10,
-    FileRenamedInConfiguredSearchRoot = 11
+    FileRenamedInConfiguredSearchRoot = 11,
+    PublicWebPageSnapshotReturned = 12
 }
 
 public static class ApprovalAuditCatalog
@@ -60,6 +62,11 @@ public sealed record MessageSendIntent(string ApplicationId, string Recipient, s
 public sealed record MessageAttachmentPreview(string DisplayName, long SizeBytes, string Sha256);
 public sealed record MessageSendPreview(string ApplicationId, string Recipient, string Text,
     IReadOnlyList<MessageAttachmentPreview> Attachments);
+
+public interface IPublicWebPageReader
+{
+    Task<ToolResult> ReadPageAsync(string url, CancellationToken cancellationToken);
+}
 
 public interface ITaskStore
 {

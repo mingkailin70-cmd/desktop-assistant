@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.48.0 R3静态公开网页读取源码验证包（2026-10-08）
+
+固定SDK Release构建0警告、0错误；网页策略/ToolBroker定向检查通过，独立无头Edge静态夹具确认脚本不运行且回环子请求被阻止；完整Windows安全套件105项通过、0项跳过。自包含包只带`win32_x64` Playwright Node驱动，使用系统Edge Stable。签名MSIX位于 `artifacts\msix-validation\c34a70958bce482aba5df188d7e25392\XiaoK-signed-validation.msix`，大小124,595,332字节，SHA-256 `0622412BE9B86EC764E4B9A6CF24F38A730B1FBF0EC4A2DF9BA645287B70018F`；SignTool验签0警告、0错误，签名者`CN=XiaoK Local Development`，证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。未安装或启动该包，证书信任未改变。本机首次公网DNS查询返回`HostNotFound`，随后同一读取器成功获取`example.com`静态正文156字符；该单一站点样本不代表完整网站验收。当前账户仍运行旧包，安装版窗口身份未能唯一核实。GitHub Actions结果将在推送后补记。
+
 ## v0.1.47.0 R3后台同目录重命名源码验证包（2026-10-08）
 
 源码接入固定工具 `file.rename.v1` 与确定性中文命令；仅在配置搜索根内对普通单文件同目录改名，不移动或覆盖。Windows句柄式操作固定不替换目标，并在完成后核验文件身份与元数据。固定SDK Release解决方案构建0警告、0错误；Windows安全套件104项通过、0项跳过；桌宠/后台交互专项57项通过。自包含 win-x64 发布使用已锁定依赖完成。签名验证包位于 `artifacts\msix-validation\c820923aa06745f5baa033edc1b94b24\XiaoK-signed-validation.msix`，大小84,741,457字节，SHA-256 `605AF553DA9B56B0069BEC63AFA839A6FFA1A2DA05D32265DEFABE97EDDBF594`。SignTool验签成功，0警告、0错误；签名者 `CN=XiaoK Local Development`，证书SHA-1指纹 `B96A02547ABA84523619E11EB7788AE9850A5C60`。本次未改变证书信任。当前账户仍运行0.1.40.0且无可核验窗口标题，因此未安装或启动新包。GitHub Actions [Build #254](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37732167053) 对提交 `491506a` 执行成功。

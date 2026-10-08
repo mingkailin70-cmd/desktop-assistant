@@ -5,5 +5,7 @@
     <Deterministic>true</Deterministic>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NuGetAudit>false</NuGetAudit>
+    <!-- 小K仅发布 win-x64；限制 Playwright 随包复制的 Node 驱动平台。 -->
+    <PlaywrightPlatform>win-x64</PlaywrightPlatform>
   </PropertyGroup>
 </Project>
