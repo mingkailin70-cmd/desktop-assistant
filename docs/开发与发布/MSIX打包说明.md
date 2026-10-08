@@ -2,7 +2,7 @@
 
 任务中心原来归属桌宠主窗口；从托盘菜单打开时会先恢复桌宠面板并聚焦输入框。现在任务中心作为独立窗口居中显示，重复打开时只恢复/激活任务中心，不再弹出主面板。固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面交互专项71项通过。
 
-自包含签名MSIX位于`artifacts\msix-validation\7d48e5d9cbf042a5be9ea96b40ffddd5\XiaoK-signed-validation.msix`，124,643,989字节，SHA-256 `74B3D64AB5D6C7CB5E65AE51256254749B8B789409E65E63DD83679EB9133B5A`。SignTool验签0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本阶段未改变证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.69.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装未启动小K；托盘启动任务中心的普通窗口交互和焦点行为仍待用户会话核验。
+自包含签名MSIX位于`artifacts\msix-validation\7d48e5d9cbf042a5be9ea96b40ffddd5\XiaoK-signed-validation.msix`，124,643,989字节，SHA-256 `74B3D64AB5D6C7CB5E65AE51256254749B8B789409E65E63DD83679EB9133B5A`。SignTool验签0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本阶段未改变证书信任。提交`ad2bd7f`已推送至`origin/main`，GitHub Actions [Build #37816849179](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37816849179)成功。当前账户已安装`MingKaiLin.XiaoK_0.1.69.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装未启动小K；托盘启动任务中心的普通窗口交互和焦点行为仍待用户会话核验。
 
 ## v0.1.68.0 R1任务中心取消状态保留绑定（2026-10-09）
 
