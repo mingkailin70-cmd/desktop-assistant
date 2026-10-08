@@ -7,6 +7,7 @@
 - `XiaoK.Host` 使用 `UserNotificationListener` 读取 Windows 通知中心中新增的 Toast 通知；权限只能由用户通过设置页按钮请求。
 - 通知读取在 MSIX 身份存在且用户授予系统授权后才会启动。普通目录运行、授权拒绝/撤销或进程退出时均不读取通知。
 - 设置中每款应用默认关闭，并要求分别配置通知来源 AUMID allowlist。只读取系统提供的 `AppUserModelId` 并先与 allowlist 比较；未知来源不会读取正文、持久化或送入模型。设置校验支持带 `!` 的包应用 AUMID 和不带 `!` 的经典桌面应用标识，但必须从实际 Windows 通知元数据核实后填写；开始菜单显示的启动 ID 只是候选，不能替代通知来源核对。微软文档说明桌面应用可使用应用定义的 AppUserModelID，常见格式为 `Company.Product...`，无需包含包应用的分隔符 `!`（[AppUserModelIDs](https://learn.microsoft.com/en-us/windows/win32/shell/appids)、[包身份概览](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/package-identity-overview)）。
+- 0.1.60.0设置页新增用户主动触发的一次性来源诊断，要求Windows通知访问权限已经授予；不会自动请求权限。它按创建时间从当前Toast快照中选出最多512条近期通知，再读取其`AppInfo.DisplayInfo.DisplayName`和`AppInfo.AppUserModelId`，按微信/WeChat/Weixin/QQ显示名过滤并在设置窗口内临时展示候选；不订阅新增事件、不访问`Notification.Visual`、不读取通知正文、不改白名单、不保存候选、不启动持续监听。应用显示名只用于帮助人工寻找样本，不能证明发布者身份；候选须与用户明确识别的真实通知交叉验证，且不应仅凭该诊断自动启用监听。
 - 启动时把当时已存在的匹配通知记为基线，不将旧通知误当作新消息。新增事件按发布者和系统通知 ID 去重，并受内存容量限制。
 - 新增事件先进入最多 256 个 ID 的有界队列，排队项与正在处理项统一去重，由单个消费者串行读取 Windows 通知列表；队列只保存系统 ID，不保存通知正文。持续事件超过容量时不再接收新 ID，并提示用户手动查看客户端，避免并发请求无界增长。
 - 处理前检查输入桌面是否为 `Default`；在异步获取通知列表返回后重新检查通知授权，并在惰性正文读取的最后一步再次检查授权和解锁状态。读取期间发现权限撤销时立即停止监听；发现锁屏时只提示、不读取正文。通知 AUMID 同时出现在微信和 QQ 配置中时拒绝启动监听，避免应用归属歧义。异步获取结果若来自已停止或已替换的监听实例，则丢弃。
@@ -22,7 +23,7 @@
 
 项目将目标框架固定为 `net10.0-windows10.0.26100.0`，通过 `WindowsSdkPackageVersion` 使用 `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87。`NuGet.Config` 仅映射该获准包；这不是客户端发送/读取接口，也不提供微信或 QQ 私聊元数据。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。截至 2026-10-04，本机清单与当前账户安装包版本均为 `0.1.32.0`，包全名为 `MingKaiLin.XiaoK_0.1.32.0_neutral__g0ndt6g65c8pe`；当前 Host 进程路径位于该版本 WindowsApps 安装目录。只读检查包外设置确认微信/QQ监控开关均为关闭、两款应用的发布者 AUMID 列表均为空，唤醒词也关闭；本轮没有请求通知权限或读取系统通知。Windows 通知系统权限状态没有重新查询，微信/QQ通知来源 AUMID 仍无真实样本核验，所以不能据设置开关推断系统权限状态，也不能宣称通知监听已验收。编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。截至2026-10-08当前账户安装MSIX为`0.1.60.0`，状态`Ok`，包全名`MingKaiLin.XiaoK_0.1.60.0_neutral__g0ndt6g65c8pe`。本轮没有启动普通设置页、请求权限或运行来源诊断；监控开关、Windows授权状态和实际Toast数据均未读取，因此当前仍未知。微信/QQ通知来源AUMID、正文结构和私聊归属没有真实样本核验；不能据安装成功、隔离启动或候选诊断代码推断通知监听已验收。编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 
@@ -38,7 +39,7 @@
 
 ## 本机验收记录
 
-无第三方测试依赖的安全检查程序覆盖：非允许来源、未知会话、缺少会话归属、过期通知、限速前置、锁屏、权限撤销、正文读取前的授权/解锁复核、微信/QQ来源归属冲突、已确认私聊、重复通知、无正文和超长正文，并检查包应用及经典桌面 AUMID 的输入边界。2026-10-03 固定 SDK Release 构建为 0 警告、0 错误；默认完整安全检查为 71 项通过、0 项跳过，包含 AppContainer OS 边界检查。检查使用合成 AUMID 与内存字符串，不读取系统通知，不访问微信/QQ账号；这些模拟用例不是客户端实测证据。
+无第三方测试依赖的安全检查程序覆盖：非允许来源、未知会话、缺少会话归属、过期通知、限速前置、锁屏、权限撤销、正文读取前的授权/解锁复核、微信/QQ来源归属冲突、已确认私聊、重复通知、无正文和超长正文，以及通知来源候选过滤、无关显示名拒绝、512项扫描和20项候选上限、设置UI只读显示与不读正文的源码边界。2026-10-08固定SDK Release构建0警告、0错误；完整Windows安全套件114项通过、0项跳过，包含AppContainer OS边界检查。检查使用合成AUMID和内存字符串，不读取系统通知、不访问微信/QQ账号；这些模拟用例不是客户端实测证据。
 
 以下仍待本机真实验收，不能由模拟策略测试代替：
 

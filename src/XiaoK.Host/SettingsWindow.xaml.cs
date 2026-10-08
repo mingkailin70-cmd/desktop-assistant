@@ -14,6 +14,7 @@ public partial class SettingsWindow : Window
         { "vscode", "edge", "wechat", "qq", "explorer" };
     private XiaoKSettings _original;
     private readonly Func<Task<string>> _requestNotificationAccess;
+    private readonly Func<Task<string>> _inspectNotificationPublishers;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> _loadContactReplyStyles;
     private readonly Func<IEnumerable<ContactReplyStylePreference>, CancellationToken, Task> _replaceContactReplyStyles;
     private readonly Func<string, CancellationToken, Task<string>> _createDatabaseBackup;
@@ -52,6 +53,7 @@ public partial class SettingsWindow : Window
         _getLocalDataCleanupPreview = getLocalDataCleanupPreview;
         _clearLocalData = clearLocalData;
         _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
+        _inspectNotificationPublishers = notificationMonitor.InspectRecentPublisherIdsAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
         DataRootBox.Text = settings.DataRoot;
@@ -428,6 +430,20 @@ public partial class SettingsWindow : Window
         finally
         {
             RequestNotificationAccessButton.IsEnabled = true;
+        }
+    }
+
+    private async void InspectNotificationPublishers_Click(object sender, RoutedEventArgs e)
+    {
+        InspectNotificationPublishersButton.IsEnabled = false;
+        NotificationPublisherCandidatesBox.Text = "正在读取应用来源元数据；不会读取通知正文……";
+        try
+        {
+            NotificationPublisherCandidatesBox.Text = await _inspectNotificationPublishers();
+        }
+        finally
+        {
+            InspectNotificationPublishersButton.IsEnabled = true;
         }
     }
 

@@ -65,6 +65,46 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         }
     }
 
+    public async Task<string> InspectRecentPublisherIdsAsync()
+    {
+        if (!_dispatcher.CheckAccess())
+            return "通知来源诊断必须从小K设置界面发起。";
+        if (_disposed) return "小K正在退出。";
+        if (XiaoKSettings.IsDiagnosticsMode)
+            return "诊断模式不访问系统通知。";
+        if (!WindowsPackageIdentity.IsPresent)
+            return "需要以已安装的 MSIX 身份运行小K，才能检查通知来源。没有读取通知。";
+
+        try
+        {
+            var listener = UserNotificationListener.Current;
+            if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+                return "Windows 通知访问权限尚未授予。先点击“请求 Windows 通知访问权限”，再运行只读诊断；没有枚举通知。";
+
+            // This one-shot diagnostic reads only display name and AUMID metadata from at most 512 current toasts.
+            // It does not subscribe to events, request permission, read toast text, mutate settings, or persist results.
+            var notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
+            if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+                return "读取期间 Windows 通知访问权限被撤销；已丢弃诊断结果。没有读取通知正文。";
+
+            var sources = notifications.OrderByDescending(notification => notification.CreationTime)
+                .Take(NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications)
+                .Select(notification => ((string?)notification.AppInfo.DisplayInfo.DisplayName,
+                    (string?)notification.AppInfo.AppUserModelId));
+            var candidates = NotificationPublisherDiagnosticPolicy.Project(sources);
+            if (candidates.Count == 0)
+                return "最近的系统 Toast 中没有显示名含“微信 / WeChat / Weixin / QQ”的有效来源标识。只检查了应用显示名和 AUMID，没有读取正文、保存或启动持续监听。";
+
+            var lines = candidates.Select(candidate => $"{candidate.DisplayName} | {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount}");
+            return "只读来源候选（当前通知快照，最多检查512条）：\n" + string.Join("\n", lines)
+                + "\n仅为候选，尚未验证稳定身份；不会自动写入白名单。未读正文、未保存结果、未启用持续监听。请结合你明确识别的客户端通知核对后，再手动填入对应 AUMID。";
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            return "无法读取通知来源元数据；没有读取正文或保存结果。请检查 MSIX 身份和 Windows 通知权限。";
+        }
+    }
+
     public async Task<string> ApplySettingsAsync(XiaoKSettings settings)
     {
         if (!_dispatcher.CheckAccess())

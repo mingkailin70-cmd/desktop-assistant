@@ -52,6 +52,48 @@ public static class MessageNoticePublisherAssignments
     }
 }
 
+public sealed record NotificationPublisherCandidate(string DisplayName, string AppUserModelId, int NotificationCount);
+
+/// <summary>Projects a bounded, ephemeral source-identity diagnostic. No toast body or sender data is accepted here.</summary>
+public static class NotificationPublisherDiagnosticPolicy
+{
+    public const int MaximumInspectedNotifications = 512;
+    public const int MaximumCandidates = 20;
+    private const int MaximumDisplayNameLength = 80;
+
+    public static IReadOnlyList<NotificationPublisherCandidate> Project(
+        IEnumerable<(string? DisplayName, string? AppUserModelId)> sources)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        var candidates = new Dictionary<string, (string DisplayName, int Count)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (displayName, appUserModelId) in sources.Take(MaximumInspectedNotifications))
+        {
+            if (!IsLikelyTargetClientName(displayName) || !AppUserModelIdPolicy.IsValid(appUserModelId)) continue;
+
+            var safeName = new string(displayName!.Where(character => !char.IsControl(character)).Take(MaximumDisplayNameLength).ToArray()).Trim();
+            if (safeName.Length == 0) continue;
+            if (candidates.TryGetValue(appUserModelId!, out var existing))
+                candidates[appUserModelId!] = (existing.DisplayName, existing.Count + 1);
+            else if (candidates.Count < MaximumCandidates)
+                candidates.Add(appUserModelId!, (safeName, 1));
+        }
+
+        return candidates.Select(pair => new NotificationPublisherCandidate(pair.Value.DisplayName, pair.Key, pair.Value.Count))
+            .OrderBy(candidate => candidate.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.AppUserModelId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static bool IsLikelyTargetClientName(string? displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 512) return false;
+        return displayName.Contains("微信", StringComparison.OrdinalIgnoreCase)
+            || displayName.Contains("WeChat", StringComparison.OrdinalIgnoreCase)
+            || displayName.Contains("Weixin", StringComparison.OrdinalIgnoreCase)
+            || displayName.Contains("QQ", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
 public enum NoticeBodyAccessFailure { None, PermissionUnavailable, SessionLocked }
 
 /// <summary>Rechecks volatile Windows authorization and lock state immediately before materializing a toast body.</summary>

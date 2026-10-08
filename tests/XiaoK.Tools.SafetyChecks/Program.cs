@@ -603,6 +603,9 @@ try
     CheckNoticePublisherAssignmentsAreUnambiguous();
     passed.Add("同一通知发布者不能同时归属微信和 QQ");
 
+    CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral();
+    passed.Add("通知来源诊断只投影微信/QQ应用显示名和AUMID，限制数量且不包含正文");
+
     CheckPackagedAndDesktopAppUserModelIds();
     passed.Add("通知 allowlist 接受已核实的 MSIX 与经典桌面应用 AUMID，并拒绝空白、控制字符和超长值");
 
@@ -4273,6 +4276,52 @@ static void CheckNoticePublisherAssignmentsAreUnambiguous()
         "不同客户端的发布者被错误判定为归属歧义。");
     Require(!MessageNoticePublisherAssignments.HasOverlap([], []),
         "空发布者清单被错误判定为归属歧义。");
+}
+
+static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
+{
+    var entries = new List<(string? DisplayName, string? AppUserModelId)>
+    {
+        ("微信", "weixin.desktop!Main"),
+        ("微信", "weixin.desktop!Main"),
+        ("QQ", "QQ"),
+        ("Other Messenger", "other.app!Main"),
+        ("WeChat impostor", "not-a-valid-id!bad!extra")
+    };
+    var projected = NotificationPublisherDiagnosticPolicy.Project(entries);
+    Require(projected.Count == 2
+        && projected.Single(item => item.AppUserModelId == "weixin.desktop!Main").NotificationCount == 2
+        && projected.Single(item => item.AppUserModelId == "QQ").NotificationCount == 1,
+        "通知来源只读诊断没有按目标应用显示名筛选并聚合AUMID。 ");
+
+    var overLimit = Enumerable.Range(0, NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications + 1)
+        .Select(index => ((string?)"QQ", (string?)$"qq.app!Id{index}"));
+    Require(NotificationPublisherDiagnosticPolicy.Project(overLimit).Count == NotificationPublisherDiagnosticPolicy.MaximumCandidates,
+        "通知来源只读诊断未限制扫描数或结果候选数。 ");
+
+    Require(!NotificationPublisherDiagnosticPolicy.IsLikelyTargetClientName("Other Messenger"),
+        "来源诊断把无关应用显示名识别为微信或QQ。");
+
+    var repositoryRoot = FindRepositoryRoot();
+    var monitor = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "WindowsNotificationMonitor.cs"));
+    var diagnosticStart = monitor.IndexOf("public async Task<string> InspectRecentPublisherIdsAsync()", StringComparison.Ordinal);
+    var diagnosticEnd = diagnosticStart < 0 ? -1
+        : monitor.IndexOf("public async Task<string> ApplySettingsAsync", diagnosticStart, StringComparison.Ordinal);
+    Require(diagnosticStart >= 0 && diagnosticEnd > diagnosticStart,
+        "通知来源诊断入口不存在或方法边界无法识别。");
+    var diagnostic = monitor[diagnosticStart..diagnosticEnd];
+    var settingsXaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml"));
+    Require(diagnostic.Contains("notification.AppInfo.DisplayInfo.DisplayName", StringComparison.Ordinal)
+        && diagnostic.Contains("notification.AppInfo.AppUserModelId", StringComparison.Ordinal)
+        && !diagnostic.Contains("notification.Notification.Visual", StringComparison.Ordinal)
+        && !diagnostic.Contains("ReadVisibleText", StringComparison.Ordinal)
+        && !diagnostic.Contains("RequestAccessAsync", StringComparison.Ordinal)
+        && !diagnostic.Contains("NotificationChanged +=", StringComparison.Ordinal),
+        "只读来源诊断读取了通知正文、自动请求权限或启动了持续监听。");
+    Require(settingsXaml.Contains("x:Name=\"NotificationPublisherCandidatesBox\"", StringComparison.Ordinal)
+        && settingsXaml.Contains("IsReadOnly=\"True\"", StringComparison.Ordinal)
+        && settingsXaml.Contains("不会自动加入白名单", StringComparison.Ordinal),
+        "来源诊断结果不是只读展示，或设置界面暗示候选会自动启用。");
 }
 
 static void CheckNotificationEventQueueIsBoundedAndDeduplicated()
