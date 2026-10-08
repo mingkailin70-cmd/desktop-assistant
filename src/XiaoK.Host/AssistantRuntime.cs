@@ -811,7 +811,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var query = request;
             foreach (var prefix in new[] { "帮我找文件", "搜索文件", "查找文件", "找文件", "搜索", "查找" })
                 if (query.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { query = query[prefix.Length..].Trim(' ', '：', ':', '“', '”', '"'); break; }
-            return await _broker.ExecuteAsync(new ToolProposal("file.search.v1",
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.search.v1",
                 ImmutableDictionary<string, string>.Empty.Add("query", query).Add("root_id", "user-files"), "user-files",
                 ToolPrecondition.ConfiguredSearchRoot, ToolExpectedOutcome.MatchingFilesListed), token);
         }
@@ -921,7 +921,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 arguments = arguments.Add("style_id", styleId);
             }
 
-            return await _broker.ExecuteAsync(new ToolProposal(tool, arguments,
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal(tool, arguments,
                 "用户本次提供的单条消息", ToolPrecondition.UserProvidedSingleMessage,
                 category == "draft" ? ToolExpectedOutcome.ReplyDraftOnly : ToolExpectedOutcome.LocalMessageAnalysis), token);
         }
@@ -941,7 +941,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 .Add("recipient", intent.Recipient)
                 .Add("text", intent.Text)
                 .Add("attachments", "none");
-            return await _broker.ExecuteAsync(new ToolProposal("message.send.v1", arguments,
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("message.send.v1", arguments,
                 $"{intent.ApplicationId}:{intent.Recipient}", ToolPrecondition.CompleteMessagePreview,
                 ToolExpectedOutcome.MessageSendPreviewShown), token);
         }
@@ -951,14 +951,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var instruction = ExtractPayload(request, new[] { "查找代码", "搜索代码", "解释代码", "分析代码", "读代码" });
             if (instruction.Length == 0)
                 return new(false, "请补充要在所选项目中查找或解释的内容。", "EMPTY_CODE_QUERY");
-            return await _broker.ExecuteAsync(new ToolProposal("code.inspect.v1",
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("code.inspect.v1",
                 ImmutableDictionary<string, string>.Empty.Add("instruction", instruction), "configured-project",
                 ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
                 ToolExpectedOutcome.CodeExplanationReturned), token);
         }
 
         if (category == "code")
-            return await _broker.ExecuteAsync(new ToolProposal("code.task.create.v1",
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("code.task.create.v1",
                 ImmutableDictionary<string, string>.Empty.Add("instruction", request), "configured-project",
                 ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
                 ToolExpectedOutcome.ReviewablePatchCreated), token);

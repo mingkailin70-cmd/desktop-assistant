@@ -66,15 +66,15 @@ finally
     Directory.Delete(root, recursive: true);
 }
 
-foreach (var tool in new[] { "app.launch.v1", "window.activate.v1", "message.send.v1", "code.task.create.v1" })
+foreach (var tool in new[] { "app.launch.v1", "window.activate.v1" })
 {
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly)?.ErrorCode == "FOREGROUND_REQUIRED",
         "后台调用放行需要前台的工具。");
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.ExplicitUserInteraction) is null,
         "阻止明确的用户交互。");
 }
-foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.rename.v1", "browser.read.public.v1", "browser.download.public.v1", "code.inspect.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1" })
-    Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台只读工具。");
+foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.rename.v1", "browser.read.public.v1", "browser.download.public.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1" })
+    Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台工具。");
 Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.ExplicitUserInteraction)?.ErrorCode == "UNKNOWN_TOOL",
     "未知工具被放行。");
 Require(ToolInteractionPolicy.Check("file.search.v1", (ToolExecutionAccess)999)?.ErrorCode == "INVALID_EXECUTION_CONTEXT",
