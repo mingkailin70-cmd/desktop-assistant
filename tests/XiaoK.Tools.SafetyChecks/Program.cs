@@ -1088,12 +1088,13 @@ static async Task CheckLargeCodeTaskUsesBoundedContextAndExactEditsAsync(string 
         $"{{\"locations\":[{{\"path\":\"Sample.cs\",\"line\":{targetLine}}}]}}",
         "{\"edits\":[{\"path\":\"Sample.cs\",\"find\":\"int marker = 1;\",\"replace\":\"int marker = 2;\"}]}");
     var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var taskId = Guid.NewGuid();
 
     var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, "把 Target 的 marker 改为 2",
-        CancellationToken.None, review);
+        CancellationToken.None, review, taskId);
 
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
-        && inference.CallCount == 2 && review.CallCount == 1,
+        && inference.CallCount == 2 && review.CallCount == 1 && review.TaskId == taskId,
         "大文件精确编辑没有进入待审阅状态。" + result.Summary);
     var prompts = inference.Prompts.ToArray();
     Require(prompts.Any(prompt => prompt.Contains("受限代码位置索引", StringComparison.Ordinal))
@@ -3554,17 +3555,24 @@ static void CheckTaskHistoryDisplayPolicy()
     var xaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
     var host = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
     var mainWindow = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+    var broker = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Tools", "ToolBroker.cs"));
+    var codeAgent = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Tools", "CodeTaskAgent.cs"));
     Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
         && xaml.Contains("Binding ExecutionMode", StringComparison.Ordinal)
         && xaml.Contains("Binding NextAction", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal)
-        && host.Contains("TaskHistoryDisplayPolicy.EffectiveState(visible.Status, hasPendingActionConfirmation)", StringComparison.Ordinal)
-        && host.Contains("_liveApprovalStateProvider?.HasPendingActionConfirmation == true", StringComparison.Ordinal)
-        && mainWindow.Contains("HasPendingActionConfirmation => _approvalInbox.HasPendingActionConfirmation", StringComparison.Ordinal)
+        && host.Contains("TaskHistoryDisplayPolicy.EffectiveState(visible.Status,", StringComparison.Ordinal)
+        && host.Contains("HasPendingActionConfirmationForTask(visible.Id) == true", StringComparison.Ordinal)
+        && host.Contains("_broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId)", StringComparison.Ordinal)
+        && mainWindow.Contains("_approvalInbox.HasPendingActionConfirmationForTask(taskId)", StringComparison.Ordinal)
+        && broker.Contains("_codeAgent.ExecuteAsync(_codeProjectRoot, _codeWorkspaceRoot,", StringComparison.Ordinal)
+        && broker.Contains("_approval as ICodeTaskReviewPresenter, taskId)", StringComparison.Ordinal)
+        && broker.Contains("details, cancellationToken, taskId)", StringComparison.Ordinal)
+        && codeAgent.Contains("testTarget, commandPreview, cancellationToken, taskId)", StringComparison.Ordinal)
         && host.Contains("TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted)", StringComparison.Ordinal)
         && host.Contains("routeStarted = true;", StringComparison.Ordinal)
         && host.IndexOf("routeStarted = true;", StringComparison.Ordinal)
-            < host.IndexOf("await RouteAsync(work.Category", StringComparison.Ordinal)
+            < host.IndexOf("await RouteAsync(work.Id, work.Category", StringComparison.Ordinal)
         && host.Contains("TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)", StringComparison.Ordinal),
         "任务中心没有绑定目标范围/执行模式/下一步，或路由副作用异常未接入待核对状态。");
 }
@@ -3638,13 +3646,40 @@ static async Task CheckApprovalInboxPolicyAsync()
             "没有唯一验证目标时仍能批准运行测试，或保留补丁动作失败。");
 
         var preview = inbox.RequestAsync("消息预览", "合成收件人和正文", ApprovalInboxKind.MessagePreview,
-            canRunDotNetTests: false, cancellation.Token);
+            canRunDotNetTests: false, cancellation.Token, taskId: Guid.NewGuid());
         entry = inbox.GetPending().Single();
         Require(!inbox.HasPendingActionConfirmation
             && !inbox.Resolve(entry.Id, ApprovalInboxChoice.Approve)
             && inbox.Resolve(entry.Id, ApprovalInboxChoice.DismissPreview)
             && await preview == ApprovalInboxChoice.DismissPreview,
             "只读消息预览被错误地当成批准发送，或无法关闭预览。");
+
+        var taskA = Guid.NewGuid();
+        var taskB = Guid.NewGuid();
+        var taskAConfirmation = inbox.RequestAsync("任务 A 确认", "合成详情", ApprovalInboxKind.Confirmation,
+            canRunDotNetTests: false, cancellation.Token, taskId: taskA);
+        Require(inbox.HasPendingActionConfirmationForTask(taskA)
+            && !inbox.HasPendingActionConfirmationForTask(taskB)
+            && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Running,
+                inbox.HasPendingActionConfirmationForTask(taskA)) == TaskLifecycleState.AwaitingApproval
+            && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Running,
+                inbox.HasPendingActionConfirmationForTask(taskB)) == TaskLifecycleState.Running,
+            "任务 A 的待确认动作错误地影响了并行任务 B 的历史状态。");
+        var taskBReview = inbox.RequestAsync("任务 B 代码审阅", "合成补丁", ApprovalInboxKind.CodeReview,
+            canRunDotNetTests: false, cancellation.Token, taskId: taskB);
+        Require(inbox.HasPendingActionConfirmationForTask(taskA)
+            && inbox.HasPendingActionConfirmationForTask(taskB),
+            "代码审阅待办没有绑定到对应的任务 B。");
+        var taskEntries = inbox.GetPending().ToDictionary(entry => entry.TaskId!.Value, entry => entry);
+        Require(taskEntries[taskA].Kind == ApprovalInboxKind.Confirmation
+            && taskEntries[taskB].Kind == ApprovalInboxKind.CodeReview
+            && inbox.Resolve(taskEntries[taskA].Id, ApprovalInboxChoice.Approve)
+            && inbox.Resolve(taskEntries[taskB].Id, ApprovalInboxChoice.KeepPatch)
+            && await taskAConfirmation == ApprovalInboxChoice.Approve
+            && await taskBReview == ApprovalInboxChoice.KeepPatch
+            && !inbox.HasPendingActionConfirmationForTask(taskA)
+            && !inbox.HasPendingActionConfirmationForTask(taskB),
+            "并行任务的审批结果没有分别完成并清理各自的任务关联。");
 
         using var cancelled = new CancellationTokenSource();
         var cancelledRequest = inbox.RequestAsync("可取消确认", "合成内容", ApprovalInboxKind.Confirmation,
@@ -6548,9 +6583,11 @@ static async Task CheckFileRecycleBinAsync(string root)
     var broker = new ToolBroker(desktop, null!, new ModelBroker(), approval, null!, "", "");
     var proposal = ToolBroker.Proposal("file.delete.recycle-bin.v1", [new("source_path", source)],
         "configured-search-root", ToolExpectedOutcome.FileSentToRecycleBin);
-    var declined = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var recycleTaskId = Guid.NewGuid();
+    var declined = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None, recycleTaskId);
     Require(!declined.Success && declined.ErrorCode == "FILE_RECYCLE_DECLINED"
         && approval.CallCount == 1 && approval.LastActionId == ApprovalAuditCatalog.FileRecycleAction
+        && approval.LastTaskId == recycleTaskId
         && approval.LastTitle == "确认移入回收站"
         && approval.LastDetails?.Contains(Path.GetFullPath(source), StringComparison.OrdinalIgnoreCase) == true
         && !declined.Summary.Contains(source, StringComparison.OrdinalIgnoreCase)
@@ -6852,9 +6889,10 @@ internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decisio
     public string? Diff { get; private set; }
     public string? TestTarget { get; private set; }
     public string? CommandPreview { get; private set; }
+    public Guid? TaskId { get; private set; }
 
     public Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
-        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;
@@ -6863,6 +6901,7 @@ internal sealed class FakeCodeTaskReviewPresenter(CodeTaskReviewDecision decisio
         Diff = diff;
         TestTarget = dotNetTestTarget;
         CommandPreview = commandPreview;
+        TaskId = taskId;
         beforeReturn?.Invoke();
         return Task.FromResult(decision);
     }
@@ -6914,7 +6953,7 @@ internal sealed class CancellableApprovalPresenter : IApprovalPresenter
     public int CallCount { get; private set; }
 
     public async Task<bool> ConfirmAsync(string actionId, string title, string details,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Guid? taskId = null)
     {
         CallCount++;
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
@@ -6927,7 +6966,7 @@ internal sealed class CancelAfterApprovalPresenter(CancellationTokenSource cance
     public int CallCount { get; private set; }
 
     public Task<bool> ConfirmAsync(string actionId, string title, string details,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;
@@ -6942,14 +6981,17 @@ internal sealed class RecordingApprovalPresenter(bool confirmed) : IApprovalPres
     public string? LastActionId { get; private set; }
     public string? LastTitle { get; private set; }
     public string? LastDetails { get; private set; }
+    public Guid? LastTaskId { get; private set; }
 
-    public Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
+    public Task<bool> ConfirmAsync(string actionId, string title, string details,
+        CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;
         LastActionId = actionId;
         LastTitle = title;
         LastDetails = details;
+        LastTaskId = taskId;
         return Task.FromResult(confirmed);
     }
 }
@@ -6958,7 +7000,8 @@ internal sealed class CountingApprovalPresenter : IApprovalPresenter
 {
     public int CallCount { get; private set; }
 
-    public Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
+    public Task<bool> ConfirmAsync(string actionId, string title, string details,
+        CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;

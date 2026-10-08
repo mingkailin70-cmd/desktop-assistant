@@ -45,7 +45,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeHorizontal;
     private double _petResizeVertical;
 
-    public bool HasPendingActionConfirmation => _approvalInbox.HasPendingActionConfirmation;
+    public bool HasPendingActionConfirmationForTask(Guid taskId) =>
+        _approvalInbox.HasPendingActionConfirmationForTask(taskId);
 
     public MainWindow()
     {
@@ -87,11 +88,12 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         SetExpandedView(expanded: false);
     }
 
-    public async Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
+    public async Task<bool> ConfirmAsync(string actionId, string title, string details,
+        CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var choice = await WaitForApprovalAsync(title, details, ApprovalInboxKind.Confirmation,
-            canRunDotNetTests: false, cancellationToken);
+            canRunDotNetTests: false, cancellationToken, taskId);
         if (choice == ApprovalInboxChoice.Unavailable)
             throw new InvalidOperationException("任务中心的审批队列已满；本次动作没有获批。");
         var confirmed = choice == ApprovalInboxChoice.Approve;
@@ -122,7 +124,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     }
 
     public async Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
-        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken, Guid? taskId = null)
     {
         var canRunDotNetTests = !string.IsNullOrWhiteSpace(dotNetTestTarget)
             && !string.IsNullOrWhiteSpace(commandPreview);
@@ -133,7 +135,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                 : "没有唯一的根目录 .sln/.slnx/.csproj 或 dotnet.exe；固定测试选项不可用。关闭/保留会维持补丁隔离。")
             + $"{Environment.NewLine}{Environment.NewLine}只有明确选择“批准应用补丁”才会修改原项目；应用前会再次核验快照。";
         var choice = await WaitForApprovalAsync("审阅隔离编程补丁", details,
-            ApprovalInboxKind.CodeReview, canRunDotNetTests, cancellationToken);
+            ApprovalInboxKind.CodeReview, canRunDotNetTests, cancellationToken, taskId);
         if (choice == ApprovalInboxChoice.Unavailable)
             throw new InvalidOperationException("任务中心的审批队列已满；补丁仍保留在隔离工作区，没有运行测试或应用。");
         var decision = choice switch
@@ -152,13 +154,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     }
 
     private async Task<ApprovalInboxChoice> WaitForApprovalAsync(string title, string details,
-        ApprovalInboxKind kind, bool canRunDotNetTests, CancellationToken cancellationToken)
+        ApprovalInboxKind kind, bool canRunDotNetTests, CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Task<ApprovalInboxChoice> pending;
         try
         {
-            pending = _approvalInbox.RequestAsync(title, details, kind, canRunDotNetTests, cancellationToken);
+            pending = _approvalInbox.RequestAsync(title, details, kind, canRunDotNetTests, cancellationToken, taskId);
         }
         catch (InvalidOperationException)
         {

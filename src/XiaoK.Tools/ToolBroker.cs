@@ -38,11 +38,11 @@ public sealed class ToolBroker
     public Task<ToolResult> ExecuteAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
         ExecuteAsync(proposal, ToolExecutionAccess.ExplicitUserInteraction, cancellationToken);
 
-    public Task<ToolResult> ExecuteBackgroundAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
-        ExecuteAsync(proposal, ToolExecutionAccess.BackgroundOnly, cancellationToken);
+    public Task<ToolResult> ExecuteBackgroundAsync(ToolProposal proposal, CancellationToken cancellationToken,
+        Guid? taskId = null) => ExecuteAsync(proposal, ToolExecutionAccess.BackgroundOnly, cancellationToken, taskId);
 
     public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, ToolExecutionAccess access,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var invalidProposal = ValidateProposal(proposal);
@@ -60,7 +60,7 @@ public sealed class ToolBroker
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
-            "file.delete.recycle-bin.v1" => await RecycleFileToBinAsync(proposal, cancellationToken),
+            "file.delete.recycle-bin.v1" => await RecycleFileToBinAsync(proposal, cancellationToken, taskId),
             "file.archive.single.v1" => await _desktop.ArchiveSingleFileToExportAsync(proposal, cancellationToken),
             "file.classify.preview.v1" => await _desktop.ClassifyFilesAsync(proposal, cancellationToken),
             "browser.read.public.v1" => _publicWebPageReader is null
@@ -74,7 +74,7 @@ public sealed class ToolBroker
             "code.inspect.v1" => await _codeAgent.InspectAsync(_codeProjectRoot, _codeWorkspaceRoot,
                 proposal.Arguments["instruction"], cancellationToken),
             "code.task.create.v1" => await _codeAgent.ExecuteAsync(_codeProjectRoot, _codeWorkspaceRoot,
-                proposal.Arguments["instruction"], cancellationToken, _approval as ICodeTaskReviewPresenter),
+                proposal.Arguments["instruction"], cancellationToken, _approval as ICodeTaskReviewPresenter, taskId),
             _ => new ToolResult(false, "未知工具已拒绝。", "UNKNOWN_TOOL")
         };
     }
@@ -279,7 +279,8 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("回收站操作只接受搜索范围内的单个本机普通文件；目标会在执行前由用户确认。");
 
-    private async Task<ToolResult> RecycleFileToBinAsync(ToolProposal proposal, CancellationToken cancellationToken)
+    private async Task<ToolResult> RecycleFileToBinAsync(ToolProposal proposal, CancellationToken cancellationToken,
+        Guid? taskId)
     {
         if (_approval is null)
             return new(false, "任务中心确认功能不可用；为安全起见没有移动文件。", "FILE_RECYCLE_APPROVAL_UNAVAILABLE");
@@ -295,7 +296,7 @@ public sealed class ToolBroker
         try
         {
             confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.FileRecycleAction,
-                "确认移入回收站", details, cancellationToken).ConfigureAwait(false);
+                "确认移入回收站", details, cancellationToken, taskId).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

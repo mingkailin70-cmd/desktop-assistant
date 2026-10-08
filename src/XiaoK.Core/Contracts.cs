@@ -108,12 +108,13 @@ public interface ITool
 }
 public interface IApprovalPresenter
 {
-    Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken);
+    Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken,
+        Guid? taskId = null);
 }
 
 public interface ILiveApprovalStateProvider
 {
-    bool HasPendingActionConfirmation { get; }
+    bool HasPendingActionConfirmationForTask(Guid taskId);
 }
 
 public interface IMessageSendPreviewPresenter
@@ -126,5 +127,5 @@ public enum CodeTaskReviewDecision { KeepPatch, RunDotNetTests, ApplyPatchToProj
 public interface ICodeTaskReviewPresenter
 {
     Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
-        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken);
+        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken, Guid? taskId = null);
 }

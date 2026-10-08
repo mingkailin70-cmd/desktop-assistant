@@ -671,9 +671,10 @@ internal static class Program
 
     private sealed class KeepPatchAndDenyAllPresenter : IApprovalPresenter, ICodeTaskReviewPresenter
     {
-        public Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> ConfirmAsync(string actionId, string title, string details,
+            CancellationToken cancellationToken, Guid? taskId = null) => Task.FromResult(false);
         public Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
-            string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken) =>
+            string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken, Guid? taskId = null) =>
             Task.FromResult(CodeTaskReviewDecision.KeepPatch);
     }
 

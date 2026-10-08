@@ -126,7 +126,7 @@ public sealed class CodeTaskAgent
         CodeWorkspaceSnapshot.ReadRetainedTasks(workspaceRoot);
 
     public async Task<ToolResult> ExecuteAsync(string projectRoot, string workspaceRoot, string instruction,
-        CancellationToken cancellationToken, ICodeTaskReviewPresenter? reviewPresenter = null)
+        CancellationToken cancellationToken, ICodeTaskReviewPresenter? reviewPresenter = null, Guid? taskId = null)
     {
         if (string.IsNullOrWhiteSpace(instruction) || instruction.Length > 4_000)
             return new(false, "编程任务说明为空或超过 4000 个字符。", "INVALID_CODE_TASK");
@@ -238,7 +238,7 @@ public sealed class CodeTaskAgent
             var decision = reviewPresenter is null
                 ? CodeTaskReviewDecision.KeepPatch
                 : await reviewPresenter.ReviewAsync(snapshot.ProjectPath, snapshot.WorkspacePath, diff,
-                    testTarget, commandPreview, cancellationToken);
+                    testTarget, commandPreview, cancellationToken, taskId);
 
             if (decision == CodeTaskReviewDecision.RunDotNetTests && testTarget is not null
                 && dotNetExecutablePath is not null)

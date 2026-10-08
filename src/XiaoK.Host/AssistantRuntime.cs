@@ -310,14 +310,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
     {
-        var hasPendingActionConfirmation = _liveApprovalStateProvider?.HasPendingActionConfirmation == true;
         var records = (await _store.GetRecentAsync(30, cancellationToken))
             .Select(record =>
             {
                 var visible = TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc);
                 visible = visible with
                 {
-                    Status = TaskHistoryDisplayPolicy.EffectiveState(visible.Status, hasPendingActionConfirmation)
+                    Status = TaskHistoryDisplayPolicy.EffectiveState(visible.Status,
+                        _liveApprovalStateProvider?.HasPendingActionConfirmationForTask(visible.Id) == true)
                 };
                 return _transientUserTaskStates.TryGetValue(visible.Id, out var transientState)
                     ? visible with { Status = transientState, ErrorCode = transientState == TaskLifecycleState.Cancelled ? "CANCELLED" : visible.ErrorCode }
@@ -575,7 +575,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 {
                     PublishUserTaskStateChanged(work.Id, task.Status);
                     routeStarted = true;
-                    var result = await RouteAsync(work.Category, work.Request, linked.Token).ConfigureAwait(false);
+                    var result = await RouteAsync(work.Id, work.Category, work.Request, linked.Token).ConfigureAwait(false);
                     finalState = result.FinalState ?? (result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed);
                     work.Admission.TryComplete();
                     SetTransientTaskStep(work.Id, TaskStepForStoredState(finalState));
@@ -801,8 +801,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             }
         }
     }
-    private async Task<ToolResult> RouteAsync(string category, string request, CancellationToken token)
+    private async Task<ToolResult> RouteAsync(Guid taskId, string category, string request, CancellationToken token)
     {
+        Task<ToolResult> ExecuteBackgroundAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
+            _broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId);
+
         var lower = request.ToLowerInvariant();
         if (category == "window")
         {
@@ -831,7 +834,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var proposal = LocalFileContentSearchPolicy.CreateUserToolProposal(request);
             if (proposal is null)
                 return new(false, "请按“在文件内容中搜索：关键词”输入。只搜索设置中的文本文件，每文件最多2 MiB、总读取最多64 MiB；只返回路径和行号，不显示或保存匹配正文。", "INVALID_CONTENT_QUERY");
-            return await _broker.ExecuteBackgroundAsync(proposal, token);
+            return await ExecuteBackgroundAsync(proposal, token);
         }
 
         if (category == "file")
@@ -839,7 +842,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var query = request;
             foreach (var prefix in new[] { "帮我找文件", "搜索文件", "查找文件", "找文件", "搜索", "查找" })
                 if (query.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { query = query[prefix.Length..].Trim(' ', '：', ':', '“', '”', '"'); break; }
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.search.v1",
+            return await ExecuteBackgroundAsync(new ToolProposal("file.search.v1",
                 ImmutableDictionary<string, string>.Empty.Add("query", query).Add("root_id", "user-files"), "user-files",
                 ToolPrecondition.ConfiguredSearchRoot, ToolExpectedOutcome.MatchingFilesListed), token);
         }
@@ -852,7 +855,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 return new(false, "请按“重命名文件：完整本机路径 为 新文件名”输入。只能修改设置中搜索目录里的单个文件名，不移动文件、不覆盖同名目标。", "INVALID_RENAME_ARGUMENTS");
             var arguments = ImmutableDictionary<string, string>.Empty
                 .Add("source_path", sourcePath).Add("new_name", newName);
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.rename.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("file.rename.v1", arguments,
                 "configured-search-root", ToolPrecondition.ConfiguredSearchRoot,
                 ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot), token);
         }
@@ -863,7 +866,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 return new(false, "请按“移动文件：完整源文件路径 到 目标目录完整路径”输入。只移动搜索范围内的单个普通文件，不覆盖已有项目。", "INVALID_MOVE_ARGUMENTS");
             var arguments = ImmutableDictionary<string, string>.Empty
                 .Add("source_path", sourcePath).Add("destination_directory", destinationDirectory);
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.move.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("file.move.v1", arguments,
                 "configured-search-roots",
                 ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
                 ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots), token);
@@ -875,7 +878,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (!LocalFileCopyPolicy.IsValidSourcePath(sourcePath))
                 return new(false, "请用“复制文件：完整源文件路径”指定一个本机文件。小K只会复制搜索范围内的单个文件到固定导出目录。", "INVALID_SOURCE_PATH");
             var arguments = ImmutableDictionary<string, string>.Empty.Add("source_path", sourcePath);
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.copy.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("file.copy.v1", arguments,
                 "configured-export", ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
                 ToolExpectedOutcome.FileCopiedToConfiguredExport), token);
         }
@@ -885,7 +888,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (!LocalFileRecycleBinPolicy.TryParseRequest(request, out var sourcePath))
                 return new(false, "请按“移入回收站：本机完整文件路径”输入。仅支持设置中搜索目录内的单个普通文件，且会先在任务中心显示目标并等待确认。", "INVALID_RECYCLE_REQUEST");
             var arguments = ImmutableDictionary<string, string>.Empty.Add("source_path", sourcePath);
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.delete.recycle-bin.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("file.delete.recycle-bin.v1", arguments,
                 "configured-search-root", ToolPrecondition.ConfiguredSearchRoot,
                 ToolExpectedOutcome.FileSentToRecycleBin), token);
         }
@@ -896,7 +899,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (!LocalFileArchivePolicy.IsValidSourcePath(sourcePath))
                 return new(false, "请用“压缩文件：完整本机路径”指定一个本机文件。小K只会压缩搜索目录内的单个普通文件到固定导出目录，原文件会保留。", "INVALID_ARCHIVE_SOURCE");
             var arguments = ImmutableDictionary<string, string>.Empty.Add("source_path", sourcePath);
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.archive.single.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("file.archive.single.v1", arguments,
                 "configured-export", ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
                 ToolExpectedOutcome.FileArchivedToConfiguredExport), token);
         }
@@ -906,7 +909,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var directoryPath = ExtractFileClassificationDirectory(request);
             if (!LocalFileClassificationPolicy.IsValidDirectoryPath(directoryPath))
                 return new(false, "请按“分类文件夹：目录完整路径”输入。只读分类会递归最多5层并在5,000个目录项处停止，不读取文件内容，也不修改文件。", "INVALID_CLASSIFICATION_DIRECTORY");
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.classify.preview.v1",
+            return await ExecuteBackgroundAsync(new ToolProposal("file.classify.preview.v1",
                 ImmutableDictionary<string, string>.Empty.Add("directory_path", directoryPath),
                 "configured-search-root", ToolPrecondition.ConfiguredClassificationDirectory,
                 ToolExpectedOutcome.FileClassificationPreviewReturned), token);
@@ -917,7 +920,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var url = ExtractPublicWebPageUrl(request);
             if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
                 return new(false, "请使用“读取网页：https://公开网站/页面”格式。只支持 HTTPS 公网地址，不会读取内网、文件或用户 Edge 会话。", "WEB_URL_NOT_ALLOWED");
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("browser.read.public.v1",
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.read.public.v1",
                 ImmutableDictionary<string, string>.Empty.Add("url", url), "public-web-page",
                 ToolPrecondition.UserProvidedPublicWebPageUrl,
                 ToolExpectedOutcome.PublicWebPageSnapshotReturned), token);
@@ -929,7 +932,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
                 return new(false, "请按“下载文件：https://公开网站/文件名”输入。下载仅允许 HTTPS 公网地址，单文件不超过50 MiB；可执行文件、脚本及网页不会保存。", "WEB_DOWNLOAD_URL_NOT_ALLOWED");
             var arguments = ImmutableDictionary<string, string>.Empty.Add("url", url);
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("browser.download.public.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.download.public.v1", arguments,
                 "configured-export", ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
                 ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport), token);
         }
@@ -959,7 +962,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 arguments = arguments.Add("style_id", styleId);
             }
 
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal(tool, arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal(tool, arguments,
                 "用户本次提供的单条消息", ToolPrecondition.UserProvidedSingleMessage,
                 category == "draft" ? ToolExpectedOutcome.ReplyDraftOnly : ToolExpectedOutcome.LocalMessageAnalysis), token);
         }
@@ -979,7 +982,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 .Add("recipient", intent.Recipient)
                 .Add("text", intent.Text)
                 .Add("attachments", "none");
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("message.send.v1", arguments,
+            return await ExecuteBackgroundAsync(new ToolProposal("message.send.v1", arguments,
                 $"{intent.ApplicationId}:{intent.Recipient}", ToolPrecondition.CompleteMessagePreview,
                 ToolExpectedOutcome.MessageSendPreviewShown), token);
         }
@@ -989,14 +992,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var instruction = ExtractPayload(request, new[] { "查找代码", "搜索代码", "解释代码", "分析代码", "读代码" });
             if (instruction.Length == 0)
                 return new(false, "请补充要在所选项目中查找或解释的内容。", "EMPTY_CODE_QUERY");
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("code.inspect.v1",
+            return await ExecuteBackgroundAsync(new ToolProposal("code.inspect.v1",
                 ImmutableDictionary<string, string>.Empty.Add("instruction", instruction), "configured-project",
                 ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
                 ToolExpectedOutcome.CodeExplanationReturned), token);
         }
 
         if (category == "code")
-            return await _broker.ExecuteBackgroundAsync(new ToolProposal("code.task.create.v1",
+            return await ExecuteBackgroundAsync(new ToolProposal("code.task.create.v1",
                 ImmutableDictionary<string, string>.Empty.Add("instruction", request), "configured-project",
                 ToolPrecondition.ConfiguredProjectAndIsolatedWorkspace,
                 ToolExpectedOutcome.ReviewablePatchCreated), token);

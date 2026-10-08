@@ -5,7 +5,7 @@ public enum ApprovalInboxKind { Confirmation, CodeReview, MessagePreview }
 public enum ApprovalInboxChoice { Approve, Decline, KeepPatch, RunDotNetTests, ApplyPatch, DismissPreview, Unavailable }
 
 public sealed record ApprovalInboxEntry(Guid Id, ApprovalInboxKind Kind, string Title, string Details,
-    DateTimeOffset CreatedAtUtc, bool CanRunDotNetTests)
+    DateTimeOffset CreatedAtUtc, bool CanRunDotNetTests, Guid? TaskId)
 {
     public bool CanApprove => Kind == ApprovalInboxKind.Confirmation;
     public bool CanDecline => Kind == ApprovalInboxKind.Confirmation;
@@ -33,6 +33,13 @@ public sealed class ApprovalInbox
         }
     }
 
+    public bool HasPendingActionConfirmationForTask(Guid taskId)
+    {
+        lock (_sync)
+            return _pending.Values.Any(request => request.Entry.TaskId == taskId
+                && request.Entry.Kind is ApprovalInboxKind.Confirmation or ApprovalInboxKind.CodeReview);
+    }
+
     public IReadOnlyList<ApprovalInboxEntry> GetPending()
     {
         lock (_sync)
@@ -41,7 +48,7 @@ public sealed class ApprovalInbox
     }
 
     public Task<ApprovalInboxChoice> RequestAsync(string title, string details, ApprovalInboxKind kind,
-        bool canRunDotNetTests, CancellationToken cancellationToken)
+        bool canRunDotNetTests, CancellationToken cancellationToken, Guid? taskId = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(title) || title.Length > 200)
@@ -52,7 +59,7 @@ public sealed class ApprovalInbox
         if (!Enum.IsDefined(kind)) throw new ArgumentOutOfRangeException(nameof(kind));
 
         var entry = new ApprovalInboxEntry(Guid.NewGuid(), kind, title, details,
-            DateTimeOffset.UtcNow, kind == ApprovalInboxKind.CodeReview && canRunDotNetTests);
+            DateTimeOffset.UtcNow, kind == ApprovalInboxKind.CodeReview && canRunDotNetTests, taskId);
         var request = new PendingApproval(entry, new TaskCompletionSource<ApprovalInboxChoice>(
             TaskCreationOptions.RunContinuationsAsynchronously));
         lock (_sync)
