@@ -342,6 +342,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (!await TrySaveStateAsync(task, token))
                 return "无法保存本地任务状态，本次操作未执行。请检查 D 盘数据目录。";
 
+            task = task with { Status = TaskLifecycleState.Running, UpdatedAtUtc = DateTimeOffset.UtcNow };
+            if (!await TrySaveStateAsync(task, token))
+                return "无法更新本地任务状态，本次操作未执行。请检查 D 盘数据目录。";
+
             var result = await RouteAsync(category, request, token);
             task = task with
             {

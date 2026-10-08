@@ -1,7 +1,7 @@
 <Window x:Class="XiaoK.Host.TaskHistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="最近任务" Height="460" Width="600" MinHeight="320" MinWidth="440"
+        Title="小K任务中心" Height="460" Width="600" MinHeight="320" MinWidth="440"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
     <Grid Margin="18">
         <Grid.RowDefinitions>
@@ -10,8 +10,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock Text="最近任务" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
-            <TextBlock Text="这里只显示类别、状态、时间和隔离工作区路径，不保存或展示请求正文与模型回答。"
+            <TextBlock Text="任务中心" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
+            <TextBlock Text="状态每3秒刷新。这里只显示任务类别、状态、时间和隔离工作区路径；请求正文与模型回答不会写入历史。"
                        Margin="0,5,0,0" Foreground="#68728A" TextWrapping="Wrap"/>
         </StackPanel>
         <Grid Grid.Row="1">
@@ -37,6 +37,10 @@
             <TextBlock x:Name="EmptyText" Text="暂无可显示的本地任务记录。" Foreground="#68728A"
                        HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
         </Grid>
-        <Button Grid.Row="2" Content="关闭" IsCancel="True" MinWidth="90" HorizontalAlignment="Right" Margin="0,12,0,0"/>
+        <DockPanel Grid.Row="2" Margin="0,12,0,0">
+            <TextBlock x:Name="RefreshStatus" DockPanel.Dock="Left" VerticalAlignment="Center"
+                       FontSize="11" Foreground="#68728A" Text="正在读取任务状态…"/>
+            <Button Content="关闭" IsCancel="True" MinWidth="90" HorizontalAlignment="Right"/>
+        </DockPanel>
     </Grid>
 </Window>

@@ -18,6 +18,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private readonly PetWindowPositionStore _petWindowPositionStore;
     private readonly WindowsNotificationMonitor _notificationMonitor;
     private readonly Forms.NotifyIcon _tray;
+    private TaskHistoryWindow? _taskCenterWindow;
     private HwndSource? _source;
     private bool _exiting;
     private bool _cancelInProgress;
@@ -670,21 +671,26 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
 
     private async void History_Click(object sender, RoutedEventArgs e) => await ShowTaskHistoryAsync();
 
-    private async Task ShowTaskHistoryAsync()
+    private Task ShowTaskHistoryAsync()
     {
-        if (_exiting) return;
+        if (_exiting) return Task.CompletedTask;
+        if (_taskCenterWindow is { IsLoaded: true } existing)
+        {
+            if (!IsVisible || !_expanded) RestoreFromTray();
+            existing.Show();
+            existing.Activate();
+            return Task.CompletedTask;
+        }
         if (!IsVisible || !_expanded) RestoreFromTray();
-        try
+        var window = new TaskHistoryWindow(_runtime.GetRecentTaskHistoryAsync) { Owner = this };
+        _taskCenterWindow = window;
+        window.Closed += (_, _) =>
         {
-            var history = await _runtime.GetRecentTaskHistoryAsync(CancellationToken.None);
-            var dialog = new TaskHistoryWindow(history) { Owner = this };
-            dialog.ShowDialog();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException
-            or InvalidOperationException or ArgumentException)
-        {
-            OutputText.Text = "无法读取本地任务记录；未修改或删除任何任务数据。请检查数据目录和隔离工作区。";
-        }
+            if (ReferenceEquals(_taskCenterWindow, window)) _taskCenterWindow = null;
+        };
+        window.Show();
+        window.Activate();
+        return Task.CompletedTask;
     }
 
     private void ShowSettings()
@@ -843,7 +849,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             sizeMenu.DropDownItems.Add($"{percent}%", null, (_, _) => SetPetScale(percent, save: true));
         menu.Items.Add(sizeMenu);
         menu.Items.Add("打开任务面板", null, (_, _) => RestoreFromTray());
-        menu.Items.Add("最近任务", null, async (_, _) => await ShowTaskHistoryAsync());
+        menu.Items.Add("任务中心", null, async (_, _) => await ShowTaskHistoryAsync());
         menu.Items.Add("设置", null, (_, _) => ShowSettings());
         menu.Items.Add("取消当前任务", null, (_, _) => CancelFromTray());
         menu.Items.Add("停麦", null, (_, _) => StopMicrophoneFromTray());

@@ -106,7 +106,7 @@
                 <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,14"
                            MouseLeftButtonDown="Header_MouseLeftButtonDown">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Content="记录" Width="42" Height="32" Click="History_Click" ToolTip="最近任务与隔离编程任务"/>
+                        <Button Content="任务" Width="42" Height="32" Click="History_Click" ToolTip="打开并查看任务状态"/>
                         <Button Content="⚙" Width="34" Height="32" Margin="5,0,0,0" Click="Settings_Click" ToolTip="设置"/>
                         <Button x:Name="ExpandButton" Content="收起" Width="48" Height="32" Margin="5,0,0,0"
                                 Click="Expand_Click" ToolTip="收起到桌宠"/>
@@ -265,7 +265,7 @@
                 <Border.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="展开任务面板" Click="ShowPanel_Click"/>
-                        <MenuItem Header="最近任务" Click="History_Click"/>
+                        <MenuItem Header="任务中心" Click="History_Click"/>
                         <MenuItem Header="设置" Click="Settings_Click"/>
                         <MenuItem Header="桌宠大小" StaysOpenOnClick="True">
                             <MenuItem StaysOpenOnClick="True">
