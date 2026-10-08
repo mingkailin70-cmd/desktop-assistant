@@ -764,14 +764,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         if (_exiting) return Task.CompletedTask;
         if (_taskCenterWindow is { IsLoaded: true } existing)
         {
-            if (!IsVisible || !_expanded) RestoreFromTray();
+            existing.WindowState = WindowState.Normal;
             existing.Show();
             existing.Activate();
             return Task.CompletedTask;
         }
-        if (!IsVisible || !_expanded) RestoreFromTray();
         var window = new TaskHistoryWindow(_runtime.GetRecentTaskHistoryAsync, _runtime.CancelTaskAsync,
-            _approvalInbox.GetPending, _approvalInbox.Resolve) { Owner = this };
+            _approvalInbox.GetPending, _approvalInbox.Resolve);
         _taskCenterWindow = window;
         window.Closed += (_, _) =>
         {

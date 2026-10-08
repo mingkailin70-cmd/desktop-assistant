@@ -117,6 +117,19 @@ Require(requiredBackgroundRoutes.All(route => assistantRuntimeSource.Contains(ro
     "文件、消息或代码路由没有固定使用后台执行入口。");
 var taskCenterSource = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
     "src", "XiaoK.Host", "TaskHistoryWindow.xaml.cs"));
+var taskCenterXaml = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
+    "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
+var taskCenterOpenStart = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
+    "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+var openTaskCenterStart = taskCenterOpenStart.IndexOf("private Task ShowTaskHistoryAsync()", StringComparison.Ordinal);
+var openTaskCenterEnd = taskCenterOpenStart.IndexOf("private void ShowSettings()", openTaskCenterStart, StringComparison.Ordinal);
+Require(openTaskCenterStart >= 0 && openTaskCenterEnd > openTaskCenterStart,
+    "无法定位托盘任务中心入口。 ");
+var openTaskCenter = taskCenterOpenStart[openTaskCenterStart..openTaskCenterEnd];
+Require(!openTaskCenter.Contains("RestoreFromTray()", StringComparison.Ordinal)
+    && !openTaskCenter.Contains("Owner = this", StringComparison.Ordinal)
+    && taskCenterXaml.Contains("WindowStartupLocation=\"CenterScreen\"", StringComparison.Ordinal),
+    "从托盘打开任务中心时不应先展开/聚焦桌宠主面板；任务中心应独立显示。 ");
 Require(taskCenterSource.Contains("var selectedEntryKey = (HistoryList.SelectedItem as TaskHistoryEntry)?.EntryKey;", StringComparison.Ordinal)
     && taskCenterSource.Contains("item.EntryKey == selectedEntryKey", StringComparison.Ordinal)
     && !taskCenterSource.Contains("selectedTitle", StringComparison.Ordinal)
@@ -168,7 +181,7 @@ if (bindingFailure is not null)
 foreach (var result in bindingResults)
     Require(result.Passed, result.Message);
 
-Console.WriteLine($"桌宠缩放/保存/后台交互策略/WPF取消按钮绑定：{checks} 项通过。");
+Console.WriteLine($"桌宠缩放/保存/后台交互策略/任务中心独立显示/WPF取消按钮绑定：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {

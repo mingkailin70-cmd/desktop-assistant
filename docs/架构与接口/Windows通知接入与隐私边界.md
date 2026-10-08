@@ -23,7 +23,7 @@
 
 项目将目标框架固定为 `net10.0-windows10.0.26100.0`，通过 `WindowsSdkPackageVersion` 使用 `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87。`NuGet.Config` 仅映射该获准包；这不是客户端发送/读取接口，也不提供微信或 QQ 私聊元数据。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。截至2026-10-09当前账户安装MSIX为`0.1.68.0`，状态`Ok`。本轮仅以隔离诊断配置隐藏启动并正常退出；没有启动普通设置页、请求通知权限、访问Toast或运行来源诊断。监控开关、Windows授权状态和实际Toast数据均未读取，因此当前仍未知。微信/QQ通知来源AUMID、正文结构和私聊归属没有真实样本核验；隔离诊断启动不能推断通知监听已验收。编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。截至2026-10-09当前账户安装MSIX为`0.1.69.0`，状态`Ok`；本轮仅安装，未启动普通设置页、请求通知权限、访问Toast或运行来源诊断。监控开关、Windows授权状态和实际Toast数据均未读取，因此当前仍未知。微信/QQ通知来源AUMID、正文结构和私聊归属没有真实样本核验；隔离诊断启动不能推断通知监听已验收。编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 
