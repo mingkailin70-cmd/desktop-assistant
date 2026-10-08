@@ -2,7 +2,7 @@
 
 排队任务取消与工作线程启动现在由原子准入门仲裁，取消先赢时立即显示取消状态、持久化并由队列跳过；工作线程先赢时仅请求协作式取消。固定SDK Release解决方案构建0警告/0错误；完整Windows安全套件111项通过、0项跳过；桌宠/后台交互专项60项通过。签名验证包位于 `artifacts\msix-validation\aa6fc339f0a643f0880b0e61c17fe6f6\XiaoK-signed-validation.msix`，大小124,620,060字节，SHA-256 `F5915FDDC4C746497DDBF2435A5C057A5A7BE43472A1E549C4EAF71C1E45B59B`；SignTool验签0警告、0错误，证书信任未改变。阶段提交 `5899ca5` 已推送至 `origin/main`，GitHub Actions [Build #267](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37753983268) 成功；记录该CI结果的文档提交 `1b5c99e` 的 [Build #268](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37754231732) 也成功。
 
-随后按当前授权尝试更新安装版。预检确认签名有效且证书已在 `LocalMachine\TrustedPeople`。安装器未找到 PID `29988` 下标题为“小K”的唯一窗口（Win32错误 `1168`）；进程仍运行但 `MainWindowTitle` 为空、`MainWindowHandle` 为 `0`，Computer Use 也未发现可操作的小K窗口。安装脚本按保护逻辑停止，未强制结束进程、未改变证书信任或安装状态；当前仍是已安装 `0.1.40.0`。需从小K托盘菜单正常退出后才能重试安装。新源码和验证包尚未进行安装版使用验收。
+首次尝试更新安装版时，签名预检成功且本机证书已受信任，但旧Host PID 29988没有可核验的“小K”窗口句柄，安装脚本以Win32错误1168安全停止；当时没有强制结束进程、改变证书信任或安装状态。用户随后从系统托盘正常退出旧版，安装脚本成功将签名MSIX 0.1.53.0安装到当前账户；包状态Ok，安装目录为 C:\Program Files\WindowsApps\MingKaiLin.XiaoK_0.1.53.0_neutral__g0ndt6g65c8pe。随后只读观察到Host PID 51624、窗口标题“小K”、MainWindowHandle=198644。GitHub Actions [Build #269](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37755153526)对提交033dc11852b665714d9bbb56003d839ef6ba42f4成功。该句柄证明窗口已创建，不是截图或交互验收；此前Computer Use操作被Escape中断，桌面像素、透明合成、焦点、任务中心真实操作及恢复均未验证。该时点未观察到Host子进程或llama/Python/ASR/TTS命名进程，不代表模型推理验收通过。证书信任保持原样。
 # MSIX 打包与权限验收
 
 ## v0.1.50.0 R3后台单文件移动源码验证包（2026-10-08）
