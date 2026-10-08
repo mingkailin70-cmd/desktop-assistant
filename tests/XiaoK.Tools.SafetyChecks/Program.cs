@@ -80,6 +80,23 @@ if (args.Length == 1 && args[0] == "--only-window-sizing")
     Console.WriteLine("通过：窗口尺寸按显示器工作区与 DPI 限制，并在空间不足时启用可滚动布局。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-copy")
+{
+    var fileCopyRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileCopyProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fileCopyRoot);
+    try
+    {
+        await CheckFileCopyToExportAsync(fileCopyRoot);
+        if (!CheckFileCopyRejectsLinkedExport(fileCopyRoot, out var linkSkipReason))
+            Console.WriteLine("跳过：导出目录重解析点夹具无法创建，用例跳过：" + linkSkipReason);
+        Console.WriteLine("通过：后台文件复制限制源范围、导出目标、覆盖和文件大小，并核验内容散列。");
+    }
+    finally
+    {
+        if (Directory.Exists(fileCopyRoot)) Directory.Delete(fileCopyRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-pet-position-store")
 {
     var petPositionRoot = Path.Combine(Path.GetTempPath(), "XiaoK-PetPositionProbe-" + Guid.NewGuid().ToString("N"));
@@ -191,6 +208,12 @@ try
 
     await CheckFileSearchFailureAndCancellationAsync(tempRoot);
     passed.Add("文件搜索根缺失和查询无效时失败关闭，预取消不执行搜索");
+
+    await CheckFileCopyToExportAsync(tempRoot);
+    passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
+    if (!CheckFileCopyRejectsLinkedExport(tempRoot, out var copyLinkSkipReason))
+        skipped.Add("小K文件导出拒绝目录联接的夹具无法创建，用例跳过：" + copyLinkSkipReason);
+    else passed.Add("小K文件导出拒绝被重解析点替换的导出目录");
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
@@ -5441,6 +5464,108 @@ static async Task CheckFileSearchFailureAndCancellationAsync(string root)
     try { await desktop.SearchFilesAsync(validProposal, cancellation.Token); }
     catch (OperationCanceledException) { cancelled = true; }
     Require(cancelled, "已经取消的文件搜索仍继续返回结果。");
+}
+
+static async Task CheckFileCopyToExportAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "file-copy");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    Directory.CreateDirectory(allowedRoot);
+    Directory.CreateDirectory(outsideRoot);
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+    var source = Path.Combine(allowedRoot, "background-copy-source.txt");
+    var outside = Path.Combine(outsideRoot, "outside-source.txt");
+    var payload = Encoding.UTF8.GetBytes("合成后台复制样本\r\nimmutable source");
+    await File.WriteAllBytesAsync(source, payload);
+    await File.WriteAllTextAsync(outside, "outside sentinel", new UTF8Encoding(false));
+
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)],
+        exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.copy.v1", [new("source_path", source)], "configured-export",
+        ToolExpectedOutcome.FileCopiedToConfiguredExport);
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var destination = Path.Combine(exportRoot, Path.GetFileName(source));
+    Require(result.Success && result.Data == destination && File.Exists(destination),
+        $"有效的后台文件复制没有写入固定导出目录：success={result.Success}, code={result.ErrorCode}, summary={result.Summary}, data={result.Data}");
+    Require((await File.ReadAllBytesAsync(destination)).SequenceEqual(payload)
+        && File.ReadAllBytes(source).SequenceEqual(payload), "文件复制改变源文件或输出字节不一致。");
+    Require(result.Summary.Contains(Convert.ToHexString(SHA256.HashData(payload)), StringComparison.Ordinal),
+        "文件复制结果未包含独立核验所用的SHA-256。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(destination)).SequenceEqual(payload),
+        "同名冲突没有失败关闭，或覆盖了既有副本。");
+
+    var outsideProposal = ToolBroker.Proposal("file.copy.v1", [new("source_path", outside)], "configured-export",
+        ToolExpectedOutcome.FileCopiedToConfiguredExport);
+    var outsideResult = await broker.ExecuteBackgroundAsync(outsideProposal, CancellationToken.None);
+    Require(!outsideResult.Success && outsideResult.ErrorCode == "SOURCE_OUTSIDE_ALLOWED_ROOT"
+        && !File.Exists(Path.Combine(exportRoot, Path.GetFileName(outside))),
+        "后台文件复制读取或写出了配置搜索范围以外的文件。");
+
+    var invalidTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = outsideRoot }, CancellationToken.None);
+    Require(!invalidTarget.Success && invalidTarget.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文件复制接受了模型提供的任意目标路径。");
+    var wrongContext = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Preconditions = ToolPrecondition.ConfiguredSearchRoot,
+        ExpectedOutcome = ToolExpectedOutcome.MatchingFilesListed
+    }, CancellationToken.None);
+    Require(!wrongContext.Success && wrongContext.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文件复制没有绑定固定的搜索/导出前置条件和可观察结果。");
+
+    var oversized = Path.Combine(allowedRoot, "oversized.bin");
+    using (var stream = new FileStream(oversized, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        stream.SetLength(LocalFileCopyPolicy.MaximumFileBytes + 1);
+    var oversizedProposal = ToolBroker.Proposal("file.copy.v1", [new("source_path", oversized)], "configured-export",
+        ToolExpectedOutcome.FileCopiedToConfiguredExport);
+    var oversizedResult = await broker.ExecuteBackgroundAsync(oversizedProposal, CancellationToken.None);
+    Require(!oversizedResult.Success && oversizedResult.ErrorCode == "SOURCE_FILE_TOO_LARGE"
+        && !File.Exists(Path.Combine(exportRoot, Path.GetFileName(oversized))),
+        "超过100 MiB上限的文件被复制。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("source_path", Path.Combine(allowedRoot, "not-started.txt"))
+        }, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
+        "预取消的后台文件复制仍执行，或留下了临时副本。");
+}
+
+static bool CheckFileCopyRejectsLinkedExport(string root, out string skipReason)
+{
+    var fixtureRoot = Path.Combine(root, "file-copy-export-link");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside-export");
+    var linkedExportRoot = Path.Combine(fixtureRoot, "Exports");
+    Directory.CreateDirectory(allowedRoot);
+    Directory.CreateDirectory(outsideRoot);
+    var source = Path.Combine(allowedRoot, "linked-export-source.txt");
+    File.WriteAllText(source, "synthetic copy", new UTF8Encoding(false));
+    if (!JunctionFixture.TryCreate(outsideRoot, linkedExportRoot, out skipReason)) return false;
+    try
+    {
+        var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)],
+            exportRoot: linkedExportRoot);
+        var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+        var proposal = ToolBroker.Proposal("file.copy.v1", [new("source_path", source)], "configured-export",
+            ToolExpectedOutcome.FileCopiedToConfiguredExport);
+        var result = broker.ExecuteBackgroundAsync(proposal, CancellationToken.None).GetAwaiter().GetResult();
+        Require(!result.Success && result.ErrorCode == "EXPORT_ROOT_UNAVAILABLE"
+            && !File.Exists(Path.Combine(outsideRoot, Path.GetFileName(source))),
+            "后台文件复制跟随了导出目录联接并写入范围外目录。");
+        skipReason = "";
+        return true;
+    }
+    finally { Directory.Delete(linkedExportRoot, recursive: false); }
 }
 
 static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)

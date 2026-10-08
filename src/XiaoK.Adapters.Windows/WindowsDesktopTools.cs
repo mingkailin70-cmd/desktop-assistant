@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 using XiaoK.Core;
@@ -60,13 +61,14 @@ public sealed class WindowsDesktopTools
 {
     private readonly IReadOnlyDictionary<string, DesktopApp> _apps;
     private readonly IReadOnlyDictionary<string, string> _searchRoots;
+    private readonly string? _exportRoot;
     private readonly IDesktopAppProcessController _appProcessController;
     private readonly IDesktopWindowController _windowController;
     private readonly TimeSpan _appLaunchTimeout;
 
     public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
         IDesktopAppProcessController? appProcessController = null, IDesktopWindowController? windowController = null,
-        TimeSpan? appLaunchTimeout = null)
+        TimeSpan? appLaunchTimeout = null, string? exportRoot = null)
     {
         _appProcessController = appProcessController ?? new SystemDesktopAppProcessController();
         _windowController = windowController ?? new SystemDesktopWindowController();
@@ -105,6 +107,7 @@ public sealed class WindowsDesktopTools
             allowedRoots.TryAdd(configuredRoot.Key, root);
         }
         _searchRoots = allowedRoots;
+        _exportRoot = NormalizeLocalPath(exportRoot);
     }
 
     public async Task<ToolResult> LaunchAsync(ToolProposal proposal, CancellationToken cancellationToken)
@@ -304,6 +307,271 @@ public sealed class WindowsDesktopTools
         var response = LocalFileSearchResultPolicy.CreateResponse(matches, scanned, scanLimitReached);
         return new(true, summary, Data: response);
     }
+
+    public Task<ToolResult> CopyFileToExportAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
+        Task.Run(() => CopyFileToExport(proposal, cancellationToken), cancellationToken);
+
+    private async Task<ToolResult> CopyFileToExport(ToolProposal proposal, CancellationToken cancellationToken)
+    {
+        if (_exportRoot is null)
+            return new(false, "小K导出目录未配置；没有复制文件。", "EXPORT_ROOT_UNAVAILABLE");
+        if (!proposal.Arguments.TryGetValue("source_path", out var requestedSource)
+            || !LocalFileCopyPolicy.IsValidSourcePath(requestedSource))
+            return new(false, "请提供搜索范围内的本机完整文件路径。", "INVALID_SOURCE_PATH");
+
+        var roots = new List<string>();
+        foreach (var configuredRoot in _searchRoots.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryOpenOrdinaryPath(configuredRoot, expectedDirectory: true, enumerateDirectory: false,
+                    out var rootHandle, out var canonicalRoot, out _)) continue;
+            rootHandle.Dispose();
+            if (roots.All(root => !root.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase)))
+                roots.Add(canonicalRoot);
+        }
+        if (roots.Count == 0)
+            return new(false, "没有可用的已配置搜索目录；没有复制文件。", "SEARCH_ROOT_UNAVAILABLE");
+
+        if (!TryOpenOrdinaryFileForRead(requestedSource, out var sourceHandle, out var sourcePath,
+                out var sourceIdentity, out var sourceLength, out var sourceWriteTime))
+            return new(false, "源文件不存在、不可读，或属于链接/特殊文件；没有复制。", "SOURCE_FILE_UNAVAILABLE");
+
+        try
+        {
+            if (!roots.Any(root => IsWithinRoot(sourcePath, root)))
+                return new(false, "源文件不在设置中允许的搜索目录内；没有复制。", "SOURCE_OUTSIDE_ALLOWED_ROOT");
+            if (sourceLength > LocalFileCopyPolicy.MaximumFileBytes)
+                return new(false, "单文件复制上限为 100 MiB；源文件过大，没有复制。", "SOURCE_FILE_TOO_LARGE");
+
+            SafeFileHandle? exportHandle = null;
+            var temporaryPath = "";
+            var finalPath = "";
+            var movedToFinal = false;
+            try
+            {
+                if (!TryPrepareExportDirectory(out exportHandle, out var canonicalExportRoot, out var exportIdentity))
+                    return new(false, "小K导出目录不可用，或路径包含链接；没有复制。", "EXPORT_ROOT_UNAVAILABLE");
+                using (exportHandle)
+                {
+                    if (IsWithinRoot(sourcePath, canonicalExportRoot))
+                        return new(false, "不能把小K导出目录中的文件再次作为源文件复制。", "SOURCE_IS_EXPORT_FILE");
+
+                    var fileName = Path.GetFileName(sourcePath);
+                    if (!IsSafeExportFileName(fileName))
+                        return new(false, "源文件名不能安全地用作导出文件名；没有复制。", "INVALID_EXPORT_FILE_NAME");
+                    finalPath = Path.Combine(canonicalExportRoot, fileName);
+                    temporaryPath = Path.Combine(canonicalExportRoot, $".xiaok-copy-{Guid.NewGuid():N}.partial");
+                    if (File.Exists(finalPath) || Directory.Exists(finalPath))
+                        return new(false, "导出目录中已有同名文件；为避免覆盖，没有复制。", "EXPORT_NAME_CONFLICT");
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                        return new(false, "小K导出目录在操作前发生变化；没有复制。", "EXPORT_ROOT_CHANGED");
+
+                    var sourceStream = new FileStream(sourceHandle, FileAccess.Read, 64 * 1024, isAsync: false);
+                    sourceHandle = null!;
+                    long copied;
+                    string sourceHash;
+                    using (sourceStream)
+                    using (var destinationStream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write,
+                               FileShare.None, 64 * 1024, FileOptions.SequentialScan))
+                    using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
+                    {
+                        var buffer = new byte[64 * 1024];
+                        copied = 0;
+                        while (true)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var read = sourceStream.Read(buffer, 0, buffer.Length);
+                            if (read == 0) break;
+                            copied += read;
+                            if (copied > LocalFileCopyPolicy.MaximumFileBytes)
+                                return new(false, "源文件在复制期间增长超过 100 MiB；没有发布部分副本。", "SOURCE_FILE_TOO_LARGE");
+                            hash.AppendData(buffer, 0, read);
+                            await destinationStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                        }
+                        await destinationStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                        destinationStream.Flush(flushToDisk: true);
+                        if (copied != sourceLength
+                            || !TryGetFileSnapshot(sourceStream.SafeFileHandle, out var sourceLengthAfterCopy,
+                                out var sourceWriteTimeAfterCopy)
+                            || sourceLengthAfterCopy != sourceLength || sourceWriteTimeAfterCopy != sourceWriteTime)
+                            return new(false, "源文件在复制期间发生变化；没有发布部分副本，请重试。", "SOURCE_CHANGED_DURING_COPY");
+                        sourceHash = Convert.ToHexString(hash.GetHashAndReset());
+                    }
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                        return new(false, "小K导出目录在复制期间发生变化；没有发布副本。", "EXPORT_ROOT_CHANGED");
+                    try { File.Move(temporaryPath, finalPath, overwrite: false); }
+                    catch (IOException) when (File.Exists(finalPath) || Directory.Exists(finalPath))
+                    { return new(false, "导出目录中出现同名文件；为避免覆盖，没有复制。", "EXPORT_NAME_CONFLICT"); }
+                    movedToFinal = true;
+
+                    if (!TryOpenOrdinaryFileForRead(finalPath, out var copiedHandle, out var copiedPath,
+                            out var copiedIdentity, out var copiedLength, out _))
+                        return CopyOutcomeUncertain(fileName);
+                    using (copiedHandle)
+                    {
+                        if (!copiedPath.Equals(finalPath, StringComparison.OrdinalIgnoreCase)
+                            || copiedLength != sourceLength || copiedIdentity == sourceIdentity
+                            || !TryComputeSha256(copiedHandle, out var copiedHash)
+                            || !string.Equals(sourceHash, copiedHash, StringComparison.Ordinal)
+                            || !IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                            return CopyOutcomeUncertain(fileName);
+                    }
+
+                    return new(true,
+                        $"已复制到小K导出目录：{fileName}（{copiedLength:N0} 字节，SHA-256 {sourceHash}）。",
+                        Data: ToDisplayPath(finalPath));
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+                or ArgumentException or NotSupportedException or Win32Exception)
+            {
+                return movedToFinal
+                    ? CopyOutcomeUncertain(Path.GetFileName(finalPath))
+                    : new(false, "复制失败；原文件未改动，且没有覆盖导出目录中的文件。", "FILE_COPY_FAILED");
+            }
+            finally
+            {
+                exportHandle?.Dispose();
+                if (!movedToFinal && temporaryPath.Length > 0 && File.Exists(temporaryPath))
+                {
+                    try { File.Delete(temporaryPath); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException) { }
+                }
+            }
+        }
+        finally { sourceHandle?.Dispose(); }
+    }
+
+    private bool TryPrepareExportDirectory(out SafeFileHandle exportHandle, out string canonicalExportRoot,
+        out FileIdentity exportIdentity)
+    {
+        exportHandle = new SafeFileHandle(IntPtr.Zero, ownsHandle: false);
+        canonicalExportRoot = "";
+        exportIdentity = default;
+        var parentPath = Path.GetDirectoryName(_exportRoot!);
+        if (string.IsNullOrWhiteSpace(parentPath)
+            || !TryOpenOrdinaryPath(parentPath, expectedDirectory: true, enumerateDirectory: false,
+                out var parentHandle, out var canonicalParent, out _)) return false;
+        using (parentHandle)
+        {
+            if (!Path.GetFullPath(ToDisplayPath(canonicalParent)).Equals(Path.GetFullPath(parentPath), StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (!Directory.Exists(_exportRoot))
+            {
+                try { Directory.CreateDirectory(_exportRoot!); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or ArgumentException) { return false; }
+            }
+            if (!TryOpenOrdinaryPath(_exportRoot!, expectedDirectory: true, enumerateDirectory: false,
+                    out var candidate, out var verifiedRoot, out var verifiedIdentity)) return false;
+            var expectedRoot = Path.Combine(canonicalParent, Path.GetFileName(_exportRoot!));
+            if (!verifiedRoot.Equals(expectedRoot, StringComparison.OrdinalIgnoreCase)
+                || !Path.GetFullPath(ToDisplayPath(verifiedRoot)).Equals(Path.GetFullPath(_exportRoot!), StringComparison.OrdinalIgnoreCase))
+            {
+                candidate.Dispose();
+                return false;
+            }
+            exportHandle = candidate;
+            canonicalExportRoot = verifiedRoot;
+            exportIdentity = verifiedIdentity;
+            return true;
+        }
+    }
+
+    private static bool IsCurrentDirectoryPath(string configuredPath, string expectedPath, FileIdentity expectedIdentity)
+    {
+        if (!TryOpenOrdinaryPath(configuredPath, expectedDirectory: true, enumerateDirectory: false,
+                out var currentHandle, out var currentPath, out var currentIdentity)) return false;
+        using (currentHandle)
+            return currentIdentity == expectedIdentity
+                && currentPath.Equals(expectedPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryOpenOrdinaryFileForRead(string path, out SafeFileHandle handle, out string canonicalPath,
+        out FileIdentity identity, out long length, out long writeTime)
+    {
+        handle = new SafeFileHandle(IntPtr.Zero, ownsHandle: false);
+        canonicalPath = "";
+        identity = default;
+        length = 0;
+        writeTime = 0;
+        SafeFileHandle? candidate = null;
+        try
+        {
+            candidate = CreateFileW(path, GenericRead, ShareRead | ShareWrite | ShareDelete, IntPtr.Zero,
+                OpenExisting, OpenReparsePoint, IntPtr.Zero);
+            if (candidate.IsInvalid || !GetFileInformationByHandle(candidate, out var information)) return false;
+            var attributes = (FileAttributes)information.FileAttributes;
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) != 0
+                || information.NumberOfLinks != 1
+                || !TryGetFileIdentity(candidate, out identity)) return false;
+            canonicalPath = GetFinalPath(candidate);
+            length = ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
+            writeTime = ((long)(uint)information.LastWriteTime.dwHighDateTime << 32)
+                | (uint)information.LastWriteTime.dwLowDateTime;
+            handle = candidate;
+            candidate = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+            or ArgumentException or NotSupportedException or Win32Exception)
+        {
+            return false;
+        }
+        finally { candidate?.Dispose(); }
+    }
+
+    private static bool TryGetFileSnapshot(SafeFileHandle handle, out long length, out long writeTime)
+    {
+        length = 0;
+        writeTime = 0;
+        if (!GetFileInformationByHandle(handle, out var information)) return false;
+        var attributes = (FileAttributes)information.FileAttributes;
+        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) != 0
+            || information.NumberOfLinks != 1) return false;
+        length = ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
+        writeTime = ((long)(uint)information.LastWriteTime.dwHighDateTime << 32)
+            | (uint)information.LastWriteTime.dwLowDateTime;
+        return true;
+    }
+
+    private static bool IsSafeExportFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || fileName is "." or ".."
+            || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || fileName.EndsWith(' ') || fileName.EndsWith('.')) return false;
+        var stem = fileName.Split('.')[0].TrimEnd(' ', '.');
+        return !stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
+            && !stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+            && !stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+            && !stem.Equals("NUL", StringComparison.OrdinalIgnoreCase)
+            && !stem.Equals("CONIN$", StringComparison.OrdinalIgnoreCase)
+            && !stem.Equals("CONOUT$", StringComparison.OrdinalIgnoreCase)
+            && !(stem.Length == 4 && (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) && stem[3] is >= '1' and <= '9');
+    }
+
+    private static bool TryComputeSha256(SafeFileHandle handle, out string sha256)
+    {
+        sha256 = "";
+        try
+        {
+            using var stream = new FileStream(handle, FileAccess.Read, 64 * 1024, isAsync: false);
+            var hash = SHA256.HashData(stream);
+            sha256 = Convert.ToHexString(hash);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        { return false; }
+    }
+
+    private static ToolResult CopyOutcomeUncertain(string fileName) =>
+        new(false, $"副本“{fileName}”已写入，但独立核验未能确认完整性；请在小K导出目录人工核对，不会自动重试。",
+            "FILE_COPY_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain);
 
     private static string? NormalizeLocalPath(string? path)
     {
@@ -607,6 +875,7 @@ public sealed class WindowsDesktopTools
     private static extern IntPtr GetForegroundWindow();
 
     private const uint FileReadAttributes = 0x00000080;
+    private const uint GenericRead = 0x80000000;
     private const uint FileListDirectory = 0x00000001;
     private const uint ShareRead = 0x00000001;
     private const uint ShareWrite = 0x00000002;

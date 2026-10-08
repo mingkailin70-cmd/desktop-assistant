@@ -19,7 +19,8 @@ public enum ToolPrecondition
     UserProvidedSingleMessage = 8,
     CompleteMessagePreview = 16,
     ConfiguredProjectAndIsolatedWorkspace = 32,
-    VerifiedPrivateNotice = 64
+    VerifiedPrivateNotice = 64,
+    ConfiguredFileExportRoot = 128
 }
 
 public enum ToolExpectedOutcome
@@ -33,7 +34,8 @@ public enum ToolExpectedOutcome
     PreviewConfirmedBeforeSend = 6,
     ReviewablePatchCreated = 7,
     CodeExplanationReturned = 8,
-    MessageSendPreviewShown = 9
+    MessageSendPreviewShown = 9,
+    FileCopiedToConfiguredExport = 10
 }
 
 public static class ApprovalAuditCatalog

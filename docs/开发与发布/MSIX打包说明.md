@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.46.0 R3后台单文件复制源码验证包（2026-10-08）
+
+固定 SDK Release解决方案构建0警告、0错误；完整 Windows安全套件103项通过、0项跳过，桌宠/后台交互专项56项通过，其中包括后台文件复制正常、冲突、越界、大小上限、重解析点导出目录和散列核验。win-x64锁定还原未下载新依赖，自包含发布成功。签名验证包位于 `artifacts\msix-validation\5975c748ac254bb49d41c29b8166c628\XiaoK-signed-validation.msix`，大小84,737,333字节，SHA-256 `060DF6D0ED809F76170CCC77EA0E533C88FE5E574CE70B3C1EAB825E25064156`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`，证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。安装预检确认信任证书已存在，本次未变更证书信任、未安装或启动软件包。当前账户仍是旧安装版运行状态；由于没有可核验的唯一小K窗口，本次不关闭进程，因此没有安装新版。实际安装版复制交互、焦点干扰、DPI和重启恢复仍待验收。GitHub Actions结果待提交推送后补记。
+
 ## v0.1.45.0 R1任务输入保留修复验证包（2026-10-08）
 
 固定 SDK Release解决方案构建0警告、0错误；Windows安全回归101项通过、0项跳过，桌宠体验专项55项通过。win-x64锁定还原成功并完成自包含发布。签名验证包位于 `artifacts\msix-validation\f4774fd2e6634738aa9136d5074c5e04\XiaoK-signed-validation.msix`，大小84,730,869字节，SHA-256 `B180539E483B23B36952C4E9E599E6FAB9E30D763D5799304B79F9F95881DF6E`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`。打包未导入/修改证书信任、未安装或启动软件包。只读检查发现账户仍安装并运行`0.1.40.0` Host，但没有可核验窗口标题；因此没有向旧版发退出请求，也没有强制终止，避免中断当前会话。新增输入保护确保队列拒绝或满载时保留请求，并防止异步回调清除用户后来输入的文字。GitHub Actions Build #251 对提交 `6621d3e` 执行成功：[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37727424370)。原生窗口验收仍未进行。

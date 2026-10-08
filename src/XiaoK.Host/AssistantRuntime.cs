@@ -109,7 +109,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             : null;
         _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), recoveryRoot);
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
-        _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
+        _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
+                exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
             approval as IMessageSendPreviewPresenter);
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
@@ -737,6 +738,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolPrecondition.ConfiguredSearchRoot, ToolExpectedOutcome.MatchingFilesListed), token);
         }
 
+        if (category == "file-copy")
+        {
+            var sourcePath = ExtractFileCopySource(request);
+            if (!LocalFileCopyPolicy.IsValidSourcePath(sourcePath))
+                return new(false, "请用“复制文件：完整源文件路径”指定一个本机文件。小K只会复制搜索范围内的单个文件到固定导出目录。", "INVALID_SOURCE_PATH");
+            var arguments = ImmutableDictionary<string, string>.Empty.Add("source_path", sourcePath);
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.copy.v1", arguments,
+                "configured-export", ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.FileCopiedToConfiguredExport), token);
+        }
+
         if (category == "analyze" || category == "draft")
         {
             var body = ExtractPayload(request, category == "draft"
@@ -835,6 +847,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (lower.StartsWith("复制文件") || lower.StartsWith("把文件复制到小k导出目录")) return "file-copy";
         if (lower.StartsWith("找文件") || lower.StartsWith("查找文件") || lower.StartsWith("搜索文件") || lower.StartsWith("搜索") || lower.StartsWith("帮我找文件")) return "file";
         if (lower.StartsWith("分析消息") || lower.StartsWith("分析聊天") || lower.StartsWith("理解聊天") || lower.StartsWith("解释这条消息") || lower.StartsWith("分析：") || lower.StartsWith("分析:")) return "analyze";
         if (lower.StartsWith("帮我回复") || lower.StartsWith("起草回复") || lower.StartsWith("回复草稿") || lower.StartsWith("帮我回")) return "draft";
@@ -849,7 +862,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
@@ -881,6 +894,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (colon >= 0) return request[(colon + 1)..].Trim();
         foreach (var prefix in prefixes)
             if (request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return request[prefix.Length..].Trim(' ', '，', ',', '：', ':');
+        return string.Empty;
+    }
+
+    private static string ExtractFileCopySource(string request)
+    {
+        var prefixes = new[] { "把文件复制到小K导出目录", "复制文件" };
+        foreach (var prefix in prefixes)
+        {
+            if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            return request[prefix.Length..].Trim(' ', '，', ',', '：', ':', '“', '”', '"', '\'');
+        }
         return string.Empty;
     }
 
