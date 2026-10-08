@@ -737,16 +737,51 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         CancelCurrent();
+        var cancelledBeforeStart = new List<UserTaskWork>();
         lock (_userTaskAdmissionLock)
         {
             foreach (var operation in _userTaskOperations.Values)
             {
-                try { operation.Lifetime.Cancel(); }
-                catch (ObjectDisposedException) { }
+                if (operation.Admission.TryCancelBeforeStart())
+                {
+                    try { operation.Lifetime.Cancel(); }
+                    catch (ObjectDisposedException) { }
+                    if (_userTaskOperations.TryRemove(operation.Id, out _))
+                    {
+                        _transientUserTaskStates[operation.Id] = TaskLifecycleState.Cancelled;
+                        _transientUserTaskSteps.TryRemove(operation.Id, out _);
+                        RememberTransientTaskResult(operation.Id,
+                            "小K正在退出；排队任务已取消，不会执行或自动重试。");
+                        if (_userTaskCompletions.TryRemove(operation.Id, out var completion))
+                            completion.TrySetResult("小K正在退出；排队任务已取消，不会执行或自动重试。");
+                        ReleasePendingUserTaskCount(operation);
+                        cancelledBeforeStart.Add(operation);
+                    }
+                }
+                else
+                {
+                    try { operation.Lifetime.Cancel(); }
+                    catch (ObjectDisposedException) { }
+                }
             }
             _userTaskQueue.Writer.TryComplete();
         }
         await _userTaskWorker.ConfigureAwait(false);
+        foreach (var work in cancelledBeforeStart)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var queued = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
+                TaskLifecycleState.Queued, work.CreatedAtUtc, work.CreatedAtUtc);
+            var cancelled = TaskExecutionShutdownPolicy.CancelBeforeStart(queued, now);
+            if (await TrySaveStateAsync(cancelled, CancellationToken.None).ConfigureAwait(false))
+                _transientUserTaskStates.TryRemove(work.Id, out _);
+            else
+                RememberTransientTaskResult(work.Id,
+                    "小K退出前已确保该排队任务不会执行，但取消状态未能保存；下次启动时请核对历史记录。");
+            PublishUserTaskStateChanged(work.Id, TaskLifecycleState.Cancelled);
+            try { work.Lifetime.Dispose(); }
+            catch (ObjectDisposedException) { }
+        }
         _noticeAnalysisQueue.Writer.TryComplete();
         _noticeAnalysisStop.Cancel();
         await _noticeAnalysisWorker.ConfigureAwait(false);

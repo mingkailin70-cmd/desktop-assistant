@@ -3593,6 +3593,28 @@ static void CheckQueuedTaskCancellationArbitration()
         && !started.TryStart() && !started.TryComplete(),
         "任务开始执行后又接受了排队取消，或完成状态不可重复关闭。");
 
+    var createdAt = DateTimeOffset.UtcNow;
+    var shutdownAt = createdAt.AddSeconds(1);
+    var queuedRecord = new TaskRecord(Guid.NewGuid(), "file", "查找文件",
+        TaskLifecycleState.Queued, createdAt, createdAt);
+    var shutdownCancelled = TaskExecutionShutdownPolicy.CancelBeforeStart(queuedRecord, shutdownAt);
+    Require(shutdownCancelled.Status == TaskLifecycleState.Cancelled
+        && shutdownCancelled.UpdatedAtUtc == shutdownAt
+        && shutdownCancelled.ErrorCode == TaskExecutionShutdownPolicy.ErrorCode
+        && TaskHistoryRecoveryPolicy.ForDisplay(shutdownCancelled, shutdownAt.AddSeconds(1)).Status
+            == TaskLifecycleState.Cancelled
+        && TaskHistoryDisplayPolicy.NextAction(shutdownCancelled.Status).Contains("不会自动重试", StringComparison.Ordinal),
+        "退出时尚未开始的排队任务没有持久化为取消终态，或重启后被误标为待核对。");
+    var runningCannotUseQueuedShutdownState = false;
+    try
+    {
+        _ = TaskExecutionShutdownPolicy.CancelBeforeStart(
+            queuedRecord with { Status = TaskLifecycleState.Running }, shutdownAt);
+    }
+    catch (ArgumentException) { runningCannotUseQueuedShutdownState = true; }
+    Require(runningCannotUseQueuedShutdownState,
+        "已经开始的任务被错误标记为“开始前取消”，掩盖了可能的系统副作用。");
+
     Parallel.For(0, 512, _ =>
     {
         var racing = new TaskExecutionAdmissionGate();
@@ -3610,13 +3632,23 @@ static void CheckQueuedTaskCancellationArbitration()
     var repositoryRoot = FindRepositoryRoot();
     var runtime = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
     var center = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml.cs"));
+    var shutdownStart = runtime.IndexOf("public async ValueTask DisposeAsync()", StringComparison.Ordinal);
+    var shutdownEnd = shutdownStart < 0 ? -1
+        : runtime.IndexOf("private void OnMicrophoneMaximumDurationReached", shutdownStart, StringComparison.Ordinal);
+    var shutdownMethod = shutdownStart >= 0 && shutdownEnd > shutdownStart
+        ? runtime[shutdownStart..shutdownEnd] : string.Empty;
     Require(runtime.Contains("work.Admission.TryCancelBeforeStart()", StringComparison.Ordinal)
         && runtime.Contains("if (!work.Admission.TryStart())", StringComparison.Ordinal)
         && runtime.Contains("await work.AdmissionPublished.ConfigureAwait(false)", StringComparison.Ordinal)
         && runtime.Contains("ReleasePendingUserTaskCount(work)", StringComparison.Ordinal)
+        && shutdownMethod.Contains("operation.Admission.TryCancelBeforeStart()", StringComparison.Ordinal)
+        && shutdownMethod.Contains("TaskExecutionShutdownPolicy.CancelBeforeStart(queued, now)", StringComparison.Ordinal)
+        && shutdownMethod.Contains("await TrySaveStateAsync(cancelled, CancellationToken.None)", StringComparison.Ordinal)
+        && shutdownMethod.Contains("operation.Lifetime.Cancel()", StringComparison.Ordinal)
+        && shutdownMethod.Contains("completion.TrySetResult(", StringComparison.Ordinal)
         && center.Contains("Func<Guid, Task<bool>> _cancelTask", StringComparison.Ordinal)
         && center.Contains("await _cancelTask(taskId)", StringComparison.Ordinal),
-        "任务中心未等待排队撤销落盘，或队列工作线程没有检查原子准入状态。");
+        "排队取消未在退出时落盘，或开始/取消原子仲裁与任务中心撤销路径不完整。");
 }
 
 static async Task CheckApprovalInboxPolicyAsync()
