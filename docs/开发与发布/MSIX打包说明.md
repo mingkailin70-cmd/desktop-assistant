@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.50.0 R3后台单文件移动源码验证包（2026-10-08）
+
+新增 `file.move.v1`，仅支持设置搜索范围内同卷、单个普通文件移动到已存在目标目录，不覆盖同名项目。固定SDK Release解决方案构建0警告、0错误；完整Windows安全套件108项通过、0项跳过；桌宠体验专项57项通过；定向移动检查覆盖成功、范围外源/目标、冲突、预取消和目录联接源/目标。签名验证包位于 `artifacts\msix-validation\56765cbe671f48c29b8ded7f6afe7e51\XiaoK-signed-validation.msix`，大小124,604,980字节，SHA-256 `AEA718597F902AF4478F0D2297DE851BFB974E21A36E0F9C24B6CBD1C60DDCA6`；manifest版本0.1.50.0。SignTool验签成功，0警告、0错误，签名者`CN=XiaoK Local Development`，证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。打包未改变证书信任。当前账户仍有旧版 MSIX `0.1.40.0` Host/PID `29988` 运行，故新包未安装或启动；安装版与真实桌面并行工作验收仍待进行。批量整理、跨卷操作和文件占用压力情境不在本切片范围内。
+
 ## v0.1.49.0 R3只读文件分类源码验证包（2026-10-08）
 
 新增 `file.classify.preview.v1` 只读扩展名统计。固定SDK Release解决方案构建0警告、0错误；文件分类定向检查通过；完整Windows安全套件106项通过、0项跳过；桌宠体验专项57项通过。签名验证包位于 `artifacts\msix-validation\a0c19f696e1441da9292cdcce9756e03\XiaoK-signed-validation.msix`，大小124,601,655字节，SHA-256 `B805D81276E34CB694E3EC5C861EC8ED3D711C6E65FB0AB1E81777032CCA9FAA`；SignTool验签成功，0警告、0错误，签名者 `CN=XiaoK Local Development`，证书SHA-1指纹 `B96A02547ABA84523619E11EB7788AE9850A5C60`。提交 `5e76f57` 已推送至 `origin/main`，GitHub Actions [Build #258](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37738758800) 成功。打包和签名未改变证书信任，未安装或启动新包。核对时当前账户仍运行 MSIX `0.1.40.0`/PID `29988`，因此保留现状以避免打断。此工具只分类预览，不整理、复制或移动文件。

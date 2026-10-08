@@ -752,6 +752,18 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot), token);
         }
 
+        if (category == "file-move")
+        {
+            if (!LocalFileMovePolicy.TryParseRequest(request, out var sourcePath, out var destinationDirectory))
+                return new(false, "请按“移动文件：完整源文件路径 到 目标目录完整路径”输入。只移动搜索范围内的单个普通文件，不覆盖已有项目。", "INVALID_MOVE_ARGUMENTS");
+            var arguments = ImmutableDictionary<string, string>.Empty
+                .Add("source_path", sourcePath).Add("destination_directory", destinationDirectory);
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.move.v1", arguments,
+                "configured-search-roots",
+                ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
+                ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots), token);
+        }
+
         if (category == "file-copy")
         {
             var sourcePath = ExtractFileCopySource(request);
@@ -886,6 +898,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
         if (lower.StartsWith("分类文件夹") || lower.StartsWith("查看文件分类") || lower.StartsWith("预览文件分类")) return "file-classify";
         if (lower.StartsWith("重命名文件")) return "file-rename";
+        if (lower.StartsWith("移动文件")) return "file-move";
         if (lower.StartsWith("复制文件") || lower.StartsWith("把文件复制到小k导出目录")) return "file-copy";
         if (lower.StartsWith("找文件") || lower.StartsWith("查找文件") || lower.StartsWith("搜索文件") || lower.StartsWith("搜索") || lower.StartsWith("帮我找文件")) return "file";
         if (lower.StartsWith("分析消息") || lower.StartsWith("分析聊天") || lower.StartsWith("理解聊天") || lower.StartsWith("解释这条消息") || lower.StartsWith("分析：") || lower.StartsWith("分析:")) return "analyze";
@@ -901,7 +914,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 

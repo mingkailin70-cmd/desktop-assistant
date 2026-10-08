@@ -55,6 +55,7 @@ public sealed class ToolBroker
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
+            "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
             "file.classify.preview.v1" => await _desktop.ClassifyFilesAsync(proposal, cancellationToken),
             "browser.read.public.v1" => _publicWebPageReader is null
                 ? new(false, "独立网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
@@ -95,6 +96,7 @@ public sealed class ToolBroker
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
+            "file.move.v1" => ValidateFileMove(proposal),
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
@@ -237,6 +239,16 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("文件重命名只接受搜索范围内的本机完整源路径和单个新文件名；不会接受任意目标目录或覆盖。");
 
+    private static ToolResult? ValidateFileMove(ToolProposal proposal) =>
+        proposal.Arguments.Count == 2
+        && proposal.Arguments.TryGetValue("source_path", out var sourcePath)
+        && LocalFileMovePolicy.IsValidSourcePath(sourcePath)
+        && proposal.Arguments.TryGetValue("destination_directory", out var destinationDirectory)
+        && LocalFileMovePolicy.IsValidDestinationDirectoryPath(destinationDirectory)
+        && proposal.Target == "configured-search-roots"
+            ? null
+            : InvalidProposal("文件移动只接受本机普通文件和已配置搜索范围内的完整目标目录；不会覆盖目标文件。");
+
     private static ToolResult? ValidateFileClassification(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
         && proposal.Arguments.TryGetValue("directory_path", out var directoryPath)
@@ -309,6 +321,7 @@ public sealed class ToolBroker
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
+        "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
@@ -325,6 +338,7 @@ public sealed class ToolBroker
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
+        "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,

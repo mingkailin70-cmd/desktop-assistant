@@ -22,7 +22,8 @@ public enum ToolPrecondition
     VerifiedPrivateNotice = 64,
     ConfiguredFileExportRoot = 128,
     UserProvidedPublicWebPageUrl = 256,
-    ConfiguredClassificationDirectory = 512
+    ConfiguredClassificationDirectory = 512,
+    ConfiguredMoveDestination = 1024
 }
 
 public enum ToolExpectedOutcome
@@ -40,7 +41,8 @@ public enum ToolExpectedOutcome
     FileCopiedToConfiguredExport = 10,
     FileRenamedInConfiguredSearchRoot = 11,
     PublicWebPageSnapshotReturned = 12,
-    FileClassificationPreviewReturned = 13
+    FileClassificationPreviewReturned = 13,
+    FileMovedWithinConfiguredSearchRoots = 14
 }
 
 public static class ApprovalAuditCatalog

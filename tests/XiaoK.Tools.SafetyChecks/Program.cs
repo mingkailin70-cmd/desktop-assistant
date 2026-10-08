@@ -114,6 +114,23 @@ if (args.Length == 1 && args[0] == "--only-file-rename")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-move")
+{
+    var fileMoveRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileMoveProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fileMoveRoot);
+    try
+    {
+        await CheckFileMoveAsync(fileMoveRoot);
+        if (!CheckFileMoveRejectsLinkedPaths(fileMoveRoot, out var moveLinkSkipReason))
+            Console.WriteLine("跳过：文件移动链接夹具无法创建，用例跳过：" + moveLinkSkipReason);
+        Console.WriteLine("通过：后台单文件移动限制在已配置搜索根和同一卷，拒绝覆盖/链接/越界，并核验文件身份及元数据。");
+    }
+    finally
+    {
+        if (Directory.Exists(fileMoveRoot)) Directory.Delete(fileMoveRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-classification")
 {
     var fileClassificationRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileClassificationProbe-" + Guid.NewGuid().ToString("N"));
@@ -268,6 +285,12 @@ try
 
     await CheckFileRenameAsync(tempRoot);
     passed.Add("后台文件重命名只在配置搜索根内同目录执行，拒绝越界/链接/无效名/冲突且核验文件身份和元数据");
+
+    await CheckFileMoveAsync(tempRoot);
+    passed.Add("后台单文件移动仅在已配置搜索根和同一卷内执行，拒绝覆盖/链接/越界并核验源和目标");
+    if (!CheckFileMoveRejectsLinkedPaths(tempRoot, out var moveLinkSkipReason))
+        skipped.Add("小K文件移动的链接夹具无法创建，用例跳过：" + moveLinkSkipReason);
+    else passed.Add("小K文件移动拒绝重解析点源路径和目标目录");
 
     await CheckFileClassificationAsync(tempRoot);
     passed.Add("后台文件分类只按扩展名读取配置搜索根内普通文件，拒绝越界和目录联接且不读取/改写文件内容");
@@ -5787,6 +5810,156 @@ static async Task CheckFileRenameAsync(string root)
                 && File.Exists(outside), "文件重命名跟随目录联接修改了搜索根外的文件。");
         }
         finally { Directory.Delete(linkedRoot, recursive: false); }
+    }
+}
+
+static async Task CheckFileMoveAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "file-move");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var sourceFolder = Path.Combine(allowedRoot, "source");
+    var destinationFolder = Path.Combine(allowedRoot, "destination");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    Directory.CreateDirectory(sourceFolder);
+    Directory.CreateDirectory(destinationFolder);
+    Directory.CreateDirectory(outsideRoot);
+
+    var source = Path.Combine(sourceFolder, "move-source.txt");
+    var destination = Path.Combine(destinationFolder, Path.GetFileName(source));
+    var payload = Encoding.UTF8.GetBytes("synthetic move payload\r\n小K");
+    await File.WriteAllBytesAsync(source, payload);
+
+    Require(LocalFileMovePolicy.TryParseRequest($"移动文件：\"{source}\" 到 \"{destinationFolder}\"",
+            out var parsedSource, out var parsedDestination)
+        && parsedSource == source && parsedDestination == destinationFolder,
+        "固定移动命令无法提取带引号的源和目标目录。");
+    Require(!LocalFileMovePolicy.TryParseRequest($"移动文件：{source} 到 \\\\server\\share", out _, out _)
+        && !LocalFileMovePolicy.TryParseRequest($"移动文件：{source}:secret 到 {destinationFolder}", out _, out _),
+        "固定移动命令接受了 UNC 或备用数据流路径。");
+    Require(ToolInteractionPolicy.GetMode("file.move.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("file.move.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "文件移动未登记为后台执行工具。");
+
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.move.v1",
+        [new("source_path", source), new("destination_directory", destinationFolder)],
+        "configured-search-roots", ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots);
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(result.Success && result.Data == destination && !File.Exists(source) && File.Exists(destination)
+        && (await File.ReadAllBytesAsync(destination)).SequenceEqual(payload),
+        $"后台文件移动未在已配置目录内准确完成：success={result.Success}, code={result.ErrorCode}, summary={result.Summary}, data={result.Data}");
+
+    var conflictSource = Path.Combine(sourceFolder, "conflict.txt");
+    var conflictTarget = Path.Combine(destinationFolder, Path.GetFileName(conflictSource));
+    await File.WriteAllTextAsync(conflictSource, "source sentinel", new UTF8Encoding(false));
+    await File.WriteAllTextAsync(conflictTarget, "target sentinel", new UTF8Encoding(false));
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", conflictSource)
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "MOVE_DESTINATION_CONFLICT"
+        && File.Exists(conflictSource) && await File.ReadAllTextAsync(conflictTarget) == "target sentinel",
+        "文件移动遇到同名目标时没有拒绝覆盖或未保留源文件。");
+
+    var outsideSource = Path.Combine(outsideRoot, "outside-source.txt");
+    await File.WriteAllTextAsync(outsideSource, "outside source sentinel", new UTF8Encoding(false));
+    var outsideSourceResult = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", outsideSource)
+    }, CancellationToken.None);
+    Require(!outsideSourceResult.Success && outsideSourceResult.ErrorCode == "SOURCE_OUTSIDE_ALLOWED_ROOT"
+        && File.Exists(outsideSource), "文件移动接受或修改了搜索根外的源文件。");
+
+    var outsideDestinationResult = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", conflictSource)
+            .SetItem("destination_directory", outsideRoot)
+    }, CancellationToken.None);
+    Require(!outsideDestinationResult.Success && outsideDestinationResult.ErrorCode == "DESTINATION_OUTSIDE_ALLOWED_ROOT"
+        && File.Exists(conflictSource) && !File.Exists(Path.Combine(outsideRoot, Path.GetFileName(conflictSource))),
+        "文件移动接受或写入了搜索根外的目标目录。");
+
+    var unchanged = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", conflictSource)
+            .SetItem("destination_directory", sourceFolder)
+    }, CancellationToken.None);
+    Require(!unchanged.Success && unchanged.ErrorCode == "MOVE_DESTINATION_UNCHANGED" && File.Exists(conflictSource),
+        "文件移动把原目录当成有效的新目标。");
+
+    var invalidTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = outsideRoot }, CancellationToken.None);
+    Require(!invalidTarget.Success && invalidTarget.ErrorCode == "INVALID_TOOL_PROPOSAL" && File.Exists(conflictSource),
+        "ToolBroker 接受了模型提供的任意文件移动目标。");
+    var wrongContext = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Preconditions = ToolPrecondition.ConfiguredSearchRoot,
+        ExpectedOutcome = ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot
+    }, CancellationToken.None);
+    Require(!wrongContext.Success && wrongContext.ErrorCode == "INVALID_TOOL_PROPOSAL" && File.Exists(conflictSource),
+        "文件移动没有绑定源目录、目标目录和移动结果的固定前置条件。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("source_path", conflictSource)
+        }, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && File.Exists(conflictSource), "预取消的后台文件移动仍修改了源文件。");
+}
+
+static bool CheckFileMoveRejectsLinkedPaths(string root, out string skipReason)
+{
+    var fixtureRoot = Path.Combine(root, "file-move-links");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    var linkedSourceRoot = Path.Combine(allowedRoot, "linked-source");
+    var linkedDestinationRoot = Path.Combine(allowedRoot, "linked-destination");
+    var safeDestination = Path.Combine(allowedRoot, "safe-destination");
+    Directory.CreateDirectory(allowedRoot);
+    Directory.CreateDirectory(outsideRoot);
+    Directory.CreateDirectory(safeDestination);
+    var outsideFile = Path.Combine(outsideRoot, "linked-source.txt");
+    File.WriteAllText(outsideFile, "outside link sentinel", new UTF8Encoding(false));
+    if (!JunctionFixture.TryCreate(outsideRoot, linkedSourceRoot, out skipReason)) return false;
+    if (!JunctionFixture.TryCreate(outsideRoot, linkedDestinationRoot, out skipReason))
+    {
+        Directory.Delete(linkedSourceRoot, recursive: false);
+        return false;
+    }
+
+    try
+    {
+        var localSource = Path.Combine(allowedRoot, "local-source.txt");
+        File.WriteAllText(localSource, "local source sentinel", new UTF8Encoding(false));
+        var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+        var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+        var proposal = ToolBroker.Proposal("file.move.v1",
+            [new("source_path", Path.Combine(linkedSourceRoot, Path.GetFileName(outsideFile))),
+                new("destination_directory", safeDestination)],
+            "configured-search-roots", ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots);
+        var linkedSource = broker.ExecuteBackgroundAsync(proposal, CancellationToken.None).GetAwaiter().GetResult();
+        Require(!linkedSource.Success && linkedSource.ErrorCode == "SOURCE_OUTSIDE_ALLOWED_ROOT"
+            && File.Exists(outsideFile) && File.ReadAllText(outsideFile) == "outside link sentinel",
+            "文件移动跟随了源目录联接并移动搜索范围外的文件。");
+
+        var linkedDestination = broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("source_path", localSource)
+                .SetItem("destination_directory", linkedDestinationRoot)
+        }, CancellationToken.None).GetAwaiter().GetResult();
+        Require(!linkedDestination.Success && linkedDestination.ErrorCode == "MOVE_DESTINATION_UNAVAILABLE"
+            && File.Exists(localSource) && File.Exists(outsideFile),
+            "文件移动跟随了目标目录联接或修改了搜索根外文件。");
+        skipReason = "";
+        return true;
+    }
+    finally
+    {
+        Directory.Delete(linkedSourceRoot, recursive: false);
+        Directory.Delete(linkedDestinationRoot, recursive: false);
     }
 }
 
