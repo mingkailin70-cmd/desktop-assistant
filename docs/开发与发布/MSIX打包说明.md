@@ -1,6 +1,10 @@
+## v0.1.54.0 R1安装与桌面窗口首轮核验（2026-10-08）
+
+用户授权正常退出旧版后，安装器经PID与窗口标题核对，向旧Host PID 51624请求正常退出并等待其自行结束；未强杀进程。安装前再次确认签名验证包SHA-256为`E8D51DB3217C5F7B7AA968FD3578FA6C7A9EC5EE4D634D049F22147A4A03FA3D`、Authenticode签名有效，证书已在`LocalMachine\TrustedPeople`；本次没有改变证书信任。安装到当前账户成功，包`MingKaiLin.XiaoK_0.1.54.0_neutral__g0ndt6g65c8pe`状态为`Ok`。从包清单读取应用ID后启动Host PID 50428。Computer Use确认银渐层桌宠收起态210×261 DIP、展开面板500×650 DIP；任务中心树列出30项既有历史并显示“目标范围、执行模式、下一步”。采集截图只显示Host主窗口、未单独显示任务中心弹窗；透明区域在截图中呈黑色，因此不把任务中心视觉布局或真实桌面透明合成记为通过。没有运行新任务、模型、麦克风、通知或消息操作。R1真实排队、前台焦点、多屏/DPI、睡眠/退出恢复及完整任务中心弹窗截图仍待验收。
+
 ## v0.1.54.0 R1任务中心目标范围与下一步指引验证包（2026-10-08）
 
-任务卡新增隐私安全的目标范围、执行模式和逐状态下一步建议。签名MSIX位于 artifacts\\msix-validation\\4745c8b3568c44c18a520a1bf35b0bba\\XiaoK-signed-validation.msix，124,622,479字节，SHA-256 E8D51DB3217C5F7B7AA968FD3578FA6C7A9EC5EE4D634D049F22147A4A03FA3D；签名状态Valid，签名者CN=XiaoK Local Development，证书指纹B96A02547ABA84523619E11EB7788AE9850A5C60。安装脚本只读预检确认签名有效且证书已受信任；证书信任未改。本阶段未安装新版，当前账户仍运行0.1.53.0，以免中断正在运行的小K。固定SDK Release构建0警告/0错误、Windows安全套件112项通过/0项跳过、桌宠体验专项60项通过。阶段提交`8633092`已推送至`origin/main`；GitHub Actions [Build #271](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37758311408)成功。
+任务卡新增隐私安全的目标范围、执行模式和逐状态下一步建议。签名MSIX位于 artifacts\\msix-validation\\4745c8b3568c44c18a520a1bf35b0bba\\XiaoK-signed-validation.msix，124,622,479字节，SHA-256 E8D51DB3217C5F7B7AA968FD3578FA6C7A9EC5EE4D634D049F22147A4A03FA3D；签名状态Valid，签名者CN=XiaoK Local Development，证书指纹B96A02547ABA84523619E11EB7788AE9850A5C60。安装脚本预检和安装前均确认签名有效、证书已受信任；用户授权正常退出旧Host后，0.1.54.0已成功安装并启动，详见本节上方记录。固定SDK Release构建0警告/0错误、Windows安全套件112项通过/0项跳过、桌宠体验专项60项通过。阶段提交`8633092`已推送至`origin/main`；GitHub Actions [Build #271](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37758311408)成功。
 
 ## v0.1.53.0 R1排队任务原子取消源码验证包（2026-10-08）
 
