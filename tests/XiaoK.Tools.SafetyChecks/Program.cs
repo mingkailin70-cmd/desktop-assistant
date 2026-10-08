@@ -5932,8 +5932,12 @@ static async Task CheckFileContentSearchAsync(string root)
     await File.WriteAllTextAsync(textPath,
         "开头\nNeedle PRIVATE_SENTINEL\n这一行没有词\nNeedle more private text\n",
         new UTF8Encoding(false));
+    var utf8BomPath = Path.Combine(allowed, "utf8-bom.txt");
+    await File.WriteAllTextAsync(utf8BomPath, "首行\nUTF8_BOM 编码标记", new UTF8Encoding(true, true));
     var validUtf16Path = Path.Combine(allowed, "utf16.txt");
     await File.WriteAllTextAsync(validUtf16Path, "UTF16 竹子", new UnicodeEncoding(false, true, true));
+    var validUtf16BePath = Path.Combine(allowed, "utf16be.txt");
+    await File.WriteAllTextAsync(validUtf16BePath, "UTF16BE 编码标记", new UnicodeEncoding(true, true, true));
     await File.WriteAllTextAsync(Path.Combine(allowed, ".env"), "Needle must-not-be-scanned", new UTF8Encoding(false));
     await File.WriteAllBytesAsync(Path.Combine(allowed, "binary.png"), Encoding.UTF8.GetBytes("Needle"));
     await File.WriteAllBytesAsync(Path.Combine(allowed, "invalid-encoding.txt"), [0xFF, 0xFE, 0x00, 0x00, 0xFF]);
@@ -5979,6 +5983,22 @@ static async Task CheckFileContentSearchAsync(string root)
         && utf16Result.Data.Contains("第1行", StringComparison.Ordinal)
         && !utf16Result.Data.Contains("竹子", StringComparison.Ordinal),
         "内容搜索没有正确解码有效UTF-16LE并只返回路径和行号。");
+    var utf8BomProposal = LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：UTF8_BOM")
+        ?? throw new InvalidOperationException("UTF-8 BOM搜索命令没有生成工具提案。");
+    var utf8BomResult = await broker.ExecuteBackgroundAsync(utf8BomProposal, CancellationToken.None);
+    Require(utf8BomResult.Success && utf8BomResult.Data is not null
+        && utf8BomResult.Data.Contains("utf8-bom.txt", StringComparison.Ordinal)
+        && utf8BomResult.Data.Contains("第2行", StringComparison.Ordinal)
+        && !utf8BomResult.Data.Contains("UTF8_BOM", StringComparison.Ordinal),
+        "内容搜索没有正确解码UTF-8 BOM并只返回路径和行号。");
+    var utf16BeProposal = LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：UTF16BE")
+        ?? throw new InvalidOperationException("UTF-16BE搜索命令没有生成工具提案。");
+    var utf16BeResult = await broker.ExecuteBackgroundAsync(utf16BeProposal, CancellationToken.None);
+    Require(utf16BeResult.Success && utf16BeResult.Data is not null
+        && utf16BeResult.Data.Contains("utf16be.txt", StringComparison.Ordinal)
+        && utf16BeResult.Data.Contains("第1行", StringComparison.Ordinal)
+        && !utf16BeResult.Data.Contains("UTF16BE", StringComparison.Ordinal),
+        "内容搜索没有正确解码UTF-16BE BOM并只返回路径和行号。");
 
     var wrongTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = "outside-root" }, CancellationToken.None);
     Require(!wrongTarget.Success && wrongTarget.ErrorCode == "INVALID_TOOL_PROPOSAL",
