@@ -22,3 +22,19 @@
 若要重开 JEV System 1 子项目，先在隔离原型中实现或验证决策头加载，包括 `lm_head` LoRA 的忠实转换/执行、官方参考输出对照、概率校准/选项顺序稳健性、拒绝边界、GPU至少预留1 GiB、CPU/RAM与延迟。没有这些结果前不接入 ModelBroker、不启动视觉路径。该子项可以在消息身份及30条通知门槛等待用户自然通知时独立排期；它不改变 R0 消息闸门未通过的状态。
 
 本次核对只访问公开模型卡、固定 llama.cpp 源码和仓库锁清单；未读取聊天/Toast内容，未联系联系人，未下载新权重，未启动模型服务，也未更改运行配置。
+
+## 2026-10-09 补充：JEV-27B 与 Qwen3.8
+
+AutoTrust 现有 `JEV-27B` 以 `Qwen3.8-27B` 为底座，公开卡提供 System 2 文本生成和 System 1 类型化决策；System 1 可通过其 `serve_decide.py` 在 vLLM 服务上暴露 `POST /v1/decide`。这是相较 JEV-9B 专用头转换问题更清晰的服务接口，但仍要求部署整套 JEV-27B/vLLM，不是能直接喂给现有 llama.cpp b11259 的小型决策头，也不会替代本地 ToolBroker 的权限判断。[JEV-27B 官方模型卡](https://huggingface.co/autotrust/JEV-27B)
+
+该卡报告权重约52 GB、KV cache约65 KB/token；256K上下文还需约17 GB KV cache。它远超本机 RTX 5060 Laptop 8 GB，权重本身也大于32 GB系统内存；没有适用于当前设备的量化、CPU卸载延迟和校准保真数据。Qwen 官方清单列出的 Qwen3.8 开放权重为27B和2.4T-A95B；后者同样不属于本机候选。[Qwen 官方仓库](https://github.com/QwenLM/Qwen3.8)
+
+**准入决定：不下载 JEV-27B/Qwen3.8，不接入生产 ModelBroker。** 如以后要研究 JEV 的 System 1，须另立离线实验：先评估能保持官方决策头、温度校准和参考输出的量化/CPU方案，再以小型脱敏选项集检验置信度与拒答；任何决策结果仍只能是建议，不能扩大权限或直接执行副作用。现有 JEV-9B Q4 代码候选2/11、System 1 未接入的结论不变。
+
+## 2026-10-09 补充：MiMo V2.6 公开成绩与本机结果
+
+MiMo 官方模型卡报告其 9B SFT checkpoint 在 SWE Verified `avg@3` 为61.1、SWE-Pro `avg@3` 为44.6，并报告 Terminal Bench 2.1 为37.1；卡片标明这些数值来自 MiMo 技术报告，且部分任务集为内部评测。[MiMo V2.6 Distill 9B 官方模型卡](https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Distill-Qwen-9B)
+
+这些成绩值得把 MiMo 保留为近期候选，但不覆盖小K的本机证据：当前固定中文任务管线此前只得到 MiMo Q8_0 3/12、JEV-9B 2/11；各自因剩余题数已无法达到80%门槛而停止。任务集、提示、量化、工具约束及通过标准不同，不能把公开榜单和本机比例合并。故 MiMo 仍只作离线候选，不改变当前运行权重或 P0 编程闸门状态。
+
+以上补充只核对公开模型卡和现有仓库评测记录；没有下载权重、启动推理、改动部署或生产模型配置。
