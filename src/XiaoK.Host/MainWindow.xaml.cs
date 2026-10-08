@@ -37,6 +37,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private CancellationTokenSource? _speechPlaybackCancellation;
     private SoundPlayer? _soundPlayer;
     private readonly Queue<PrivateNoticeAnalysisResult> _pendingNoticeAnalyses = [];
+    private readonly CancellationTokenSource _petRendererCancellation = new();
+    private VPetPortraitRuntime? _petRenderer;
+    private Task? _petRendererInitializationTask;
+    private string _currentStatus = "待命";
     private double _expandedWidth = 500;
     private double _expandedHeight = 650;
     private double _petScalePercent = PetSizingPolicy.DefaultPercent;
@@ -1191,12 +1195,14 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private void SetStatus(string status)
     {
+        _currentStatus = status;
         var compactStatus = GetCompactStatus(status);
         StatusText.Text = compactStatus;
         PetStatusText.Text = compactStatus;
         StatusText.ToolTip = status;
         PetStatusText.ToolTip = status;
         PetView.ToolTip = $"{status} · 单击展开，右键调大小，Ctrl+滚轮缩放";
+        UpdatePetPose(status);
         var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)
             || status.Contains("未授予", StringComparison.Ordinal) || status.Contains("未能启动", StringComparison.Ordinal)
             ? System.Windows.Media.Color.FromRgb(205, 69, 69)
@@ -1210,6 +1216,82 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                         ? System.Windows.Media.Color.FromRgb(123, 132, 152)
                         : System.Windows.Media.Color.FromRgb(87, 163, 112);
         PetStatusDot.Fill = new SolidColorBrush(color);
+    }
+
+    private void PetEngineViewbox_Loaded(object sender, RoutedEventArgs e)
+    {
+        _petRendererInitializationTask ??= InitializePetRendererAsync();
+    }
+
+    private async Task InitializePetRendererAsync()
+    {
+        VPetPortraitRuntime? renderer = null;
+        try
+        {
+            renderer = new VPetPortraitRuntime(Dispatcher, _runtime.CurrentSettings.DataRoot);
+            PetEngineHost.Content = renderer.View;
+            await renderer.InitializeAsync(_petRendererCancellation.Token);
+            if (_exiting)
+            {
+                renderer.Dispose();
+                renderer = null;
+                return;
+            }
+
+            _petRenderer = renderer;
+            renderer = null;
+            PetSpriteFallback.Visibility = Visibility.Collapsed;
+            PetEngineViewbox.Opacity = 1;
+            UpdatePetPose(_currentStatus);
+        }
+        catch (OperationCanceledException) when (_exiting)
+        {
+            PetEngineHost.Content = null;
+        }
+        catch (Exception)
+        {
+            PetEngineHost.Content = null;
+            PetEngineViewbox.Opacity = 0;
+            PetSpriteFallback.Visibility = Visibility.Visible;
+            if (!_exiting) SetStatus("VPet桌宠不可用，继续使用静态形象");
+        }
+        finally
+        {
+            renderer?.Dispose();
+        }
+    }
+
+    private void UpdatePetPose(string status)
+    {
+        if (_petRenderer is null) return;
+        var pose = status.Contains("采集麦克风", StringComparison.Ordinal)
+            || status.Contains("聆听", StringComparison.Ordinal)
+            || status.Contains("唤醒监听已开启", StringComparison.Ordinal)
+                ? XiaoKPetPose.Listening
+                : status.Contains("运行中", StringComparison.Ordinal)
+                    || status.Contains("执行", StringComparison.Ordinal)
+                    || status.Contains("播报", StringComparison.Ordinal)
+                    ? XiaoKPetPose.Executing
+                    : status.Contains("识别中", StringComparison.Ordinal)
+                        || status.Contains("分析", StringComparison.Ordinal)
+                        || status.Contains("思考", StringComparison.Ordinal)
+                        || status.Contains("任务队列中", StringComparison.Ordinal)
+                            ? XiaoKPetPose.Thinking
+                            : XiaoKPetPose.Idle;
+        try
+        {
+            _petRenderer.SetPose(pose);
+        }
+        catch (Exception)
+        {
+            var renderer = _petRenderer;
+            _petRenderer = null;
+            PetEngineViewbox.Opacity = 0;
+            PetSpriteFallback.Visibility = Visibility.Visible;
+            PetEngineHost.Content = null;
+            try { renderer.Dispose(); }
+            catch (Exception) { }
+        }
     }
 
     private static string GetCompactStatus(string status)
@@ -1270,6 +1352,17 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                 UnregisterHotKey(_source.Handle, 1901);
                 _hotkeyRegistered = false;
             }
+            _petRendererCancellation.Cancel();
+            try
+            {
+                if (_petRendererInitializationTask is not null)
+                    await _petRendererInitializationTask;
+            }
+            catch (Exception) { }
+            try { _petRenderer?.Dispose(); }
+            catch (Exception) { }
+            _petRenderer = null;
+            _petRendererCancellation.Dispose();
             try { await _runtime.DisposeAsync(); }
             catch (Exception) { SetStatus("退出清理未能完整确认"); }
             _shutdownComplete = true;

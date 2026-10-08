@@ -72,7 +72,20 @@ $packagePath = Join-Path $validationRoot $packageName
 New-Item -ItemType Directory -Path $layoutPath -Force | Out-Null
 Copy-Item -Path (Join-Path $publishPath '*') -Destination $layoutPath -Recurse
 New-Item -ItemType Directory -Path (Join-Path $layoutPath 'Assets') -Force | Out-Null
-Copy-Item -Path (Join-Path $assetsPath '*') -Destination (Join-Path $layoutPath 'Assets')
+foreach ($assetName in @('StoreLogo.png', 'Square150x150Logo.png', 'Square44x44Logo.png')) {
+    $sourceAsset = Join-Path $assetsPath $assetName
+    $destinationAsset = Join-Path (Join-Path $layoutPath 'Assets') $assetName
+    if (Test-Path -LiteralPath $destinationAsset -PathType Leaf) {
+        $sourceHash = (Get-FileHash -LiteralPath $sourceAsset -Algorithm SHA256).Hash
+        $destinationHash = (Get-FileHash -LiteralPath $destinationAsset -Algorithm SHA256).Hash
+        if ($sourceHash -ne $destinationHash) {
+            throw "Publish output already contains a different MSIX logo: $assetName"
+        }
+    }
+    else {
+        Copy-Item -LiteralPath $sourceAsset -Destination $destinationAsset
+    }
+}
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $layoutPath 'AppxManifest.xml')
 
 & $makeAppxPath pack /v /h SHA256 /d $layoutPath /p $packagePath

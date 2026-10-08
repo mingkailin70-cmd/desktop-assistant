@@ -342,7 +342,7 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
+                            <Image x:Name="PetSpriteFallback" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                    Width="284" Height="284" Margin="0,6,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
                                    AutomationProperties.Name="三维银渐层小猫小K，正面坐姿">
@@ -350,6 +350,12 @@
                                     <DropShadowEffect Color="#667768" BlurRadius="16" ShadowDepth="4" Opacity="0.20"/>
                                 </Image.Effect>
                             </Image>
+                            <Viewbox x:Name="PetEngineViewbox" Width="284" Height="284" Margin="0,6,0,0"
+                                     Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
+                                     AutomationProperties.Name="VPet Core驱动的小K银渐层桌宠"
+                                     Loaded="PetEngineViewbox_Loaded">
+                                <ContentControl x:Name="PetEngineHost" />
+                            </Viewbox>
                         </Grid>
                     </Button>
                     <Border Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Bottom"
