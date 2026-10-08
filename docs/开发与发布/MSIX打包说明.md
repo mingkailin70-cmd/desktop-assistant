@@ -1,3 +1,11 @@
+## v0.1.64.0 运行时任务类别持久化修复（2026-10-08）
+
+本版修复SQLite任务存储类别白名单落后于`AssistantRuntime`路由的问题。此前存储只接受8种旧类别，而运行时已经路由18种任务；不受支持的新类别会在首次排队状态保存时失败，任务无法进入执行队列。Core新增统一固定`TaskCategoryCatalog`供Host显示和SQLite校验/读取共同使用。安全回归逐一验证18类写入、读取和备份均成功，仍拒绝未知类别；任务摘要/结果正文继续丢弃。没有运行真实任务或触碰真实文件。
+
+固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面体验专项61项通过。修复提交`ae51d32`已推送，GitHub Actions [Build #301](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37798191625)成功；版本提交`de3783c`已推送，GitHub Actions [Build #302](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37798471086)成功。
+
+自包含签名MSIX位于`artifacts\msix-validation\da53d9cc526c4716b35e5752a545dc25\XiaoK-signed-validation.msix`，124,642,458字节，SHA-256 `E4F698A8FF824F06F27D5F9528ED142DC8B83B35A637E7632167DC547099BDA2`。SignTool验签0警告、0错误；证书已在`LocalMachine\TrustedPeople`，本次没有修改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.64.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装脚本确认没有启动Host；当前仍无`XiaoK.Host`进程。真实任务路由、普通用户界面和真实文件操作仍待安装版验收。
+
 ## v0.1.63.0 R3单文件回收站与SQLite v5更新（2026-10-08）
 
 本版包含固定范围的单文件回收站工具、审批后身份复核、审批后提交前取消处理，以及SQLite v4→v5审计迁移；设置页备份恢复提示同步为v5。固定SDK 10.0.401 Release构建0警告、0错误；完整Windows安全套件115项通过、0项跳过，桌面交互专项61项通过。拒绝、审批前/后取消和范围限制均使用仓库外临时合成文件验证，没有调用真实回收站。
