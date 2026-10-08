@@ -1647,6 +1647,7 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
         "补丁上下文没有直接提供原文片段，或仍要求模型计算行号。");
     Require(patchSystemPrompt.Contains("程序会验证find在整个授权文件中唯一出现且位于该片段内", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("新增别名或映射时优先只改匹配条件并保留原分支结果", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("保持原有 Contains、StartsWith、相等判断、StringComparison 参数和旧别名原样", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("不得改写原有return、throw、break或continue", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("不得引入任务没有指定的字符串、近义词或额外输入", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("不要把仅供JSON表示的反斜杠写入源码", StringComparison.Ordinal),
