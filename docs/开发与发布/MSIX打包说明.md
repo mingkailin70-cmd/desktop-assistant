@@ -2,7 +2,7 @@
 
 关闭Host时，尚未开始的有限队列任务现在通过原子准入状态取消，并将`Cancelled`终态保存至SQLite。已开始的任务保持现有取消与副作用结果不确定策略，不会被标记成“开始前取消”。固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面交互专项71项通过。
 
-自包含签名MSIX位于`artifacts\msix-validation\df27bb1ff98b463b8323cdcfb4664cc2\XiaoK-signed-validation.msix`，124,645,116字节，SHA-256 `BCF003C2E64F479D0759360D66386EA3284F1F7ED42C6E92EC758570F8C9D4B1`。SignTool验签0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已位于`LocalMachine\TrustedPeople`，本阶段未改证书信任。当前账户安装`MingKaiLin.XiaoK_0.1.70.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装器没有启动Host，当前没有`XiaoK.Host`进程。源码提交与CI链接将在推送后补入。
+自包含签名MSIX位于`artifacts\msix-validation\df27bb1ff98b463b8323cdcfb4664cc2\XiaoK-signed-validation.msix`，124,645,116字节，SHA-256 `BCF003C2E64F479D0759360D66386EA3284F1F7ED42C6E92EC758570F8C9D4B1`。SignTool验签0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已位于`LocalMachine\TrustedPeople`，本阶段未改证书信任。提交`c3761b4`已推送至`origin/main`，GitHub Actions [Build 37820202530](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37820202530)成功。当前账户安装`MingKaiLin.XiaoK_0.1.70.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装器没有启动Host，当前没有`XiaoK.Host`进程。
 
 ## v0.1.69.0 R1托盘任务中心独立显示（2026-10-09）
 
