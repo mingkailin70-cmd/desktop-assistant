@@ -738,6 +738,19 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolPrecondition.ConfiguredSearchRoot, ToolExpectedOutcome.MatchingFilesListed), token);
         }
 
+        if (category == "file-rename")
+        {
+            var (sourcePath, newName) = ExtractFileRenameRequest(request);
+            if (!LocalFileRenamePolicy.IsValidSourcePath(sourcePath)
+                || !LocalFileRenamePolicy.IsValidFileName(newName))
+                return new(false, "请按“重命名文件：完整本机路径 为 新文件名”输入。只能修改设置中搜索目录里的单个文件名，不移动文件、不覆盖同名目标。", "INVALID_RENAME_ARGUMENTS");
+            var arguments = ImmutableDictionary<string, string>.Empty
+                .Add("source_path", sourcePath).Add("new_name", newName);
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.rename.v1", arguments,
+                "configured-search-root", ToolPrecondition.ConfiguredSearchRoot,
+                ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot), token);
+        }
+
         if (category == "file-copy")
         {
             var sourcePath = ExtractFileCopySource(request);
@@ -847,6 +860,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (lower.StartsWith("重命名文件")) return "file-rename";
         if (lower.StartsWith("复制文件") || lower.StartsWith("把文件复制到小k导出目录")) return "file-copy";
         if (lower.StartsWith("找文件") || lower.StartsWith("查找文件") || lower.StartsWith("搜索文件") || lower.StartsWith("搜索") || lower.StartsWith("帮我找文件")) return "file";
         if (lower.StartsWith("分析消息") || lower.StartsWith("分析聊天") || lower.StartsWith("理解聊天") || lower.StartsWith("解释这条消息") || lower.StartsWith("分析：") || lower.StartsWith("分析:")) return "analyze";
@@ -862,7 +876,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-rename" => "文件重命名", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
@@ -906,6 +920,24 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return request[prefix.Length..].Trim(' ', '，', ',', '：', ':', '“', '”', '"', '\'');
         }
         return string.Empty;
+    }
+
+    private static (string SourcePath, string NewName) ExtractFileRenameRequest(string request)
+    {
+        const string prefix = "重命名文件";
+        if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return ("", "");
+        var payload = request[prefix.Length..].TrimStart(' ', '：', ':');
+        var separator = payload.LastIndexOf(" 为 ", StringComparison.Ordinal);
+        if (separator <= 0 || separator + 3 >= payload.Length) return ("", "");
+        return (TrimOptionalQuotes(payload[..separator], trimWhitespace: true),
+            TrimOptionalQuotes(payload[(separator + 3)..], trimWhitespace: true));
+    }
+
+    private static string TrimOptionalQuotes(string value, bool trimWhitespace)
+    {
+        var trimmed = trimWhitespace ? value.Trim() : value;
+        return trimmed.Length >= 2 && ((trimmed[0] == '"' && trimmed[^1] == '"')
+            || (trimmed[0] == '\'' && trimmed[^1] == '\'')) ? trimmed[1..^1] : trimmed;
     }
 
     public Task<IReadOnlyList<ContactReplyStylePreference>> GetContactReplyStylesAsync(CancellationToken cancellationToken) =>

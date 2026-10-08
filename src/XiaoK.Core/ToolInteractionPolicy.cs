@@ -8,7 +8,7 @@ public static class ToolInteractionPolicy
 {
     public static ToolInteractionMode GetMode(string toolId) => toolId switch
     {
-        "file.search.v1" or "file.copy.v1" or "code.inspect.v1" or "message.analyze.v1"
+        "file.search.v1" or "file.copy.v1" or "file.rename.v1" or "code.inspect.v1" or "message.analyze.v1"
             or "message.notice.analyze.v1" or "message.draft.v1" => ToolInteractionMode.Background,
         // 当前发送只有预览对话框，编程任务也可能弹出审阅窗口。
         "app.launch.v1" or "window.activate.v1" or "message.send.v1"

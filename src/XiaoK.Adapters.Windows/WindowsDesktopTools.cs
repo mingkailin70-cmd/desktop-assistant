@@ -57,7 +57,7 @@ public interface IDesktopWindowController
     WindowActivationOutcome ActivateWindow(DesktopApp app);
 }
 
-public sealed class WindowsDesktopTools
+public sealed partial class WindowsDesktopTools
 {
     private readonly IReadOnlyDictionary<string, DesktopApp> _apps;
     private readonly IReadOnlyDictionary<string, string> _searchRoots;

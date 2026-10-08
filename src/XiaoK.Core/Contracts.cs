@@ -35,7 +35,8 @@ public enum ToolExpectedOutcome
     ReviewablePatchCreated = 7,
     CodeExplanationReturned = 8,
     MessageSendPreviewShown = 9,
-    FileCopiedToConfiguredExport = 10
+    FileCopiedToConfiguredExport = 10,
+    FileRenamedInConfiguredSearchRoot = 11
 }
 
 public static class ApprovalAuditCatalog

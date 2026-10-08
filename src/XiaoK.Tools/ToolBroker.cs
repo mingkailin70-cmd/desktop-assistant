@@ -52,6 +52,7 @@ public sealed class ToolBroker
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
+            "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
@@ -87,6 +88,7 @@ public sealed class ToolBroker
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
+            "file.rename.v1" => ValidateFileRename(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
             "message.draft.v1" => ValidateDraft(proposal),
@@ -217,6 +219,16 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("文件复制只接受搜索范围内的本机完整文件路径，并写入固定的小K导出目录。未执行任意目标路径。");
 
+    private static ToolResult? ValidateFileRename(ToolProposal proposal) =>
+        proposal.Arguments.Count == 2
+        && proposal.Arguments.TryGetValue("source_path", out var sourcePath)
+        && LocalFileRenamePolicy.IsValidSourcePath(sourcePath)
+        && proposal.Arguments.TryGetValue("new_name", out var newName)
+        && LocalFileRenamePolicy.IsValidFileName(newName)
+        && proposal.Target == "configured-search-root"
+            ? null
+            : InvalidProposal("文件重命名只接受搜索范围内的本机完整源路径和单个新文件名；不会接受任意目标目录或覆盖。");
+
     private Task<ToolResult> AnalyzeAsync(ToolProposal proposal, CancellationToken token) =>
         CompleteAsync(proposal, "请用中文分析用户提供的单条聊天通知。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "message", token);
 
@@ -272,6 +284,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
+        "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
         "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
         "message.send.v1" => ToolPrecondition.CompleteMessagePreview,
@@ -285,6 +298,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
+        "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,

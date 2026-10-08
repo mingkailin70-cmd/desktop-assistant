@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.47.0 R3后台同目录重命名源码验证包（2026-10-08）
+
+源码接入固定工具 `file.rename.v1` 与确定性中文命令；仅在配置搜索根内对普通单文件同目录改名，不移动或覆盖。Windows句柄式操作固定不替换目标，并在完成后核验文件身份与元数据。固定SDK Release解决方案构建0警告、0错误；Windows安全套件104项通过、0项跳过；桌宠/后台交互专项57项通过。自包含 win-x64 发布使用已锁定依赖完成。签名验证包位于 `artifacts\msix-validation\c820923aa06745f5baa033edc1b94b24\XiaoK-signed-validation.msix`，大小84,741,457字节，SHA-256 `605AF553DA9B56B0069BEC63AFA839A6FFA1A2DA05D32265DEFABE97EDDBF594`。SignTool验签成功，0警告、0错误；签名者 `CN=XiaoK Local Development`，证书SHA-1指纹 `B96A02547ABA84523619E11EB7788AE9850A5C60`。本次未改变证书信任。当前账户仍运行0.1.40.0且无可核验窗口标题，因此未安装或启动新包。GitHub Actions结果待阶段提交推送后记录。
+
 ## v0.1.46.0 R3后台单文件复制源码验证包（2026-10-08）
 
 固定 SDK Release解决方案构建0警告、0错误；完整 Windows安全套件103项通过、0项跳过，桌宠/后台交互专项56项通过，其中包括后台文件复制正常、冲突、越界、大小上限、重解析点导出目录和散列核验。win-x64锁定还原未下载新依赖，自包含发布成功。签名验证包位于 `artifacts\msix-validation\5975c748ac254bb49d41c29b8166c628\XiaoK-signed-validation.msix`，大小84,737,333字节，SHA-256 `060DF6D0ED809F76170CCC77EA0E533C88FE5E574CE70B3C1EAB825E25064156`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`，证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。安装预检确认信任证书已存在，本次未变更证书信任、未安装或启动软件包。当前账户仍是旧安装版运行状态；由于没有可核验的唯一小K窗口，本次不关闭进程，因此没有安装新版。实际安装版复制交互、焦点干扰、DPI和重启恢复仍待验收。GitHub Actions结果待提交推送后补记。

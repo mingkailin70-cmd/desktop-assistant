@@ -97,6 +97,21 @@ if (args.Length == 1 && args[0] == "--only-file-copy")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-rename")
+{
+    var fileRenameRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileRenameProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fileRenameRoot);
+    try
+    {
+        await CheckFileRenameAsync(fileRenameRoot);
+        Console.WriteLine("通过：后台文件重命名限制在搜索目录和原父目录，禁止覆盖，并核验文件身份与内容元数据。");
+    }
+    finally
+    {
+        if (Directory.Exists(fileRenameRoot)) Directory.Delete(fileRenameRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-pet-position-store")
 {
     var petPositionRoot = Path.Combine(Path.GetTempPath(), "XiaoK-PetPositionProbe-" + Guid.NewGuid().ToString("N"));
@@ -214,6 +229,9 @@ try
     if (!CheckFileCopyRejectsLinkedExport(tempRoot, out var copyLinkSkipReason))
         skipped.Add("小K文件导出拒绝目录联接的夹具无法创建，用例跳过：" + copyLinkSkipReason);
     else passed.Add("小K文件导出拒绝被重解析点替换的导出目录");
+
+    await CheckFileRenameAsync(tempRoot);
+    passed.Add("后台文件重命名只在配置搜索根内同目录执行，拒绝越界/链接/无效名/冲突且核验文件身份和元数据");
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
@@ -5566,6 +5584,100 @@ static bool CheckFileCopyRejectsLinkedExport(string root, out string skipReason)
         return true;
     }
     finally { Directory.Delete(linkedExportRoot, recursive: false); }
+}
+
+static async Task CheckFileRenameAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "file-rename");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    Directory.CreateDirectory(allowedRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    var source = Path.Combine(allowedRoot, "rename-source.txt");
+    var renamed = Path.Combine(allowedRoot, "rename-result.txt");
+    var payload = Encoding.UTF8.GetBytes("synthetic file rename; payload remains unchanged\r\n小K");
+    await File.WriteAllBytesAsync(source, payload);
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.rename.v1",
+        [new("source_path", source), new("new_name", Path.GetFileName(renamed))], "configured-search-root",
+        ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot);
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(result.Success && result.Data == renamed && !File.Exists(source) && File.Exists(renamed)
+        && (await File.ReadAllBytesAsync(renamed)).SequenceEqual(payload),
+        $"后台文件重命名未在原目录准确完成：success={result.Success}, code={result.ErrorCode}, summary={result.Summary}, data={result.Data}");
+
+    var conflictSource = Path.Combine(allowedRoot, "conflict-source.txt");
+    var conflictTarget = Path.Combine(allowedRoot, "existing-target.txt");
+    await File.WriteAllTextAsync(conflictSource, "source remains", new UTF8Encoding(false));
+    await File.WriteAllTextAsync(conflictTarget, "target sentinel", new UTF8Encoding(false));
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", conflictSource)
+            .SetItem("new_name", Path.GetFileName(conflictTarget))
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "RENAME_NAME_CONFLICT"
+        && File.Exists(conflictSource) && await File.ReadAllTextAsync(conflictTarget) == "target sentinel",
+        "文件重命名遇到同名目标时没有拒绝覆盖或未保留源文件。");
+
+    var outside = Path.Combine(outsideRoot, "outside.txt");
+    await File.WriteAllTextAsync(outside, "outside sentinel", new UTF8Encoding(false));
+    var outsideResult = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("source_path", outside)
+    }, CancellationToken.None);
+    Require(!outsideResult.Success && outsideResult.ErrorCode == "SOURCE_OUTSIDE_ALLOWED_ROOT"
+        && File.Exists(outside) && !File.Exists(Path.Combine(outsideRoot, "rename-result.txt")),
+        "文件重命名修改了配置搜索目录外的文件。");
+
+    foreach (var invalidName in new[] { "..\\escape.txt", "CON.txt", "bad/name.txt", "trailing.", new string('x', LocalFileRenamePolicy.MaximumFileNameLength + 1) })
+    {
+        Require(!LocalFileRenamePolicy.IsValidFileName(invalidName), $"文件名策略接受了非法名称：{invalidName}");
+        var invalid = await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("new_name", invalidName)
+        }, CancellationToken.None);
+        Require(!invalid.Success && invalid.ErrorCode == "INVALID_TOOL_PROPOSAL" && File.Exists(renamed),
+            "ToolBroker 接受非法新文件名或执行了非法更名。");
+    }
+
+    var target = await broker.ExecuteBackgroundAsync(proposal with { Target = outsideRoot }, CancellationToken.None);
+    Require(!target.Success && target.ErrorCode == "INVALID_TOOL_PROPOSAL" && File.Exists(renamed),
+        "文件重命名接受了模型指定的任意目标目录。");
+    var wrongContext = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Preconditions = ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
+        ExpectedOutcome = ToolExpectedOutcome.FileCopiedToConfiguredExport
+    }, CancellationToken.None);
+    Require(!wrongContext.Success && wrongContext.ErrorCode == "INVALID_TOOL_PROPOSAL" && File.Exists(renamed),
+        "文件重命名没有绑定固定的搜索范围前置条件与可观察结果。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("source_path", conflictSource)
+        }, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && File.Exists(conflictSource), "预取消的文件重命名仍修改了源文件。");
+
+    var linkedRoot = Path.Combine(fixtureRoot, "linked-root");
+    if (JunctionFixture.TryCreate(outsideRoot, linkedRoot, out _))
+    {
+        try
+        {
+            var linkedSource = Path.Combine(linkedRoot, "outside.txt");
+            var linked = await broker.ExecuteBackgroundAsync(proposal with
+            {
+                Arguments = proposal.Arguments.SetItem("source_path", linkedSource)
+            }, CancellationToken.None);
+            Require(!linked.Success && linked.ErrorCode == "SOURCE_OUTSIDE_ALLOWED_ROOT"
+                && File.Exists(outside), "文件重命名跟随目录联接修改了搜索根外的文件。");
+        }
+        finally { Directory.Delete(linkedRoot, recursive: false); }
+    }
 }
 
 static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
