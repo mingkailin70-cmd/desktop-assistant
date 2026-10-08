@@ -1,5 +1,14 @@
-## v0.1.64.0 运行时任务类别持久化修复（2026-10-08）
+## v0.1.65.0 R1任务历史审批状态显示修正（2026-10-08）
 
+修复当前Host等待用户确认时，任务历史仍显示为普通运行中的状态歧义。当前进程的审批箱存在`Confirmation`或`CodeReview`待办时，只将关联的运行任务在读取视图中显示为`AwaitingApproval`；消息预览、排队和终态不受影响。此状态投影不改SQLite、不持久化审批，也不在重启后恢复或重放动作。
+
+固定SDK Release构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面体验专项61项通过。代码提交`5657a48`已推送，GitHub Actions Build #305取消；版本提交`aef59a3`已推送，Build #306成功。
+
+签名MSIX位于`artifacts\msix-validation\1a24f2938ab64ff4a87c11f4ee9e7969\XiaoK-signed-validation.msix`，124,642,986字节，SHA-256 `DC0606233451FB6E9FDFEC9E5BD66251D276277783E3F873D67E21C1FB094187`。SignTool验签0警告、0错误；签名者`CN=XiaoK Local Development`，证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，安装没有改变证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.65.0_neutral__g0ndt6g65c8pe`，状态`Ok`。
+
+安装版只在`--diagnostics-profile --background`模式下隐藏启动；窗口“小K”不可见，应用注册关闭消息使进程以退出码0结束。没有打开普通界面、运行用户任务或启用模型、麦克风和通知；R1普通UI与任务流程仍待验收。隔离配置仅访问独立Temp目录，没有读取常规用户数据。
+
+## v0.1.64.0 运行时任务类别持久化修复（2026-10-08）
 本版修复SQLite任务存储类别白名单落后于`AssistantRuntime`路由的问题。此前存储只接受8种旧类别，而运行时已经路由18种任务；不受支持的新类别会在首次排队状态保存时失败，任务无法进入执行队列。Core新增统一固定`TaskCategoryCatalog`供Host显示和SQLite校验/读取共同使用。安全回归逐一验证18类写入、读取和备份均成功，仍拒绝未知类别；任务摘要/结果正文继续丢弃。没有运行真实任务或触碰真实文件。
 
 固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面体验专项61项通过。修复提交`ae51d32`已推送，GitHub Actions [Build #301](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37798191625)成功；版本提交`de3783c`已推送，GitHub Actions [Build #302](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37798471086)成功。
