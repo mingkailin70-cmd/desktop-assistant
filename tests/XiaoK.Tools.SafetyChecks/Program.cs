@@ -152,6 +152,21 @@ if (args.Length == 1 && args[0] == "--only-public-web-read")
     Console.WriteLine("通过：网页读取只接受明确提供的 HTTPS 公网地址，并固定为静态后台读取。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-public-web-download")
+{
+    var downloadProbeRoot = Path.Combine(Path.GetTempPath(), "XiaoK-WebDownloadProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(downloadProbeRoot);
+    try
+    {
+        await CheckPublicFileDownloadAsync(downloadProbeRoot);
+        Console.WriteLine("通过：公网文件下载固定 HTTPS/公网目标、大小和文件类型限制，原子写入导出目录且校验 SHA-256。");
+    }
+    finally
+    {
+        if (Directory.Exists(downloadProbeRoot)) Directory.Delete(downloadProbeRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-browser-render")
 {
     await CheckStaticBrowserRenderingAsync();
@@ -297,6 +312,9 @@ try
 
     await CheckPublicWebPageReadPolicyAsync();
     passed.Add("网页读取固定为用户明确提供的 HTTPS 公网地址，拒绝内网/文件/非标准端口并核验动作范围");
+
+    await CheckPublicFileDownloadAsync(tempRoot);
+    passed.Add("公网文件下载仅接收 HTTPS 公网 URL，拒绝活动/可执行类型，写入固定导出目录、不覆盖并核验 SHA-256");
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
@@ -5596,6 +5614,130 @@ static async Task CheckPublicWebPageReadPolicyAsync()
     }
 }
 
+static async Task CheckPublicFileDownloadAsync(string root)
+{
+    var unicodeDisposition = System.Net.Http.Headers.ContentDispositionHeaderValue.Parse(
+        "attachment; filename*=UTF-8''%E7%A0%94%E7%A9%B6%E6%8A%A5%E5%91%8A.pdf");
+    Require(PublicFileDownloader.ResolveFileName(unicodeDisposition, new Uri("https://example.com/file")) == "研究报告.pdf",
+        "RFC 5987 UTF-8文件名没有按标准解码。");
+    var traversalDisposition = System.Net.Http.Headers.ContentDispositionHeaderValue.Parse(
+        "attachment; filename*=UTF-8''..%2Fescape.txt");
+    Require(!PublicFileDownloadPolicy.IsAllowedFileName(
+        PublicFileDownloader.ResolveFileName(traversalDisposition, new Uri("https://example.com/file"))),
+        "RFC 5987编码后的文件名路径穿越没有被拒绝。");
+    Require(PublicFileDownloadPolicy.IsAllowedFileName("research-paper.pdf")
+        && PublicFileDownloadPolicy.IsAllowedFileName("data.json")
+        && PublicFileDownloadPolicy.IsAllowedFileName("短报告.txt"),
+        "有效的被动文件名被拒绝。");
+    foreach (var name in new[] { "../escape.txt", "..\\escape.txt", "CON.txt", "unsafe.exe", "launch.PS1",
+                 "page.html", "active.svg", "trailing.", "trailing ", "" })
+        Require(!PublicFileDownloadPolicy.IsAllowedFileName(name), $"公网下载接受了不安全文件名：{name}");
+    Require(PublicFileDownloadPolicy.IsAllowedMediaType("application/pdf")
+        && !PublicFileDownloadPolicy.IsAllowedMediaType("text/html; charset=utf-8")
+        && !PublicFileDownloadPolicy.IsAllowedMediaType("application/x-msdownload"),
+        "公网下载内容类型策略错误。");
+    Require(!PublicFileDownloadPolicy.IsAllowedContent([0x4d, 0x5a])
+        && !PublicFileDownloadPolicy.IsAllowedContent([0x23, 0x21])
+        && PublicFileDownloadPolicy.IsAllowedContent([0x25, 0x50, 0x44, 0x46]),
+        "公网下载没有拦截可执行文件或脚本特征，或误拒被动内容。");
+    Require(PublicFileDownloadPolicy.MaximumDownloadBytes == 50 * 1024 * 1024,
+        "公网下载资源上限意外变化。");
+
+    var fixtureRoot = Path.Combine(root, "public-file-download");
+    var exportRoot = Path.Combine(fixtureRoot, "user-data", "Exports");
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+    var content = Encoding.UTF8.GetBytes("synthetic public download payload\r\n仅本机夹具");
+    var result = new PublicFileDownloadResult(true, "合成下载完成。", FileName: "research.txt",
+        MediaType: "text/plain", Content: content, Sha256: Convert.ToHexString(SHA256.HashData(content)));
+    var downloader = new FakePublicFileDownloader(result);
+    var desktop = new WindowsDesktopTools([], [], exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "",
+        publicFileDownloader: downloader);
+    var proposal = ToolBroker.Proposal("browser.download.public.v1", [new("url", "https://example.com/research.txt")],
+        "configured-export", ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport);
+
+    Require(ToolInteractionPolicy.GetMode("browser.download.public.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("browser.download.public.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "公网下载没有登记为后台工具。");
+    var downloaded = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var destination = Path.Combine(exportRoot, "research.txt");
+    Require(downloaded.Success && downloaded.Data == destination && File.Exists(destination)
+        && (await File.ReadAllBytesAsync(destination)).SequenceEqual(content)
+        && downloaded.Summary.Contains(Convert.ToHexString(SHA256.HashData(content)), StringComparison.Ordinal),
+        $"有效公网下载没有原子保存并校验内容：{downloaded.ErrorCode} {downloaded.Summary}");
+    Require(downloader.CallCount == 1 && downloader.LastUrl == "https://example.com/research.txt",
+        "ToolBroker 没有将固定用户 URL 交给独立下载接口。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(destination)).SequenceEqual(content),
+        "公网下载同名冲突没有失败关闭，或覆盖既有文件。");
+
+    foreach (var invalid in new[]
+    {
+        proposal with { Arguments = proposal.Arguments.SetItem("url", "http://example.com/research.txt") },
+        proposal with { Arguments = proposal.Arguments.SetItem("url", "https://127.0.0.1/private") },
+        proposal with { Target = "arbitrary-path" },
+        proposal with { Preconditions = ToolPrecondition.UserProvidedPublicFileUrl },
+        proposal with { ExpectedOutcome = ToolExpectedOutcome.FileCopiedToConfiguredExport },
+        proposal with { Arguments = proposal.Arguments.Add("destination", "C:\\Users\\Public\\payload") }
+    })
+    {
+        var rejected = await broker.ExecuteBackgroundAsync(invalid, CancellationToken.None);
+        Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && downloader.CallCount == 2,
+            "公网下载接受了不安全 URL、任意保存目标、额外参数或错误固定提案。");
+    }
+
+    downloader.Result = result with { FileName = "unsafe.exe" };
+    var executable = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("url", "https://example.com/unsafe.exe")
+    }, CancellationToken.None);
+    Require(!executable.Success && executable.ErrorCode == "INVALID_DOWNLOAD_RESULT"
+        && !File.Exists(Path.Combine(exportRoot, "unsafe.exe")),
+        "ToolBroker/文件发布端接受了执行文件扩展名。");
+
+    var disguisedExecutable = new byte[] { 0x4d, 0x5a, 0x90, 0x00 };
+    downloader.Result = result with
+    {
+        FileName = "disguised.txt",
+        Content = disguisedExecutable,
+        Sha256 = Convert.ToHexString(SHA256.HashData(disguisedExecutable))
+    };
+    var executableSignature = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("url", "https://example.com/disguised.txt")
+    }, CancellationToken.None);
+    Require(!executableSignature.Success && executableSignature.ErrorCode == "INVALID_DOWNLOAD_RESULT"
+        && !File.Exists(Path.Combine(exportRoot, "disguised.txt")),
+        "伪装为文本扩展名的可执行文件头仍被写入。");
+
+    downloader.Result = result with { FileName = "mismatch.txt", Sha256 = new string('0', 64) };
+    var badHash = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("url", "https://example.com/mismatch.txt")
+    }, CancellationToken.None);
+    Require(!badHash.Success && badHash.ErrorCode == "DOWNLOAD_HASH_MISMATCH"
+        && !File.Exists(Path.Combine(exportRoot, "mismatch.txt")),
+        "网络下载摘要不匹配时仍写出了文件。");
+
+    downloader.Result = FailureResult("WEB_DOWNLOAD_FAILED");
+    var networkFailure = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(!networkFailure.Success && networkFailure.ErrorCode == "WEB_DOWNLOAD_FAILED"
+        && !File.Exists(Path.Combine(exportRoot, "research.txt.partial")),
+        "下载器失败后仍发布了部分文件。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled, "预取消的公网下载仍启动下载器。");
+
+    static PublicFileDownloadResult FailureResult(string errorCode) =>
+        new(false, "合成网络失败，没有内容。", errorCode);
+}
+
 static async Task CheckStaticBrowserRenderingAsync()
 {
     using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -6203,6 +6345,21 @@ internal sealed class FakePublicWebPageReader : IPublicWebPageReader
         CallCount++;
         LastUrl = url;
         return Task.FromResult(new ToolResult(true, "合成静态网页读取结果。", Data: "合成网页正文"));
+    }
+}
+
+internal sealed class FakePublicFileDownloader(PublicFileDownloadResult result) : IPublicFileDownloader
+{
+    public PublicFileDownloadResult Result { get; set; } = result;
+    public int CallCount { get; private set; }
+    public string? LastUrl { get; private set; }
+
+    public Task<PublicFileDownloadResult> DownloadAsync(string url, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        LastUrl = url;
+        return Task.FromResult(Result);
     }
 }
 

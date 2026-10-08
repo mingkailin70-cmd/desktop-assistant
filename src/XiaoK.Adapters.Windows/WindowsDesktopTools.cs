@@ -447,6 +447,98 @@ public sealed partial class WindowsDesktopTools
         finally { sourceHandle?.Dispose(); }
     }
 
+    public Task<ToolResult> SavePublicFileToExportAsync(PublicFileDownloadResult download,
+        CancellationToken cancellationToken) => Task.Run(() => SavePublicFileToExport(download, cancellationToken), cancellationToken);
+
+    private async Task<ToolResult> SavePublicFileToExport(PublicFileDownloadResult download,
+        CancellationToken cancellationToken)
+    {
+        if (_exportRoot is null)
+            return new(false, "小K导出目录未配置；没有保存下载内容。", "EXPORT_ROOT_UNAVAILABLE");
+        if (!download.Success || download.Content is null || download.Content.Length == 0
+            || download.Content.Length > PublicFileDownloadPolicy.MaximumDownloadBytes
+            || !PublicFileDownloadPolicy.IsAllowedFileName(download.FileName)
+            || !PublicFileDownloadPolicy.IsAllowedMediaType(download.MediaType)
+            || !PublicFileDownloadPolicy.IsAllowedContent(download.Content))
+            return new(false, "下载结果缺少有效文件名或内容，或超过安全限制；没有保存文件。", "INVALID_DOWNLOAD_RESULT");
+
+        var contentHash = Convert.ToHexString(SHA256.HashData(download.Content));
+        if (!string.Equals(contentHash, download.Sha256, StringComparison.OrdinalIgnoreCase))
+            return new(false, "下载数据与网络适配器提供的 SHA-256 不一致；没有保存文件。", "DOWNLOAD_HASH_MISMATCH");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryPrepareExportDirectory(out var exportHandle, out var canonicalExportRoot, out var exportIdentity))
+            return new(false, "小K导出目录不可用，或路径包含链接；没有保存下载内容。", "EXPORT_ROOT_UNAVAILABLE");
+
+        using (exportHandle)
+        {
+            var fileName = download.FileName!;
+            var finalPath = Path.Combine(canonicalExportRoot, fileName);
+            var temporaryPath = Path.Combine(canonicalExportRoot, $".xiaok-download-{Guid.NewGuid():N}.partial");
+            var published = false;
+            try
+            {
+                if (File.Exists(finalPath) || Directory.Exists(finalPath))
+                    return new(false, "小K导出目录中已有同名文件；为避免覆盖，没有保存下载内容。", "EXPORT_NAME_CONFLICT");
+                if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                    return new(false, "小K导出目录在下载保存前发生变化；没有保存文件。", "EXPORT_ROOT_CHANGED");
+
+                await using (var destination = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write,
+                    FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                {
+                    await destination.WriteAsync(download.Content, cancellationToken).ConfigureAwait(false);
+                    await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    destination.Flush(flushToDisk: true);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                    return new(false, "小K导出目录在保存期间发生变化；没有发布下载文件。", "EXPORT_ROOT_CHANGED");
+                try { File.Move(temporaryPath, finalPath, overwrite: false); }
+                catch (IOException) when (File.Exists(finalPath) || Directory.Exists(finalPath))
+                { return new(false, "导出目录中出现同名文件；为避免覆盖，没有保存下载内容。", "EXPORT_NAME_CONFLICT"); }
+                published = true;
+
+                if (!TryOpenOrdinaryFileForRead(finalPath, out var savedHandle, out var savedPath,
+                        out _, out var savedLength, out _))
+                    return DownloadOutcomeUncertain(fileName);
+                using (savedHandle)
+                {
+                    if (!savedPath.Equals(finalPath, StringComparison.OrdinalIgnoreCase)
+                        || savedLength != download.Content.Length
+                        || !TryComputeSha256(savedHandle, out var savedHash)
+                        || !string.Equals(contentHash, savedHash, StringComparison.Ordinal)
+                        || !IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                        return DownloadOutcomeUncertain(fileName);
+                }
+
+                return new(true,
+                    $"已下载到小K导出目录：{fileName}（{download.Content.Length:N0} 字节，SHA-256 {contentHash}）。",
+                    Data: ToDisplayPath(finalPath));
+            }
+            catch (OperationCanceledException) when (!published) { throw; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+                or ArgumentException or NotSupportedException or Win32Exception)
+            {
+                return published
+                    ? DownloadOutcomeUncertain(fileName)
+                    : new(false, "下载文件写入导出目录失败；没有覆盖现有文件。", "FILE_DOWNLOAD_SAVE_FAILED");
+            }
+            finally
+            {
+                if (!published && File.Exists(temporaryPath))
+                {
+                    try { File.Delete(temporaryPath); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException) { }
+                }
+            }
+        }
+    }
+
+    private static ToolResult DownloadOutcomeUncertain(string fileName) =>
+        new(false, $"下载文件“{fileName}”可能已写入，但独立核验未能确认完整性；请人工检查导出目录，不会自动重试。",
+            "FILE_DOWNLOAD_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain);
+
     private bool TryPrepareExportDirectory(out SafeFileHandle exportHandle, out string canonicalExportRoot,
         out FileIdentity exportIdentity)
     {

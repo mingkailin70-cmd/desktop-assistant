@@ -23,7 +23,8 @@ public enum ToolPrecondition
     ConfiguredFileExportRoot = 128,
     UserProvidedPublicWebPageUrl = 256,
     ConfiguredClassificationDirectory = 512,
-    ConfiguredMoveDestination = 1024
+    ConfiguredMoveDestination = 1024,
+    UserProvidedPublicFileUrl = 2048
 }
 
 public enum ToolExpectedOutcome
@@ -42,7 +43,8 @@ public enum ToolExpectedOutcome
     FileRenamedInConfiguredSearchRoot = 11,
     PublicWebPageSnapshotReturned = 12,
     FileClassificationPreviewReturned = 13,
-    FileMovedWithinConfiguredSearchRoots = 14
+    FileMovedWithinConfiguredSearchRoots = 14,
+    PublicFileDownloadedToConfiguredExport = 15
 }
 
 public static class ApprovalAuditCatalog
@@ -70,6 +72,14 @@ public sealed record MessageSendPreview(string ApplicationId, string Recipient, 
 public interface IPublicWebPageReader
 {
     Task<ToolResult> ReadPageAsync(string url, CancellationToken cancellationToken);
+}
+
+public sealed record PublicFileDownloadResult(bool Success, string Summary, string? ErrorCode = null,
+    string? FileName = null, string? MediaType = null, byte[]? Content = null, string? Sha256 = null);
+
+public interface IPublicFileDownloader
+{
+    Task<PublicFileDownloadResult> DownloadAsync(string url, CancellationToken cancellationToken);
 }
 
 public interface ITaskStore

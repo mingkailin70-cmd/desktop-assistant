@@ -15,10 +15,12 @@ public sealed class ToolBroker
     private readonly string _codeProjectRoot;
     private readonly string _codeWorkspaceRoot;
     private readonly IPublicWebPageReader? _publicWebPageReader;
+    private readonly IPublicFileDownloader? _publicFileDownloader;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
         IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot,
-        IMessageSendPreviewPresenter? messageSendPreview = null, IPublicWebPageReader? publicWebPageReader = null)
+        IMessageSendPreviewPresenter? messageSendPreview = null, IPublicWebPageReader? publicWebPageReader = null,
+        IPublicFileDownloader? publicFileDownloader = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -29,6 +31,7 @@ public sealed class ToolBroker
         _codeProjectRoot = codeProjectRoot;
         _codeWorkspaceRoot = codeWorkspaceRoot;
         _publicWebPageReader = publicWebPageReader;
+        _publicFileDownloader = publicFileDownloader;
     }
 
     // 兼容直接由用户发起的交互入口；后台调用必须使用 ExecuteBackgroundAsync。
@@ -60,6 +63,7 @@ public sealed class ToolBroker
             "browser.read.public.v1" => _publicWebPageReader is null
                 ? new(false, "独立网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
                 : await _publicWebPageReader.ReadPageAsync(proposal.Arguments["url"], cancellationToken),
+            "browser.download.public.v1" => await DownloadPublicFileAsync(proposal, cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
             "message.draft.v1" => await DraftAsync(proposal, cancellationToken),
@@ -99,6 +103,7 @@ public sealed class ToolBroker
             "file.move.v1" => ValidateFileMove(proposal),
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
+            "browser.download.public.v1" => ValidatePublicFileDownload(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
             "message.draft.v1" => ValidateDraft(proposal),
@@ -265,6 +270,24 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("网页读取只接受用户明确提供的 HTTPS 公网地址；文件、内网和其他协议不会交给浏览器。");
 
+    private static ToolResult? ValidatePublicFileDownload(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("url", out var url)
+        && PublicWebUrlPolicy.IsAllowedUrlShape(url)
+        && proposal.Target == "configured-export"
+            ? null
+            : InvalidProposal("公网文件下载只接受用户明确提供的 HTTPS 公网地址，并固定保存至小K导出目录。");
+
+    private async Task<ToolResult> DownloadPublicFileAsync(ToolProposal proposal, CancellationToken cancellationToken)
+    {
+        if (_publicFileDownloader is null)
+            return new(false, "独立公网文件下载器未配置；没有建立网络连接。", "WEB_DOWNLOADER_UNAVAILABLE");
+        var result = await _publicFileDownloader.DownloadAsync(proposal.Arguments["url"], cancellationToken)
+            .ConfigureAwait(false);
+        if (!result.Success) return new(false, result.Summary, result.ErrorCode ?? "WEB_DOWNLOAD_FAILED");
+        return await _desktop.SavePublicFileToExportAsync(result, cancellationToken).ConfigureAwait(false);
+    }
+
     private Task<ToolResult> AnalyzeAsync(ToolProposal proposal, CancellationToken token) =>
         CompleteAsync(proposal, "请用中文分析用户提供的单条聊天通知。只区分明确内容、可能意图和建议；不要推断未给出的上下文。", "message", token);
 
@@ -324,6 +347,7 @@ public sealed class ToolBroker
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
+        "browser.download.public.v1" => ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
         "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
         "message.send.v1" => ToolPrecondition.CompleteMessagePreview,
@@ -341,6 +365,7 @@ public sealed class ToolBroker
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
+        "browser.download.public.v1" => ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.draft.v1" => ToolExpectedOutcome.ReplyDraftOnly,

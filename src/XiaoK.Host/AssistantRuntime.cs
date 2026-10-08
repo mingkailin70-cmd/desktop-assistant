@@ -113,7 +113,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
                 exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
-            approval as IMessageSendPreviewPresenter, new PlaywrightPublicWebPageReader());
+            approval as IMessageSendPreviewPresenter, new PlaywrightPublicWebPageReader(), new PublicFileDownloader());
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -797,6 +797,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.PublicWebPageSnapshotReturned), token);
         }
 
+        if (category == "web-download")
+        {
+            var url = ExtractPublicFileUrl(request);
+            if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
+                return new(false, "请按“下载文件：https://公开网站/文件名”输入。下载仅允许 HTTPS 公网地址，单文件不超过50 MiB；可执行文件、脚本及网页不会保存。", "WEB_DOWNLOAD_URL_NOT_ALLOWED");
+            var arguments = ImmutableDictionary<string, string>.Empty.Add("url", url);
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("browser.download.public.v1", arguments,
+                "configured-export", ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport), token);
+        }
+
         if (category == "analyze" || category == "draft")
         {
             var body = ExtractPayload(request, category == "draft"
@@ -895,6 +906,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (lower.StartsWith("下载文件") || lower.StartsWith("下载网页文件")) return "web-download";
         if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
         if (lower.StartsWith("分类文件夹") || lower.StartsWith("查看文件分类") || lower.StartsWith("预览文件分类")) return "file-classify";
         if (lower.StartsWith("重命名文件")) return "file-rename";
@@ -914,7 +926,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
@@ -974,6 +986,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string ExtractPublicWebPageUrl(string request)
     {
         foreach (var prefix in new[] { "查看网页内容", "读取网页", "浏览网页" })
+        {
+            if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();
+            if (value.Length >= 2 && ((value[0] == '<' && value[^1] == '>')
+                || (value[0] == '“' && value[^1] == '”')
+                || (value[0] == '"' && value[^1] == '"')))
+                value = value[1..^1].Trim();
+            return value;
+        }
+        return string.Empty;
+    }
+
+    private static string ExtractPublicFileUrl(string request)
+    {
+        foreach (var prefix in new[] { "下载网页文件", "下载文件" })
         {
             if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();

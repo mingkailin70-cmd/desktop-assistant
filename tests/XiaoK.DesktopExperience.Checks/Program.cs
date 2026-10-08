@@ -73,7 +73,7 @@ foreach (var tool in new[] { "app.launch.v1", "window.activate.v1", "message.sen
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.ExplicitUserInteraction) is null,
         "阻止明确的用户交互。");
 }
-foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.rename.v1", "code.inspect.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1" })
+foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.rename.v1", "browser.read.public.v1", "browser.download.public.v1", "code.inspect.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台只读工具。");
 Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.ExplicitUserInteraction)?.ErrorCode == "UNKNOWN_TOOL",
     "未知工具被放行。");
