@@ -59,6 +59,7 @@ public sealed class ToolBroker
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
+            "file.archive.single.v1" => await _desktop.ArchiveSingleFileToExportAsync(proposal, cancellationToken),
             "file.classify.preview.v1" => await _desktop.ClassifyFilesAsync(proposal, cancellationToken),
             "browser.read.public.v1" => _publicWebPageReader is null
                 ? new(false, "独立网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
@@ -101,6 +102,7 @@ public sealed class ToolBroker
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
+            "file.archive.single.v1" => ValidateFileArchive(proposal),
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
             "browser.download.public.v1" => ValidatePublicFileDownload(proposal),
@@ -278,6 +280,14 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("公网文件下载只接受用户明确提供的 HTTPS 公网地址，并固定保存至小K导出目录。");
 
+    private static ToolResult? ValidateFileArchive(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("source_path", out var sourcePath)
+        && LocalFileArchivePolicy.IsValidSourcePath(sourcePath)
+        && proposal.Target == "configured-export"
+            ? null
+            : InvalidProposal("文件压缩只接受搜索范围内的单个本机普通文件，并固定保存至小K导出目录。");
+
     private async Task<ToolResult> DownloadPublicFileAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {
         if (_publicFileDownloader is null)
@@ -345,6 +355,7 @@ public sealed class ToolBroker
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
+        "file.archive.single.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "browser.download.public.v1" => ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
@@ -363,6 +374,7 @@ public sealed class ToolBroker
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
+        "file.archive.single.v1" => ToolExpectedOutcome.FileArchivedToConfiguredExport,
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
         "browser.download.public.v1" => ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport,

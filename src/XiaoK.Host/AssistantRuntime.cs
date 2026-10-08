@@ -775,6 +775,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.FileCopiedToConfiguredExport), token);
         }
 
+        if (category == "file-archive")
+        {
+            var sourcePath = ExtractFileArchiveSource(request);
+            if (!LocalFileArchivePolicy.IsValidSourcePath(sourcePath))
+                return new(false, "请用“压缩文件：完整本机路径”指定一个本机文件。小K只会压缩搜索目录内的单个普通文件到固定导出目录，原文件会保留。", "INVALID_ARCHIVE_SOURCE");
+            var arguments = ImmutableDictionary<string, string>.Empty.Add("source_path", sourcePath);
+            return await _broker.ExecuteBackgroundAsync(new ToolProposal("file.archive.single.v1", arguments,
+                "configured-export", ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.FileArchivedToConfiguredExport), token);
+        }
+
         if (category == "file-classify")
         {
             var directoryPath = ExtractFileClassificationDirectory(request);
@@ -906,6 +917,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (lower.StartsWith("压缩文件")) return "file-archive";
         if (lower.StartsWith("下载文件") || lower.StartsWith("下载网页文件")) return "web-download";
         if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
         if (lower.StartsWith("分类文件夹") || lower.StartsWith("查看文件分类") || lower.StartsWith("预览文件分类")) return "file-classify";
@@ -926,7 +938,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-archive" => "文件压缩", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
@@ -970,6 +982,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return request[prefix.Length..].Trim(' ', '，', ',', '：', ':', '“', '”', '"', '\'');
         }
         return string.Empty;
+    }
+
+    private static string ExtractFileArchiveSource(string request)
+    {
+        const string prefix = "压缩文件";
+        if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+        var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();
+        return TrimOptionalQuotes(value, trimWhitespace: true);
     }
 
     private static string ExtractFileClassificationDirectory(string request)

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
@@ -538,6 +539,207 @@ public sealed partial class WindowsDesktopTools
     private static ToolResult DownloadOutcomeUncertain(string fileName) =>
         new(false, $"下载文件“{fileName}”可能已写入，但独立核验未能确认完整性；请人工检查导出目录，不会自动重试。",
             "FILE_DOWNLOAD_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain);
+
+    public Task<ToolResult> ArchiveSingleFileToExportAsync(ToolProposal proposal,
+        CancellationToken cancellationToken) => Task.Run(() => ArchiveSingleFileToExport(proposal, cancellationToken), cancellationToken);
+
+    private async Task<ToolResult> ArchiveSingleFileToExport(ToolProposal proposal,
+        CancellationToken cancellationToken)
+    {
+        if (_exportRoot is null)
+            return new(false, "小K导出目录未配置；没有压缩文件。", "EXPORT_ROOT_UNAVAILABLE");
+        if (!proposal.Arguments.TryGetValue("source_path", out var requestedSource)
+            || !LocalFileArchivePolicy.IsValidSourcePath(requestedSource))
+            return new(false, "请提供搜索范围内的本机单文件完整路径。", "INVALID_ARCHIVE_SOURCE");
+
+        var roots = new List<string>();
+        foreach (var configuredRoot in _searchRoots.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryOpenOrdinaryPath(configuredRoot, expectedDirectory: true, enumerateDirectory: false,
+                    out var rootHandle, out var canonicalRoot, out _)) continue;
+            rootHandle.Dispose();
+            if (roots.All(root => !root.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase)))
+                roots.Add(canonicalRoot);
+        }
+        if (roots.Count == 0)
+            return new(false, "没有可用的已配置搜索目录；没有压缩文件。", "SEARCH_ROOT_UNAVAILABLE");
+
+        if (!TryOpenOrdinaryFileForRead(requestedSource, out var sourceHandle, out var sourcePath,
+                out _, out var sourceLength, out var sourceWriteTime))
+            return new(false, "源文件不存在、不可读，或属于链接/特殊文件；没有压缩。", "ARCHIVE_SOURCE_UNAVAILABLE");
+
+        try
+        {
+            if (!roots.Any(root => IsWithinRoot(sourcePath, root)))
+                return new(false, "源文件不在设置中允许的搜索目录内；没有压缩。", "SOURCE_OUTSIDE_ALLOWED_ROOT");
+            if (sourceLength > LocalFileArchivePolicy.MaximumSourceBytes)
+                return new(false, "单文件压缩上限为100 MiB；源文件过大，没有压缩。", "ARCHIVE_SOURCE_TOO_LARGE");
+
+            if (!TryPrepareExportDirectory(out var exportHandle, out var canonicalExportRoot, out var exportIdentity))
+                return new(false, "小K导出目录不可用，或路径包含链接；没有压缩文件。", "EXPORT_ROOT_UNAVAILABLE");
+            using (exportHandle)
+            {
+                if (IsWithinRoot(sourcePath, canonicalExportRoot))
+                    return new(false, "不能把小K导出目录中的文件再次作为压缩源文件。", "SOURCE_IS_EXPORT_FILE");
+
+                var sourceName = Path.GetFileName(sourcePath);
+                var archiveName = sourceName + ".zip";
+                if (!IsSafeExportFileName(archiveName))
+                    return new(false, "源文件名不能安全地用作压缩包名称；没有压缩。", "INVALID_ARCHIVE_FILE_NAME");
+                var finalPath = Path.Combine(canonicalExportRoot, archiveName);
+                var temporaryPath = Path.Combine(canonicalExportRoot, $".xiaok-archive-{Guid.NewGuid():N}.partial");
+                var published = false;
+                try
+                {
+                    if (File.Exists(finalPath) || Directory.Exists(finalPath))
+                        return new(false, "小K导出目录中已有同名压缩包；为避免覆盖，没有压缩。", "EXPORT_NAME_CONFLICT");
+                    if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                        return new(false, "小K导出目录在压缩前发生变化；没有处理源文件。", "EXPORT_ROOT_CHANGED");
+
+                    var sourceStream = new FileStream(sourceHandle, FileAccess.Read, 64 * 1024, isAsync: false);
+                    sourceHandle = null!;
+                    string sourceHash;
+                    using (sourceStream)
+                    using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
+                    using (var archiveFile = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.ReadWrite,
+                               FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                    {
+                        using (var archive = new ZipArchive(archiveFile, ZipArchiveMode.Create, leaveOpen: true))
+                        {
+                            var entry = archive.CreateEntry(sourceName, CompressionLevel.Fastest);
+                            await using var entryStream = entry.Open();
+                            var buffer = new byte[64 * 1024];
+                            long archivedBytes = 0;
+                            while (true)
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
+                                var read = sourceStream.Read(buffer, 0, buffer.Length);
+                                if (read == 0) break;
+                                archivedBytes += read;
+                                if (archivedBytes > LocalFileArchivePolicy.MaximumSourceBytes)
+                                    return new(false, "源文件在压缩期间增长超过100 MiB；没有发布压缩包。", "ARCHIVE_SOURCE_TOO_LARGE");
+                                hash.AppendData(buffer, 0, read);
+                                await entryStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                            }
+                            if (archivedBytes != sourceLength
+                                || !TryGetFileSnapshot(sourceStream.SafeFileHandle, out var sourceLengthAfterArchive,
+                                    out var sourceWriteTimeAfterArchive)
+                                || sourceLengthAfterArchive != sourceLength || sourceWriteTimeAfterArchive != sourceWriteTime)
+                                return new(false, "源文件在压缩期间发生变化；没有发布压缩包。", "SOURCE_CHANGED_DURING_ARCHIVE");
+                            sourceHash = Convert.ToHexString(hash.GetHashAndReset());
+                        }
+                        await archiveFile.FlushAsync(cancellationToken).ConfigureAwait(false);
+                        archiveFile.Flush(flushToDisk: true);
+                    }
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                        return new(false, "小K导出目录在压缩期间发生变化；没有发布压缩包。", "EXPORT_ROOT_CHANGED");
+
+                    if (!TryVerifySingleFileArchive(temporaryPath, sourceName, sourceLength, sourceHash,
+                            cancellationToken,
+                            out var verificationError))
+                        return new(false, verificationError, "ARCHIVE_VERIFICATION_FAILED");
+
+                    if (!TryOpenOrdinaryFileForRead(temporaryPath, out var temporaryHandle, out _, out _,
+                            out var temporaryLength, out _)
+                        || temporaryLength <= 0 || temporaryLength > LocalFileArchivePolicy.MaximumSourceBytes + 1024 * 1024)
+                    {
+                        temporaryHandle?.Dispose();
+                        return new(false, "临时压缩包大小或文件类型异常；没有发布。", "ARCHIVE_OUTPUT_INVALID");
+                    }
+                    using (temporaryHandle)
+                    {
+                        if (!TryComputeSha256(temporaryHandle, out var archiveHash))
+                            return new(false, "无法核验临时压缩包；没有发布。", "ARCHIVE_OUTPUT_UNVERIFIABLE");
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (!IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                            return new(false, "小K导出目录在发布压缩包前发生变化。", "EXPORT_ROOT_CHANGED");
+                        try { File.Move(temporaryPath, finalPath, overwrite: false); }
+                        catch (IOException) when (File.Exists(finalPath) || Directory.Exists(finalPath))
+                        { return new(false, "导出目录中出现同名压缩包；为避免覆盖，没有发布。", "EXPORT_NAME_CONFLICT"); }
+                        published = true;
+
+                        if (!TryOpenOrdinaryFileForRead(finalPath, out var savedHandle, out var savedPath,
+                                out _, out var savedLength, out _))
+                            return ArchiveOutcomeUncertain(archiveName);
+                        using (savedHandle)
+                        {
+                            if (!savedPath.Equals(finalPath, StringComparison.OrdinalIgnoreCase)
+                                || savedLength != temporaryLength
+                                || !TryComputeSha256(savedHandle, out var savedHash)
+                                || !string.Equals(archiveHash, savedHash, StringComparison.Ordinal)
+                                || !IsCurrentDirectoryPath(_exportRoot!, canonicalExportRoot, exportIdentity))
+                                return ArchiveOutcomeUncertain(archiveName);
+                        }
+                    }
+
+                    return new(true,
+                        $"已压缩到小K导出目录：{archiveName}（源文件 {sourceLength:N0} 字节，SHA-256 {sourceHash}）。原文件保留。",
+                        Data: ToDisplayPath(finalPath));
+                }
+                catch (OperationCanceledException) when (!published) { throw; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+                    or ArgumentException or NotSupportedException or InvalidDataException or Win32Exception)
+                {
+                    return published
+                        ? ArchiveOutcomeUncertain(archiveName)
+                        : new(false, "压缩失败；源文件未改动，且没有覆盖导出目录中的文件。", "FILE_ARCHIVE_FAILED");
+                }
+                finally
+                {
+                    if (!published && File.Exists(temporaryPath))
+                    {
+                        try { File.Delete(temporaryPath); }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException) { }
+                    }
+                }
+            }
+        }
+        finally { sourceHandle?.Dispose(); }
+    }
+
+    private static bool TryVerifySingleFileArchive(string archivePath, string expectedName, long expectedLength,
+        string expectedHash, CancellationToken cancellationToken, out string error)
+    {
+        error = "压缩包内容没有通过独立核验；没有发布。";
+        try
+        {
+            using var file = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var archive = new ZipArchive(file, ZipArchiveMode.Read, leaveOpen: false);
+            if (archive.Entries.Count != 1 || !archive.Entries[0].Name.Equals(expectedName, StringComparison.Ordinal)
+                || archive.Entries[0].FullName.Contains('/') || archive.Entries[0].FullName.Contains('\\')
+                || archive.Entries[0].Length != expectedLength) return false;
+
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            using var content = archive.Entries[0].Open();
+            var buffer = new byte[64 * 1024];
+            long readBytes = 0;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var read = content.Read(buffer, 0, buffer.Length);
+                if (read == 0) break;
+                readBytes += read;
+                if (readBytes > expectedLength) return false;
+                hash.AppendData(buffer, 0, read);
+            }
+            if (readBytes != expectedLength
+                || !string.Equals(Convert.ToHexString(hash.GetHashAndReset()), expectedHash, StringComparison.Ordinal)) return false;
+            error = "";
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
+            or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static ToolResult ArchiveOutcomeUncertain(string fileName) =>
+        new(false, $"压缩包“{fileName}”可能已写入，但独立核验未能确认完整性；请人工检查导出目录，不会自动重试。",
+            "FILE_ARCHIVE_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain);
 
     private bool TryPrepareExportDirectory(out SafeFileHandle exportHandle, out string canonicalExportRoot,
         out FileIdentity exportIdentity)
