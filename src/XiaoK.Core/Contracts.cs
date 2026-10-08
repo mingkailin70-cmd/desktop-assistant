@@ -21,7 +21,8 @@ public enum ToolPrecondition
     ConfiguredProjectAndIsolatedWorkspace = 32,
     VerifiedPrivateNotice = 64,
     ConfiguredFileExportRoot = 128,
-    UserProvidedPublicWebPageUrl = 256
+    UserProvidedPublicWebPageUrl = 256,
+    ConfiguredClassificationDirectory = 512
 }
 
 public enum ToolExpectedOutcome
@@ -38,7 +39,8 @@ public enum ToolExpectedOutcome
     MessageSendPreviewShown = 9,
     FileCopiedToConfiguredExport = 10,
     FileRenamedInConfiguredSearchRoot = 11,
-    PublicWebPageSnapshotReturned = 12
+    PublicWebPageSnapshotReturned = 12,
+    FileClassificationPreviewReturned = 13
 }
 
 public static class ApprovalAuditCatalog

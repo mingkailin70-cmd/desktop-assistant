@@ -114,6 +114,21 @@ if (args.Length == 1 && args[0] == "--only-file-rename")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-classification")
+{
+    var fileClassificationRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileClassificationProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fileClassificationRoot);
+    try
+    {
+        await CheckFileClassificationAsync(fileClassificationRoot);
+        Console.WriteLine("通过：文件分类只读取允许目录内的普通文件名扩展，不读取内容、不写入文件，并标示不完整扫描。");
+    }
+    finally
+    {
+        if (Directory.Exists(fileClassificationRoot)) Directory.Delete(fileClassificationRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-public-web-read")
 {
     await CheckPublicWebPageReadPolicyAsync();
@@ -253,6 +268,9 @@ try
 
     await CheckFileRenameAsync(tempRoot);
     passed.Add("后台文件重命名只在配置搜索根内同目录执行，拒绝越界/链接/无效名/冲突且核验文件身份和元数据");
+
+    await CheckFileClassificationAsync(tempRoot);
+    passed.Add("后台文件分类只按扩展名读取配置搜索根内普通文件，拒绝越界和目录联接且不读取/改写文件内容");
 
     await CheckPublicWebPageReadPolicyAsync();
     passed.Add("网页读取固定为用户明确提供的 HTTPS 公网地址，拒绝内网/文件/非标准端口并核验动作范围");
@@ -5770,6 +5788,105 @@ static async Task CheckFileRenameAsync(string root)
         }
         finally { Directory.Delete(linkedRoot, recursive: false); }
     }
+}
+
+static async Task CheckFileClassificationAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "file-classification");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var selectedRoot = Path.Combine(allowedRoot, "to-classify");
+    var nestedRoot = Path.Combine(selectedRoot, "nested");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    Directory.CreateDirectory(nestedRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    var documentsFile = Path.Combine(selectedRoot, "report.PDF");
+    var codeFile = Path.Combine(nestedRoot, "sample.CS");
+    var imageFile = Path.Combine(nestedRoot, "photo.png");
+    var otherFile = Path.Combine(selectedRoot, "opaque.unknown-extension");
+    var bidiFile = Path.Combine(selectedRoot, "setup\u202E.msi");
+    var outsideFile = Path.Combine(outsideRoot, "outside-secret.txt");
+    const string privateSentinel = "this private content must not be read or returned";
+    foreach (var path in new[] { documentsFile, codeFile, imageFile, otherFile, bidiFile, outsideFile })
+        await File.WriteAllTextAsync(path, privateSentinel, new UTF8Encoding(false));
+
+    Require(LocalFileClassificationPolicy.IsValidDirectoryPath(selectedRoot)
+        && !LocalFileClassificationPolicy.IsValidDirectoryPath("\\\\server\\share")
+        && !LocalFileClassificationPolicy.IsValidDirectoryPath(Path.Combine(selectedRoot, "stream:bad")),
+        "文件分类目录词法检查接受了 UNC 或备用数据流路径。");
+    Require(LocalFileClassificationPolicy.ClassifyExtension(".PDF") == "文档"
+        && LocalFileClassificationPolicy.ClassifyExtension(".png") == "图片"
+        && LocalFileClassificationPolicy.ClassifyExtension(".cs") == "代码与配置"
+        && LocalFileClassificationPolicy.ClassifyExtension(".unknown-extension") == "其他",
+        "文件扩展名分类表对大小写或已知/未知类型映射错误。");
+
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.classify.preview.v1", [new("directory_path", selectedRoot)],
+        "configured-search-root", ToolExpectedOutcome.FileClassificationPreviewReturned);
+    var beforeFiles = Directory.GetFiles(fixtureRoot, "*", SearchOption.AllDirectories)
+        .Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var afterFiles = Directory.GetFiles(fixtureRoot, "*", SearchOption.AllDirectories)
+        .Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    Require(result.Success && result.Data is not null
+        && result.Data.Contains("文档：1", StringComparison.Ordinal)
+        && result.Data.Contains("图片：1", StringComparison.Ordinal)
+        && result.Data.Contains("代码与配置：1", StringComparison.Ordinal)
+        && result.Data.Contains("其他：1", StringComparison.Ordinal)
+        && result.Data.Contains("安装程序：1", StringComparison.Ordinal)
+        && result.Data.Contains("setup�.msi", StringComparison.Ordinal)
+        && !result.Data.Contains('\u202E')
+        && result.Data.Contains("report.PDF", StringComparison.Ordinal)
+        && result.Data.Contains("nested\\sample.CS", StringComparison.Ordinal)
+        && result.Data.Contains("未读取文件内容", StringComparison.Ordinal)
+        && !result.Data.Contains(privateSentinel, StringComparison.Ordinal)
+        && beforeFiles.SequenceEqual(afterFiles, StringComparer.OrdinalIgnoreCase)
+        && File.ReadAllText(documentsFile) == privateSentinel,
+        $"文件分类没有返回只读扩展名报告或读取/改变了测试文件：success={result.Success}, code={result.ErrorCode}, data={result.Data}");
+    Require(ToolInteractionPolicy.GetMode("file.classify.preview.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("file.classify.preview.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "文件分类没有登记为不抢前台的后台只读工具。");
+
+    var outsideResult = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("directory_path", outsideRoot)
+    }, CancellationToken.None);
+    Require(!outsideResult.Success && outsideResult.ErrorCode == "CLASSIFICATION_DIRECTORY_OUTSIDE_ROOT"
+        && outsideResult.Data is null,
+        "文件分类读取了设置搜索范围外的目录。");
+
+    var invalidTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = outsideRoot }, CancellationToken.None);
+    var wrongContext = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Preconditions = ToolPrecondition.ConfiguredSearchRoot,
+        ExpectedOutcome = ToolExpectedOutcome.MatchingFilesListed
+    }, CancellationToken.None);
+    Require(!invalidTarget.Success && invalidTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !wrongContext.Success && wrongContext.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文件分类接受了模型指定的任意目标或错配的前置条件。");
+
+    var linkedRoot = Path.Combine(selectedRoot, "linked-outside");
+    if (JunctionFixture.TryCreate(outsideRoot, linkedRoot, out var linkSkipReason))
+    {
+        try
+        {
+            var linkedResult = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+            Require(linkedResult.Success && linkedResult.Data is not null
+                && linkedResult.Data.Contains("扫描可能不完整", StringComparison.Ordinal)
+                && !linkedResult.Data.Contains("outside-secret.txt", StringComparison.Ordinal),
+                "文件分类跟随目录联接越出搜索根，或没有说明跳过项。");
+        }
+        finally { Directory.Delete(linkedRoot, recursive: false); }
+    }
+    else Console.WriteLine("跳过：文件分类目录联接夹具无法创建，用例跳过：" + linkSkipReason);
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled, "预取消的文件分类仍继续扫描目录。");
 }
 
 static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
