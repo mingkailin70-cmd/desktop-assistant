@@ -1,6 +1,6 @@
 ## v0.1.55.0 R3本机文本内容搜索（2026-10-08）
 
-固定SDK Release解决方案构建0警告、0错误；完整Windows安全套件113项通过、0项跳过，桌宠体验专项60项通过。定向合成检查覆盖路径范围、敏感扩展名、二进制与坏编码拒绝、文件大小和总量上限、结果不含正文、固定工具调用及取消。自包含签名MSIX位于`artifacts\msix-validation\c89c870a0b4047d28a9eebf0400884b6\XiaoK-signed-validation.msix`，124,631,554字节，SHA-256 `1C1F0A11CB46B5B7554160CE3120E25DD150F97CAC220A887A2A274304C15596`；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书原已受信任，本次未改变信任。当前账户安装包`MingKaiLin.XiaoK_0.1.55.0_neutral__g0ndt6g65c8pe`状态`Ok`。阶段提交`8b481e7`已推送至`origin/main`，GitHub Actions [Build #276](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37767506879)成功。安装器没有启动新版；真实用户目录及新版窗口操作仍未验收。
+固定SDK Release解决方案构建0警告、0错误；完整Windows安全套件113项通过、0项跳过，桌宠体验专项60项通过。定向合成检查覆盖路径范围、敏感扩展名、二进制与坏编码拒绝、文件大小和总量上限、结果不含正文、固定工具调用及取消。自包含签名MSIX位于`artifacts\msix-validation\c89c870a0b4047d28a9eebf0400884b6\XiaoK-signed-validation.msix`，124,631,554字节，SHA-256 `1C1F0A11CB46B5B7554160CE3120E25DD150F97CAC220A887A2A274304C15596`；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书原已受信任，本次未改变信任。当前账户安装包`MingKaiLin.XiaoK_0.1.55.0_neutral__g0ndt6g65c8pe`状态`Ok`。阶段提交`8b481e7`已推送至`origin/main`，GitHub Actions [Build #276](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37767506879)成功。之后从安装目录以`--diagnostics-profile --background`启动Host，确认隐藏窗口、前台焦点句柄未变，并按注册消息正常退出。没有使用常规用户配置、打开任务面板或搜索真实目录；隔离诊断配置留存在系统临时目录，未接触用户数据。
 
 ## v0.1.54.0 R1安装与桌面窗口首轮核验（2026-10-08）
 
