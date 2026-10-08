@@ -4,7 +4,7 @@ Host增加锁定的`VPet-Simulator.Core 1.1.0.66`姿态渲染适配器，使用�
 
 固定SDK 10.0.401锁定还原和Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面交互专项71项通过。自包含MSIX共137,405,245字节，SHA-256为`254D0A7F956D000DD2DC60D33742FAEF5A5C1FBD0F5101DE811D06D140822599`。SignTool验签0警告、0错误，证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已位于`LocalMachine\TrustedPeople`，本阶段未改证书信任。
 
-当前账户已安装`MingKaiLin.XiaoK_0.1.71.0_neutral__g0ndt6g65c8pe`，状态`Ok`；安装文件核对确认VPet Core、四张姿态图和两份许可证均存在。安装器没有启动Host，当前无`XiaoK.Host`进程，因此尚未验证真实桌面透明合成、焦点/点击穿透、姿态状态切换、缩放/DPI、睡眠恢复或资源占用。该阶段源码与文档提交及GitHub Actions结果待记录。
+当前账户已安装`MingKaiLin.XiaoK_0.1.71.0_neutral__g0ndt6g65c8pe`，状态`Ok`；安装文件核对确认VPet Core、四张姿态图和两份许可证均存在。安装器没有启动Host，当前无`XiaoK.Host`进程，因此尚未验证真实桌面透明合成、焦点/点击穿透、姿态状态切换、缩放/DPI、睡眠恢复或资源占用。源码与文档提交`3db5329`已推送至`origin/main`，GitHub Actions [Build #330](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37837080862)成功。
 
 ## v0.1.70.0 R1退出时排队任务状态修复（2026-10-09）
 
