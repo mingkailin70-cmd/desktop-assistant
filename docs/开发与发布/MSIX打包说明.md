@@ -1,6 +1,6 @@
 ## v0.1.68.0 R1任务中心取消状态保留绑定（2026-10-09）
 
-任务中心点击“取消”时，原代码直接给绑定到`CanCancel`的按钮属性赋值，可能移除WPF绑定。现在通过`SetCurrentValue`临时禁用，并按当前任务状态恢复有效值，保留原绑定；桌面交互专项加入源代码回归保护。固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面交互专项63项通过。
+任务中心点击“取消”时，原代码直接给绑定到`CanCancel`的按钮属性赋值，可能移除WPF绑定。现在通过`SetCurrentValue`临时禁用，并按当前任务状态恢复有效值，保留原绑定；桌面交互专项加入源代码回归保护。固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面交互专项63项通过。源码及版本提交`14fa560`已推送至`origin/main`，GitHub Actions [Build #311](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37811902857)成功。
 
 自包含签名MSIX位于`artifacts\msix-validation\39c8e9283b5e4d35a293d1f71a26b824\XiaoK-signed-validation.msix`，124,643,983字节，SHA-256 `D3104E1BB98D944B77D9AE5A53756C916C654F7A9E25EC90EF661F1493474C85`。SignTool验签0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信任，本阶段未改变信任。当前账户安装`MingKaiLin.XiaoK_0.1.68.0_neutral__g0ndt6g65c8pe`，状态`Ok`。
 
