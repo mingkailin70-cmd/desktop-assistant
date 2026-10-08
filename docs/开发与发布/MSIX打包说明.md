@@ -1,3 +1,11 @@
+## v0.1.57.0 R1审批重启恢复修复（2026-10-08）
+
+本版包含`d4de23e`：重启后，内存中已经失效的普通审批任务不再显示成可继续处理的`AwaitingApproval`，而映射为`OutcomeUncertain` / `APPROVAL_NOT_RESTORED`并明确提示不会自动继续或重放。隔离代码任务的旧`awaiting_approval`同样标记为中断待核对；当前进程中的审批流程不受影响。安全套件113项通过、0项跳过；Release解决方案构建0警告、0错误。待审批内容并未持久化，因此本修复不恢复审批按钮或原批准动作。
+
+固定SDK 10.0.401将Host发布为win-x64自包含应用，含.NET 10.0.12与Windows Desktop 10.0.12；MSIX结构检查通过，614个载荷文件。签名包位于`artifacts\msix-validation\ba236fdb4ad04605bb16784fe8422a92\XiaoK-signed-validation.msix`，124,630,357字节，SHA-256 `01859C4B16A166D69695C61F190FDBD6717C759D53225E79310293DC004A14C2`。SignTool验签通过，0警告、0错误；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书已在`LocalMachine\TrustedPeople`，本次未改信任。包已安装至当前账户，`MingKaiLin.XiaoK_0.1.57.0_neutral__g0ndt6g65c8pe`状态`Ok`，安装目录`C:\Program Files\WindowsApps\MingKaiLin.XiaoK_0.1.57.0_neutral__g0ndt6g65c8pe`；安装后确认Host未运行，本轮未启动该包。
+
+修复提交`d4de23e`与版本提交`4073b49`均已推送至`origin/main`。GitHub Actions [Build #285](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37775736968)成功；此前对修复提交单独创建的Build #284被版本提交触发的新运行取消。当前包的Host启动、任务中心实机显示和重启恢复仍待验收。
+
 ## v0.1.56.0 R3搜索命令路由安装包（2026-10-08）
 
 本版包含阶段提交`29b402e`中的Core固定提案工厂：用户搜索命令通过同一工厂生成`file.search.content.v1`提案，Host与安全检查共用构造规则。固定SDK Release解决方案构建0警告、0错误，定向内容搜索检查通过，完整Windows安全套件113项通过、0项跳过。版本号提交`1f0dedf`已推送至`origin/main`；GitHub Actions [Build #281](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37772765036)和[Build #282](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37773908609)均成功。
