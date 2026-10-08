@@ -29,10 +29,21 @@ public sealed class ToolBroker
         _codeWorkspaceRoot = codeWorkspaceRoot;
     }
 
-    public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, CancellationToken cancellationToken)
+    // 兼容直接由用户发起的交互入口；后台调用必须使用 ExecuteBackgroundAsync。
+    public Task<ToolResult> ExecuteAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
+        ExecuteAsync(proposal, ToolExecutionAccess.ExplicitUserInteraction, cancellationToken);
+
+    public Task<ToolResult> ExecuteBackgroundAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
+        ExecuteAsync(proposal, ToolExecutionAccess.BackgroundOnly, cancellationToken);
+
+    public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, ToolExecutionAccess access,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var invalidProposal = ValidateProposal(proposal);
         if (invalidProposal is not null) return invalidProposal;
+        var interactionDenied = ToolInteractionPolicy.Check(proposal.ToolId, access);
+        if (interactionDenied is not null) return interactionDenied;
 
         // Fixed registry: model text never becomes a command, script, arbitrary path, or click target.
         return proposal.ToolId switch

@@ -14,8 +14,6 @@ namespace XiaoK.Host;
 
 public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
-    private const double PetWindowWidth = 300;
-    private const double PetWindowHeight = 372;
     private readonly AssistantRuntime _runtime;
     private readonly PetWindowPositionStore _petWindowPositionStore;
     private readonly WindowsNotificationMonitor _notificationMonitor;
@@ -38,6 +36,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private readonly Queue<PrivateNoticeAnalysisResult> _pendingNoticeAnalyses = [];
     private double _expandedWidth = 500;
     private double _expandedHeight = 650;
+    private double _petScalePercent = PetSizingPolicy.DefaultPercent;
+    private bool _petSizeControlsReady;
+    private double _petResizeStartPercent;
+    private double _petResizeHorizontal;
+    private double _petResizeVertical;
 
     public MainWindow()
     {
@@ -45,6 +48,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _runtime = new AssistantRuntime(this);
         _petWindowPositionStore = new PetWindowPositionStore(
             _runtime.CurrentSettings.DataRoot);
+        if (_petWindowPositionStore.TryLoad(out var savedPet)) _petScalePercent = savedPet.ScalePercent;
+        _petSizeControlsReady = true;
+        UpdatePetSizeControls();
         _runtime.SpeechCaptureMaximumDurationReached += OnSpeechCaptureMaximumDurationReached;
         _runtime.WakeWordDetected += OnWakeWordDetected;
         _runtime.WakeWordStatusChanged += OnWakeWordStatusChanged;
@@ -823,15 +829,19 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     {
         if (_exiting) return;
         SetExpandedView(expanded: false);
+        ShowActivated = false;
         Show();
         WindowState = WindowState.Normal;
-        Activate();
     }
 
     private Forms.ContextMenuStrip BuildTrayMenu()
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("显示桌宠", null, (_, _) => ShowPet());
+        var sizeMenu = new Forms.ToolStripMenuItem("桌宠大小");
+        foreach (var percent in new[] { 40, 55, 70, 85, 100, 125, 160 })
+            sizeMenu.DropDownItems.Add($"{percent}%", null, (_, _) => SetPetScale(percent, save: true));
+        menu.Items.Add(sizeMenu);
         menu.Items.Add("打开任务面板", null, (_, _) => RestoreFromTray());
         menu.Items.Add("最近任务", null, async (_, _) => await ShowTaskHistoryAsync());
         menu.Items.Add("设置", null, (_, _) => ShowSettings());
@@ -924,6 +934,59 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         }
     }
 
+    private void PetView_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (_expanded || (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == 0) return;
+        SetPetScale(_petScalePercent + Math.Sign(e.Delta) * 5, save: true);
+        e.Handled = true;
+    }
+
+    private void PetScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_petSizeControlsReady) SetPetScale(e.NewValue, save: true);
+    }
+
+    private void ResetPetSize_Click(object sender, RoutedEventArgs e) => SetPetScale(PetSizingPolicy.DefaultPercent, save: true);
+
+    private void PetResize_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
+    {
+        _petResizeStartPercent = _petScalePercent;
+        _petResizeHorizontal = _petResizeVertical = 0;
+        e.Handled = true;
+    }
+
+    private void PetResize_DragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+    {
+        _petResizeHorizontal += e.HorizontalChange / PetSizingPolicy.BaseWidthDip * 100;
+        _petResizeVertical += e.VerticalChange / PetSizingPolicy.BaseHeightDip * 100;
+        var change = Math.Abs(_petResizeHorizontal) >= Math.Abs(_petResizeVertical)
+            ? _petResizeHorizontal : _petResizeVertical;
+        SetPetScale(_petResizeStartPercent + change, save: false);
+        e.Handled = true;
+    }
+
+    private void PetResize_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        SaveWindowPosition();
+        e.Handled = true;
+    }
+
+    private void SetPetScale(double percent, bool save)
+    {
+        _petScalePercent = Math.Round(PetSizingPolicy.ClampPercent(percent), 1);
+        UpdatePetSizeControls();
+        if (!_expanded) FitWindowToMonitorWorkArea();
+        if (save) SaveWindowPosition();
+    }
+
+    private void UpdatePetSizeControls()
+    {
+        _petSizeControlsReady = false;
+        PetScaleSlider.Value = _petScalePercent;
+        PetScaleLabel.Text = $"大小 {_petScalePercent:0.#}%";
+        _petSizeControlsReady = true;
+    }
+
     private void RestoreWindowPosition()
     {
         var handle = new WindowInteropHelper(this).Handle;
@@ -975,18 +1038,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         var workAreaHeight = info.Work.Bottom - info.Work.Top;
         if (workAreaWidth <= 0 || workAreaHeight <= 0) return;
 
-        var requestedWidth = _expanded ? _expandedWidth : PetWindowWidth;
-        var requestedHeight = _expanded ? _expandedHeight : PetWindowHeight;
-        var preferredMinimumWidth = _expanded ? 440d : PetWindowWidth;
-        var preferredMinimumHeight = _expanded ? 560d : PetWindowHeight;
-        var layout = WindowAreaSizingPolicy.FitToWorkArea(
-            requestedWidth,
-            requestedHeight,
-            preferredMinimumWidth,
-            preferredMinimumHeight,
-            workAreaWidth,
-            workAreaHeight,
-            GetEffectiveDpi(handle));
+        var layout = _expanded
+            ? WindowAreaSizingPolicy.FitToWorkArea(_expandedWidth, _expandedHeight, 440, 560,
+                workAreaWidth, workAreaHeight, GetEffectiveDpi(handle))
+            : PetSizingPolicy.FitToWorkArea(_petScalePercent, workAreaWidth, workAreaHeight, GetEffectiveDpi(handle));
 
         var previousChangingState = _changingWindowMode;
         _changingWindowMode = true;
@@ -1031,12 +1086,12 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         if (handle == IntPtr.Zero || !GetWindowRect(handle, out var rect)) return;
         try
         {
-            _petWindowPositionStore.Save(rect.Left, rect.Top);
+            _petWindowPositionStore.Save(rect.Left, rect.Top, _petScalePercent);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or System.Security.SecurityException or InvalidOperationException or ArgumentException)
         {
-            SetStatus("桌宠位置保存失败");
+            SetStatus("桌宠位置和大小保存失败");
         }
     }
 
@@ -1047,7 +1102,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         PetStatusText.Text = compactStatus;
         StatusText.ToolTip = status;
         PetStatusText.ToolTip = status;
-        PetView.ToolTip = $"{status} · 单击展开任务面板，右键打开菜单";
+        PetView.ToolTip = $"{status} · 单击展开，右键调大小，Ctrl+滚轮缩放";
         var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)
             || status.Contains("未授予", StringComparison.Ordinal) || status.Contains("未能启动", StringComparison.Ordinal)
             ? System.Windows.Media.Color.FromRgb(205, 69, 69)

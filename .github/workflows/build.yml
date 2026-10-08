@@ -25,3 +25,5 @@ jobs:
           dotnet-version: 10.0.401
       - name: Build
         run: dotnet build XiaoK.sln --configuration Release
+      - name: Desktop experience checks
+        run: dotnet run --project tests/XiaoK.DesktopExperience.Checks --configuration Release --no-build --no-restore

@@ -455,7 +455,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 {
                     if (work.Lifetime.IsCancellationRequested) continue;
                     ToolResult result;
-                    try { result = await _broker.ExecuteAsync(work.Proposal, work.Lifetime.Token).ConfigureAwait(false); }
+                    try { result = await _broker.ExecuteBackgroundAsync(work.Proposal, work.Lifetime.Token).ConfigureAwait(false); }
                     catch (OperationCanceledException) when (work.Lifetime.IsCancellationRequested) { continue; }
                     catch (Exception) { result = new(false, "本地通知分析失败；正文未写入历史或日志。", "NOTICE_ANALYSIS_FAILED"); }
 

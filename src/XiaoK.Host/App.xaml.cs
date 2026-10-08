@@ -71,6 +71,8 @@ public partial class App : System.Windows.Application
         }
 
         MainWindow = new MainWindow();
+        // 桌宠首次出现或登录启动时不抢用户正在使用的窗口。
+        MainWindow.ShowActivated = false;
         if (startInTray) MainWindow.Opacity = 0;
         MainWindow.Show();
         if (startInTray)

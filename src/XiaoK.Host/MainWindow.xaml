@@ -260,12 +260,28 @@
 
             <Border x:Name="PetView" Visibility="Collapsed" Background="Transparent" CornerRadius="30"
                     BorderBrush="Transparent" BorderThickness="0" MouseLeftButtonDown="PetView_MouseLeftButtonDown"
+                    PreviewMouseWheel="PetView_PreviewMouseWheel"
                     ToolTip="单击展开任务面板；拖动可调整位置；右键打开菜单">
                 <Border.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="展开任务面板" Click="ShowPanel_Click"/>
                         <MenuItem Header="最近任务" Click="History_Click"/>
                         <MenuItem Header="设置" Click="Settings_Click"/>
+                        <MenuItem Header="桌宠大小" StaysOpenOnClick="True">
+                            <MenuItem StaysOpenOnClick="True">
+                                <MenuItem.Header>
+                                    <StackPanel Width="215" Margin="4">
+                                        <TextBlock x:Name="PetScaleLabel" Text="大小 70%" Margin="0,0,0,8"/>
+                                        <Slider x:Name="PetScaleSlider" Minimum="40" Maximum="160" Value="70"
+                                                TickFrequency="5" SmallChange="5" LargeChange="10"
+                                                IsSnapToTickEnabled="True" ValueChanged="PetScaleSlider_ValueChanged"
+                                                AutomationProperties.Name="桌宠大小百分比"/>
+                                        <TextBlock Text="40%–160% · Ctrl+滚轮也可缩放" FontSize="11" Margin="0,8,0,0"/>
+                                    </StackPanel>
+                                </MenuItem.Header>
+                            </MenuItem>
+                            <MenuItem Header="恢复推荐大小（70%）" Click="ResetPetSize_Click"/>
+                        </MenuItem>
                         <Separator/>
                         <MenuItem Header="取消当前任务" Click="Cancel_Click"/>
                         <MenuItem Header="停麦" Click="StopMic_Click"/>
@@ -274,7 +290,9 @@
                         <MenuItem Header="退出小K" Click="Exit_Click"/>
                     </ContextMenu>
                 </Border.ContextMenu>
-                <Grid Margin="3,2">
+                <Grid>
+                <Viewbox Stretch="Uniform">
+                <Grid Width="300" Height="372" Margin="0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
@@ -353,10 +371,25 @@
                             </Border>
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="小K" FontSize="13" FontWeight="SemiBold" Foreground="#304236"/>
-                                <TextBlock Text="轻点开始聊天 · 右键更多" FontSize="9" Foreground="#718571" Margin="0,1,0,0"/>
+                                <TextBlock Text="轻点聊天 · 右键调大小" FontSize="9" Foreground="#718571" Margin="0,1,0,0"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                </Grid>
+                </Viewbox>
+                <Thumb x:Name="PetResizeHandle" Width="22" Height="22" HorizontalAlignment="Right"
+                       VerticalAlignment="Bottom" Margin="0,0,3,3" Cursor="SizeNWSE" Focusable="False"
+                       ToolTip="拖动调整桌宠大小" AutomationProperties.Name="拖动调整桌宠大小"
+                       DragStarted="PetResize_DragStarted" DragDelta="PetResize_DragDelta"
+                       DragCompleted="PetResize_DragCompleted">
+                    <Thumb.Template>
+                        <ControlTemplate TargetType="Thumb">
+                            <Border Background="#A0F8FBF7" CornerRadius="6" BorderBrush="#D7E4D6" BorderThickness="1">
+                                <Path Data="M 7,16 L 16,7 M 11,16 L 16,11" Stroke="#718571" StrokeThickness="1.5"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Thumb.Template>
+                </Thumb>
                 </Grid>
             </Border>
         </Grid>

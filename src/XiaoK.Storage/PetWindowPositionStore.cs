@@ -1,8 +1,9 @@
 using System.Text.Json;
+using XiaoK.Core;
 
 namespace XiaoK.Storage;
 
-public sealed record PetWindowPosition(int LeftPixels, int TopPixels);
+public sealed record PetWindowPosition(int LeftPixels, int TopPixels, double ScalePercent = 100);
 
 /// <summary>
 /// Keeps the desktop pet's volatile window placement separate from application settings.
@@ -41,9 +42,11 @@ public sealed class PetWindowPositionStore
             if (root.ValueKind != JsonValueKind.Object) return false;
 
             var properties = root.EnumerateObject().ToArray();
-            if (properties.Length != 2
+            if (properties.Length is not (2 or 3)
                 || properties.Count(property => property.NameEquals("leftPixels")) != 1
                 || properties.Count(property => property.NameEquals("topPixels")) != 1
+                || properties.Any(property => property.Name is not ("leftPixels" or "topPixels" or "scalePercent"))
+                || properties.Count(property => property.NameEquals("scalePercent")) > 1
                 || !root.TryGetProperty("leftPixels", out var left)
                 || !root.TryGetProperty("topPixels", out var top)
                 || !left.TryGetInt32(out var leftPixels)
@@ -51,7 +54,12 @@ public sealed class PetWindowPositionStore
                 || !IsCoordinate(leftPixels)
                 || !IsCoordinate(topPixels)) return false;
 
-            position = new PetWindowPosition(leftPixels, topPixels);
+            // 老版仅保存坐标，恢复原来的 100% 尺寸。
+            var scalePercent = 100d;
+            if (root.TryGetProperty("scalePercent", out var scale)
+                && (scale.ValueKind != JsonValueKind.Number || !scale.TryGetDouble(out scalePercent)
+                    || !PetSizingPolicy.IsValidPercent(scalePercent))) return false;
+            position = new PetWindowPosition(leftPixels, topPixels, scalePercent);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
@@ -61,10 +69,12 @@ public sealed class PetWindowPositionStore
         }
     }
 
-    public void Save(int leftPixels, int topPixels)
+    public void Save(int leftPixels, int topPixels, double scalePercent = 100)
     {
         if (!IsCoordinate(leftPixels) || !IsCoordinate(topPixels))
             throw new ArgumentOutOfRangeException(nameof(leftPixels), "桌宠坐标超出可接受范围。");
+        if (!PetSizingPolicy.IsValidPercent(scalePercent))
+            throw new ArgumentOutOfRangeException(nameof(scalePercent), "桌宠缩放应在 40%–160% 之间。");
 
         Directory.CreateDirectory(_directory);
         if (IsReparsePoint(_directory) || IsReparsePoint(_path))
@@ -73,7 +83,7 @@ public sealed class PetWindowPositionStore
         var temporaryPath = Path.Combine(_directory, ".pet-window-position-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(new PetWindowPosition(leftPixels, topPixels), SerializerOptions);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new PetWindowPosition(leftPixels, topPixels, scalePercent), SerializerOptions);
             if (bytes.Length > MaximumFileBytes) throw new IOException("桌宠位置数据超出大小限制。");
             using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                        bufferSize: 4096, FileOptions.WriteThrough))
