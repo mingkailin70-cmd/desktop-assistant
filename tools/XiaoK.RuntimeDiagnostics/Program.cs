@@ -12,6 +12,9 @@ if (args.Length == 5 && args[0] == "--voice-installed-idle-roundtrip")
 if (args.Length == 5 && args[0] == "--voice-installed-batch-roundtrip")
     return await VoiceInstalledBatchRoundTrip.RunAsync(args[1], args[2], args[3], args[4]);
 
+if (args.Length == 2 && args[0] == "--installed-content-search")
+    return await InstalledPackageContentSearchCheck.RunAsync(args[1]);
+
 if (args.Length != 4 || args[0] != "--managed-qwen")
 {
     Console.Error.WriteLine("用法：");
@@ -19,6 +22,7 @@ if (args.Length != 4 || args[0] != "--managed-qwen")
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-host-roundtrip <仓库目录> <语音环境目录> <仓库外报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-installed-idle-roundtrip <已安装包目录> <模型目录> <语音环境目录> <仓库外报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-installed-batch-roundtrip <已安装包目录> <模型目录> <语音环境目录> <仓库外报告路径>");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --installed-content-search <小K已安装包目录>");
     return 2;
 }
 
