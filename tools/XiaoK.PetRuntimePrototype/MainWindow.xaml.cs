@@ -59,12 +59,18 @@ public partial class MainWindow : Window
         File.WriteAllText(_logPath, $"started={DateTimeOffset.Now:O}{Environment.NewLine}focus-before=0x{_foregroundBeforeShow:X}{Environment.NewLine}");
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _closeTimer.Start();
         try
         {
             _pet?.LoadALL();
+            if (_pet is not null)
+            {
+                await _pet.Load_2_WaitGraph();
+                await WaitForInitialGraphAsync(_pet);
+            }
+
             _pet?.Display(_poseSequence[0], AnimatType.Single, GraphType.Default, static () => { });
             File.AppendAllText(_logPath, $"renderer-initialized={_pet is not null}{Environment.NewLine}");
             _poseTimer.Start();
@@ -115,6 +121,20 @@ public partial class MainWindow : Window
             new GraphInfo(name, GraphType.Default, AnimatType.Single, IGameSave.ModeType.Nomal),
             length: 500,
             isloop: true));
+    }
+
+    private static async Task WaitForInitialGraphAsync(Main pet)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (pet.PetGrid.Tag is not IGraph && pet.PetGrid2.Tag is not IGraph)
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new TimeoutException("VPet默认姿态未能在10秒内启动。");
+            }
+
+            await Task.Delay(50);
+        }
     }
 
     private void ShowNextPose()
