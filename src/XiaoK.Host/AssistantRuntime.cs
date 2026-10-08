@@ -34,10 +34,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly SemaphoreSlim _executionGate = new(1, 1);
     private readonly Channel<UserTaskWork> _userTaskQueue = Channel.CreateBounded<UserTaskWork>(
         new BoundedChannelOptions(16) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _userTaskOperations = new();
+    private readonly ConcurrentDictionary<Guid, UserTaskWork> _userTaskOperations = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<string>> _userTaskCompletions = new();
     private readonly ConcurrentDictionary<Guid, string> _transientUserTaskResults = new();
     private readonly ConcurrentDictionary<Guid, string> _transientUserTaskSteps = new();
+    private readonly ConcurrentDictionary<Guid, TaskLifecycleState> _transientUserTaskStates = new();
     private readonly object _transientResultLock = new();
     private readonly object _userTaskAdmissionLock = new();
     private readonly Queue<Guid> _transientResultOrder = new();
@@ -308,7 +309,13 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
     {
         var records = (await _store.GetRecentAsync(30, cancellationToken))
-            .Select(record => TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc));
+            .Select(record =>
+            {
+                var visible = TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc);
+                return _transientUserTaskStates.TryGetValue(visible.Id, out var transientState)
+                    ? visible with { Status = transientState, ErrorCode = transientState == TaskLifecycleState.Cancelled ? "CANCELLED" : visible.ErrorCode }
+                    : visible;
+            });
         var history = records.Select(record => new TaskHistoryEntry(
             record.Id,
             $"{record.Summary} · {record.Id.ToString("N")[..8]}",
@@ -378,24 +385,33 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 shuttingDown = true;
                 operation.Dispose();
             }
-            else if (!_userTaskOperations.TryAdd(id, operation))
-            {
-                taskIdCollision = true;
-                operation.Dispose();
-            }
             else
             {
-                if (completion is not null) _userTaskCompletions[id] = completion;
-                Interlocked.Increment(ref _pendingUserTaskCount);
-                SetTransientTaskStep(id, "等待本机交互任务执行权");
-                if (!_userTaskQueue.Writer.TryWrite(new UserTaskWork(id, task.Kind, request, task.CreatedAtUtc, operation)))
+                var work = new UserTaskWork(id, task.Kind, request, task.CreatedAtUtc, operation);
+                if (!_userTaskOperations.TryAdd(id, work))
                 {
-                    _transientUserTaskSteps.TryRemove(id, out _);
-                    _userTaskOperations.TryRemove(id, out _);
-                    _userTaskCompletions.TryRemove(id, out _);
-                    Interlocked.Decrement(ref _pendingUserTaskCount);
+                    taskIdCollision = true;
                     operation.Dispose();
-                    queueFull = true;
+                }
+                else
+                {
+                    if (completion is not null) _userTaskCompletions[id] = completion;
+                    Interlocked.Increment(ref _pendingUserTaskCount);
+                    SetTransientTaskStep(id, "等待本机交互任务执行权");
+                    if (!_userTaskQueue.Writer.TryWrite(work))
+                    {
+                        _transientUserTaskSteps.TryRemove(id, out _);
+                        _userTaskOperations.TryRemove(id, out _);
+                        _userTaskCompletions.TryRemove(id, out _);
+                        ReleasePendingUserTaskCount(work);
+                        operation.Dispose();
+                        queueFull = true;
+                    }
+                    else
+                    {
+                        PublishUserTaskStateChanged(id, TaskLifecycleState.Queued);
+                        work.MarkAdmissionPublished();
+                    }
                 }
             }
         }
@@ -420,26 +436,62 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return new(false, null, "小K的本地任务队列已满，本次操作没有执行；请稍后再试。");
         }
 
-        PublishUserTaskStateChanged(id, TaskLifecycleState.Queued);
         return new(true, id, $"任务已加入队列（{id.ToString("N")[..8]}）。运行和完成状态可在任务中心查看。");
     }
 
-    public bool CancelTask(Guid taskId)
+    public async Task<bool> CancelTaskAsync(Guid taskId)
     {
-        if (!_userTaskOperations.TryGetValue(taskId, out var operation)) return false;
-        try
+        UserTaskWork? work;
+        bool cancelledBeforeStart;
+        lock (_userTaskAdmissionLock)
         {
-            if (operation.IsCancellationRequested) return true;
-            operation.Cancel();
+            if (!_userTaskOperations.TryGetValue(taskId, out work)) return false;
+            cancelledBeforeStart = work.Admission.TryCancelBeforeStart();
+            if (cancelledBeforeStart || work.Admission.State == TaskExecutionAdmissionState.Running)
+            {
+                try { work.Lifetime.Cancel(); }
+                catch (ObjectDisposedException) { }
+            }
+        }
+
+        if (cancelledBeforeStart)
+        {
+            _transientUserTaskStates[work.Id] = TaskLifecycleState.Cancelled;
+            _userTaskOperations.TryRemove(work.Id, out _);
+            ReleasePendingUserTaskCount(work);
+            SetTransientTaskStep(work.Id, TaskStepForStoredState(TaskLifecycleState.Cancelled));
+            RememberTransientTaskResult(work.Id, "任务在开始执行前已取消；不会运行或自动重试。");
+            if (_userTaskCompletions.TryRemove(work.Id, out var completion))
+                completion.TrySetResult("任务在开始执行前已取消；不会运行或自动重试。");
+            PublishUserTaskStateChanged(work.Id, TaskLifecycleState.Cancelled);
+
+            var cancelledAt = DateTimeOffset.UtcNow;
+            var cancelled = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
+                TaskLifecycleState.Cancelled, work.CreatedAtUtc, cancelledAt, ErrorCode: "CANCELLED");
+            var stateSaved = await TrySaveStateAsync(cancelled, CancellationToken.None).ConfigureAwait(false);
+            if (stateSaved)
+                _transientUserTaskStates.TryRemove(work.Id, out _);
+            else
+                RememberTransientTaskResult(work.Id,
+                    "任务在开始执行前已取消；本地历史写入失败，本次不会运行。重新启动后若状态仍待核对，请手动检查。");
             return true;
         }
-        catch (ObjectDisposedException) { return false; }
+
+        return work.Admission.State is TaskExecutionAdmissionState.Running
+            or TaskExecutionAdmissionState.CancelledBeforeStart;
     }
 
     private async Task ProcessUserTaskQueueAsync()
     {
         await foreach (var work in _userTaskQueue.Reader.ReadAllAsync().ConfigureAwait(false))
         {
+            await work.AdmissionPublished.ConfigureAwait(false);
+            if (!work.Admission.TryStart())
+            {
+                try { work.Lifetime.Dispose(); }
+                catch (ObjectDisposedException) { }
+                continue;
+            }
             try { await ExecuteUserTaskAsync(work).ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException
                 and not AccessViolationException)
@@ -449,11 +501,12 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                     TaskLifecycleState.OutcomeUncertain, work.CreatedAtUtc, DateTimeOffset.UtcNow,
                     ErrorCode: "WORKER_EXCEPTION");
                 await TrySaveStateAsync(uncertain, CancellationToken.None).ConfigureAwait(false);
+                work.Admission.TryComplete();
                 var operationWasTracked = _userTaskOperations.TryRemove(work.Id, out _);
                 _userTaskCompletions.TryRemove(work.Id, out var completion);
                 try { work.Lifetime.Dispose(); }
                 catch (ObjectDisposedException) { }
-                if (operationWasTracked) Interlocked.Decrement(ref _pendingUserTaskCount);
+                if (operationWasTracked) ReleasePendingUserTaskCount(work);
                 completion?.TrySetResult("任务执行器异常退出；请打开任务中心核对状态。");
                 PublishUserTaskStateChanged(work.Id, TaskLifecycleState.OutcomeUncertain);
             }
@@ -505,6 +558,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                     PublishUserTaskStateChanged(work.Id, task.Status);
                     var result = await RouteAsync(work.Category, work.Request, linked.Token).ConfigureAwait(false);
                     finalState = result.FinalState ?? (result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed);
+                    work.Admission.TryComplete();
                     SetTransientTaskStep(work.Id, TaskStepForStoredState(finalState));
                     output = result.Success
                         ? result.FinalState == TaskLifecycleState.AwaitingApproval
@@ -547,9 +601,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             Interlocked.CompareExchange(ref _active, null, work.Lifetime);
             linked?.Dispose();
             timeout?.Dispose();
+            work.Admission.TryComplete();
             _userTaskOperations.TryRemove(work.Id, out _);
             work.Lifetime.Dispose();
-            Interlocked.Decrement(ref _pendingUserTaskCount);
+            ReleasePendingUserTaskCount(work);
             SetTransientTaskStep(work.Id, TaskStepForStoredState(finalState));
             RememberTransientTaskResult(work.Id, output);
             PublishUserTaskStateChanged(work.Id, finalState);
@@ -576,6 +631,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         if (step.Length > 240) step = step[..240];
         _transientUserTaskSteps[taskId] = step;
+    }
+
+    private void ReleasePendingUserTaskCount(UserTaskWork work)
+    {
+        if (work.TryReleasePendingCount()) Interlocked.Decrement(ref _pendingUserTaskCount);
     }
 
     private static string TaskStepForStoredState(TaskLifecycleState state) => state switch
@@ -643,7 +703,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             foreach (var operation in _userTaskOperations.Values)
             {
-                try { operation.Cancel(); }
+                try { operation.Lifetime.Cancel(); }
                 catch (ObjectDisposedException) { }
             }
             _userTaskQueue.Writer.TryComplete();
@@ -666,6 +726,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _inference.Dispose();
             _transientUserTaskResults.Clear();
             _transientUserTaskSteps.Clear();
+            _transientUserTaskStates.Clear();
             _executionGate.Release();
         }
     }
@@ -944,8 +1005,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private sealed record NoticeAnalysisWork(string ApplicationId, ToolProposal Proposal,
         CancellationTokenSource Lifetime);
-    private sealed record UserTaskWork(Guid Id, string Category, string Request, DateTimeOffset CreatedAtUtc,
-        CancellationTokenSource Lifetime);
+    private sealed class UserTaskWork(Guid id, string category, string request, DateTimeOffset createdAtUtc,
+        CancellationTokenSource lifetime)
+    {
+        private int _pendingCountReleased;
+        private readonly TaskCompletionSource _admissionPublished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Guid Id { get; } = id;
+        public string Category { get; } = category;
+        public string Request { get; } = request;
+        public DateTimeOffset CreatedAtUtc { get; } = createdAtUtc;
+        public CancellationTokenSource Lifetime { get; } = lifetime;
+        public TaskExecutionAdmissionGate Admission { get; } = new();
+        public Task AdmissionPublished => _admissionPublished.Task;
+        public void MarkAdmissionPublished() => _admissionPublished.TrySetResult();
+        public bool TryReleasePendingCount() => Interlocked.Exchange(ref _pendingCountReleased, 1) == 0;
+    }
 
     private static string TaskStateLabel(TaskLifecycleState state) => state switch
     {

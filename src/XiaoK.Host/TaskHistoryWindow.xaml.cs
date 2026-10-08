@@ -11,13 +11,13 @@ public partial class TaskHistoryWindow : Window
     private readonly Func<CancellationToken, Task<IReadOnlyList<TaskHistoryEntry>>> _loadHistory;
     private readonly Func<IReadOnlyList<ApprovalInboxEntry>> _loadApprovals;
     private readonly Func<Guid, ApprovalInboxChoice, bool> _resolveApproval;
-    private readonly Func<Guid, bool> _cancelTask;
+    private readonly Func<Guid, Task<bool>> _cancelTask;
     private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly CancellationTokenSource _lifetime = new();
     private bool _refreshInProgress;
 
     internal TaskHistoryWindow(Func<CancellationToken, Task<IReadOnlyList<TaskHistoryEntry>>> loadHistory,
-        Func<Guid, bool> cancelTask, Func<IReadOnlyList<ApprovalInboxEntry>> loadApprovals,
+        Func<Guid, Task<bool>> cancelTask, Func<IReadOnlyList<ApprovalInboxEntry>> loadApprovals,
         Func<Guid, ApprovalInboxChoice, bool> resolveApproval)
     {
         InitializeComponent();
@@ -38,11 +38,21 @@ public partial class TaskHistoryWindow : Window
 
     private async void RefreshTimer_Tick(object? sender, EventArgs e) => await RefreshAsync();
 
-    private void CancelTask_Click(object sender, RoutedEventArgs e)
+    private async void CancelTask_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not System.Windows.Controls.Button { Tag: Guid taskId }) return;
-        if (_cancelTask(taskId)) RefreshStatus.Text = "已请求取消；任务会在安全的取消点停止。";
-        else RefreshStatus.Text = "该任务已结束或无法取消；状态将在下一次刷新时更新。";
+        if (sender is not System.Windows.Controls.Button { Tag: Guid taskId } button) return;
+        button.IsEnabled = false;
+        RefreshStatus.Text = "正在撤销排队任务或请求运行任务停止…";
+        try
+        {
+            if (await _cancelTask(taskId)) RefreshStatus.Text = "排队任务已撤销，或已向运行任务请求安全停止。";
+            else RefreshStatus.Text = "该任务已结束或无法取消；状态将在下一次刷新时更新。";
+            await RefreshAsync();
+        }
+        finally
+        {
+            if (button.IsLoaded) button.IsEnabled = true;
+        }
     }
 
     private async void ResolveApproval_Click(object sender, RoutedEventArgs e)

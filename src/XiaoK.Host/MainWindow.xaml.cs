@@ -535,7 +535,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             RequestBox.Clear();
         _userTaskRunning = _runtime.PendingUserTaskCount > 0;
         OutputText.Text = admission.Message;
-        SetStatus("任务已排队");
+        SetStatus(_runtime.HasActiveUserTask ? "本地任务运行中"
+            : _runtime.PendingUserTaskCount > 0 ? $"任务队列中（{_runtime.PendingUserTaskCount}）" : _runtime.VoiceStatus);
         CancelButton.IsEnabled = _runtime.HasActiveUserTask && !_cancelInProgress;
     }
 
@@ -764,7 +765,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             return Task.CompletedTask;
         }
         if (!IsVisible || !_expanded) RestoreFromTray();
-        var window = new TaskHistoryWindow(_runtime.GetRecentTaskHistoryAsync, _runtime.CancelTask,
+        var window = new TaskHistoryWindow(_runtime.GetRecentTaskHistoryAsync, _runtime.CancelTaskAsync,
             _approvalInbox.GetPending, _approvalInbox.Resolve) { Owner = this };
         _taskCenterWindow = window;
         window.Closed += (_, _) =>

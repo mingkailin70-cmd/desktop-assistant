@@ -83,6 +83,12 @@ if (args.Length == 1 && args[0] == "--only-window-sizing")
     Console.WriteLine("通过：窗口尺寸按显示器工作区与 DPI 限制，并在空间不足时启用可滚动布局。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-queued-task-cancel")
+{
+    CheckQueuedTaskCancellationArbitration();
+    Console.WriteLine("通过：排队撤销与执行抢占原子仲裁；撤销胜出后工作线程不能启动任务。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-copy")
 {
     var fileCopyRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileCopyProbe-" + Guid.NewGuid().ToString("N"));
@@ -367,6 +373,9 @@ try
 
     CheckInterruptedTaskHistoryIsNotReplayed();
     passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
+
+    CheckQueuedTaskCancellationArbitration();
+    passed.Add("排队任务取消与执行开始原子仲裁；撤销胜出后工作线程不会启动该任务");
 
     await CheckApprovalInboxPolicyAsync();
     passed.Add("审批待办只允许对应动作、取消时失败关闭并限制待办容量");
@@ -3396,6 +3405,48 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
         "隔离编程任务状态没有区分异常中断与等待审阅。");
 }
 
+static void CheckQueuedTaskCancellationArbitration()
+{
+    var cancelled = new TaskExecutionAdmissionGate();
+    Require(cancelled.State == TaskExecutionAdmissionState.Queued
+        && cancelled.TryCancelBeforeStart()
+        && cancelled.State == TaskExecutionAdmissionState.CancelledBeforeStart
+        && !cancelled.TryStart() && !cancelled.TryComplete(),
+        "任务在队列中取消后仍可被执行器启动或标记为已完成。");
+
+    var started = new TaskExecutionAdmissionGate();
+    Require(started.TryStart() && started.State == TaskExecutionAdmissionState.Running
+        && !started.TryCancelBeforeStart() && started.TryComplete()
+        && started.State == TaskExecutionAdmissionState.Completed
+        && !started.TryStart() && !started.TryComplete(),
+        "任务开始执行后又接受了排队取消，或完成状态不可重复关闭。");
+
+    Parallel.For(0, 512, _ =>
+    {
+        var racing = new TaskExecutionAdmissionGate();
+        var startWon = false;
+        var cancelWon = false;
+        Parallel.Invoke(
+            () => startWon = racing.TryStart(),
+            () => cancelWon = racing.TryCancelBeforeStart());
+        Require(startWon != cancelWon
+            && (startWon && racing.State == TaskExecutionAdmissionState.Running
+                || cancelWon && racing.State == TaskExecutionAdmissionState.CancelledBeforeStart),
+            "并发取消与启动没有唯一胜出者，或状态与操作结果不一致。");
+    });
+
+    var repositoryRoot = FindRepositoryRoot();
+    var runtime = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    var center = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml.cs"));
+    Require(runtime.Contains("work.Admission.TryCancelBeforeStart()", StringComparison.Ordinal)
+        && runtime.Contains("if (!work.Admission.TryStart())", StringComparison.Ordinal)
+        && runtime.Contains("await work.AdmissionPublished.ConfigureAwait(false)", StringComparison.Ordinal)
+        && runtime.Contains("ReleasePendingUserTaskCount(work)", StringComparison.Ordinal)
+        && center.Contains("Func<Guid, Task<bool>> _cancelTask", StringComparison.Ordinal)
+        && center.Contains("await _cancelTask(taskId)", StringComparison.Ordinal),
+        "任务中心未等待排队撤销落盘，或队列工作线程没有检查原子准入状态。");
+}
+
 static async Task CheckApprovalInboxPolicyAsync()
 {
     var inbox = new ApprovalInbox();
@@ -3482,6 +3533,7 @@ static void CheckTaskProgressIsVisibleAndTransient()
     var recordStart = contracts.IndexOf("public sealed record TaskRecord(", StringComparison.Ordinal);
     var recordEnd = recordStart < 0 ? -1 : contracts.IndexOf(");", recordStart, StringComparison.Ordinal);
     Require(runtimeSource.Contains("_transientUserTaskSteps", StringComparison.Ordinal)
+        && runtimeSource.Contains("_transientUserTaskStates", StringComparison.Ordinal)
         && runtimeSource.Contains("TaskStepForStoredState", StringComparison.Ordinal)
         && runtimeSource.Contains("SetTransientTaskStep(work.Id, \"正在执行本地任务步骤", StringComparison.Ordinal)
         && taskCenterXaml.Contains("Binding CurrentStep", StringComparison.Ordinal)
