@@ -3,6 +3,8 @@ namespace XiaoK.Core;
 /// <summary>限制本机文本内容搜索的范围、资源与仅返回位置的结果格式。</summary>
 public static class LocalFileContentSearchPolicy
 {
+    public const string ToolId = "file.search.content.v1";
+    public const string UserSearchRootId = "user-files";
     public const int MaximumQueryLength = 120;
     public const int MaximumResults = 10;
     public const int MaximumLineNumbersPerFile = 5;
@@ -48,6 +50,18 @@ public static class LocalFileContentSearchPolicy
         }
 
         return false;
+    }
+
+    public static ToolProposal? CreateUserToolProposal(string? request)
+    {
+        if (!TryParseUserCommand(request, out var query)) return null;
+
+        var arguments = System.Collections.Immutable.ImmutableDictionary<string, string>.Empty
+            .Add("query", query)
+            .Add("root_id", UserSearchRootId);
+        return new ToolProposal(ToolId, arguments, UserSearchRootId,
+            ToolPrecondition.ConfiguredSearchRoot,
+            ToolExpectedOutcome.MatchingFileContentLocationsListed);
     }
 
     public static string CreateSummary(int resultCount, int scannedEntries, long bytesRead, int skippedEntries,

@@ -798,11 +798,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
         if (category == "file-content-search")
         {
-            if (!LocalFileContentSearchPolicy.TryParseUserCommand(request, out var contentQuery))
+            var proposal = LocalFileContentSearchPolicy.CreateUserToolProposal(request);
+            if (proposal is null)
                 return new(false, "请按“在文件内容中搜索：关键词”输入。只搜索设置中的文本文件，每文件最多2 MiB、总读取最多64 MiB；只返回路径和行号，不显示或保存匹配正文。", "INVALID_CONTENT_QUERY");
-            var proposal = ToolBroker.Proposal("file.search.content.v1",
-                [new KeyValuePair<string, string>("query", contentQuery), new("root_id", "user-files")],
-                "user-files", ToolExpectedOutcome.MatchingFileContentLocationsListed);
             return await _broker.ExecuteBackgroundAsync(proposal, token);
         }
 

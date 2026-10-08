@@ -5709,9 +5709,16 @@ static async Task CheckFileContentSearchAsync(string root)
 
     var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowed)]);
     var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
-    var proposal = ToolBroker.Proposal("file.search.content.v1",
-        [new("query", "Needle"), new("root_id", "user-files")], "user-files",
-        ToolExpectedOutcome.MatchingFileContentLocationsListed);
+    var proposal = LocalFileContentSearchPolicy.CreateUserToolProposal("在文件内容中搜索：Needle")
+        ?? throw new InvalidOperationException("正常内容搜索命令没有生成工具提案。");
+    Require(proposal.ToolId == "file.search.content.v1"
+        && proposal.Target == "user-files"
+        && proposal.Preconditions == ToolPrecondition.ConfiguredSearchRoot
+        && proposal.ExpectedOutcome == ToolExpectedOutcome.MatchingFileContentLocationsListed
+        && proposal.Arguments.Count == 2
+        && proposal.Arguments.GetValueOrDefault("query") == "Needle"
+        && proposal.Arguments.GetValueOrDefault("root_id") == "user-files",
+        "真实用户命令没有生成绑定固定搜索根、前置条件及期望结果的工具提案。");
 
     Require(ToolInteractionPolicy.GetMode("file.search.content.v1") == ToolInteractionMode.Background
         && ToolInteractionPolicy.Check("file.search.content.v1", ToolExecutionAccess.BackgroundOnly) is null,
@@ -5727,10 +5734,9 @@ static async Task CheckFileContentSearchAsync(string root)
         "搜索结果未限于受支持文本和配置目录，或泄露了匹配正文：" + resultData);
     Require(!resultData.Contains("malformed-utf16.txt", StringComparison.Ordinal),
         "内容搜索接受了含未配对代理项的UTF-16文件。");
-    var utf16Result = await broker.ExecuteBackgroundAsync(proposal with
-    {
-        Arguments = proposal.Arguments.SetItem("query", "竹子")
-    }, CancellationToken.None);
+    var utf16Proposal = LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：竹子")
+        ?? throw new InvalidOperationException("第二种受支持的用户搜索命令没有生成工具提案。");
+    var utf16Result = await broker.ExecuteBackgroundAsync(utf16Proposal, CancellationToken.None);
     Require(utf16Result.Success && utf16Result.Data is not null
         && utf16Result.Data.Contains("utf16.txt", StringComparison.Ordinal)
         && utf16Result.Data.Contains("第1行", StringComparison.Ordinal)
@@ -5751,8 +5757,9 @@ static async Task CheckFileContentSearchAsync(string root)
         && parsed == "错误提示" && !LocalFileContentSearchPolicy.IsValidQuery("  "),
         "用户内容搜索命令没有被可靠解析或空查询没有拒绝。");
     Require(LocalFileContentSearchPolicy.IsUserCommand("搜索文件内容：")
-        && !LocalFileContentSearchPolicy.TryParseUserCommand("搜索文件内容：", out _),
-        "无查询的内容搜索命令没有被路由到明确的格式错误反馈。");
+        && !LocalFileContentSearchPolicy.TryParseUserCommand("搜索文件内容：", out _)
+        && LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：") is null,
+        "无查询的内容搜索命令没有进入明确的格式错误路径。");
 
     using var cancellation = new CancellationTokenSource();
     cancellation.Cancel();
