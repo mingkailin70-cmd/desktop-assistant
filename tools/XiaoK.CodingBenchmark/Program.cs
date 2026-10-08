@@ -57,7 +57,7 @@ internal static class Program
             var modelId = options.ModelId;
             var model = ResolveModel(repoRoot, modelId);
             var pipelineVersion = options.EnableThinking ? PipelineVersionThinking : PipelineVersionNoThinking;
-            if (task.Category != "R") pipelineVersion += "-selection-schema-readable-mapping-feedback-v82";
+            if (task.Category != "R") pipelineVersion += "-selection-schema-literal-feedback-v84";
             var resultFile = GetAggregateResultPath(manifest.Version);
             EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision, pipelineVersion, taskId);
             var gpuBaseline = await ReadGpuSnapshotAsync();

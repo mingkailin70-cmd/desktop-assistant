@@ -1237,8 +1237,14 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
                 && !schema.GetProperty("additionalProperties").GetBoolean())
             && (testCase.ExpectedCalls == 1
                 || (patchSchemas.Length >= 1 && patchSchemas.All(schema =>
-                    schema.GetProperty("properties").GetProperty("edits").GetProperty("items")
-                        .GetProperty("required").GetArrayLength() == 4))),
+                {
+                    var item = schema.GetProperty("properties").GetProperty("edits").GetProperty("items");
+                    return item.GetProperty("required").GetArrayLength() == 4
+                        && item.GetProperty("properties").GetProperty("path").GetProperty("enum").GetArrayLength() == 1
+                        && item.GetProperty("properties").GetProperty("path").GetProperty("enum")[0].GetString() == "Sample.cs"
+                        && item.GetProperty("properties").GetProperty("startLine").GetProperty("maximum").GetInt32() == 1
+                        && item.GetProperty("properties").GetProperty("endLine").GetProperty("maximum").GetInt32() == 1;
+                }))),
             "文件选择与补丁生成没有各自使用正确的严格 JSON Schema。");
         Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
             $"模型输出 {testCase.Name} 修改了原项目。");
@@ -1439,6 +1445,10 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
         && patchSchema.GetProperty("required").GetArrayLength() == 1
         && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
             .GetProperty("required").GetArrayLength() == 4
+        && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
+            .GetProperty("properties").GetProperty("path").GetProperty("enum")[0].GetString() == "Sample.cs"
+        && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
+            .GetProperty("properties").GetProperty("endLine").GetProperty("maximum").GetInt32() == 4
         && !patchSchema.GetProperty("additionalProperties").GetBoolean(),
         "代码补丁生成没有使用已固定的低温和随机种子设置。");
 
@@ -1547,6 +1557,26 @@ static async Task CheckAdditiveMappingPatchGuardAsync(string root)
 
     await VerifyCorrectionAsync("wrong-literal", wrongAliasPatch, "用户请求未指定的字符串值");
     await VerifyCorrectionAsync("lost-return", removedReturnPatch, "删除或改写了原有 return");
+
+    const string missingAliasPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":5,\"endLine\":8,\"replacementLines\":[\"        if (phrase == \\\"微信\\\")\",\"        {\",\"            return \\\"wechat\\\";\",\"        }\"]}]}";
+    var missingProject = CreateProject(root, "mapping-guard-missing-alias", source);
+    var missingWorkspaceRoot = Path.Combine(root, "mapping-guard-missing-alias-workspaces");
+    var missingInference = new ScriptedInference(missingAliasPatch, validPatch);
+    var missingReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var missingResult = await NewAgent(missingInference).ExecuteAsync(missingProject,
+        missingWorkspaceRoot, instruction, CancellationToken.None, missingReview);
+    var missingCorrectionPrompt = missingInference.Prompts.SingleOrDefault(prompt =>
+        prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+    var missingWorkspace = Path.Combine(Directory.GetDirectories(missingWorkspaceRoot).Single(),
+        "workspace", "Sample.cs");
+    Require(missingResult.Success && missingResult.FinalState == TaskLifecycleState.AwaitingApproval
+        && missingInference.CallCount == 2 && missingReview.CallCount == 1
+        && missingCorrectionPrompt?.Contains("必须逐字保留的用户输入短语（不可信数据", StringComparison.Ordinal) == true
+        && missingCorrectionPrompt.Contains("微信电脑版", StringComparison.Ordinal)
+        && File.ReadAllText(missingWorkspace) == source.Replace("phrase == \"微信\"",
+            "phrase == \"微信\" || phrase == \"微信电脑版\"", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(missingProject, "Sample.cs")) == source,
+        "缺失指定别名时，纠正提示没有提供清楚标记为不可信数据的精确输入字面量。");
 
     const string normalizedSource = "internal static class Resolver\n{\n    static string Resolve(string phrase)\n    {\n        phrase = phrase.ToLowerInvariant();\n        if (phrase == \"小k项目\")\n        {\n            return \"vscode/xiaok\";\n        }\n        return \"unknown\";\n    }\n}\n";
     const string normalizedInstruction = "加入‘小K代码项目’别名，解析为vscode/xiaok。";
