@@ -93,12 +93,12 @@ public partial class TaskHistoryWindow : Window
             var currentHistory = HistoryList.ItemsSource as IEnumerable<TaskHistoryEntry>;
             if (currentHistory is null || !currentHistory.SequenceEqual(history))
             {
-                var selectedTitle = (HistoryList.SelectedItem as TaskHistoryEntry)?.Title;
+                var selectedEntryKey = (HistoryList.SelectedItem as TaskHistoryEntry)?.EntryKey;
                 var scrollViewer = FindVisualChild<ScrollViewer>(HistoryList);
                 var scrollOffset = scrollViewer?.VerticalOffset ?? 0;
                 HistoryList.ItemsSource = history;
                 EmptyText.Visibility = history.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-                var selected = selectedTitle is null ? null : history.FirstOrDefault(item => item.Title == selectedTitle);
+                var selected = selectedEntryKey is null ? null : history.FirstOrDefault(item => item.EntryKey == selectedEntryKey);
                 if (selected is not null) HistoryList.SelectedItem = selected;
                 else if (scrollViewer is not null)
                     _ = Dispatcher.BeginInvoke(() => scrollViewer.ScrollToVerticalOffset(scrollOffset), DispatcherPriority.Loaded);

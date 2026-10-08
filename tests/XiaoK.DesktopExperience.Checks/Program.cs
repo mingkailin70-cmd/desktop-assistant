@@ -105,4 +105,12 @@ var requiredBackgroundRoutes = new[]
 };
 Require(requiredBackgroundRoutes.All(route => assistantRuntimeSource.Contains(route, StringComparison.Ordinal)),
     "文件、消息或代码路由没有固定使用后台执行入口。");
+var taskCenterSource = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
+    "src", "XiaoK.Host", "TaskHistoryWindow.xaml.cs"));
+Require(taskCenterSource.Contains("var selectedEntryKey = (HistoryList.SelectedItem as TaskHistoryEntry)?.EntryKey;", StringComparison.Ordinal)
+    && taskCenterSource.Contains("item.EntryKey == selectedEntryKey", StringComparison.Ordinal)
+    && !taskCenterSource.Contains("selectedTitle", StringComparison.Ordinal)
+    && assistantRuntimeSource.Contains("$\"task:{record.Id:N}\"", StringComparison.Ordinal)
+    && assistantRuntimeSource.Contains("$\"code:{task.TaskId}\"", StringComparison.Ordinal),
+    "任务中心刷新必须按稳定任务键保留所选任务，不能用显示标题关联记录。");
 Console.WriteLine($"桌宠缩放/保存/后台交互策略：{checks} 项通过。");

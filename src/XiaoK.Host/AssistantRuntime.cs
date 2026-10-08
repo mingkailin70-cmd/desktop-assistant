@@ -324,6 +324,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                     : visible;
             });
         var history = records.Select(record => new TaskHistoryEntry(
+            $"task:{record.Id:N}",
             record.Id,
             $"{record.Summary} · {record.Id.ToString("N")[..8]}",
             TaskStateLabel(record.Status), record.UpdatedAtUtc,
@@ -348,6 +349,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var interrupted = TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(
                 task.State, task.UpdatedAtUtc, _processStartedAtUtc);
             return new TaskHistoryEntry(
+                $"code:{task.TaskId}",
                 null,
                 $"隔离编程任务 · {task.TaskId[^8..]}",
                 interrupted ? "上次中断，需核对" : CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
@@ -1475,7 +1477,7 @@ internal sealed record XiaoKSettings
 
 internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory);
 internal sealed record RootSetting(string Id, string Path);
-internal sealed record TaskHistoryEntry(Guid? TaskId, string Title, string State, DateTimeOffset UpdatedAtUtc,
+internal sealed record TaskHistoryEntry(string EntryKey, Guid? TaskId, string Title, string State, DateTimeOffset UpdatedAtUtc,
     string Detail, bool CanCancel, string CurrentStep, string TargetScope, string ExecutionMode, string NextAction);
 internal sealed record TaskQueueAdmission(bool Accepted, Guid? TaskId, string Message);
 internal sealed record LocalDataCleanupPreview(SqlitePersonalDataSummary Database,
