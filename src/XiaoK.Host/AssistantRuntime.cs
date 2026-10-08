@@ -31,13 +31,24 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
+    private readonly Channel<UserTaskWork> _userTaskQueue = Channel.CreateBounded<UserTaskWork>(
+        new BoundedChannelOptions(16) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _userTaskOperations = new();
+    private readonly ConcurrentDictionary<Guid, TaskCompletionSource<string>> _userTaskCompletions = new();
+    private readonly ConcurrentDictionary<Guid, string> _transientUserTaskResults = new();
+    private readonly ConcurrentDictionary<Guid, string> _transientUserTaskSteps = new();
+    private readonly object _transientResultLock = new();
+    private readonly object _userTaskAdmissionLock = new();
+    private readonly Queue<Guid> _transientResultOrder = new();
     private readonly Channel<NoticeAnalysisWork> _noticeAnalysisQueue = Channel.CreateBounded<NoticeAnalysisWork>(
         new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _noticeAnalysisStop = new();
     private readonly Task _noticeAnalysisWorker;
     private readonly ConcurrentDictionary<CancellationTokenSource, byte> _noticeAnalysisWorkItems = new();
     private CancellationTokenSource? _active;
+    private readonly Task _userTaskWorker;
     private int _stopping;
+    private int _pendingUserTaskCount;
 
     public AssistantRuntime(IApprovalPresenter approval)
     {
@@ -101,6 +112,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
             approval as IMessageSendPreviewPresenter);
+        _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
 
@@ -114,6 +126,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         : _settings.WakeWordEnabled && _wakeWordListener is not null ? _wakeWordListener.Status
         : _voiceInference is null ? _voiceStatus : _voiceInference.Status;
     public bool IsMicrophoneActive => _microphone.IsActive;
+    public int PendingUserTaskCount => Volatile.Read(ref _pendingUserTaskCount);
+    public bool HasActiveUserTask => Volatile.Read(ref _active) is not null;
     public string? StartupIsolationNotice => !_dotNetTestRunner.StartupIsolationRecovery.Success
         || _dotNetTestRunner.StartupIsolationRecovery.RecoveredProfiles > 0
         ? _dotNetTestRunner.StartupIsolationRecovery.Message
@@ -125,6 +139,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public event Action? WakeWordDetected;
     public event Action<string>? WakeWordStatusChanged;
     public event Action? MicrophoneStoppedForSessionLock;
+    public event Action<Guid, TaskLifecycleState>? UserTaskStateChanged;
 
     public Task StartMicrophoneAsync(CancellationToken cancellationToken)
     {
@@ -293,11 +308,15 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var records = (await _store.GetRecentAsync(30, cancellationToken))
             .Select(record => TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc));
         var history = records.Select(record => new TaskHistoryEntry(
+            record.Id,
             $"{record.Summary} · {record.Id.ToString("N")[..8]}",
             TaskStateLabel(record.Status), record.UpdatedAtUtc,
-            record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
+            _transientUserTaskResults.TryGetValue(record.Id, out var transientResult) ? transientResult
+            : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
                 ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
-                : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}"))
+                : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}",
+            IsCancellableTaskState(record.Status) && _userTaskOperations.ContainsKey(record.Id),
+            _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status)))
             .ToList();
 
         var codeTasks = await Task.Run(() => CodeTaskAgent.ReadRetainedTasks(_settings.CodeWorkspaceRoot), cancellationToken);
@@ -306,11 +325,13 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             var interrupted = TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(
                 task.State, task.UpdatedAtUtc, _processStartedAtUtc);
             return new TaskHistoryEntry(
+                null,
                 $"隔离编程任务 · {task.TaskId[^8..]}",
                 interrupted ? "上次中断，需核对" : CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
                 interrupted
                     ? $"小K不会自动续跑。请检查隔离工作区后手动决定下一步：{task.WorkspacePath}"
-                    : $"隔离工作区：{task.WorkspacePath}");
+                    : $"隔离工作区：{task.WorkspacePath}", false,
+                interrupted ? "上次运行中断；不会自动恢复或重试。" : $"编程任务：{CodeTaskStateLabel(task.State)}");
         }));
 
         return history.OrderByDescending(item => item.UpdatedAtUtc).Take(35).ToArray();
@@ -318,73 +339,271 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public async Task<string> SubmitAsync(string input)
     {
-        if (XiaoKSettings.IsDiagnosticsMode) return "诊断模式只用于界面检查；桌面操作、文件访问和模型推理均未执行。";
-        if (Volatile.Read(ref _stopping) != 0) return "小K正在退出，暂不接受新任务。";
-        var request = input.Trim();
-        if (request.Length == 0) return "先输入一句话，或用 Ctrl+Shift+K 打开小K。";
+        var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var admission = await QueueUserTaskAsync(input, completion, CancellationToken.None);
+        return admission.Accepted ? await completion.Task : admission.Message;
+    }
 
-        var operation = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        var previous = Interlocked.Exchange(ref _active, operation);
-        try { previous?.Cancel(); }
-        catch (ObjectDisposedException) { }
-        var token = operation.Token;
+    public Task<TaskQueueAdmission> QueueUserTaskAsync(string input, CancellationToken cancellationToken = default) =>
+        QueueUserTaskAsync(input, null, cancellationToken);
+
+    private async Task<TaskQueueAdmission> QueueUserTaskAsync(string input,
+        TaskCompletionSource<string>? completion, CancellationToken cancellationToken)
+    {
+        if (XiaoKSettings.IsDiagnosticsMode)
+            return new(false, null, "诊断模式只用于界面检查；桌面操作、文件访问和模型推理均未执行。");
+        if (Volatile.Read(ref _stopping) != 0)
+            return new(false, null, "小K正在退出，暂不接受新任务。");
+        var request = input.Trim();
+        if (request.Length == 0) return new(false, null, "先输入一句话，或用 Ctrl+Shift+K 打开小K。");
+        if (request.Length > 8_000) return new(false, null, "单项任务文字不能超过 8,000 个字符。");
+
+        var id = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var category = Classify(request);
+        var task = new TaskRecord(id, category, CategoryLabel(category), TaskLifecycleState.Queued, now, now);
+        if (!await TrySaveStateAsync(task, cancellationToken))
+            return new(false, null, "无法保存本地任务状态，本次操作未排队。请检查 D 盘数据目录。");
+
+        var operation = new CancellationTokenSource();
+        var shuttingDown = false;
+        var taskIdCollision = false;
+        var queueFull = false;
+        lock (_userTaskAdmissionLock)
+        {
+            if (Volatile.Read(ref _stopping) != 0)
+            {
+                shuttingDown = true;
+                operation.Dispose();
+            }
+            else if (!_userTaskOperations.TryAdd(id, operation))
+            {
+                taskIdCollision = true;
+                operation.Dispose();
+            }
+            else
+            {
+                if (completion is not null) _userTaskCompletions[id] = completion;
+                Interlocked.Increment(ref _pendingUserTaskCount);
+                SetTransientTaskStep(id, "等待本机交互任务执行权");
+                if (!_userTaskQueue.Writer.TryWrite(new UserTaskWork(id, task.Kind, request, task.CreatedAtUtc, operation)))
+                {
+                    _transientUserTaskSteps.TryRemove(id, out _);
+                    _userTaskOperations.TryRemove(id, out _);
+                    _userTaskCompletions.TryRemove(id, out _);
+                    Interlocked.Decrement(ref _pendingUserTaskCount);
+                    operation.Dispose();
+                    queueFull = true;
+                }
+            }
+        }
+
+        if (shuttingDown)
+        {
+            task = task with { Status = TaskLifecycleState.Cancelled, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "SHUTTING_DOWN" };
+            await TrySaveStateAsync(task, CancellationToken.None);
+            return new(false, null, "小K正在退出，本次操作没有排队或执行。");
+        }
+        if (taskIdCollision)
+        {
+            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "TASK_ID_COLLISION" };
+            await TrySaveStateAsync(task, CancellationToken.None);
+            return new(false, null, "无法创建唯一任务编号；本次操作未排队。");
+        }
+        if (queueFull)
+        {
+            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "QUEUE_FULL" };
+            await TrySaveStateAsync(task, CancellationToken.None);
+            PublishUserTaskStateChanged(id, task.Status);
+            return new(false, null, "小K的本地任务队列已满，本次操作没有执行；请稍后再试。");
+        }
+
+        PublishUserTaskStateChanged(id, TaskLifecycleState.Queued);
+        return new(true, id, $"任务已加入队列（{id.ToString("N")[..8]}）。运行和完成状态可在任务中心查看。");
+    }
+
+    public bool CancelTask(Guid taskId)
+    {
+        if (!_userTaskOperations.TryGetValue(taskId, out var operation)) return false;
+        try
+        {
+            if (operation.IsCancellationRequested) return true;
+            operation.Cancel();
+            return true;
+        }
+        catch (ObjectDisposedException) { return false; }
+    }
+
+    private async Task ProcessUserTaskQueueAsync()
+    {
+        await foreach (var work in _userTaskQueue.Reader.ReadAllAsync().ConfigureAwait(false))
+        {
+            try { await ExecuteUserTaskAsync(work).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException
+                and not AccessViolationException)
+            {
+                // One failed task must not terminate the serial worker and strand later queue entries.
+                var uncertain = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
+                    TaskLifecycleState.OutcomeUncertain, work.CreatedAtUtc, DateTimeOffset.UtcNow,
+                    ErrorCode: "WORKER_EXCEPTION");
+                await TrySaveStateAsync(uncertain, CancellationToken.None).ConfigureAwait(false);
+                var operationWasTracked = _userTaskOperations.TryRemove(work.Id, out _);
+                _userTaskCompletions.TryRemove(work.Id, out var completion);
+                try { work.Lifetime.Dispose(); }
+                catch (ObjectDisposedException) { }
+                if (operationWasTracked) Interlocked.Decrement(ref _pendingUserTaskCount);
+                completion?.TrySetResult("任务执行器异常退出；请打开任务中心核对状态。");
+                PublishUserTaskStateChanged(work.Id, TaskLifecycleState.OutcomeUncertain);
+            }
+        }
+    }
+
+    private async Task ExecuteUserTaskAsync(UserTaskWork work)
+    {
+        var task = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
+            TaskLifecycleState.Queued, work.CreatedAtUtc, work.CreatedAtUtc);
+        var finalState = TaskLifecycleState.Failed;
+        var output = "任务失败。为保护隐私，故障内容未写入日志。";
         var gateEntered = false;
-        TaskRecord? task = null;
+        var finalStateSaved = false;
+        CancellationTokenSource? timeout = null;
+        CancellationTokenSource? linked = null;
 
         try
         {
-            await _executionGate.WaitAsync(token);
+            timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            linked = CancellationTokenSource.CreateLinkedTokenSource(work.Lifetime.Token, timeout.Token);
+            Interlocked.Exchange(ref _active, work.Lifetime);
+            await _executionGate.WaitAsync(linked.Token).ConfigureAwait(false);
             gateEntered = true;
-            if (Volatile.Read(ref _stopping) != 0) return "小K正在退出，暂不接受新任务。";
-            var now = DateTimeOffset.UtcNow;
-            var category = Classify(request);
-            task = new TaskRecord(Guid.NewGuid(), category, CategoryLabel(category), TaskLifecycleState.Planning, now, now);
-            if (!await TrySaveStateAsync(task, token))
-                return "无法保存本地任务状态，本次操作未执行。请检查 D 盘数据目录。";
+            linked.Token.ThrowIfCancellationRequested();
+            if (Volatile.Read(ref _stopping) != 0) throw new OperationCanceledException(linked.Token);
 
-            task = task with { Status = TaskLifecycleState.Running, UpdatedAtUtc = DateTimeOffset.UtcNow };
-            if (!await TrySaveStateAsync(task, token))
-                return "无法更新本地任务状态，本次操作未执行。请检查 D 盘数据目录。";
-
-            var result = await RouteAsync(category, request, token);
-            task = task with
+            task = task with { Status = TaskLifecycleState.Planning, UpdatedAtUtc = DateTimeOffset.UtcNow };
+            SetTransientTaskStep(work.Id, "正在分析请求并选择本地处理路径");
+            if (!await TrySaveStateAsync(task, linked.Token).ConfigureAwait(false))
             {
-                Status = result.FinalState ?? (result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed),
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-                // The detailed chat body/result remains transient and is never persisted.
-                ErrorCode = result.ErrorCode
-            };
-            var saved = await TrySaveStateAsync(task, CancellationToken.None);
-            var output = result.Success
-                ? result.FinalState == TaskLifecycleState.AwaitingApproval ? $"{result.Summary}{Environment.NewLine}{Environment.NewLine}{result.Data}" : result.Data ?? result.Summary
-                : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
-            return saved ? output : output + "（任务结果未写入本地历史）";
+                finalState = TaskLifecycleState.Failed;
+                task = task with { ErrorCode = "STATE_WRITE_FAILED" };
+                output = "无法保存任务状态，本次操作未执行。请检查 D 盘数据目录。";
+            }
+            else
+            {
+                PublishUserTaskStateChanged(work.Id, task.Status);
+                task = task with { Status = TaskLifecycleState.Running, UpdatedAtUtc = DateTimeOffset.UtcNow };
+                SetTransientTaskStep(work.Id, "正在执行本地任务步骤；结束后会显示结果或待办");
+                if (!await TrySaveStateAsync(task, linked.Token).ConfigureAwait(false))
+                {
+                    finalState = TaskLifecycleState.Failed;
+                    task = task with { ErrorCode = "STATE_WRITE_FAILED" };
+                    output = "无法更新任务状态，本次操作未执行。请检查 D 盘数据目录。";
+                }
+                else
+                {
+                    PublishUserTaskStateChanged(work.Id, task.Status);
+                    var result = await RouteAsync(work.Category, work.Request, linked.Token).ConfigureAwait(false);
+                    finalState = result.FinalState ?? (result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed);
+                    SetTransientTaskStep(work.Id, TaskStepForStoredState(finalState));
+                    output = result.Success
+                        ? result.FinalState == TaskLifecycleState.AwaitingApproval
+                            ? $"{result.Summary}{Environment.NewLine}{Environment.NewLine}{result.Data}"
+                            : result.Data ?? result.Summary
+                        : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
+                    task = task with { Status = finalState, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = result.ErrorCode };
+                    finalStateSaved = await TrySaveStateAsync(task, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
-            if (task is not null)
+            finalState = work.Lifetime.IsCancellationRequested || Volatile.Read(ref _stopping) != 0
+                ? TaskLifecycleState.Cancelled : TaskLifecycleState.Failed;
+            task = task with
             {
-                task = task with { Status = TaskLifecycleState.Cancelled, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "CANCELLED" };
-                await TrySaveStateAsync(task, CancellationToken.None);
-            }
-            return "已取消当前任务。";
+                Status = finalState,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                ErrorCode = finalState == TaskLifecycleState.Cancelled ? "CANCELLED" : "TIMEOUT"
+            };
+            output = finalState == TaskLifecycleState.Cancelled ? "已取消该任务；不会自动重试。"
+                : "任务等待或执行超过 5 分钟，已停止；请在任务中心核对状态。";
         }
         catch (Exception)
         {
-            if (task is not null)
-            {
-                task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "INTERNAL" };
-                await TrySaveStateAsync(task, CancellationToken.None);
-            }
-            return "任务失败。为保护隐私，故障内容未写入日志。";
+            finalState = TaskLifecycleState.Failed;
+            task = task with { Status = finalState, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "INTERNAL" };
+            output = "任务失败。为保护隐私，故障内容未写入日志。";
         }
         finally
         {
+            if (linked is null || !finalStateSaved)
+            {
+                task = task with { Status = finalState, UpdatedAtUtc = DateTimeOffset.UtcNow };
+                finalStateSaved = await TrySaveStateAsync(task, CancellationToken.None).ConfigureAwait(false);
+                if (!finalStateSaved) output += "（最终状态未能写入本地历史）";
+            }
             if (gateEntered) _executionGate.Release();
-            Interlocked.CompareExchange(ref _active, null, operation);
-            operation.Dispose();
+            Interlocked.CompareExchange(ref _active, null, work.Lifetime);
+            linked?.Dispose();
+            timeout?.Dispose();
+            _userTaskOperations.TryRemove(work.Id, out _);
+            work.Lifetime.Dispose();
+            Interlocked.Decrement(ref _pendingUserTaskCount);
+            SetTransientTaskStep(work.Id, TaskStepForStoredState(finalState));
+            RememberTransientTaskResult(work.Id, output);
+            PublishUserTaskStateChanged(work.Id, finalState);
+            if (_userTaskCompletions.TryRemove(work.Id, out var completion)) completion.TrySetResult(output);
         }
     }
+
+    private void RememberTransientTaskResult(Guid taskId, string result)
+    {
+        lock (_transientResultLock)
+        {
+            _transientUserTaskResults[taskId] = result.Length <= 16_000 ? result : result[..16_000] + "…（结果已截断）";
+            _transientResultOrder.Enqueue(taskId);
+            while (_transientResultOrder.Count > 20)
+            {
+                var expiredTaskId = _transientResultOrder.Dequeue();
+                _transientUserTaskResults.TryRemove(expiredTaskId, out _);
+                _transientUserTaskSteps.TryRemove(expiredTaskId, out _);
+            }
+        }
+    }
+
+    private void SetTransientTaskStep(Guid taskId, string step)
+    {
+        if (step.Length > 240) step = step[..240];
+        _transientUserTaskSteps[taskId] = step;
+    }
+
+    private static string TaskStepForStoredState(TaskLifecycleState state) => state switch
+    {
+        TaskLifecycleState.Queued => "等待本机交互任务执行权",
+        TaskLifecycleState.Planning => "正在分析请求并选择本地处理路径",
+        TaskLifecycleState.AwaitingApproval => "等待你查看并处理任务中心待办",
+        TaskLifecycleState.Running => "正在执行本地任务步骤；结束后会显示结果或待办",
+        TaskLifecycleState.Verifying => "正在核验操作结果",
+        TaskLifecycleState.Completed => "任务已完成",
+        TaskLifecycleState.Failed => "任务失败；查看状态说明后决定下一步",
+        TaskLifecycleState.Cancelled => "任务已取消；不会自动重试",
+        TaskLifecycleState.OutcomeUncertain => "结果待人工核对；不会自动重试",
+        _ => "阶段未知；请核对任务状态"
+    };
+
+    private void PublishUserTaskStateChanged(Guid taskId, TaskLifecycleState state)
+    {
+        var handlers = UserTaskStateChanged;
+        if (handlers is null) return;
+        foreach (Action<Guid, TaskLifecycleState> handler in handlers.GetInvocationList())
+        {
+            try { handler(taskId, state); }
+            catch (Exception) { }
+        }
+    }
+
+    private static bool IsCancellableTaskState(TaskLifecycleState state) => state is
+        TaskLifecycleState.Queued or TaskLifecycleState.Planning or TaskLifecycleState.Running
+        or TaskLifecycleState.Verifying or TaskLifecycleState.AwaitingApproval;
 
     public Task<bool> StopMicrophoneAndDiscardAsync() => _microphone.StopImmediatelyAndDiscardAsync();
 
@@ -418,6 +637,16 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         CancelCurrent();
+        lock (_userTaskAdmissionLock)
+        {
+            foreach (var operation in _userTaskOperations.Values)
+            {
+                try { operation.Cancel(); }
+                catch (ObjectDisposedException) { }
+            }
+            _userTaskQueue.Writer.TryComplete();
+        }
+        await _userTaskWorker.ConfigureAwait(false);
         _noticeAnalysisQueue.Writer.TryComplete();
         _noticeAnalysisStop.Cancel();
         await _noticeAnalysisWorker.ConfigureAwait(false);
@@ -433,6 +662,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         finally
         {
             _inference.Dispose();
+            _transientUserTaskResults.Clear();
+            _transientUserTaskSteps.Clear();
             _executionGate.Release();
         }
     }
@@ -623,6 +854,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     };
 
     private sealed record NoticeAnalysisWork(string ApplicationId, ToolProposal Proposal,
+        CancellationTokenSource Lifetime);
+    private sealed record UserTaskWork(Guid Id, string Category, string Request, DateTimeOffset CreatedAtUtc,
         CancellationTokenSource Lifetime);
 
     private static string TaskStateLabel(TaskLifecycleState state) => state switch
@@ -946,7 +1179,9 @@ internal sealed record XiaoKSettings
 
 internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory);
 internal sealed record RootSetting(string Id, string Path);
-internal sealed record TaskHistoryEntry(string Title, string State, DateTimeOffset UpdatedAtUtc, string Detail);
+internal sealed record TaskHistoryEntry(Guid? TaskId, string Title, string State, DateTimeOffset UpdatedAtUtc,
+    string Detail, bool CanCancel, string CurrentStep);
+internal sealed record TaskQueueAdmission(bool Accepted, Guid? TaskId, string Message);
 internal sealed record LocalDataCleanupPreview(SqlitePersonalDataSummary Database,
     LegacySettingsCleanupSnapshot LegacySettings, ManagedPrivacyFilesPlan ManagedFiles);
 internal sealed record LocalDataCleanupResult(bool DatabaseCompacted, bool LegacySettingsPropertyRemoved,

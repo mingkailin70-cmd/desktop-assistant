@@ -3,6 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="小K任务中心" Height="460" Width="600" MinHeight="320" MinWidth="440"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+    </Window.Resources>
     <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -11,32 +14,78 @@
         </Grid.RowDefinitions>
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <TextBlock Text="任务中心" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
-            <TextBlock Text="状态每3秒刷新。这里只显示任务类别、状态、时间和隔离工作区路径；请求正文与模型回答不会写入历史。"
+            <TextBlock Text="任务状态每3秒刷新。排队/运行任务可逐项取消；审批和消息预览留在待办页，不抢焦点。正文与结果不会写入历史。"
                        Margin="0,5,0,0" Foreground="#68728A" TextWrapping="Wrap"/>
         </StackPanel>
-        <Grid Grid.Row="1">
-            <ListBox x:Name="HistoryList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Border BorderBrush="#E7EAF1" BorderThickness="0,0,0,1" Padding="8">
-                            <StackPanel>
-                                <DockPanel>
-                                    <TextBlock Text="{Binding State}" DockPanel.Dock="Right" Foreground="#3758A6" Margin="12,0,0,0"/>
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="#293149" TextWrapping="Wrap"/>
-                                </DockPanel>
-                                <TextBlock Text="{Binding UpdatedAtUtc, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}"
-                                           FontSize="11" Foreground="#68728A" Margin="0,3,0,0"/>
-                                <TextBox Text="{Binding Detail}" FontSize="11" Foreground="#68728A"
-                                         TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent"
-                                         IsTabStop="True" Margin="-5,0,-5,-4" Padding="5,4"/>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-            <TextBlock x:Name="EmptyText" Text="暂无可显示的本地任务记录。" Foreground="#68728A"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
-        </Grid>
+        <TabControl Grid.Row="1">
+            <TabItem Header="任务">
+                <Grid Margin="0,8,0,0">
+                    <ListBox x:Name="HistoryList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="#E7EAF1" BorderThickness="0,0,0,1" Padding="8">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <Button Content="取消" Tag="{Binding TaskId}" IsEnabled="{Binding CanCancel}"
+                                                    DockPanel.Dock="Right" Click="CancelTask_Click" MinWidth="52" Height="25"
+                                                    Margin="8,0,0,0" Padding="6,0"/>
+                                            <TextBlock Text="{Binding State}" DockPanel.Dock="Right" Foreground="#3758A6" Margin="12,0,0,0"/>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="#293149" TextWrapping="Wrap"/>
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding UpdatedAtUtc, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}"
+                                                   FontSize="11" Foreground="#68728A" Margin="0,3,0,0"/>
+                                        <TextBlock FontSize="11" Foreground="#426AA8" TextWrapping="Wrap" Margin="0,3,0,0">
+                                            <Run Text="当前步骤："/><Run Text="{Binding CurrentStep}"/>
+                                        </TextBlock>
+                                        <TextBox Text="{Binding Detail}" FontSize="11" Foreground="#68728A"
+                                                 TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent"
+                                                 IsTabStop="True" Margin="-5,0,-5,-4" Padding="5,4"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="EmptyText" Text="暂无可显示的本地任务记录。" Foreground="#68728A"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
+            </TabItem>
+            <TabItem Header="待办确认">
+                <Grid Margin="0,8,0,0">
+                    <ListBox x:Name="ApprovalList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="#E7EAF1" BorderThickness="0,0,0,1" Padding="8">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="#293149" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding CreatedAtUtc, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}"
+                                                   FontSize="11" Foreground="#68728A" Margin="0,3,0,4"/>
+                                        <TextBox Text="{Binding Details}" FontSize="11" Foreground="#4E586F"
+                                                 TextWrapping="Wrap" IsReadOnly="True" AcceptsReturn="True" MaxHeight="190"
+                                                 VerticalScrollBarVisibility="Auto" BorderBrush="#E7EAF1" Padding="6"/>
+                                        <WrapPanel Margin="0,6,0,0">
+                                            <Button Content="批准" Tag="Approve" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    Visibility="{Binding CanApprove, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            <Button Content="拒绝" Tag="Decline" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    Visibility="{Binding CanDecline, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            <Button Content="保留补丁" Tag="KeepPatch" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    Visibility="{Binding CanKeepPatch, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            <Button Content="批准固定测试" Tag="RunDotNetTests" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    Visibility="{Binding CanRunDotNetTests, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            <Button Content="批准应用补丁" Tag="ApplyPatch" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    Visibility="{Binding CanApplyPatch, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                            <Button Content="完成预览" Tag="DismissPreview" Click="ResolveApproval_Click"
+                                                    Visibility="{Binding CanDismissPreview, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="EmptyApprovalsText" Text="没有待处理的审批或预览。" Foreground="#68728A"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
         <DockPanel Grid.Row="2" Margin="0,12,0,0">
             <TextBlock x:Name="RefreshStatus" DockPanel.Dock="Left" VerticalAlignment="Center"
                        FontSize="11" Foreground="#68728A" Text="正在读取任务状态…"/>

@@ -225,6 +225,12 @@ try
     CheckInterruptedTaskHistoryIsNotReplayed();
     passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
 
+    await CheckApprovalInboxPolicyAsync();
+    passed.Add("审批待办只允许对应动作、取消时失败关闭并限制待办容量");
+
+    CheckTaskProgressIsVisibleAndTransient();
+    passed.Add("任务中心显示真实生命周期步骤，步骤不进入持久化任务正文");
+
     await CheckValidPatchIsIsolatedAsync(tempRoot);
     passed.Add("单文件项目确定性选择唯一源文件；有效补丁只写隔离工作区、保留 CRLF，并记录待审阅状态");
 
@@ -3242,6 +3248,100 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
     Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
         && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt),
         "隔离编程任务状态没有区分异常中断与等待审阅。");
+}
+
+static async Task CheckApprovalInboxPolicyAsync()
+{
+    var inbox = new ApprovalInbox();
+    using (var cancellation = new CancellationTokenSource())
+    {
+        var confirmation = inbox.RequestAsync("确认示例动作", "合成详情", ApprovalInboxKind.Confirmation,
+            canRunDotNetTests: false, cancellation.Token);
+        var entry = inbox.GetPending().Single();
+        Require(!inbox.Resolve(entry.Id, ApprovalInboxChoice.ApplyPatch)
+            && inbox.GetPending().Single().Id == entry.Id,
+            "普通确认待办接受了不匹配的补丁动作或丢失待办。");
+        Require(inbox.Resolve(entry.Id, ApprovalInboxChoice.Approve)
+            && await confirmation == ApprovalInboxChoice.Approve
+            && inbox.GetPending().Count == 0,
+            "确认待办未返回明确的批准决定或没有清理内存待办。");
+
+        var review = inbox.RequestAsync("审阅合成补丁", "diff", ApprovalInboxKind.CodeReview,
+            canRunDotNetTests: false, cancellation.Token);
+        entry = inbox.GetPending().Single();
+        Require(!entry.CanRunDotNetTests && !inbox.Resolve(entry.Id, ApprovalInboxChoice.RunDotNetTests)
+            && inbox.Resolve(entry.Id, ApprovalInboxChoice.KeepPatch)
+            && await review == ApprovalInboxChoice.KeepPatch,
+            "没有唯一验证目标时仍能批准运行测试，或保留补丁动作失败。");
+
+        var preview = inbox.RequestAsync("消息预览", "合成收件人和正文", ApprovalInboxKind.MessagePreview,
+            canRunDotNetTests: false, cancellation.Token);
+        entry = inbox.GetPending().Single();
+        Require(!inbox.Resolve(entry.Id, ApprovalInboxChoice.Approve)
+            && inbox.Resolve(entry.Id, ApprovalInboxChoice.DismissPreview)
+            && await preview == ApprovalInboxChoice.DismissPreview,
+            "只读消息预览被错误地当成批准发送，或无法关闭预览。");
+
+        using var cancelled = new CancellationTokenSource();
+        var cancelledRequest = inbox.RequestAsync("可取消确认", "合成内容", ApprovalInboxKind.Confirmation,
+            canRunDotNetTests: false, cancelled.Token);
+        cancelled.Cancel();
+        var cancellationObserved = false;
+        try { _ = await cancelledRequest; }
+        catch (OperationCanceledException) { cancellationObserved = true; }
+        Require(cancellationObserved && inbox.GetPending().Count == 0,
+            "取消任务后审批没有失败关闭并从内存待办中移除。");
+    }
+
+    var capacityTasks = Enumerable.Range(0, 16).Select(index => inbox.RequestAsync(
+        $"合成审批 {index}", "合成内容", ApprovalInboxKind.Confirmation, false, CancellationToken.None)).ToArray();
+    var rejectedAtCapacity = false;
+    try
+    {
+        _ = inbox.RequestAsync("超出容量", "合成内容", ApprovalInboxKind.Confirmation,
+            canRunDotNetTests: false, CancellationToken.None);
+    }
+    catch (InvalidOperationException) { rejectedAtCapacity = true; }
+    Require(rejectedAtCapacity && inbox.GetPending().Count == 16,
+        "待办超过上限仍被接纳，或超额请求影响了已有审批。");
+    foreach (var entry in inbox.GetPending()) inbox.Resolve(entry.Id, ApprovalInboxChoice.Decline);
+    var results = await Task.WhenAll(capacityTasks);
+    Require(results.All(choice => choice == ApprovalInboxChoice.Decline) && inbox.GetPending().Count == 0,
+        "满载待办清理或逐项拒绝返回错误。");
+
+    var repositoryRoot = FindRepositoryRoot();
+    var windowSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+    var start = windowSource.IndexOf("public async Task<bool> ConfirmAsync", StringComparison.Ordinal);
+    var end = windowSource.IndexOf("private async void Run_Click", start, StringComparison.Ordinal);
+    Require(start >= 0 && end > start, "没有找到桌面审批 Presenter 源码范围。");
+    var presenters = windowSource[start..end];
+    var taskCenterXaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
+    Require(!presenters.Contains("ShowDialog(", StringComparison.Ordinal)
+        && !presenters.Contains("MessageBox.Show", StringComparison.Ordinal)
+        && presenters.Contains("_approvalInbox.RequestAsync", StringComparison.Ordinal)
+        && presenters.Contains("preview.Recipient", StringComparison.Ordinal)
+        && presenters.Contains("preview.Text", StringComparison.Ordinal)
+        && presenters.Contains("preview.Attachments", StringComparison.Ordinal)
+        && taskCenterXaml.Contains("Header=\"待办确认\"", StringComparison.Ordinal)
+        && taskCenterXaml.Contains("批准应用补丁", StringComparison.Ordinal),
+        "确认/发送预览/代码审阅未留在非模态任务中心，或预览内容缺少完整收件人/正文/附件。");
+}
+
+static void CheckTaskProgressIsVisibleAndTransient()
+{
+    var repositoryRoot = FindRepositoryRoot();
+    var runtimeSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    var taskCenterXaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
+    var contracts = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Core", "Contracts.cs"));
+    var recordStart = contracts.IndexOf("public sealed record TaskRecord(", StringComparison.Ordinal);
+    var recordEnd = recordStart < 0 ? -1 : contracts.IndexOf(");", recordStart, StringComparison.Ordinal);
+    Require(runtimeSource.Contains("_transientUserTaskSteps", StringComparison.Ordinal)
+        && runtimeSource.Contains("TaskStepForStoredState", StringComparison.Ordinal)
+        && runtimeSource.Contains("SetTransientTaskStep(work.Id, \"正在执行本地任务步骤", StringComparison.Ordinal)
+        && taskCenterXaml.Contains("Binding CurrentStep", StringComparison.Ordinal)
+        && recordStart >= 0 && recordEnd > recordStart
+        && !contracts[recordStart..recordEnd].Contains("CurrentStep", StringComparison.Ordinal),
+        "当前步骤没有展示到任务中心、使用不受生命周期约束的描述，或被加入持久化任务记录。");
 }
 
 static void CheckAppResolverRejectsUnknownApplications()

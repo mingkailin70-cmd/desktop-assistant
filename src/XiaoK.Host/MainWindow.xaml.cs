@@ -15,6 +15,7 @@ namespace XiaoK.Host;
 public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
     private readonly AssistantRuntime _runtime;
+    private readonly ApprovalInbox _approvalInbox = new();
     private readonly PetWindowPositionStore _petWindowPositionStore;
     private readonly WindowsNotificationMonitor _notificationMonitor;
     private readonly Forms.NotifyIcon _tray;
@@ -46,7 +47,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     public MainWindow()
     {
         InitializeComponent();
+        CancelButton.IsEnabled = false;
         _runtime = new AssistantRuntime(this);
+        _approvalInbox.Changed += OnApprovalInboxChanged;
         _petWindowPositionStore = new PetWindowPositionStore(
             _runtime.CurrentSettings.DataRoot);
         if (_petWindowPositionStore.TryLoad(out var savedPet)) _petScalePercent = savedPet.ScalePercent;
@@ -56,6 +59,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _runtime.WakeWordDetected += OnWakeWordDetected;
         _runtime.WakeWordStatusChanged += OnWakeWordStatusChanged;
         _runtime.MicrophoneStoppedForSessionLock += OnMicrophoneStoppedForSessionLock;
+        _runtime.UserTaskStateChanged += OnUserTaskStateChanged;
         _notificationMonitor = new WindowsNotificationMonitor(Dispatcher);
         _notificationMonitor.StatusChanged += OnNotificationStatusChanged;
         _notificationMonitor.PrivateNoticeAccepted += OnPrivateNoticeAccepted;
@@ -83,8 +87,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     public async Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var answer = System.Windows.MessageBox.Show(this, details, title, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No);
-        var confirmed = answer == System.Windows.MessageBoxResult.Yes;
+        var choice = await WaitForApprovalAsync(title, details, ApprovalInboxKind.Confirmation,
+            canRunDotNetTests: false, cancellationToken);
+        if (choice == ApprovalInboxChoice.Unavailable)
+            throw new InvalidOperationException("任务中心的审批队列已满；本次动作没有获批。");
+        var confirmed = choice == ApprovalInboxChoice.Approve;
         await _runtime.RecordApprovalAuditAsync(actionId,
             confirmed ? ApprovalAuditCatalog.Confirmed : ApprovalAuditCatalog.Declined, cancellationToken);
         return confirmed;
@@ -93,34 +100,45 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     public async Task ShowMessageSendPreviewAsync(MessageSendPreview preview, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (Dispatcher.CheckAccess()) ShowMessageSendPreview(preview, cancellationToken);
-        else await Dispatcher.InvokeAsync(() => ShowMessageSendPreview(preview, cancellationToken)).Task;
-        cancellationToken.ThrowIfCancellationRequested();
-    }
-
-    private void ShowMessageSendPreview(MessageSendPreview preview, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var dialog = new MessageSendPreviewWindow(preview) { Owner = this };
-        using var registration = cancellationToken.Register(() => Dispatcher.BeginInvoke(new Action(() =>
+        var application = preview.ApplicationId switch
         {
-            if (dialog.IsVisible) dialog.Close();
-        })));
-        dialog.Loaded += (_, _) =>
-        {
-            if (cancellationToken.IsCancellationRequested) dialog.Close();
+            "wechat" => "微信",
+            "qq" => "QQ",
+            _ => "未知应用"
         };
-        dialog.ShowDialog();
+        var attachments = preview.Attachments.Count == 0
+            ? "无"
+            : string.Join(Environment.NewLine, preview.Attachments.Select(attachment =>
+                $"{attachment.DisplayName} · {attachment.SizeBytes} 字节 · SHA-256 {attachment.Sha256}"));
+        var details = $"应用：{application} ({preview.ApplicationId}){Environment.NewLine}收件人显示名：{preview.Recipient}{Environment.NewLine}身份状态：客户端账号身份尚未核验{Environment.NewLine}{Environment.NewLine}正文：{Environment.NewLine}{preview.Text}{Environment.NewLine}{Environment.NewLine}附件：{Environment.NewLine}{attachments}{Environment.NewLine}{Environment.NewLine}这里只显示预览；本版本没有微信/QQ发送适配器。";
+        var choice = await WaitForApprovalAsync("消息发送预览", details, ApprovalInboxKind.MessagePreview,
+            canRunDotNetTests: false, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
+        if (choice != ApprovalInboxChoice.DismissPreview)
+            throw new InvalidOperationException("消息预览没有进入待办列表；本次操作已停止。");
     }
 
     public async Task<CodeTaskReviewDecision> ReviewAsync(string projectPath, string workspacePath, string diff,
         string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
     {
-        var decision = !Dispatcher.CheckAccess()
-            ? await Dispatcher.InvokeAsync(() => ShowCodeTaskReview(projectPath, workspacePath, diff,
-                dotNetTestTarget, commandPreview, cancellationToken)).Task
-            : ShowCodeTaskReview(projectPath, workspacePath, diff, dotNetTestTarget, commandPreview, cancellationToken);
+        var canRunDotNetTests = !string.IsNullOrWhiteSpace(dotNetTestTarget)
+            && !string.IsNullOrWhiteSpace(commandPreview);
+        var details = $"原项目（只读）：{projectPath}{Environment.NewLine}隔离工作区：{workspacePath}{Environment.NewLine}"
+            + $"{Environment.NewLine}差异预览：{Environment.NewLine}{diff}{Environment.NewLine}{Environment.NewLine}"
+            + (canRunDotNetTests
+                ? $"固定验证命令：{Environment.NewLine}{commandPreview}{Environment.NewLine}{Environment.NewLine}依赖还原可能联网下载包；构建目标和测试代码可能读写其他文件、启动子进程或联网。批准前请确认信任该项目。"
+                : "没有唯一的根目录 .sln/.slnx/.csproj 或 dotnet.exe；固定测试选项不可用。关闭/保留会维持补丁隔离。")
+            + $"{Environment.NewLine}{Environment.NewLine}只有明确选择“批准应用补丁”才会修改原项目；应用前会再次核验快照。";
+        var choice = await WaitForApprovalAsync("审阅隔离编程补丁", details,
+            ApprovalInboxKind.CodeReview, canRunDotNetTests, cancellationToken);
+        if (choice == ApprovalInboxChoice.Unavailable)
+            throw new InvalidOperationException("任务中心的审批队列已满；补丁仍保留在隔离工作区，没有运行测试或应用。");
+        var decision = choice switch
+        {
+            ApprovalInboxChoice.RunDotNetTests => CodeTaskReviewDecision.RunDotNetTests,
+            ApprovalInboxChoice.ApplyPatch => CodeTaskReviewDecision.ApplyPatchToProject,
+            _ => CodeTaskReviewDecision.KeepPatch
+        };
         if (decision == CodeTaskReviewDecision.RunDotNetTests)
             await _runtime.RecordApprovalAuditAsync(ApprovalAuditCatalog.CodeTaskAction,
                 ApprovalAuditCatalog.RunDotNetTests, cancellationToken);
@@ -130,25 +148,60 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         return decision;
     }
 
-    private CodeTaskReviewDecision ShowCodeTaskReview(string projectPath, string workspacePath, string diff,
-        string? dotNetTestTarget, string? commandPreview, CancellationToken cancellationToken)
+    private async Task<ApprovalInboxChoice> WaitForApprovalAsync(string title, string details,
+        ApprovalInboxKind kind, bool canRunDotNetTests, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var dialog = new CodeTaskReviewWindow(projectPath, workspacePath, diff, dotNetTestTarget, commandPreview)
+        Task<ApprovalInboxChoice> pending;
+        try
         {
-            Owner = this
-        };
-        using var registration = cancellationToken.Register(() => Dispatcher.BeginInvoke(new Action(() =>
+            pending = _approvalInbox.RequestAsync(title, details, kind, canRunDotNetTests, cancellationToken);
+        }
+        catch (InvalidOperationException)
         {
-            if (dialog.IsVisible) dialog.Close();
-        })));
-        dialog.Loaded += (_, _) =>
+            NotifyApprovalUnavailable();
+            return ApprovalInboxChoice.Unavailable;
+        }
+        NotifyPendingApproval();
+        return await pending;
+    }
+
+    private void NotifyPendingApproval()
+    {
+        void Notify()
         {
-            if (cancellationToken.IsCancellationRequested) dialog.Close();
-        };
-        dialog.ShowDialog();
-        cancellationToken.ThrowIfCancellationRequested();
-        return dialog.Decision;
+            if (_exiting) return;
+            ShowTrayNotice("有待处理确认；小K没有自动批准。打开任务中心查看。");
+            _taskCenterWindow?.RefreshImmediately();
+        }
+
+        if (Dispatcher.CheckAccess()) Notify();
+        else if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+        {
+            try { Dispatcher.BeginInvoke(new Action(Notify)); }
+            catch (InvalidOperationException) { }
+        }
+    }
+
+    private void NotifyApprovalUnavailable()
+    {
+        void Notify()
+        {
+            if (!_exiting) ShowTrayNotice("待处理确认已达上限；本次操作没有获批。请先处理任务中心中的待办。");
+        }
+
+        if (Dispatcher.CheckAccess()) Notify();
+        else if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+        {
+            try { Dispatcher.BeginInvoke(new Action(Notify)); }
+            catch (InvalidOperationException) { }
+        }
+    }
+
+    private void OnApprovalInboxChanged()
+    {
+        if (_exiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        _taskCenterWindow?.RefreshImmediately();
     }
 
     private async void Run_Click(object sender, RoutedEventArgs e) => await RunRequestAsync();
@@ -456,12 +509,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         var request = RequestBox.Text;
         if (string.IsNullOrWhiteSpace(request)) return;
         RequestBox.Clear();
-        _userTaskRunning = true;
-        OutputText.Text = "正在处理；可随时取消。聊天内容和模型回答仅保留在内存中。";
-        SetStatus("任务运行中");
-        SetButtonsEnabled(false);
-        try { OutputText.Text = await _runtime.SubmitAsync(request); }
-        finally { FinishUserTask(); }
+        await QueueUserTaskFromUiAsync(request);
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -471,26 +519,59 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             OutputText.Text = "麦克风仍在采集。请先结束或丢弃录音，再打开项目。";
             return;
         }
-        _userTaskRunning = true;
-        OutputText.Text = "正在打开项目；可随时取消。";
-        SetStatus("任务运行中");
-        SetButtonsEnabled(false);
-        try { OutputText.Text = await _runtime.SubmitAsync("打开小K项目"); }
-        finally { FinishUserTask(); }
+        await QueueUserTaskFromUiAsync("打开小K项目");
     }
 
-    private void FinishUserTask()
+    private async Task QueueUserTaskFromUiAsync(string request)
     {
-        _userTaskRunning = false;
-        SetStatus(_runtime.VoiceStatus);
-        SetButtonsEnabled(true);
-        if (_pendingNoticeAnalyses.Count == 0) return;
+        var admission = await _runtime.QueueUserTaskAsync(request);
+        if (!admission.Accepted)
+        {
+            OutputText.Text = admission.Message;
+            SetStatus("任务未排队");
+            return;
+        }
 
-        var analyses = _pendingNoticeAnalyses.ToArray();
-        _pendingNoticeAnalyses.Clear();
-        OutputText.Text += Environment.NewLine + Environment.NewLine
-            + "后台私聊通知分析（只基于各条通知中可见的文字）：" + Environment.NewLine
-            + string.Join(Environment.NewLine + Environment.NewLine, analyses.Select(FormatNoticeAnalysis));
+        _userTaskRunning = _runtime.PendingUserTaskCount > 0;
+        OutputText.Text = admission.Message;
+        SetStatus("任务已排队");
+        CancelButton.IsEnabled = _runtime.HasActiveUserTask && !_cancelInProgress;
+    }
+
+    private void OnUserTaskStateChanged(Guid taskId, TaskLifecycleState state)
+    {
+        if (_exiting || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            try { Dispatcher.BeginInvoke(new Action(() => OnUserTaskStateChanged(taskId, state))); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+
+        _userTaskRunning = _runtime.PendingUserTaskCount > 0;
+        CancelButton.IsEnabled = _runtime.HasActiveUserTask && !_cancelInProgress;
+        if (state is TaskLifecycleState.Queued or TaskLifecycleState.Planning or TaskLifecycleState.Running)
+        {
+            SetStatus(state switch
+            {
+                TaskLifecycleState.Queued => $"任务排队中（{_runtime.PendingUserTaskCount}）",
+                TaskLifecycleState.Planning => "任务准备中",
+                _ => "任务运行中"
+            });
+            return;
+        }
+
+        if (state is TaskLifecycleState.Failed or TaskLifecycleState.OutcomeUncertain)
+            ShowTrayNotice("一个任务未能完成或结果待核对；请打开任务中心查看原因。");
+        if (!_userTaskRunning) SetStatus(_runtime.VoiceStatus);
+        else SetStatus($"任务队列中（{_runtime.PendingUserTaskCount}）");
+        if (!_userTaskRunning && _pendingNoticeAnalyses.Count > 0)
+        {
+            var analyses = _pendingNoticeAnalyses.ToArray();
+            _pendingNoticeAnalyses.Clear();
+            OutputText.Text = "后台私聊通知分析（只基于各条通知中可见的文字）：" + Environment.NewLine
+                + string.Join(Environment.NewLine + Environment.NewLine, analyses.Select(FormatNoticeAnalysis));
+        }
     }
 
     private void OnPrivateNoticeAccepted(MessageNotice notice, CancellationToken monitoringSession)
@@ -590,7 +671,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         finally
         {
             _cancelInProgress = false;
-            CancelButton.IsEnabled = !_exiting;
+            CancelButton.IsEnabled = !_exiting && _runtime.HasActiveUserTask;
             if (!_speechProcessing) SpeechButton.IsEnabled = true;
         }
     }
@@ -682,7 +763,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             return Task.CompletedTask;
         }
         if (!IsVisible || !_expanded) RestoreFromTray();
-        var window = new TaskHistoryWindow(_runtime.GetRecentTaskHistoryAsync) { Owner = this };
+        var window = new TaskHistoryWindow(_runtime.GetRecentTaskHistoryAsync, _runtime.CancelTask,
+            _approvalInbox.GetPending, _approvalInbox.Resolve) { Owner = this };
         _taskCenterWindow = window;
         window.Closed += (_, _) =>
         {
@@ -1195,6 +1277,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         _notificationMonitor.PrivateNoticeAccepted -= OnPrivateNoticeAccepted;
         _runtime.SpeechCaptureMaximumDurationReached -= OnSpeechCaptureMaximumDurationReached;
         _runtime.PrivateNoticeAnalysisCompleted -= OnPrivateNoticeAnalysisCompleted;
+        _runtime.UserTaskStateChanged -= OnUserTaskStateChanged;
+        _approvalInbox.Changed -= OnApprovalInboxChanged;
         if (_source is not null)
         {
             if (_hotkeyRegistered) UnregisterHotKey(_source.Handle, 1901);
