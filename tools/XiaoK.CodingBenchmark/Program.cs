@@ -310,7 +310,7 @@ internal static class Program
     private static string BuildPipelineVersion(bool enableThinking, string category)
     {
         var pipelineVersion = enableThinking ? PipelineVersionThinking : PipelineVersionNoThinking;
-        if (category != "R") pipelineVersion += "-selection-schema-literal-feedback-v84-unique-exact-text-patch-v77-normalized-alias-guard-v79-preserve-match-semantics-v80";
+        if (category != "R") pipelineVersion += "-selection-schema-literal-feedback-v84-unique-exact-text-patch-v77-normalized-alias-guard-v79-preserve-match-semantics-v80-authorized-correction-literals-v81-omit-rejected-literal-context-v82";
         if (category == "F") pipelineVersion += "-task-scoped-fixture-v85";
         return pipelineVersion;
     }

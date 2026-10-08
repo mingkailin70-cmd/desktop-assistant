@@ -1708,7 +1708,7 @@ static async Task CheckInvalidEditGetsOneBoundedCorrectionAsync(string root)
 
     var prompts = inference.Prompts.ToArray();
     var systemPrompts = inference.SystemPrompts.ToArray();
-    var correctionPrompt = prompts.SingleOrDefault(prompt => prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+    var correctionPrompt = prompts.SingleOrDefault(prompt => prompt.Contains("上次编辑纠正上下文", StringComparison.Ordinal));
     var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
         && inference.CallCount == 2 && review.CallCount == 1,
@@ -1757,22 +1757,29 @@ static async Task CheckAdditiveMappingPatchGuardAsync(string root)
         var review = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
         var result = await NewAgent(inference).ExecuteAsync(project, workspaceRoot, instruction,
             CancellationToken.None, review);
-        var correctionPrompt = inference.Prompts.SingleOrDefault(prompt => prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+        var correctionPrompt = inference.Prompts.SingleOrDefault(prompt => prompt.Contains("上次编辑纠正上下文", StringComparison.Ordinal));
         var workspace = Path.Combine(Directory.GetDirectories(workspaceRoot).Single(), "workspace", "Sample.cs");
         var expected = source.Replace("phrase == \"微信\"", "phrase == \"微信\" || phrase == \"微信电脑版\"", StringComparison.Ordinal);
+        var hasOmittedPriorPatchNotice = correctionPrompt?.Contains("上次补丁已省略", StringComparison.Ordinal) == true;
+        var includesRejectedLiteral = correctionPrompt?.Contains("微信十字版", StringComparison.Ordinal) == true;
+        var hasWhitelistLabel = correctionPrompt?.Contains("唯一允许新增的映射字面量白名单", StringComparison.Ordinal) == true;
+        var hasExactWhitelist = correctionPrompt?.Contains("[\"wechat\",\"微信电脑版\"]", StringComparison.Ordinal) == true;
+        var hasSystemWhitelistRule = inference.SystemPrompts.Any(prompt => prompt.Contains(
+            "只能新增其中明确列出的值；被拒绝的字面量不得再写入补丁", StringComparison.Ordinal));
         var rejectedLiteralIsClearlyUntrusted = caseName != "wrong-literal"
-            || (correctionPrompt?.Contains("被拒绝的字符串字面量（不可信数据", StringComparison.Ordinal) == true
-                && correctionPrompt.Contains("微信十字版", StringComparison.Ordinal));
+            || (hasOmittedPriorPatchNotice && !includesRejectedLiteral && hasWhitelistLabel
+                && hasExactWhitelist && hasSystemWhitelistRule);
         Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval
             && inference.CallCount == 2 && review.CallCount == 1
             && correctionPrompt?.Contains(expectedReason, StringComparison.Ordinal) == true
             && rejectedLiteralIsClearlyUntrusted
             && File.ReadAllText(workspace) == expected
             && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
-            $"{caseName} 的错误映射补丁没有经一次受限纠正后保留为可审阅隔离补丁：{result.Summary}");
+            $"{caseName} 的错误映射补丁没有经一次受限纠正后保留为可审阅隔离补丁：{result.Summary}; " +
+            $"literal-prompt-checks={hasOmittedPriorPatchNotice}/{includesRejectedLiteral}/{hasWhitelistLabel}/{hasExactWhitelist}/{hasSystemWhitelistRule}");
     }
 
-    await VerifyCorrectionAsync("wrong-literal", wrongAliasPatch, "用户请求未指定的字符串值");
+    await VerifyCorrectionAsync("wrong-literal", wrongAliasPatch, "新增别名补丁含有未授权映射字面量");
     await VerifyCorrectionAsync("lost-return", removedReturnPatch, "删除或改写了原有 return");
 
     const string missingAliasPatch = "{\"edits\":[{\"path\":\"Sample.cs\",\"startLine\":5,\"endLine\":8,\"replacementLines\":[\"        if (phrase == \\\"微信\\\")\",\"        {\",\"            return \\\"wechat\\\";\",\"        }\"]}]}";
@@ -1783,7 +1790,7 @@ static async Task CheckAdditiveMappingPatchGuardAsync(string root)
     var missingResult = await NewAgent(missingInference).ExecuteAsync(missingProject,
         missingWorkspaceRoot, instruction, CancellationToken.None, missingReview);
     var missingCorrectionPrompt = missingInference.Prompts.SingleOrDefault(prompt =>
-        prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+        prompt.Contains("上次编辑纠正上下文", StringComparison.Ordinal));
     var missingWorkspace = Path.Combine(Directory.GetDirectories(missingWorkspaceRoot).Single(),
         "workspace", "Sample.cs");
     Require(missingResult.Success && missingResult.FinalState == TaskLifecycleState.AwaitingApproval
@@ -1843,7 +1850,7 @@ static async Task CheckAdditiveMappingPatchGuardAsync(string root)
     var normalizedRejectResult = await NewAgent(normalizedRejectInference).ExecuteAsync(normalizedRejectProject,
         normalizedRejectWorkspace, normalizedInstruction, CancellationToken.None, normalizedRejectReview);
     var normalizedRejectPrompt = normalizedRejectInference.Prompts.Single(prompt =>
-        prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+        prompt.Contains("上次编辑纠正上下文", StringComparison.Ordinal));
     var normalizedRejectOutput = File.ReadAllText(Path.Combine(Directory.GetDirectories(normalizedRejectWorkspace).Single(),
         "workspace", "Sample.cs"));
     Require(normalizedRejectResult.Success && normalizedRejectInference.CallCount == 2
