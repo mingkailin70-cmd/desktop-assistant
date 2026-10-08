@@ -4,7 +4,7 @@
 
 固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件115项通过、0项跳过；桌面体验专项61项通过。修复提交`ae51d32`已推送，GitHub Actions [Build #301](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37798191625)成功；版本提交`de3783c`已推送，GitHub Actions [Build #302](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37798471086)成功。
 
-自包含签名MSIX位于`artifacts\msix-validation\da53d9cc526c4716b35e5752a545dc25\XiaoK-signed-validation.msix`，124,642,458字节，SHA-256 `E4F698A8FF824F06F27D5F9528ED142DC8B83B35A637E7632167DC547099BDA2`。SignTool验签0警告、0错误；证书已在`LocalMachine\TrustedPeople`，本次没有修改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.64.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装脚本确认没有启动Host；当前仍无`XiaoK.Host`进程。真实任务路由、普通用户界面和真实文件操作仍待安装版验收。
+自包含签名MSIX位于`artifacts\msix-validation\da53d9cc526c4716b35e5752a545dc25\XiaoK-signed-validation.msix`，124,642,458字节，SHA-256 `E4F698A8FF824F06F27D5F9528ED142DC8B83B35A637E7632167DC547099BDA2`。SignTool验签0警告、0错误；证书已在`LocalMachine\TrustedPeople`，本次没有修改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.64.0_neutral__g0ndt6g65c8pe`，状态`Ok`。安装脚本本身没有启动Host；随后从安装目录以隔离诊断配置隐藏启动，窗口句柄均不可见，未启用模型、麦克风、通知或任务，并经应用注册的正常退出消息关闭。当前无`XiaoK.Host`进程。真实任务路由、普通用户界面和真实文件操作仍待安装版验收。诊断配置留在系统Temp下的独立目录，未访问常规用户数据。
 
 ## v0.1.63.0 R3单文件回收站与SQLite v5更新（2026-10-08）
 
