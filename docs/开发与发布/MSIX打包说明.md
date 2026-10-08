@@ -2,7 +2,7 @@
 
 ## v0.1.48.0 R3静态公开网页读取源码验证包（2026-10-08）
 
-固定SDK Release构建0警告、0错误；网页策略/ToolBroker定向检查通过，独立无头Edge静态夹具确认脚本不运行且回环子请求被阻止；完整Windows安全套件105项通过、0项跳过。自包含包只带`win32_x64` Playwright Node驱动，使用系统Edge Stable。签名MSIX位于 `artifacts\msix-validation\c34a70958bce482aba5df188d7e25392\XiaoK-signed-validation.msix`，大小124,595,332字节，SHA-256 `0622412BE9B86EC764E4B9A6CF24F38A730B1FBF0EC4A2DF9BA645287B70018F`；SignTool验签0警告、0错误，签名者`CN=XiaoK Local Development`，证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。未安装或启动该包，证书信任未改变。本机首次公网DNS查询返回`HostNotFound`，随后同一读取器成功获取`example.com`静态正文156字符；该单一站点样本不代表完整网站验收。当前账户仍运行旧包，安装版窗口身份未能唯一核实。GitHub Actions结果将在推送后补记。
+固定SDK Release构建0警告、0错误；网页策略/ToolBroker定向检查通过，独立无头Edge静态夹具确认脚本不运行且回环子请求被阻止；完整Windows安全套件105项通过、0项跳过。自包含包只带`win32_x64` Playwright Node驱动，使用系统Edge Stable。签名MSIX位于 `artifacts\msix-validation\c34a70958bce482aba5df188d7e25392\XiaoK-signed-validation.msix`，大小124,595,332字节，SHA-256 `0622412BE9B86EC764E4B9A6CF24F38A730B1FBF0EC4A2DF9BA645287B70018F`；SignTool验签0警告、0错误，签名者`CN=XiaoK Local Development`，证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。未安装或启动该包，证书信任未改变。本机首次公网DNS查询返回`HostNotFound`，随后同一读取器成功获取`example.com`静态正文156字符；该单一站点样本不代表完整网站验收。当前账户仍运行旧包，安装版窗口身份未能唯一核实。GitHub Actions [Build #256](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37736436369) 对提交 `e65cad1` 执行成功。
 
 ## v0.1.47.0 R3后台同目录重命名源码验证包（2026-10-08）
 
