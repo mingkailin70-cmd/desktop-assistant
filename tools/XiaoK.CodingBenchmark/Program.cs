@@ -20,6 +20,16 @@ internal static class Program
     private const int EvaluationContextTokens = 6144;
     private const string PipelineVersionNoThinking = "code-agent-inspect-source-rendered-mappings-v54-notice-policy-facts-v56-send-code-broker-facts-v70-deterministic-source-guards-v52-compact-correction-context-v50-source-condition-outcome-coverage-v48-ordered-pre-call-guards-v47-source-mapping-target-coverage-v46-topic-enum-coverage-v45-dynamic-topic-counts-v44-citation-line-grounding-v43-compact-claims-v42-completeness-check-v41-json-schema-v40-v38-v37-inspect-operation-gates-v36-compact-line-citations-v35-structured-claim-citations-v34-specific-citation-feedback-v33-fixed-source-reference-line-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-no-thinking-unique-exact-match-anchor-fallback-v71-no-startLine-preferred-prompt-v72-program-numbered-line-range-edits-v73-preserve-branch-behavior-v74-exact-request-and-json-code-v75-low-temperature-seed-42-v76";
     private const string PipelineVersionThinking = "code-agent-inspect-source-rendered-mappings-v55-notice-policy-facts-v57-send-code-broker-facts-v71-deterministic-source-guards-v53-compact-correction-context-v51-source-condition-outcome-coverage-v49-ordered-pre-call-guards-v47-source-mapping-target-coverage-v46-topic-enum-coverage-v45-dynamic-topic-counts-v44-citation-line-grounding-v43-compact-claims-v42-completeness-check-v41-json-schema-v40-v38-v37-inspect-operation-gates-v36-compact-line-citations-v35-structured-claim-citations-v34-specific-citation-feedback-v33-fixed-source-reference-line-v31-precise-claim-scope-v30-bounded-source-citation-correction-v29-absolute-line-citations-validated-v28-explicit-target-priority-cross-separator-selection-line-anchored-exact-edits-configured-app-id-alias-safety-decision-branch-context-anchors-bounded-validation-correction-extra-semantic-location-newline-normalized-target-path-noise-contained-nuget-paths-6144-unique-exact-match-anchor-fallback-v71-no-startLine-preferred-prompt-v72-program-numbered-line-range-edits-v73-preserve-branch-behavior-v74-exact-request-and-json-code-v75-low-temperature-seed-42-v76";
+    private static readonly string[] PipelineArtifactNames =
+    [
+        "XiaoK.Adapters.Windows.dll",
+        "XiaoK.CodingBenchmark.dll",
+        "XiaoK.CodingBenchmark.deps.json",
+        "XiaoK.CodingBenchmark.runtimeconfig.json",
+        "XiaoK.Core.dll",
+        "XiaoK.Inference.dll",
+        "XiaoK.Tools.dll"
+    ];
     private const string V3ManifestSha256 = "8a057c1fa935e0b2200cfa89fdce8328567b1a737e50fe2adf25e9b2ebf68ae4";
     private const string V4ManifestSha256 = "9d5e09034231d119895fcc029b0fd6119d8993e24cb5fe116c4de88322208d5f";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -31,6 +41,15 @@ internal static class Program
         try
         {
             var options = ParseArguments(args);
+
+            if (options.ShowPipelineId)
+            {
+                var buildSha256 = ComputePipelineBuildSha256();
+                Console.WriteLine($"评测代码程序集集合 SHA-256：{buildSha256}");
+                foreach (var category in new[] { "R", "S", "M", "F" })
+                    Console.WriteLine($"{category}：{BuildPipelineVersion(options.EnableThinking, category)}");
+                return 0;
+            }
 
             if (Console.IsInputRedirected)
             {
@@ -52,15 +71,18 @@ internal static class Program
             if (!string.Equals(task.Category, taskId[..1], StringComparison.Ordinal))
                 throw new InvalidDataException("题目类别与 ID 前缀不一致。");
 
+            var pipelineBuildSha256 = ComputePipelineBuildSha256();
+            var pipelineVersion = BuildPipelineVersion(options.EnableThinking, task.Category);
             var baselineCommit = RequireGitCommit(manifest.BaselineCommit);
             await EnsureGitCommitExistsAsync(repoRoot, baselineCommit);
             var modelId = options.ModelId;
             var model = ResolveModel(repoRoot, modelId);
-            var pipelineVersion = options.EnableThinking ? PipelineVersionThinking : PipelineVersionNoThinking;
-            if (task.Category != "R") pipelineVersion += "-selection-schema-literal-feedback-v84";
-            if (task.Category == "F") pipelineVersion += "-task-scoped-fixture-v85";
+            var runtimeFileSetSha256 = ComputeLockedRuntimeFileSetSha256(model.RuntimeFiles);
             var resultFile = GetAggregateResultPath(manifest.Version);
-            EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision, pipelineVersion, taskId);
+            EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision,
+                model.ModelSha256, model.RuntimeVersion, runtimeFileSetSha256,
+                pipelineVersion, pipelineBuildSha256, taskId);
+            Console.WriteLine($"评测代码程序集集合 SHA-256：{pipelineBuildSha256}");
             var gpuBaseline = await ReadGpuSnapshotAsync();
             if (gpuBaseline.FreeMiB < model.MinimumInitialGpuFreeMiB)
                 throw new InvalidOperationException($"启动前显存空闲 {gpuBaseline.FreeMiB} MiB，低于该模型预算 {model.ExpectedGpuMemoryMiB:N0} MiB 加 1,024 MiB 余量；本次未启动。");
@@ -186,7 +208,8 @@ internal static class Program
                 var reviewerPassed = automaticallySafe && string.Equals(Console.ReadLine()?.Trim(), "y", StringComparison.OrdinalIgnoreCase);
                 if (!automaticallySafe) _ = Console.ReadLine();
 
-                var aggregate = new AggregateResult(3, pipelineVersion, responseDiagnostics.Count,
+                var aggregate = new AggregateResult(4, pipelineVersion, runtimeFileSetSha256, pipelineBuildSha256,
+                    responseDiagnostics.Count,
                     responseDiagnostics.Sum(item => item.PromptTokens), responseDiagnostics.Sum(item => item.CompletionTokens),
                     responseDiagnostics.Count(item => item.ContentCharacters == 0),
                     string.Join(",", responseDiagnostics.Select(item => item.FinishReason ?? "unknown")),
@@ -243,6 +266,7 @@ internal static class Program
         string? taskId = null;
         var modelId = "qwen3.5-4b-q4km";
         var enableThinking = false;
+        var showPipelineId = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         for (var index = 0; index < args.Length; index++)
@@ -252,6 +276,11 @@ internal static class Program
             if (option == "--enable-thinking")
             {
                 enableThinking = true;
+                continue;
+            }
+            if (option == "--show-pipeline-id")
+            {
+                showPipelineId = true;
                 continue;
             }
 
@@ -270,9 +299,46 @@ internal static class Program
             }
         }
 
+        if (showPipelineId)
+            return new(repositoryRoot ?? string.Empty, datasetVersion ?? string.Empty, taskId ?? string.Empty,
+                modelId, enableThinking, true);
         if (repositoryRoot is null || datasetVersion is null || taskId is null)
             throw new ArgumentException("缺少必需选项 --repo、--dataset 或 --task。");
-        return new(repositoryRoot, datasetVersion, taskId, modelId, enableThinking);
+        return new(repositoryRoot, datasetVersion, taskId, modelId, enableThinking, false);
+    }
+
+    private static string BuildPipelineVersion(bool enableThinking, string category)
+    {
+        var pipelineVersion = enableThinking ? PipelineVersionThinking : PipelineVersionNoThinking;
+        if (category != "R") pipelineVersion += "-selection-schema-literal-feedback-v84";
+        if (category == "F") pipelineVersion += "-task-scoped-fixture-v85";
+        return pipelineVersion;
+    }
+
+    private static string ComputePipelineBuildSha256()
+    {
+        using var aggregateHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var fileName in PipelineArtifactNames.Order(StringComparer.Ordinal))
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, fileName);
+            if (!File.Exists(path))
+                throw new InvalidDataException($"评测管线程序集缺失：{fileName}；拒绝生成不完整的管线身份。");
+            var component = Encoding.UTF8.GetBytes($"{fileName}\0{Sha256File(path)}\n");
+            aggregateHash.AppendData(component);
+        }
+        return Convert.ToHexString(aggregateHash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static string ComputeLockedRuntimeFileSetSha256(IReadOnlyList<RuntimeFile> runtimeFiles)
+    {
+        using var aggregateHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var file in runtimeFiles.OrderBy(item => item.Name, StringComparer.Ordinal))
+        {
+            var sha256 = RequireSha256(file.Sha256, "运行时文件 SHA-256");
+            var component = Encoding.UTF8.GetBytes($"{file.Name}\0{file.SizeBytes}\0{sha256}\n");
+            aggregateHash.AppendData(component);
+        }
+        return Convert.ToHexString(aggregateHash.GetHashAndReset()).ToLowerInvariant();
     }
 
     private static BenchmarkTask ReadTask(string datasetRoot, string taskId, DatasetLock datasetLock)
@@ -612,7 +678,8 @@ internal static class Program
     private static void AppendAggregate(string path, AggregateResult result)
     {
         EnsureTaskNotAlreadyScored(path, result.DatasetVersion, result.BaselineCommit, result.ModelId, result.ModelRevision,
-            result.PipelineVersion ?? "", result.TaskId);
+            result.ModelSha256, result.RuntimeVersion, result.RuntimeFileSetSha256 ?? "", result.PipelineVersion ?? "",
+            result.PipelineBuildSha256 ?? "", result.TaskId);
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(result, JsonOptions) + "\n");
         using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
         stream.Write(bytes);
@@ -620,7 +687,8 @@ internal static class Program
     }
 
     private static void EnsureTaskNotAlreadyScored(string path, string datasetVersion, string baselineCommit,
-        string modelId, string modelRevision, string pipelineVersion, string taskId)
+        string modelId, string modelRevision, string modelSha256, string runtimeVersion, string runtimeFileSetSha256,
+        string pipelineVersion, string pipelineBuildSha256, string taskId)
     {
         if (!File.Exists(path)) return;
         foreach (var line in File.ReadLines(path, Encoding.UTF8))
@@ -630,7 +698,10 @@ internal static class Program
                 ?? throw new InvalidDataException("已有评分摘要包含无效 JSON；拒绝追加，避免重复或覆盖评分。");
             if (existing.DatasetVersion == datasetVersion && existing.BaselineCommit == baselineCommit
                 && existing.ModelId == modelId
-                && existing.ModelRevision == modelRevision && existing.PipelineVersion == pipelineVersion
+                && existing.ModelRevision == modelRevision && existing.ModelSha256 == modelSha256
+                && existing.RuntimeVersion == runtimeVersion && existing.RuntimeFileSetSha256 == runtimeFileSetSha256
+                && existing.PipelineVersion == pipelineVersion
+                && existing.PipelineBuildSha256 == pipelineBuildSha256
                 && existing.TaskId == taskId)
                 throw new InvalidOperationException($"题目 {taskId} 已在此模型 revision 和固定基线上评分；拒绝重复运行或覆盖评分。");
         }
@@ -735,7 +806,7 @@ internal static class Program
 
     private sealed record GpuSnapshot(long FreeMiB, long UsedMiB);
     private sealed record BenchmarkOptions(string RepositoryRoot, string DatasetVersion, string TaskId,
-        string ModelId, bool EnableThinking);
+        string ModelId, bool EnableThinking, bool ShowPipelineId);
     private sealed record BenchmarkTask(string Id, string Category, string Acceptance, string Grading,
         bool NetworkAllowed, bool ExternalSideEffectsAllowed, IReadOnlyList<string> TargetFiles, string Prompt);
     private sealed record ReviewKey(string Expected, string Evidence);
@@ -759,7 +830,8 @@ internal static class Program
         bool EvaluationCandidate);
     private sealed record RuntimeManifest(int SchemaVersion, string RuntimeVersion, string RuntimeSha256, string ModelId,
         string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB);
-    private sealed record AggregateResult(int SchemaVersion, string? PipelineVersion, int ResponseCount,
+    private sealed record AggregateResult(int SchemaVersion, string? PipelineVersion,
+        string? RuntimeFileSetSha256, string? PipelineBuildSha256, int ResponseCount,
         int PromptTokens, int CompletionTokens, int EmptyContentResponses, string? FinishReasons,
         string RunId, DateTimeOffset FinishedAtUtc,
         string DatasetVersion, string BaselineCommit, string TaskId, string Category, string ModelId,
