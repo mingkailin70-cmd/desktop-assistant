@@ -21,6 +21,7 @@ public static class TaskHistoryDisplayPolicy
         "file-classify" => "用户指定的本机目录（只读）",
         "file-content-search" => "用户指定的文本查询（只返回路径与行号）",
         "web-read" => "用户提供的公开 HTTPS 页面",
+        "web-read-dynamic" => "用户提供的公开 HTTPS 页面（启用内联脚本，只读提取）",
         "web-download" => "用户提供的公开 HTTPS 文件与小K导出目录",
         "analyze" => "用户提供的单条消息（本地处理）",
         "draft" => "用户提供的单条消息（本地草拟）",

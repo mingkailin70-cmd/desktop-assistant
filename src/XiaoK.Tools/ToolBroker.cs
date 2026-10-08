@@ -15,12 +15,14 @@ public sealed class ToolBroker
     private readonly string _codeProjectRoot;
     private readonly string _codeWorkspaceRoot;
     private readonly IPublicWebPageReader? _publicWebPageReader;
+    private readonly IDynamicPublicWebPageReader? _dynamicPublicWebPageReader;
     private readonly IPublicFileDownloader? _publicFileDownloader;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
         IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot,
         IMessageSendPreviewPresenter? messageSendPreview = null, IPublicWebPageReader? publicWebPageReader = null,
-        IPublicFileDownloader? publicFileDownloader = null)
+        IPublicFileDownloader? publicFileDownloader = null,
+        IDynamicPublicWebPageReader? dynamicPublicWebPageReader = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -31,6 +33,7 @@ public sealed class ToolBroker
         _codeProjectRoot = codeProjectRoot;
         _codeWorkspaceRoot = codeWorkspaceRoot;
         _publicWebPageReader = publicWebPageReader;
+        _dynamicPublicWebPageReader = dynamicPublicWebPageReader;
         _publicFileDownloader = publicFileDownloader;
     }
 
@@ -66,6 +69,9 @@ public sealed class ToolBroker
             "browser.read.public.v1" => _publicWebPageReader is null
                 ? new(false, "独立网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
                 : await _publicWebPageReader.ReadPageAsync(proposal.Arguments["url"], cancellationToken),
+            "browser.read.dynamic.public.v1" => _dynamicPublicWebPageReader is null
+                ? new(false, "独立动态网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
+                : await _dynamicPublicWebPageReader.ReadDynamicPageAsync(proposal.Arguments["url"], cancellationToken),
             "browser.download.public.v1" => await DownloadPublicFileAsync(proposal, cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
@@ -109,6 +115,7 @@ public sealed class ToolBroker
             "file.archive.single.v1" => ValidateFileArchive(proposal),
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
+            "browser.read.dynamic.public.v1" => ValidateDynamicPublicWebPageRead(proposal),
             "browser.download.public.v1" => ValidatePublicFileDownload(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
@@ -327,6 +334,14 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("网页读取只接受用户明确提供的 HTTPS 公网地址；文件、内网和其他协议不会交给浏览器。");
 
+    private static ToolResult? ValidateDynamicPublicWebPageRead(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("url", out var url)
+        && PublicWebUrlPolicy.IsAllowedUrlShape(url)
+        && proposal.Target == "public-dynamic-web-page"
+            ? null
+            : InvalidProposal("动态网页读取只接受用户明确提供的 HTTPS 公网地址；文件、内网和其他协议不会交给浏览器。");
+
     private static ToolResult? ValidatePublicFileDownload(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
         && proposal.Arguments.TryGetValue("url", out var url)
@@ -415,6 +430,7 @@ public sealed class ToolBroker
         "file.archive.single.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
+        "browser.read.dynamic.public.v1" => ToolPrecondition.UserProvidedDynamicPublicWebPageUrl,
         "browser.download.public.v1" => ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
         "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
@@ -436,6 +452,7 @@ public sealed class ToolBroker
         "file.archive.single.v1" => ToolExpectedOutcome.FileArchivedToConfiguredExport,
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
+        "browser.read.dynamic.public.v1" => ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned,
         "browser.download.public.v1" => ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,

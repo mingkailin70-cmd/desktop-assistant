@@ -24,7 +24,8 @@ public enum ToolPrecondition
     UserProvidedPublicWebPageUrl = 256,
     ConfiguredClassificationDirectory = 512,
     ConfiguredMoveDestination = 1024,
-    UserProvidedPublicFileUrl = 2048
+    UserProvidedPublicFileUrl = 2048,
+    UserProvidedDynamicPublicWebPageUrl = 4096
 }
 
 public enum ToolExpectedOutcome
@@ -47,7 +48,8 @@ public enum ToolExpectedOutcome
     PublicFileDownloadedToConfiguredExport = 15,
     FileArchivedToConfiguredExport = 16,
     MatchingFileContentLocationsListed = 17,
-    FileSentToRecycleBin = 18
+    FileSentToRecycleBin = 18,
+    DynamicPublicWebPageSnapshotReturned = 19
 }
 
 public static class ApprovalAuditCatalog
@@ -76,6 +78,11 @@ public sealed record MessageSendPreview(string ApplicationId, string Recipient, 
 public interface IPublicWebPageReader
 {
     Task<ToolResult> ReadPageAsync(string url, CancellationToken cancellationToken);
+}
+
+public interface IDynamicPublicWebPageReader
+{
+    Task<ToolResult> ReadDynamicPageAsync(string url, CancellationToken cancellationToken);
 }
 
 public sealed record PublicFileDownloadResult(bool Success, string Summary, string? ErrorCode = null,

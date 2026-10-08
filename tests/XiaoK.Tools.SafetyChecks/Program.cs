@@ -222,7 +222,7 @@ if (args.Length == 1 && args[0] == "--only-public-web-download")
 if (args.Length == 1 && args[0] == "--only-browser-render")
 {
     await CheckStaticBrowserRenderingAsync();
-    Console.WriteLine("通过：独立无头 Edge 只解析静态 HTML，脚本未执行且网页外连被阻止。");
+    Console.WriteLine("通过：静态模式禁用脚本；动态模式只运行沙箱内联脚本，CSP与路由均阻止外部及本机子请求。");
     return;
 }
 if (args.Length == 2 && args[0] == "--probe-public-web-read")
@@ -6051,6 +6051,31 @@ static async Task CheckPublicWebPageReadPolicyAsync()
         Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && reader.CallCount == 1,
             "网页目标、参数或固定前置条件错误时仍调用了读取器。");
     }
+
+    var dynamicReader = new FakeDynamicPublicWebPageReader();
+    var dynamicBroker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "",
+        dynamicPublicWebPageReader: dynamicReader);
+    var dynamicProposal = ToolBroker.Proposal("browser.read.dynamic.public.v1", [new("url", "https://example.com/")],
+        "public-dynamic-web-page", ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned);
+    Require(ToolInteractionPolicy.GetMode("browser.read.dynamic.public.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("browser.read.dynamic.public.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "显式动态网页读取没有限制为后台只读工具。");
+    var dynamicResult = await dynamicBroker.ExecuteBackgroundAsync(dynamicProposal, CancellationToken.None);
+    Require(dynamicResult.Success && dynamicReader.CallCount == 1 && dynamicReader.LastUrl == "https://example.com/",
+        "有效的动态公网网址没有交给隔离动态读取器。");
+    foreach (var invalid in new[]
+    {
+        dynamicProposal with { Arguments = dynamicProposal.Arguments.SetItem("url", "file:///C:/Windows/win.ini") },
+        dynamicProposal with { Target = "user-edge-session" },
+        dynamicProposal with { Preconditions = ToolPrecondition.UserProvidedPublicWebPageUrl },
+        dynamicProposal with { ExpectedOutcome = ToolExpectedOutcome.PublicWebPageSnapshotReturned },
+        dynamicProposal with { Arguments = dynamicProposal.Arguments.Add("script", "arbitrary") }
+    })
+    {
+        var rejected = await dynamicBroker.ExecuteBackgroundAsync(invalid, CancellationToken.None);
+        Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && dynamicReader.CallCount == 1,
+            "动态网页提案目标、参数或固定前置条件错误时仍调用了读取器。");
+    }
 }
 
 static async Task CheckPublicFileDownloadAsync(string root)
@@ -6204,6 +6229,24 @@ static async Task CheckStaticBrowserRenderingAsync()
         && result.AriaSnapshot.Contains("textbox \"搜索关键词\"", StringComparison.Ordinal),
         $"静态网页 ARIA 结构没有保留标题、链接、按钮和标注输入框：{result.AriaSnapshot}");
     Require(!listener.Pending(), "静态网页解析器连接了 HTML 中的本机图片地址。");
+
+    var dynamicHtml = $$"""
+        <!-- hostile prefix: <head><script>this is only a comment, but a string-based CSP inserter can be fooled</script></head> -->
+        <!doctype html><html><head><meta charset="utf-8"><title>动态测试页</title></head><body>
+        <main><h1 id="content">初始占位</h1></main>
+        <script>try { parent.document.body.setAttribute('data-xiaok-script-escaped', 'true'); document.querySelector('#content').textContent = '脚本逃出了沙箱'; } catch { document.querySelector('#content').textContent = '沙箱隔离后的动态正文'; } fetch('http://127.0.0.1:{{port}}/must-not-fetch').catch(() => {});</script>
+        <script src="http://127.0.0.1:{{port}}/must-not-run.js"></script>
+        <img src="http://127.0.0.1:{{port}}/must-not-connect.png">
+        </body></html>
+        """;
+    var dynamic = await PlaywrightPublicWebPageReader.RenderDynamicHtmlAsync(dynamicHtml, timeout.Token);
+    Require(dynamic.Title == "动态测试页"
+        && dynamic.BodyText.Contains("沙箱隔离后的动态正文", StringComparison.Ordinal)
+        && !dynamic.BodyText.Contains("初始占位", StringComparison.Ordinal),
+        "隔离动态读取没有执行沙箱内下载HTML中的内联脚本并提取更新后的DOM。");
+    Require(dynamic.AriaSnapshot.Contains("heading \"沙箱隔离后的动态正文\" [level=1]", StringComparison.Ordinal)
+        && !listener.Pending(),
+        $"动态读取未生成更新后的ARIA快照，或访问了页面中的本机子资源：{dynamic.AriaSnapshot}");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)
@@ -6962,6 +7005,20 @@ internal sealed class FakePublicWebPageReader : IPublicWebPageReader
         CallCount++;
         LastUrl = url;
         return Task.FromResult(new ToolResult(true, "合成静态网页读取结果。", Data: "合成网页正文"));
+    }
+}
+
+internal sealed class FakeDynamicPublicWebPageReader : IDynamicPublicWebPageReader
+{
+    public int CallCount { get; private set; }
+    public string? LastUrl { get; private set; }
+
+    public Task<ToolResult> ReadDynamicPageAsync(string url, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        LastUrl = url;
+        return Task.FromResult(new ToolResult(true, "合成动态网页读取结果。", Data: "合成DOM正文"));
     }
 }
 

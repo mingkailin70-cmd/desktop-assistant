@@ -113,10 +113,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             : null;
         _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), recoveryRoot);
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
+        var publicWebPageReader = new PlaywrightPublicWebPageReader();
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
                 exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
-            approval as IMessageSendPreviewPresenter, new PlaywrightPublicWebPageReader(), new PublicFileDownloader());
+            approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader);
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -963,6 +964,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.PublicWebPageSnapshotReturned), token);
         }
 
+        if (category == "web-read-dynamic")
+        {
+            var url = ExtractDynamicPublicWebPageUrl(request);
+            if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
+                return new(false, "请使用“读取动态网页：https://公开网站/页面”格式。仅运行该页面下载HTML中的内联脚本；所有网络子请求都会阻止，不使用用户 Edge 登录态，不点击、填写或提交。", "WEB_URL_NOT_ALLOWED");
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.read.dynamic.public.v1",
+                ImmutableDictionary<string, string>.Empty.Add("url", url), "public-dynamic-web-page",
+                ToolPrecondition.UserProvidedDynamicPublicWebPageUrl,
+                ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned), token);
+        }
+
         if (category == "web-download")
         {
             var url = ExtractPublicFileUrl(request);
@@ -1076,6 +1088,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";
         if (lower.StartsWith("下载文件") || lower.StartsWith("下载网页文件")) return "web-download";
+        if (lower.StartsWith("读取动态网页")) return "web-read-dynamic";
         if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
         if (lower.StartsWith("分类文件夹") || lower.StartsWith("查看文件分类") || lower.StartsWith("预览文件分类")) return "file-classify";
         if (lower.StartsWith("重命名文件")) return "file-rename";
@@ -1182,6 +1195,18 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return value;
         }
         return string.Empty;
+    }
+
+    private static string ExtractDynamicPublicWebPageUrl(string request)
+    {
+        const string prefix = "读取动态网页";
+        if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+        var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();
+        if (value.Length >= 2 && ((value[0] == '<' && value[^1] == '>')
+            || (value[0] == '“' && value[^1] == '”')
+            || (value[0] == '"' && value[^1] == '"')))
+            value = value[1..^1].Trim();
+        return value;
     }
 
     private static string ExtractPublicFileUrl(string request)

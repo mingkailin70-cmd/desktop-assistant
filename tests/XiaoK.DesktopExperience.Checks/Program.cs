@@ -84,7 +84,7 @@ foreach (var tool in new[] { "app.launch.v1", "window.activate.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.ExplicitUserInteraction) is null,
         "阻止明确的用户交互。");
 }
-foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.rename.v1", "browser.read.public.v1", "browser.download.public.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1" })
+foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台工具。");
 Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.ExplicitUserInteraction)?.ErrorCode == "UNKNOWN_TOOL",
     "未知工具被放行。");
@@ -110,11 +110,16 @@ var requiredBackgroundRoutes = new[]
     "var tool = category == \"draft\" ? \"message.draft.v1\" : \"message.analyze.v1\";",
     "ExecuteBackgroundAsync(new ToolProposal(tool, arguments,",
     "ExecuteBackgroundAsync(new ToolProposal(\"message.send.v1\"",
+    "ExecuteBackgroundAsync(new ToolProposal(\"browser.read.dynamic.public.v1\"",
     "ExecuteBackgroundAsync(new ToolProposal(\"code.inspect.v1\"",
     "ExecuteBackgroundAsync(new ToolProposal(\"code.task.create.v1\""
 };
 Require(requiredBackgroundRoutes.All(route => assistantRuntimeSource.Contains(route, StringComparison.Ordinal)),
     "文件、消息或代码路由没有固定使用后台执行入口。");
+Require(assistantRuntimeSource.IndexOf("lower.StartsWith(\"读取动态网页\")", StringComparison.Ordinal)
+        < assistantRuntimeSource.IndexOf("lower.StartsWith(\"读取网页\")", StringComparison.Ordinal)
+    && assistantRuntimeSource.Contains("if (category == \"web-read-dynamic\")", StringComparison.Ordinal),
+    "只有显式“读取动态网页”命令才能进入启用内联脚本的独立浏览器路径。");
 var taskCenterSource = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
     "src", "XiaoK.Host", "TaskHistoryWindow.xaml.cs"));
 var taskCenterXaml = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,

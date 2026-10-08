@@ -16,6 +16,7 @@ public static class TaskCategoryCatalog
         ["file-delete"] = "移入回收站",
         ["file-classify"] = "文件分类预览",
         ["web-read"] = "静态网页读取",
+        ["web-read-dynamic"] = "动态网页读取",
         ["web-download"] = "公网文件下载",
         ["analyze"] = "消息分析",
         ["draft"] = "回复草稿",
