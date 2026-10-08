@@ -41,7 +41,7 @@ public partial class TaskHistoryWindow : Window
     private async void CancelTask_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.Controls.Button { Tag: Guid taskId } button) return;
-        button.IsEnabled = false;
+        button.SetCurrentValue(UIElement.IsEnabledProperty, false);
         RefreshStatus.Text = "正在撤销排队任务或请求运行任务停止…";
         try
         {
@@ -51,7 +51,9 @@ public partial class TaskHistoryWindow : Window
         }
         finally
         {
-            if (button.IsLoaded) button.IsEnabled = true;
+            if (button.IsLoaded)
+                button.SetCurrentValue(UIElement.IsEnabledProperty,
+                    button.DataContext is TaskHistoryEntry entry && entry.CanCancel);
         }
     }
 
