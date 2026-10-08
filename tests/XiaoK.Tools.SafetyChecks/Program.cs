@@ -168,6 +168,21 @@ if (args.Length == 1 && args[0] == "--only-file-classification")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-content-search")
+{
+    var fileContentSearchRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileContentSearchProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(fileContentSearchRoot);
+    try
+    {
+        await CheckFileContentSearchAsync(fileContentSearchRoot);
+        Console.WriteLine("通过：本机内容搜索只在配置范围内读取受限文本文件，结果仅含路径与行号，正文不返回、不持久化。");
+    }
+    finally
+    {
+        if (Directory.Exists(fileContentSearchRoot)) Directory.Delete(fileContentSearchRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-public-web-read")
 {
     await CheckPublicWebPageReadPolicyAsync();
@@ -313,6 +328,9 @@ try
 
     await CheckFileSearchFailureAndCancellationAsync(tempRoot);
     passed.Add("文件搜索根缺失和查询无效时失败关闭，预取消不执行搜索");
+
+    await CheckFileContentSearchAsync(tempRoot);
+    passed.Add("后台文本内容搜索仅读取搜索根内受限文本文件，只返回位置、不泄露匹配正文并核验目录/文件范围");
 
     await CheckFileCopyToExportAsync(tempRoot);
     passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
@@ -5663,6 +5681,85 @@ static async Task CheckFileSearchFailureAndCancellationAsync(string root)
     try { await desktop.SearchFilesAsync(validProposal, cancellation.Token); }
     catch (OperationCanceledException) { cancelled = true; }
     Require(cancelled, "已经取消的文件搜索仍继续返回结果。");
+}
+
+static async Task CheckFileContentSearchAsync(string root)
+{
+    var fixture = Path.Combine(root, "file-content-search");
+    var allowed = Path.Combine(fixture, "allowed");
+    var outside = Path.Combine(fixture, "outside");
+    Directory.CreateDirectory(allowed);
+    Directory.CreateDirectory(outside);
+
+    var textPath = Path.Combine(allowed, "notes.txt");
+    await File.WriteAllTextAsync(textPath,
+        "开头\nNeedle PRIVATE_SENTINEL\n这一行没有词\nNeedle more private text\n",
+        new UTF8Encoding(false));
+    var validUtf16Path = Path.Combine(allowed, "utf16.txt");
+    await File.WriteAllTextAsync(validUtf16Path, "UTF16 竹子", new UnicodeEncoding(false, true, true));
+    await File.WriteAllTextAsync(Path.Combine(allowed, ".env"), "Needle must-not-be-scanned", new UTF8Encoding(false));
+    await File.WriteAllBytesAsync(Path.Combine(allowed, "binary.png"), Encoding.UTF8.GetBytes("Needle"));
+    await File.WriteAllBytesAsync(Path.Combine(allowed, "invalid-encoding.txt"), [0xFF, 0xFE, 0x00, 0x00, 0xFF]);
+    var malformedUtf16 = new byte[] { 0xFF, 0xFE, (byte)'N', 0, (byte)'e', 0, (byte)'e', 0,
+        (byte)'d', 0, (byte)'l', 0, (byte)'e', 0, 0, 0xD8 };
+    await File.WriteAllBytesAsync(Path.Combine(allowed, "malformed-utf16.txt"), malformedUtf16);
+    using (var oversized = new FileStream(Path.Combine(allowed, "oversized.txt"), FileMode.CreateNew, FileAccess.Write))
+        oversized.SetLength(LocalFileContentSearchPolicy.MaximumFileBytes + 1L);
+    await File.WriteAllTextAsync(Path.Combine(outside, "outside.txt"), "Needle outside-root", new UTF8Encoding(false));
+
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowed)]);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.search.content.v1",
+        [new("query", "Needle"), new("root_id", "user-files")], "user-files",
+        ToolExpectedOutcome.MatchingFileContentLocationsListed);
+
+    Require(ToolInteractionPolicy.GetMode("file.search.content.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("file.search.content.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "文件内容搜索没有按只读本机能力登记为后台工具。");
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var resultData = result.Data ?? string.Empty;
+    Require(result.Success && resultData.Contains("notes.txt", StringComparison.Ordinal)
+        && resultData.Contains("第2、4行", StringComparison.Ordinal)
+        && !resultData.Contains("Needle", StringComparison.Ordinal)
+        && !resultData.Contains("PRIVATE_SENTINEL", StringComparison.Ordinal)
+        && !resultData.Contains("outside.txt", StringComparison.Ordinal)
+        && !resultData.Contains("binary.png", StringComparison.Ordinal),
+        "搜索结果未限于受支持文本和配置目录，或泄露了匹配正文：" + resultData);
+    Require(!resultData.Contains("malformed-utf16.txt", StringComparison.Ordinal),
+        "内容搜索接受了含未配对代理项的UTF-16文件。");
+    var utf16Result = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("query", "竹子")
+    }, CancellationToken.None);
+    Require(utf16Result.Success && utf16Result.Data is not null
+        && utf16Result.Data.Contains("utf16.txt", StringComparison.Ordinal)
+        && utf16Result.Data.Contains("第1行", StringComparison.Ordinal)
+        && !utf16Result.Data.Contains("竹子", StringComparison.Ordinal),
+        "内容搜索没有正确解码有效UTF-16LE并只返回路径和行号。");
+
+    var wrongTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = "outside-root" }, CancellationToken.None);
+    Require(!wrongTarget.Success && wrongTarget.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "ToolBroker 接受了与固定搜索根不一致的内容搜索目标。");
+    var invalidQuery = await desktop.SearchFileContentsAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("query", "bad\0query")
+    }, CancellationToken.None);
+    Require(!invalidQuery.Success && invalidQuery.ErrorCode == "INVALID_CONTENT_QUERY",
+        "内容搜索没有在访问文件前拒绝控制字符查询。");
+
+    Require(LocalFileContentSearchPolicy.TryParseUserCommand("在文件内容中搜索：『错误提示』", out var parsed)
+        && parsed == "错误提示" && !LocalFileContentSearchPolicy.IsValidQuery("  "),
+        "用户内容搜索命令没有被可靠解析或空查询没有拒绝。");
+    Require(LocalFileContentSearchPolicy.IsUserCommand("搜索文件内容：")
+        && !LocalFileContentSearchPolicy.TryParseUserCommand("搜索文件内容：", out _),
+        "无查询的内容搜索命令没有被路由到明确的格式错误反馈。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await desktop.SearchFileContentsAsync(proposal, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled, "已取消的文件内容搜索仍继续读取文件。");
 }
 
 static async Task CheckPublicWebPageReadPolicyAsync()

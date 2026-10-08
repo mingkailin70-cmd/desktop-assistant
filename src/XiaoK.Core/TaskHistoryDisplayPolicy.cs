@@ -13,6 +13,7 @@ public static class TaskHistoryDisplayPolicy
         "file-move" => "配置搜索根中的源文件和同卷目标目录",
         "file-rename" => "配置搜索根中的单个文件",
         "file-classify" => "用户指定的本机目录（只读）",
+        "file-content-search" => "用户指定的文本查询（只返回路径与行号）",
         "web-read" => "用户提供的公开 HTTPS 页面",
         "web-download" => "用户提供的公开 HTTPS 文件与小K导出目录",
         "analyze" => "用户提供的单条消息（本地处理）",

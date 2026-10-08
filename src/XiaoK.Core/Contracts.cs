@@ -45,7 +45,8 @@ public enum ToolExpectedOutcome
     FileClassificationPreviewReturned = 13,
     FileMovedWithinConfiguredSearchRoots = 14,
     PublicFileDownloadedToConfiguredExport = 15,
-    FileArchivedToConfiguredExport = 16
+    FileArchivedToConfiguredExport = 16,
+    MatchingFileContentLocationsListed = 17
 }
 
 public static class ApprovalAuditCatalog

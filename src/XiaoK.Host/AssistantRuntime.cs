@@ -796,6 +796,16 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolPrecondition.ApplicationAllowlisted, ToolExpectedOutcome.ApplicationWindowVisible), token);
         }
 
+        if (category == "file-content-search")
+        {
+            if (!LocalFileContentSearchPolicy.TryParseUserCommand(request, out var contentQuery))
+                return new(false, "请按“在文件内容中搜索：关键词”输入。只搜索设置中的文本文件，每文件最多2 MiB、总读取最多64 MiB；只返回路径和行号，不显示或保存匹配正文。", "INVALID_CONTENT_QUERY");
+            var proposal = ToolBroker.Proposal("file.search.content.v1",
+                [new KeyValuePair<string, string>("query", contentQuery), new("root_id", "user-files")],
+                "user-files", ToolExpectedOutcome.MatchingFileContentLocationsListed);
+            return await _broker.ExecuteBackgroundAsync(proposal, token);
+        }
+
         if (category == "file")
         {
             var query = request;
@@ -984,6 +994,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("压缩文件")) return "file-archive";
         if (lower.StartsWith("下载文件") || lower.StartsWith("下载网页文件")) return "web-download";
         if (lower.StartsWith("读取网页") || lower.StartsWith("查看网页内容") || lower.StartsWith("浏览网页")) return "web-read";
@@ -1005,7 +1016,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     private static string CategoryLabel(string category) => category switch
     {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-copy" => "文件复制", "file-archive" => "文件压缩", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
+        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-content-search" => "文件内容查找", "file-copy" => "文件复制", "file-archive" => "文件压缩", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
         "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
     };
 
