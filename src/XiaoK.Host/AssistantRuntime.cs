@@ -22,6 +22,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly DateTimeOffset _processStartedAtUtc = DateTimeOffset.UtcNow;
     private XiaoKSettings _settings;
     private readonly SqliteTaskStore _store;
+    private readonly ILiveApprovalStateProvider? _liveApprovalStateProvider;
     private readonly LocalInferenceClient _inference;
     private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly DotNetTestRunner _dotNetTestRunner;
@@ -54,6 +55,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public AssistantRuntime(IApprovalPresenter approval)
     {
+        _liveApprovalStateProvider = approval as ILiveApprovalStateProvider;
         _settings = XiaoKSettings.Load();
         if (!XiaoKSettings.IsDiagnosticsMode)
         {
@@ -308,10 +310,15 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
     public async Task<IReadOnlyList<TaskHistoryEntry>> GetRecentTaskHistoryAsync(CancellationToken cancellationToken)
     {
+        var hasPendingActionConfirmation = _liveApprovalStateProvider?.HasPendingActionConfirmation == true;
         var records = (await _store.GetRecentAsync(30, cancellationToken))
             .Select(record =>
             {
                 var visible = TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc);
+                visible = visible with
+                {
+                    Status = TaskHistoryDisplayPolicy.EffectiveState(visible.Status, hasPendingActionConfirmation)
+                };
                 return _transientUserTaskStates.TryGetValue(visible.Id, out var transientState)
                     ? visible with { Status = transientState, ErrorCode = transientState == TaskLifecycleState.Cancelled ? "CANCELLED" : visible.ErrorCode }
                     : visible;

@@ -111,6 +111,11 @@ public interface IApprovalPresenter
     Task<bool> ConfirmAsync(string actionId, string title, string details, CancellationToken cancellationToken);
 }
 
+public interface ILiveApprovalStateProvider
+{
+    bool HasPendingActionConfirmation { get; }
+}
+
 public interface IMessageSendPreviewPresenter
 {
     Task ShowMessageSendPreviewAsync(MessageSendPreview preview, CancellationToken cancellationToken);

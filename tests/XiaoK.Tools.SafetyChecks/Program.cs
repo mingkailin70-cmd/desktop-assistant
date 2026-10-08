@@ -411,7 +411,7 @@ try
     passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
 
     CheckTaskHistoryDisplayPolicy();
-    passed.Add("任务中心显示目标范围、执行模式和逐状态的取消/重试指引");
+    passed.Add("任务中心显示目标范围、执行模式、待确认状态和逐状态的取消/重试指引");
 
     CheckQueuedTaskCancellationArbitration();
     passed.Add("排队任务取消与执行开始原子仲裁；撤销胜出后工作线程不会启动该任务");
@@ -3513,6 +3513,16 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
 
 static void CheckTaskHistoryDisplayPolicy()
 {
+    Require(TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Running, hasPendingActionConfirmation: true)
+            == TaskLifecycleState.AwaitingApproval
+        && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Running, hasPendingActionConfirmation: false)
+            == TaskLifecycleState.Running
+        && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Completed, hasPendingActionConfirmation: true)
+            == TaskLifecycleState.Completed
+        && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Queued, hasPendingActionConfirmation: true)
+            == TaskLifecycleState.Queued,
+        "当前进程的待确认动作没有反映在运行中任务状态，或投影影响了非运行中任务。");
+
     Require(TaskHistoryDisplayPolicy.TargetScope("file-move").Contains("同卷目标目录", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("file-delete").Contains("回收站", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
@@ -3543,10 +3553,14 @@ static void CheckTaskHistoryDisplayPolicy()
     var repositoryRoot = FindRepositoryRoot();
     var xaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
     var host = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    var mainWindow = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
     Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
         && xaml.Contains("Binding ExecutionMode", StringComparison.Ordinal)
         && xaml.Contains("Binding NextAction", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal)
+        && host.Contains("TaskHistoryDisplayPolicy.EffectiveState(visible.Status, hasPendingActionConfirmation)", StringComparison.Ordinal)
+        && host.Contains("_liveApprovalStateProvider?.HasPendingActionConfirmation == true", StringComparison.Ordinal)
+        && mainWindow.Contains("HasPendingActionConfirmation => _approvalInbox.HasPendingActionConfirmation", StringComparison.Ordinal)
         && host.Contains("TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted)", StringComparison.Ordinal)
         && host.Contains("routeStarted = true;", StringComparison.Ordinal)
         && host.IndexOf("routeStarted = true;", StringComparison.Ordinal)
@@ -3605,26 +3619,29 @@ static async Task CheckApprovalInboxPolicyAsync()
         var confirmation = inbox.RequestAsync("确认示例动作", "合成详情", ApprovalInboxKind.Confirmation,
             canRunDotNetTests: false, cancellation.Token);
         var entry = inbox.GetPending().Single();
-        Require(!inbox.Resolve(entry.Id, ApprovalInboxChoice.ApplyPatch)
+        Require(inbox.HasPendingActionConfirmation
+            && !inbox.Resolve(entry.Id, ApprovalInboxChoice.ApplyPatch)
             && inbox.GetPending().Single().Id == entry.Id,
             "普通确认待办接受了不匹配的补丁动作或丢失待办。");
         Require(inbox.Resolve(entry.Id, ApprovalInboxChoice.Approve)
             && await confirmation == ApprovalInboxChoice.Approve
-            && inbox.GetPending().Count == 0,
+            && inbox.GetPending().Count == 0 && !inbox.HasPendingActionConfirmation,
             "确认待办未返回明确的批准决定或没有清理内存待办。");
 
         var review = inbox.RequestAsync("审阅合成补丁", "diff", ApprovalInboxKind.CodeReview,
             canRunDotNetTests: false, cancellation.Token);
         entry = inbox.GetPending().Single();
-        Require(!entry.CanRunDotNetTests && !inbox.Resolve(entry.Id, ApprovalInboxChoice.RunDotNetTests)
+        Require(inbox.HasPendingActionConfirmation && !entry.CanRunDotNetTests
+            && !inbox.Resolve(entry.Id, ApprovalInboxChoice.RunDotNetTests)
             && inbox.Resolve(entry.Id, ApprovalInboxChoice.KeepPatch)
-            && await review == ApprovalInboxChoice.KeepPatch,
+            && await review == ApprovalInboxChoice.KeepPatch && !inbox.HasPendingActionConfirmation,
             "没有唯一验证目标时仍能批准运行测试，或保留补丁动作失败。");
 
         var preview = inbox.RequestAsync("消息预览", "合成收件人和正文", ApprovalInboxKind.MessagePreview,
             canRunDotNetTests: false, cancellation.Token);
         entry = inbox.GetPending().Single();
-        Require(!inbox.Resolve(entry.Id, ApprovalInboxChoice.Approve)
+        Require(!inbox.HasPendingActionConfirmation
+            && !inbox.Resolve(entry.Id, ApprovalInboxChoice.Approve)
             && inbox.Resolve(entry.Id, ApprovalInboxChoice.DismissPreview)
             && await preview == ApprovalInboxChoice.DismissPreview,
             "只读消息预览被错误地当成批准发送，或无法关闭预览。");
@@ -3651,9 +3668,11 @@ static async Task CheckApprovalInboxPolicyAsync()
     catch (InvalidOperationException) { rejectedAtCapacity = true; }
     Require(rejectedAtCapacity && inbox.GetPending().Count == 16,
         "待办超过上限仍被接纳，或超额请求影响了已有审批。");
+    Require(inbox.HasPendingActionConfirmation, "满载的动作确认待办没有标记当前存在待确认动作。");
     foreach (var entry in inbox.GetPending()) inbox.Resolve(entry.Id, ApprovalInboxChoice.Decline);
     var results = await Task.WhenAll(capacityTasks);
-    Require(results.All(choice => choice == ApprovalInboxChoice.Decline) && inbox.GetPending().Count == 0,
+    Require(results.All(choice => choice == ApprovalInboxChoice.Decline) && inbox.GetPending().Count == 0
+        && !inbox.HasPendingActionConfirmation,
         "满载待办清理或逐项拒绝返回错误。");
 
     var repositoryRoot = FindRepositoryRoot();

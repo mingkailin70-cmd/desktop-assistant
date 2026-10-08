@@ -12,7 +12,8 @@ using XiaoK.Storage;
 
 namespace XiaoK.Host;
 
-public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
+public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalStateProvider,
+    ICodeTaskReviewPresenter, IMessageSendPreviewPresenter
 {
     private readonly AssistantRuntime _runtime;
     private readonly ApprovalInbox _approvalInbox = new();
@@ -43,6 +44,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
     private double _petResizeStartPercent;
     private double _petResizeHorizontal;
     private double _petResizeVertical;
+
+    public bool HasPendingActionConfirmation => _approvalInbox.HasPendingActionConfirmation;
 
     public MainWindow()
     {

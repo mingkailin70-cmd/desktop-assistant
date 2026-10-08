@@ -24,6 +24,15 @@ public sealed class ApprovalInbox
 
     public event Action? Changed;
 
+    public bool HasPendingActionConfirmation
+    {
+        get
+        {
+            lock (_sync)
+                return _pending.Values.Any(request => request.Entry.Kind is ApprovalInboxKind.Confirmation or ApprovalInboxKind.CodeReview);
+        }
+    }
+
     public IReadOnlyList<ApprovalInboxEntry> GetPending()
     {
         lock (_sync)

@@ -3,6 +3,11 @@ namespace XiaoK.Core;
 /// <summary>为任务中心提供不含请求正文的目标范围、执行模式和下一步提示。</summary>
 public static class TaskHistoryDisplayPolicy
 {
+    public static TaskLifecycleState EffectiveState(TaskLifecycleState storedState, bool hasPendingActionConfirmation) =>
+        storedState == TaskLifecycleState.Running && hasPendingActionConfirmation
+            ? TaskLifecycleState.AwaitingApproval
+            : storedState;
+
     public static string TargetScope(string taskKind) => taskKind switch
     {
         "app" => "固定允许列表中的应用",
