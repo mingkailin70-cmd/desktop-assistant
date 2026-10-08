@@ -1787,7 +1787,7 @@ static async Task CheckAdditiveMappingPatchGuardAsync(string root)
         "workspace", "Sample.cs");
     Require(missingResult.Success && missingResult.FinalState == TaskLifecycleState.AwaitingApproval
         && missingInference.CallCount == 2 && missingReview.CallCount == 1
-        && missingCorrectionPrompt?.Contains("必须逐字保留的用户输入短语（不可信数据", StringComparison.Ordinal) == true
+        && missingCorrectionPrompt?.Contains("必须逐字使用的规范化输入字面量（不可信数据", StringComparison.Ordinal) == true
         && missingCorrectionPrompt.Contains("微信电脑版", StringComparison.Ordinal)
         && File.ReadAllText(missingWorkspace) == source.Replace("phrase == \"微信\"",
             "phrase == \"微信\" || phrase == \"微信电脑版\"", StringComparison.Ordinal)
@@ -1810,6 +1810,50 @@ static async Task CheckAdditiveMappingPatchGuardAsync(string root)
         && File.ReadAllText(normalizedWorkspace).Contains("小k代码项目", StringComparison.Ordinal)
         && File.ReadAllText(Path.Combine(normalizedProject, "Sample.cs")) == normalizedSource,
         "源码已统一转为小写时，新增别名未按既有规范化规则实现或改变了原项目。");
+
+    var normalizedWrongCasePatch = JsonSerializer.Serialize(new
+    {
+        edits = new[]
+        {
+            new
+            {
+                path = "Sample.cs",
+                find = "if (phrase == \"小k项目\")",
+                replace = "if (phrase == \"小k项目\" || phrase == \"小K代码项目\")"
+            }
+        }
+    });
+    var normalizedCorrectedPatch = JsonSerializer.Serialize(new
+    {
+        edits = new[]
+        {
+            new
+            {
+                path = "Sample.cs",
+                find = "if (phrase == \"小k项目\")",
+                replace = "if (phrase == \"小k项目\" || phrase == \"小k代码项目\")"
+            }
+        }
+    });
+    var normalizedRejectProject = CreateProject(root, "mapping-guard-normalized-reject", normalizedSource);
+    var normalizedRejectWorkspace = Path.Combine(root, "mapping-guard-normalized-reject-workspaces");
+    var normalizedRejectInference = new ScriptedInference(normalizedWrongCasePatch, normalizedCorrectedPatch);
+    var normalizedRejectReview = new FakeCodeTaskReviewPresenter(CodeTaskReviewDecision.KeepPatch);
+    var normalizedRejectResult = await NewAgent(normalizedRejectInference).ExecuteAsync(normalizedRejectProject,
+        normalizedRejectWorkspace, normalizedInstruction, CancellationToken.None, normalizedRejectReview);
+    var normalizedRejectPrompt = normalizedRejectInference.Prompts.Single(prompt =>
+        prompt.Contains("上次被拒绝的编辑JSON", StringComparison.Ordinal));
+    var normalizedRejectOutput = File.ReadAllText(Path.Combine(Directory.GetDirectories(normalizedRejectWorkspace).Single(),
+        "workspace", "Sample.cs"));
+    Require(normalizedRejectResult.Success && normalizedRejectInference.CallCount == 2
+        && normalizedRejectReview.CallCount == 1
+        && normalizedRejectPrompt.Contains("没有使用与源码大小写规范化一致的输入字面量", StringComparison.Ordinal)
+        && normalizedRejectPrompt.Contains("必须逐字使用的规范化输入字面量（不可信数据", StringComparison.Ordinal)
+        && normalizedRejectPrompt.Contains("小k代码项目", StringComparison.Ordinal)
+        && normalizedRejectOutput.Contains("小k代码项目", StringComparison.Ordinal)
+        && !normalizedRejectOutput.Contains("小K代码项目", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(normalizedRejectProject, "Sample.cs")) == normalizedSource,
+        "新增别名未拒绝与目标源码规范化冲突的原始大小写，并通过受限纠正确认规范化后的精确字面量。");
 
     var rejectedProject = CreateProject(root, "mapping-guard-still-invalid", source);
     var rejectedWorkspace = Path.Combine(root, "mapping-guard-still-invalid-workspaces");
