@@ -1,3 +1,7 @@
+## v0.1.54.0 R1任务中心目标范围与下一步指引验证包（2026-10-08）
+
+任务卡新增隐私安全的目标范围、执行模式和逐状态下一步建议。签名MSIX位于 artifacts\\msix-validation\\4745c8b3568c44c18a520a1bf35b0bba\\XiaoK-signed-validation.msix，124,622,479字节，SHA-256 E8D51DB3217C5F7B7AA968FD3578FA6C7A9EC5EE4D634D049F22147A4A03FA3D；签名状态Valid，签名者CN=XiaoK Local Development，证书指纹B96A02547ABA84523619E11EB7788AE9850A5C60。安装脚本只读预检确认签名有效且证书已受信任；证书信任未改。本阶段未安装新版，当前账户仍运行0.1.53.0，以免中断正在运行的小K。固定SDK Release构建0警告/0错误、Windows安全套件112项通过/0项跳过、桌宠体验专项60项通过。阶段提交与CI状态待推送后补记。
+
 ## v0.1.53.0 R1排队任务原子取消源码验证包（2026-10-08）
 
 排队任务取消与工作线程启动现在由原子准入门仲裁，取消先赢时立即显示取消状态、持久化并由队列跳过；工作线程先赢时仅请求协作式取消。固定SDK Release解决方案构建0警告/0错误；完整Windows安全套件111项通过、0项跳过；桌宠/后台交互专项60项通过。签名验证包位于 `artifacts\msix-validation\aa6fc339f0a643f0880b0e61c17fe6f6\XiaoK-signed-validation.msix`，大小124,620,060字节，SHA-256 `F5915FDDC4C746497DDBF2435A5C057A5A7BE43472A1E549C4EAF71C1E45B59B`；SignTool验签0警告、0错误，证书信任未改变。阶段提交 `5899ca5` 已推送至 `origin/main`，GitHub Actions [Build #267](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37753983268) 成功；记录该CI结果的文档提交 `1b5c99e` 的 [Build #268](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37754231732) 也成功。

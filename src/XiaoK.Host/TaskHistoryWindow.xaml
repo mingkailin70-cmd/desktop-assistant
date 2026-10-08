@@ -37,9 +37,18 @@
                                         <TextBlock FontSize="11" Foreground="#426AA8" TextWrapping="Wrap" Margin="0,3,0,0">
                                             <Run Text="当前步骤："/><Run Text="{Binding CurrentStep}"/>
                                         </TextBlock>
+                                        <TextBlock FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,3,0,0">
+                                            <Run Text="目标范围："/><Run Text="{Binding TargetScope}"/>
+                                        </TextBlock>
+                                        <TextBlock FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,3,0,0">
+                                            <Run Text="执行模式："/><Run Text="{Binding ExecutionMode}"/>
+                                        </TextBlock>
                                         <TextBox Text="{Binding Detail}" FontSize="11" Foreground="#68728A"
                                                  TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent"
                                                  IsTabStop="True" Margin="-5,0,-5,-4" Padding="5,4"/>
+                                        <TextBlock FontSize="11" Foreground="#425274" TextWrapping="Wrap" Margin="0,3,0,0">
+                                            <Run Text="下一步："/><Run Text="{Binding NextAction}"/>
+                                        </TextBlock>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

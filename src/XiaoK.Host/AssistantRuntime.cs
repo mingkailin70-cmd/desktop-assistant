@@ -325,7 +325,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
                 : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}",
             IsCancellableTaskState(record.Status) && _userTaskOperations.ContainsKey(record.Id),
-            _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status)))
+            _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status),
+            TaskHistoryDisplayPolicy.TargetScope(record.Kind),
+            TaskHistoryDisplayPolicy.ExecutionMode(record.Kind),
+            TaskHistoryDisplayPolicy.NextAction(record.Status)))
             .ToList();
 
         var codeTasks = await Task.Run(() => CodeTaskAgent.ReadRetainedTasks(_settings.CodeWorkspaceRoot), cancellationToken);
@@ -340,7 +343,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 interrupted
                     ? $"小K不会自动续跑。请检查隔离工作区后手动决定下一步：{task.WorkspacePath}"
                     : $"隔离工作区：{task.WorkspacePath}", false,
-                interrupted ? "上次运行中断；不会自动恢复或重试。" : $"编程任务：{CodeTaskStateLabel(task.State)}");
+                interrupted ? "上次运行中断；不会自动恢复或重试。" : $"编程任务：{CodeTaskStateLabel(task.State)}",
+                TaskHistoryDisplayPolicy.TargetScope("code"),
+                TaskHistoryDisplayPolicy.ExecutionMode("code"),
+                TaskHistoryDisplayPolicy.NextActionForCodeTask(task.State, interrupted));
         }));
 
         return history.OrderByDescending(item => item.UpdatedAtUtc).Take(35).ToArray();
@@ -1421,7 +1427,7 @@ internal sealed record XiaoKSettings
 internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory);
 internal sealed record RootSetting(string Id, string Path);
 internal sealed record TaskHistoryEntry(Guid? TaskId, string Title, string State, DateTimeOffset UpdatedAtUtc,
-    string Detail, bool CanCancel, string CurrentStep);
+    string Detail, bool CanCancel, string CurrentStep, string TargetScope, string ExecutionMode, string NextAction);
 internal sealed record TaskQueueAdmission(bool Accepted, Guid? TaskId, string Message);
 internal sealed record LocalDataCleanupPreview(SqlitePersonalDataSummary Database,
     LegacySettingsCleanupSnapshot LegacySettings, ManagedPrivacyFilesPlan ManagedFiles);

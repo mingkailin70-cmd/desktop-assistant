@@ -374,6 +374,9 @@ try
     CheckInterruptedTaskHistoryIsNotReplayed();
     passed.Add("重启前未结束的任务显示为结果待核对，不自动重试或泄露旧结果");
 
+    CheckTaskHistoryDisplayPolicy();
+    passed.Add("任务中心显示目标范围、执行模式和逐状态的取消/重试指引");
+
     CheckQueuedTaskCancellationArbitration();
     passed.Add("排队任务取消与执行开始原子仲裁；撤销胜出后工作线程不会启动该任务");
 
@@ -3403,6 +3406,30 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
     Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
         && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt),
         "隔离编程任务状态没有区分异常中断与等待审阅。");
+}
+
+static void CheckTaskHistoryDisplayPolicy()
+{
+    Require(TaskHistoryDisplayPolicy.TargetScope("file-move").Contains("同卷目标目录", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("file").Contains("不改变前台窗口", StringComparison.Ordinal),
+        "任务中心没有显示准确的固定目标范围或执行模式。");
+    Require(TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Queued).Contains("不会执行", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running).Contains("副作用", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.OutcomeUncertain).Contains("不会自动重试", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.NextActionForCodeTask("running", interrupted: true)
+            .Contains("不会自动重试", StringComparison.Ordinal),
+        "任务中心的取消、待核对或失败后指引错误，可能引导重复执行。");
+
+    var repositoryRoot = FindRepositoryRoot();
+    var xaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
+    var host = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
+        && xaml.Contains("Binding ExecutionMode", StringComparison.Ordinal)
+        && xaml.Contains("Binding NextAction", StringComparison.Ordinal)
+        && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal),
+        "任务历史数据没有完整绑定到任务中心界面。");
 }
 
 static void CheckQueuedTaskCancellationArbitration()
