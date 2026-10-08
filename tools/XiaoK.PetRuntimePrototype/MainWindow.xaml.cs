@@ -16,6 +16,9 @@ public partial class MainWindow : Window
     private GraphCore? _graph;
     private Main? _pet;
     private readonly DispatcherTimer _closeTimer;
+    private readonly DispatcherTimer _poseTimer;
+    private readonly string[] _poseSequence = ["xiaok-idle", "xiaok-listening", "xiaok-thinking", "xiaok-executing"];
+    private int _poseIndex;
 
     public MainWindow()
     {
@@ -30,14 +33,10 @@ public partial class MainWindow : Window
         {
             GraphConfig = new GraphCore.Config(new LpsDocument())
         };
-        var imagePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Pets", "xiaok-silver-shaded-3d-v15.png");
-        var animation = new Picture(
-            _graph,
-            imagePath,
-            new GraphInfo("xiaok-idle", GraphType.Default, AnimatType.Single, IGameSave.ModeType.Nomal),
-            length: 500,
-            isloop: true);
-        _graph.AddGraph(animation);
+        AddPose("xiaok-idle", "xiaok-silver-shaded-3d-v15.png");
+        AddPose("xiaok-listening", "xiaok-silver-shaded-vpet-listening-v1.png");
+        AddPose("xiaok-thinking", "xiaok-silver-shaded-vpet-thinking-v1.png");
+        AddPose("xiaok-executing", "xiaok-silver-shaded-vpet-executing-v1.png");
 
         var core = new GameCore
         {
@@ -54,6 +53,8 @@ public partial class MainWindow : Window
 
         _closeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
         _closeTimer.Tick += (_, _) => Close();
+        _poseTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _poseTimer.Tick += (_, _) => ShowNextPose();
 
         File.WriteAllText(_logPath, $"started={DateTimeOffset.Now:O}{Environment.NewLine}focus-before=0x{_foregroundBeforeShow:X}{Environment.NewLine}");
     }
@@ -64,7 +65,9 @@ public partial class MainWindow : Window
         try
         {
             _pet?.LoadALL();
+            _pet?.Display(_poseSequence[0], AnimatType.Single, GraphType.Default, static () => { });
             File.AppendAllText(_logPath, $"renderer-initialized={_pet is not null}{Environment.NewLine}");
+            _poseTimer.Start();
         }
         catch (Exception exception)
         {
@@ -84,6 +87,7 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _closeTimer.Stop();
+        _poseTimer.Stop();
         try
         {
             _pet?.Dispose();
@@ -99,6 +103,38 @@ public partial class MainWindow : Window
             File.AppendAllText(_logPath,
                 $"closed={DateTimeOffset.Now:O}{Environment.NewLine}" +
                 $"foreground-preserved-after-close={foregroundAfterClose == _foregroundBeforeShow}{Environment.NewLine}");
+        }
+    }
+
+    private void AddPose(string name, string fileName)
+    {
+        var imagePath = Path.Combine(AppContext.BaseDirectory, "Assets", "Pets", fileName);
+        _graph!.AddGraph(new Picture(
+            _graph,
+            imagePath,
+            new GraphInfo(name, GraphType.Default, AnimatType.Single, IGameSave.ModeType.Nomal),
+            length: 500,
+            isloop: true));
+    }
+
+    private void ShowNextPose()
+    {
+        if (_pet is null)
+        {
+            return;
+        }
+
+        _poseIndex = (_poseIndex + 1) % _poseSequence.Length;
+        var pose = _poseSequence[_poseIndex];
+        try
+        {
+            _pet.Display(pose, AnimatType.Single, GraphType.Default, static () => { });
+            File.AppendAllText(_logPath, $"pose={pose}{Environment.NewLine}");
+        }
+        catch (Exception exception)
+        {
+            File.AppendAllText(_logPath, $"pose-error={pose}:{exception.GetType().Name}{Environment.NewLine}");
+            _poseTimer.Stop();
         }
     }
 

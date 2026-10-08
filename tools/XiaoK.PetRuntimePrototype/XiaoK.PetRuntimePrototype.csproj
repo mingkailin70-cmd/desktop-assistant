@@ -15,5 +15,14 @@
     <Content Include="..\..\src\XiaoK.Host\Assets\Pets\xiaok-silver-shaded-3d-v15.png"
              Link="Assets\Pets\xiaok-silver-shaded-3d-v15.png"
              CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\XiaoK.Host\Assets\Pets\xiaok-silver-shaded-vpet-listening-v1.png"
+             Link="Assets\Pets\xiaok-silver-shaded-vpet-listening-v1.png"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\XiaoK.Host\Assets\Pets\xiaok-silver-shaded-vpet-thinking-v1.png"
+             Link="Assets\Pets\xiaok-silver-shaded-vpet-thinking-v1.png"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\XiaoK.Host\Assets\Pets\xiaok-silver-shaded-vpet-executing-v1.png"
+             Link="Assets\Pets\xiaok-silver-shaded-vpet-executing-v1.png"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
