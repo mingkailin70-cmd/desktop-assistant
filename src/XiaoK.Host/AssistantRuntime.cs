@@ -321,6 +321,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             $"{record.Summary} · {record.Id.ToString("N")[..8]}",
             TaskStateLabel(record.Status), record.UpdatedAtUtc,
             _transientUserTaskResults.TryGetValue(record.Id, out var transientResult) ? transientResult
+            : record.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
+                ? "上次关闭时的审批待办不会跨进程恢复；小K没有自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
             : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
                 ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
                 : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}",

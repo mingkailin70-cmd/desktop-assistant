@@ -3412,18 +3412,25 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
     var staleQueued = stale with { Status = TaskLifecycleState.Queued };
     var awaitingApproval = stale with { Status = TaskLifecycleState.AwaitingApproval };
     var current = stale with { UpdatedAtUtc = processStartedAt.AddSeconds(1) };
+    var currentApproval = awaitingApproval with { UpdatedAtUtc = processStartedAt.AddSeconds(1) };
 
     var interrupted = TaskHistoryRecoveryPolicy.ForDisplay(stale, processStartedAt);
     Require(interrupted.Status == TaskLifecycleState.OutcomeUncertain
         && interrupted.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
         && interrupted.Result is null, "上次进程中未结束的任务没有被标为待核对，或保留了旧结果内容。");
+    var interruptedApproval = TaskHistoryRecoveryPolicy.ForDisplay(awaitingApproval, processStartedAt);
+    Require(interruptedApproval.Status == TaskLifecycleState.OutcomeUncertain
+        && interruptedApproval.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
+        && interruptedApproval.Result is null,
+        "重启后已失效的内存审批仍显示为可继续处理，或保留了旧结果内容。");
     Require(TaskHistoryRecoveryPolicy.ForDisplay(staleQueued, processStartedAt).Status == TaskLifecycleState.OutcomeUncertain
-        && TaskHistoryRecoveryPolicy.ForDisplay(awaitingApproval, processStartedAt) == awaitingApproval
-        && TaskHistoryRecoveryPolicy.ForDisplay(current, processStartedAt) == current,
-        "旧的排队任务、等待审阅任务或当前进程内任务状态投影错误。");
+        && TaskHistoryRecoveryPolicy.ForDisplay(current, processStartedAt) == current
+        && TaskHistoryRecoveryPolicy.ForDisplay(currentApproval, processStartedAt) == currentApproval,
+        "旧的排队任务或当前进程内任务/审批状态投影错误。");
     Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
-        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt),
-        "隔离编程任务状态没有区分异常中断与等待审阅。");
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt)
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", currentApproval.UpdatedAtUtc, processStartedAt),
+        "隔离编程任务的旧审批没有标记为失效，或当前进程内审批被误标。");
 }
 
 static void CheckTaskHistoryDisplayPolicy()
