@@ -2,9 +2,9 @@
 
 本版包含源码提交`4360de8`：找文件、聊天分析/起草、发送预览、代码检索和隔离编程任务均从Host后台任务队列调用`ExecuteBackgroundAsync`。固定交互策略只将应用启动和窗口切换列为前台；任务审批和代码审阅仍以非模态任务待办呈现。没有接入真实微信/QQ发送适配器，本阶段未发送消息。
 
-固定SDK 10.0.401自包含发布与MSIX结构验证成功，包内含.NET 10.0.12和Windows Desktop 10.0.12，共614个载荷文件。签名MSIX位于`artifacts\msix-validation\f88ef1fee13f4a439aa3f024b9de0c7b\XiaoK-signed-validation.msix`，124,630,340字节，SHA-256 `464170AB1512857A53D4DFBCEFD0718102D7EDDFD9380224CBF51D82276D1B82`。SignTool验签成功，0警告、0错误；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书已在`LocalMachine\TrustedPeople`，本次未更改信任。MSIX已安装至当前账户，包`MingKaiLin.XiaoK_0.1.58.0_neutral__g0ndt6g65c8pe`状态`Ok`，安装目录`C:\Program Files\WindowsApps\MingKaiLin.XiaoK_0.1.58.0_neutral__g0ndt6g65c8pe`。安装后未启动应用；UI、消息预览与运行时路由需后续验收。
+固定SDK 10.0.401自包含发布与MSIX结构验证成功，包内含.NET 10.0.12和Windows Desktop 10.0.12，共614个载荷文件。签名MSIX位于`artifacts\msix-validation\f88ef1fee13f4a439aa3f024b9de0c7b\XiaoK-signed-validation.msix`，124,630,340字节，SHA-256 `464170AB1512857A53D4DFBCEFD0718102D7EDDFD9380224CBF51D82276D1B82`。SignTool验签成功，0警告、0错误；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书已在`LocalMachine\TrustedPeople`，本次未更改信任。MSIX已安装至当前账户，包`MingKaiLin.XiaoK_0.1.58.0_neutral__g0ndt6g65c8pe`状态`Ok`，安装目录`C:\Program Files\WindowsApps\MingKaiLin.XiaoK_0.1.58.0_neutral__g0ndt6g65c8pe`。随后以`--diagnostics-profile --background`从安装目录启动Host（PID 36056），窗口标题“小K”与PID匹配且保持隐藏。启动前、启动后、运行期间和退出后前台句柄均为`329536`；投递注册的正常退出消息后进程退出码0。诊断模式拒绝桌面操作、文件访问和模型推理；本次没有启动普通用户界面，因此消息预览UI与真实任务路由仍待验收。
 
-Release解决方案构建0警告、0错误，后台交互专项58项通过，完整Windows安全套件113项通过、0项跳过。源码提交`4360de8`已推送；GitHub Actions [Build #287](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37777121163)成功。安装后核对当前账户MSIX版本和状态；当前无`XiaoK.Host`进程。
+Release解决方案构建0警告、0错误，后台交互专项58项通过，完整Windows安全套件113项通过、0项跳过。源码提交`4360de8`已推送；GitHub Actions [Build #287](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37777121163)成功。诊断退出后再次核对当前账户仍安装0.1.58.0、状态`Ok`，且当前无`XiaoK.Host`进程。
 
 ## v0.1.57.0 R1审批重启恢复修复（2026-10-08）
 
