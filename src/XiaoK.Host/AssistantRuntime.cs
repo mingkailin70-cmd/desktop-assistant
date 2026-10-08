@@ -1046,11 +1046,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         return "chat";
     }
 
-    private static string CategoryLabel(string category) => category switch
-    {
-        "app" => "应用操作", "window" => "窗口切换", "file" => "文件查找", "file-content-search" => "文件内容查找", "file-copy" => "文件复制", "file-archive" => "文件压缩", "file-move" => "文件移动", "file-rename" => "文件重命名", "file-delete" => "移入回收站", "file-classify" => "文件分类预览", "web-read" => "静态网页读取", "web-download" => "公网文件下载", "analyze" => "消息分析", "draft" => "回复草稿",
-        "send" => "发送请求", "code-inspect" => "只读代码检索", "code" => "本地编程任务", _ => "本地对话"
-    };
+    private static string CategoryLabel(string category) => TaskCategoryCatalog.LabelOrConversation(category);
 
     private sealed record NoticeAnalysisWork(string ApplicationId, ToolProposal Proposal,
         CancellationTokenSource Lifetime);

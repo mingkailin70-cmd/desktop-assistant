@@ -3107,13 +3107,44 @@ static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
         && recent[0].Summary == "本地对话" && recent[0].Result is null && recent[0].ErrorCode == "SAFE_TEST",
         "SQLite 任务往返写入保留了非规范字段或遗漏了必要状态。");
 
+    var expectedCategories = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["app"] = "应用操作", ["window"] = "窗口切换", ["file"] = "文件查找",
+        ["file-content-search"] = "文件内容查找", ["file-copy"] = "文件复制",
+        ["file-archive"] = "文件压缩", ["file-move"] = "文件移动", ["file-rename"] = "文件重命名",
+        ["file-delete"] = "移入回收站", ["file-classify"] = "文件分类预览",
+        ["web-read"] = "静态网页读取", ["web-download"] = "公网文件下载",
+        ["analyze"] = "消息分析", ["draft"] = "回复草稿", ["send"] = "发送请求",
+        ["code-inspect"] = "只读代码检索", ["code"] = "本地编程任务", ["chat"] = "本地对话"
+    };
+    var categoryTasks = expectedCategories.Select((entry, index) => new TaskRecord(
+        Guid.NewGuid(), entry.Key, "用户输入不得进入任务历史", TaskLifecycleState.Completed,
+        now.AddMinutes(index + 1), now.AddMinutes(index + 1))).ToArray();
+    foreach (var categoryTask in categoryTasks)
+        await store.SaveAsync(categoryTask, CancellationToken.None);
+
+    var categorized = await store.GetRecentAsync(100, CancellationToken.None);
+    Require(expectedCategories.All(entry => categorized.Any(task => task.Kind == entry.Key && task.Summary == entry.Value))
+        && categorized.All(task => task.Result is null && task.Summary != "用户输入不得进入任务历史"),
+        "运行时某个固定任务类别无法在SQLite持久化，或用户正文被存入任务摘要。");
+    var unknownCategoryRejected = false;
+    try
+    {
+        await store.SaveAsync(new TaskRecord(Guid.NewGuid(), "unknown-category", "unknown", TaskLifecycleState.Queued,
+            now, now), CancellationToken.None);
+    }
+    catch (ArgumentException) { unknownCategoryRejected = true; }
+    Require(unknownCategoryRejected, "SQLite任务存储接受了未登记类别。");
+
     await store.CreateBackupAsync(backupPath, CancellationToken.None);
     var overwriteRejected = false;
     try { await store.CreateBackupAsync(backupPath, CancellationToken.None); }
     catch (IOException) { overwriteRejected = true; }
     var backup = new SqliteTaskStore(backupPath);
     var backedUp = await backup.GetRecentAsync(20, CancellationToken.None);
-    Require(overwriteRejected && backedUp.Count == 1 && backedUp[0].Id == id && backedUp[0].Result is null,
+    Require(overwriteRejected && backedUp.Count == categoryTasks.Length + 1
+        && backedUp.Any(task => task.Id == id && task.Result is null)
+        && expectedCategories.All(entry => backedUp.Any(task => task.Kind == entry.Key && task.Summary == entry.Value)),
         "SQLite 在线备份未保留任务状态、拒绝覆盖已有文件或泄露结果字段。");
     Require(DatabaseFilesOmitSentinel(databasePath, privateSentinel)
         && DatabaseFilesOmitSentinel(backupPath, privateSentinel),

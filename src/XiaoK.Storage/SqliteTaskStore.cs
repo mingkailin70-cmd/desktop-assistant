@@ -887,19 +887,7 @@ public sealed class SqliteTaskStore : ITaskStore
 
     private static bool TryCategory(string? kind, out string summary)
     {
-        summary = kind switch
-        {
-            "app" => "应用操作",
-            "window" => "窗口切换",
-            "file" => "文件查找",
-            "analyze" => "消息分析",
-            "draft" => "回复草稿",
-            "send" => "发送请求",
-            "code" => "本地编程任务",
-            "chat" => "本地对话",
-            _ => ""
-        };
-        return summary.Length > 0;
+        return TaskCategoryCatalog.TryGetLabel(kind, out summary);
     }
 
     private static string? SanitizeErrorCode(string? errorCode)
