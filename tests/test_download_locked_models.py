@@ -20,6 +20,7 @@ class P0ModelAssetStatusTests(unittest.TestCase):
             "models": [
                 model("downloaded_and_verified"),
                 model("locally_evaluated"),
+                model("accepted"),
                 model("blocked-license-review", required=False, checksum=""),
             ]
         }

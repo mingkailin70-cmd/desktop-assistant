@@ -23,7 +23,7 @@ MAX_DOWNLOAD_RETRIES = 8
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
-ROOT_ASSET_READY_STATUSES = {"downloaded_and_verified", "locally_evaluated"}
+ROOT_ASSET_READY_STATUSES = {"downloaded_and_verified", "locally_evaluated", "accepted"}
 ROOT_ASSETS_READY = "p0-required-model-assets-downloaded-and-verified"
 ROOT_ASSETS_PARTIAL = "p0-models-partially-downloaded"
 
