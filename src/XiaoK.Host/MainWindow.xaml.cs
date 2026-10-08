@@ -508,8 +508,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         }
         var request = RequestBox.Text;
         if (string.IsNullOrWhiteSpace(request)) return;
-        RequestBox.Clear();
-        await QueueUserTaskFromUiAsync(request);
+        await QueueUserTaskFromUiAsync(request, clearInputIfUnchanged: true);
     }
 
     private async void OpenProject_Click(object sender, RoutedEventArgs e)
@@ -522,7 +521,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
         await QueueUserTaskFromUiAsync("打开小K项目");
     }
 
-    private async Task QueueUserTaskFromUiAsync(string request)
+    private async Task QueueUserTaskFromUiAsync(string request, bool clearInputIfUnchanged = false)
     {
         var admission = await _runtime.QueueUserTaskAsync(request);
         if (!admission.Accepted)
@@ -532,6 +531,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ICodeTaskReviewPre
             return;
         }
 
+        if (clearInputIfUnchanged && string.Equals(RequestBox.Text, request, StringComparison.Ordinal))
+            RequestBox.Clear();
         _userTaskRunning = _runtime.PendingUserTaskCount > 0;
         OutputText.Text = admission.Message;
         SetStatus("任务已排队");

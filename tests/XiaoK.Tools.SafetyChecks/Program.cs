@@ -231,6 +231,9 @@ try
     CheckTaskProgressIsVisibleAndTransient();
     passed.Add("任务中心显示真实生命周期步骤，步骤不进入持久化任务正文");
 
+    CheckQueueRejectionPreservesRequestText();
+    passed.Add("本地任务队列拒绝或满载时保留用户输入，可继续修改后重试");
+
     await CheckValidPatchIsIsolatedAsync(tempRoot);
     passed.Add("单文件项目确定性选择唯一源文件；有效补丁只写隔离工作区、保留 CRLF，并记录待审阅状态");
 
@@ -3342,6 +3345,27 @@ static void CheckTaskProgressIsVisibleAndTransient()
         && recordStart >= 0 && recordEnd > recordStart
         && !contracts[recordStart..recordEnd].Contains("CurrentStep", StringComparison.Ordinal),
         "当前步骤没有展示到任务中心、使用不受生命周期约束的描述，或被加入持久化任务记录。");
+}
+
+static void CheckQueueRejectionPreservesRequestText()
+{
+    var repositoryRoot = FindRepositoryRoot();
+    var source = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+    var submitStart = source.IndexOf("private async Task RunRequestAsync()", StringComparison.Ordinal);
+    var submitEnd = source.IndexOf("private async void OpenProject_Click", submitStart, StringComparison.Ordinal);
+    var queueStart = source.IndexOf("private async Task QueueUserTaskFromUiAsync(", StringComparison.Ordinal);
+    var queueEnd = source.IndexOf("private void OnUserTaskStateChanged", queueStart, StringComparison.Ordinal);
+    Require(submitStart >= 0 && submitEnd > submitStart && queueStart >= 0 && queueEnd > queueStart,
+        "没有找到输入提交和队列接纳处理源码范围。");
+    var submit = source[submitStart..submitEnd];
+    var queue = source[queueStart..queueEnd];
+    var rejectedBranch = queue.IndexOf("if (!admission.Accepted)", StringComparison.Ordinal);
+    var clearRequest = queue.IndexOf("RequestBox.Clear()", StringComparison.Ordinal);
+    Require(!submit.Contains("RequestBox.Clear()", StringComparison.Ordinal)
+        && queue.Contains("clearInputIfUnchanged", StringComparison.Ordinal)
+        && queue.Contains("string.Equals(RequestBox.Text, request, StringComparison.Ordinal)", StringComparison.Ordinal)
+        && rejectedBranch >= 0 && clearRequest > rejectedBranch,
+        "队列拒绝时丢弃原输入，或异步等待期间清除了用户新输入。");
 }
 
 static void CheckAppResolverRejectsUnknownApplications()

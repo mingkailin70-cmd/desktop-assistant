@@ -1,5 +1,9 @@
 # MSIX 打包与权限验收
 
+## v0.1.45.0 R1任务输入保留修复验证包（2026-10-08）
+
+固定 SDK Release解决方案构建0警告、0错误；Windows安全回归101项通过、0项跳过，桌宠体验专项55项通过。win-x64锁定还原成功并完成自包含发布。签名验证包位于 `artifacts\msix-validation\f4774fd2e6634738aa9136d5074c5e04\XiaoK-signed-validation.msix`，大小84,730,869字节，SHA-256 `B180539E483B23B36952C4E9E599E6FAB9E30D763D5799304B79F9F95881DF6E`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`。打包未导入/修改证书信任、未安装或启动软件包，当前账户仍运行旧安装版本。新增输入保护确保队列拒绝或满载时保留请求，并防止异步回调清除用户后来输入的文字。此包的远端CI结果待提交后核对；原生窗口验收仍未进行。
+
 ## v0.1.44.0 R1任务中心源码验证包（2026-10-08）
 
 固定 SDK Release 解决方案构建0警告、0错误；Windows 安全回归100项通过、0项跳过，桌宠体验专项55项通过。win-x64锁定还原成功并完成自包含发布。签名验证包位于 `artifacts\msix-validation\9ea1c0a9b62247819546d61ee94e72fb\XiaoK-signed-validation.msix`，大小84,730,754字节，SHA-256 `FDFFD38934A968B7BD1F4AE428C3457B8403CC73BA8A001C6FFF62FAAC20EFE1`；签名状态`Valid`，签名者为`CN=XiaoK Local Development`。打包未导入/修改证书信任、未安装或启动软件包，当前账户仍运行旧安装版本。GitHub Actions Build #249 对提交 `aad5748` 执行成功：[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37726574586)。任务中心的真实窗口布局、焦点影响、取消操作及关闭/重启恢复仍待安装版验收；本验证不代表R1完成。
