@@ -3447,14 +3447,31 @@ static void CheckTaskHistoryDisplayPolicy()
             .Contains("不会自动重试", StringComparison.Ordinal),
         "任务中心的取消、待核对或失败后指引错误，可能引导重复执行。");
 
+    Require(TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: true)
+        && TaskFailureSafetyPolicy.RequiresManualVerification("app", routeStarted: true)
+        && TaskFailureSafetyPolicy.RequiresManualVerification("code", routeStarted: true)
+        && !TaskFailureSafetyPolicy.RequiresManualVerification("file", routeStarted: true)
+        && !TaskFailureSafetyPolicy.RequiresManualVerification("web-read", routeStarted: true)
+        && !TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: false)
+        && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.CancelledOutcomeUncertainErrorCode)
+        && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.TimedOutOutcomeUncertainErrorCode)
+        && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.ExceptionOutcomeUncertainErrorCode)
+        && !TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode("INTERNAL"),
+        "可能已产生副作用的工具异常未被要求人工核对，或只读/路由前失败被误标为结果不确定。");
+
     var repositoryRoot = FindRepositoryRoot();
     var xaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
     var host = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
     Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
         && xaml.Contains("Binding ExecutionMode", StringComparison.Ordinal)
         && xaml.Contains("Binding NextAction", StringComparison.Ordinal)
-        && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal),
-        "任务历史数据没有完整绑定到任务中心界面。");
+        && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal)
+        && host.Contains("TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted)", StringComparison.Ordinal)
+        && host.Contains("routeStarted = true;", StringComparison.Ordinal)
+        && host.IndexOf("routeStarted = true;", StringComparison.Ordinal)
+            < host.IndexOf("await RouteAsync(work.Category", StringComparison.Ordinal)
+        && host.Contains("TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)", StringComparison.Ordinal),
+        "任务中心没有绑定目标范围/执行模式/下一步，或路由副作用异常未接入待核对状态。");
 }
 
 static void CheckQueuedTaskCancellationArbitration()

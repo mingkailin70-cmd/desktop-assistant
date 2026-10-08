@@ -325,6 +325,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ? "上次关闭时的审批待办不会跨进程恢复；小K没有自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
             : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
                 ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
+            : TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)
+                ? "工具在取消、超时或异常后未能确认结果；小K不会自动重试。请先检查目标状态，再决定下一步。"
                 : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}",
             IsCancellableTaskState(record.Status) && _userTaskOperations.ContainsKey(record.Id),
             _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status),
@@ -529,6 +531,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var output = "任务失败。为保护隐私，故障内容未写入日志。";
         var gateEntered = false;
         var finalStateSaved = false;
+        var routeStarted = false;
         CancellationTokenSource? timeout = null;
         CancellationTokenSource? linked = null;
 
@@ -564,6 +567,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 else
                 {
                     PublishUserTaskStateChanged(work.Id, task.Status);
+                    routeStarted = true;
                     var result = await RouteAsync(work.Category, work.Request, linked.Token).ConfigureAwait(false);
                     finalState = result.FinalState ?? (result.Success ? TaskLifecycleState.Completed : TaskLifecycleState.Failed);
                     work.Admission.TryComplete();
@@ -580,22 +584,39 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            finalState = work.Lifetime.IsCancellationRequested || Volatile.Read(ref _stopping) != 0
-                ? TaskLifecycleState.Cancelled : TaskLifecycleState.Failed;
+            var cancellationWasRequested = work.Lifetime.IsCancellationRequested || Volatile.Read(ref _stopping) != 0;
+            var outcomeMayBeUncertain = TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted);
+            finalState = outcomeMayBeUncertain ? TaskLifecycleState.OutcomeUncertain
+                : cancellationWasRequested ? TaskLifecycleState.Cancelled : TaskLifecycleState.Failed;
             task = task with
             {
                 Status = finalState,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
-                ErrorCode = finalState == TaskLifecycleState.Cancelled ? "CANCELLED" : "TIMEOUT"
+                ErrorCode = outcomeMayBeUncertain
+                    ? cancellationWasRequested
+                        ? TaskFailureSafetyPolicy.CancelledOutcomeUncertainErrorCode
+                        : TaskFailureSafetyPolicy.TimedOutOutcomeUncertainErrorCode
+                    : finalState == TaskLifecycleState.Cancelled ? "CANCELLED" : "TIMEOUT"
             };
-            output = finalState == TaskLifecycleState.Cancelled ? "已取消该任务；不会自动重试。"
+            output = outcomeMayBeUncertain
+                ? "工具在取消或超时前可能已经产生副作用；结果待核对，小K不会自动重试。请先检查目标状态。"
+                : finalState == TaskLifecycleState.Cancelled ? "已取消该任务；不会自动重试。"
                 : "任务等待或执行超过 5 分钟，已停止；请在任务中心核对状态。";
         }
         catch (Exception)
         {
-            finalState = TaskLifecycleState.Failed;
-            task = task with { Status = finalState, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "INTERNAL" };
-            output = "任务失败。为保护隐私，故障内容未写入日志。";
+            var outcomeMayBeUncertain = TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted);
+            finalState = outcomeMayBeUncertain ? TaskLifecycleState.OutcomeUncertain : TaskLifecycleState.Failed;
+            task = task with
+            {
+                Status = finalState,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                ErrorCode = outcomeMayBeUncertain
+                    ? TaskFailureSafetyPolicy.ExceptionOutcomeUncertainErrorCode : "INTERNAL"
+            };
+            output = outcomeMayBeUncertain
+                ? "工具执行发生异常且结果未确认；小K不会自动重试。请先检查目标状态。"
+                : "任务失败。为保护隐私，故障内容未写入日志。";
         }
         finally
         {
