@@ -23,6 +23,28 @@ MAX_DOWNLOAD_RETRIES = 8
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+ROOT_ASSET_READY_STATUSES = {"downloaded_and_verified", "locally_evaluated"}
+ROOT_ASSETS_READY = "p0-required-model-assets-downloaded-and-verified"
+ROOT_ASSETS_PARTIAL = "p0-models-partially-downloaded"
+
+
+def derive_p0_model_asset_status(lock: dict) -> str:
+    required = [item for item in lock.get("models", []) if item.get("requiredForP0")]
+    if not required:
+        return ROOT_ASSETS_PARTIAL
+
+    for model in required:
+        files = model.get("files", [])
+        if model.get("status") not in ROOT_ASSET_READY_STATUSES or not files:
+            return ROOT_ASSETS_PARTIAL
+        if any(
+            not isinstance(item.get("upstreamReportedSizeBytes"), int)
+            or item["upstreamReportedSizeBytes"] <= 0
+            or not SHA256_RE.fullmatch(str(item.get("localVerifiedSha256", "")).lower())
+            for item in files
+        ):
+            return ROOT_ASSETS_PARTIAL
+    return ROOT_ASSETS_READY
 
 
 def request_opener(proxy: str | None) -> urllib.request.OpenerDirector:
@@ -278,11 +300,7 @@ def main() -> int:
         digest = download_one(opener, model, locked_file, target)
         complete_now = all(item.get("localVerifiedSha256") for item in model.get("files", []))
         model["status"] = "downloaded_and_verified" if complete_now else "partially_downloaded"
-        if any(item.get("localVerifiedSha256") for item in model.get("files", [])):
-            lock["status"] = "p0-models-partially-downloaded"
-        required = [item for item in lock.get("models", []) if item.get("requiredForP0")]
-        if required and all(item.get("status") == "downloaded_and_verified" for item in required):
-            lock["status"] = "p0-models-downloaded-and-verified-not-evaluated"
+        lock["status"] = derive_p0_model_asset_status(lock)
         save_lock(lock_path, lock)
         print(f"  SHA-256 {digest}", flush=True)
 

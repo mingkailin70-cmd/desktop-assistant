@@ -3,6 +3,8 @@
 此目录只保存版本、来源、许可与校验记录，不保存模型、wheel、凭证或用户数据。
 
 - models.lock.json 是模型来源、固定 revision、文件清单和校验状态登记表。使用 `tools/download_locked_models.py` 前后都会查询固定 revision 的上游文件元数据；缺失的文件大小和 LFS SHA256 会先从该固定版本补入锁清单，再进行断点续传。响应提前结束或临时 SSL/连接错误时最多自动重连8次；大小和 SHA-256 均通过才标为 `downloaded_and_verified`，仍不代表推理效果或资源验收通过。
+- 顶层 `status` 只汇总锁清单中 `requiredForP0` 资产的登记：模型条目为`downloaded_and_verified`或`locally_evaluated`，且每个锁定文件都有字节数和 SHA-256 时，显示`p0-required-model-assets-downloaded-and-verified`。被评测的候选仍计为已经下载校验；此状态不代表模型质量合格、被接受为生产模型或P0验收通过。需要中的模型或散列记录不完整时显示`p0-models-partially-downloaded`。许可阻塞且非P0必需的候选不会影响该汇总。根状态不会每次读取时扫描磁盘；要确认文件当前未损坏，仍需对照实际部署目录重新核验 SHA-256。
+- 当前根状态`p0-required-model-assets-downloaded-and-verified`依据锁定条目记录；2026-10-09只读复核确认仓库开发副本的8个有权重文件条目与D盘4组正式主模型/语音权重均存在且字节数符合清单，本轮未重算大文件 SHA-256，也未核验D盘运行时文件。模型推理质量与资源门槛仍需独立验收。
 - runtimes.lock.json 是系统运行时与 Python 入口依赖登记表。使用 `tools/download_locked_runtime.py --runtime llama.cpp --proxy http://127.0.0.1:7897` 可下载经固定 SHA-256 锁定的官方 ZIP；`tools/stage_locked_llama_runtime.py` 会复核压缩包与 Qwen GGUF 后安全解压到对应模型版本目录。用户已接受 CUDA 本机使用许可。2026-10-02 使用托管 `LlamaCppModelRuntime`、`ModelBroker` 和回环 `LocalInferenceClient` 完成两次合成聊天请求；权重载入并返回指定短句。验证用 `llama-runtime.json` 已删除。实际 CUDA 层卸载、峰值显存、性能和进程退出时延仍未验收。
 - [本地模型推理首测记录](../docs/验收与评测/本地模型推理首测记录.md) 保存两次合成请求的本机证据与未完成的 GPU/生命周期测量项。
 - 开发阶段主模型目录位于仓库忽略的 `models\llm\qwen3.5-4b\<40位revision>`；正式安装目标为 `D:\XiaoK\Models\<模型类别>\<模型ID>\<revision>`。托管 llama.cpp 清单 `llama-runtime.json` 与固定运行时 `Runtime\llama-server.exe` 放在对应模型版本目录；Qwen GGUF 文件名及 revision 必须与锁清单一致。

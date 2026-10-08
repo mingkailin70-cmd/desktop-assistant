@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+      - name: Locked model status checks
+        run: python -m unittest discover -s tests -p test_download_locked_models.py
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.401
