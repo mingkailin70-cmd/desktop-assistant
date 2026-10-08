@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XiaoK.DesktopExperience.Che
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XiaoK.Adapters.Browser", "src\XiaoK.Adapters.Browser\XiaoK.Adapters.Browser.csproj", "{3A879479-3E5C-4344-8086-EEAC44982863}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XiaoK.PetRuntimePrototype", "tools\XiaoK.PetRuntimePrototype\XiaoK.PetRuntimePrototype.csproj", "{4BFF6063-44F2-409E-B51C-A203338ACD74}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -187,6 +189,18 @@ Global
 		{3A879479-3E5C-4344-8086-EEAC44982863}.Release|x64.Build.0 = Release|Any CPU
 		{3A879479-3E5C-4344-8086-EEAC44982863}.Release|x86.ActiveCfg = Release|Any CPU
 		{3A879479-3E5C-4344-8086-EEAC44982863}.Release|x86.Build.0 = Release|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Debug|x64.Build.0 = Debug|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Debug|x86.Build.0 = Debug|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Release|x64.ActiveCfg = Release|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Release|x64.Build.0 = Release|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Release|x86.ActiveCfg = Release|Any CPU
+		{4BFF6063-44F2-409E-B51C-A203338ACD74}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -204,5 +218,6 @@ Global
 		{87D3CE8D-7C0B-42FB-9686-B88359476A6B} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{79A706DF-E30F-4ECA-9B3D-650BA097881B} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{3A879479-3E5C-4344-8086-EEAC44982863} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{4BFF6063-44F2-409E-B51C-A203338ACD74} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
