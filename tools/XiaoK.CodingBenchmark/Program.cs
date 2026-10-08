@@ -58,6 +58,7 @@ internal static class Program
             var model = ResolveModel(repoRoot, modelId);
             var pipelineVersion = options.EnableThinking ? PipelineVersionThinking : PipelineVersionNoThinking;
             if (task.Category != "R") pipelineVersion += "-selection-schema-literal-feedback-v84";
+            if (task.Category == "F") pipelineVersion += "-task-scoped-fixture-v85";
             var resultFile = GetAggregateResultPath(manifest.Version);
             EnsureTaskNotAlreadyScored(resultFile, manifest.Version, baselineCommit, model.Id, model.Revision, pipelineVersion, taskId);
             var gpuBaseline = await ReadGpuSnapshotAsync();
@@ -146,7 +147,7 @@ internal static class Program
                     ? changedFiles.Count == 0
                     : changedFiles.All(path => task.TargetFiles.Contains(path, StringComparer.Ordinal));
                 var fixtureResult = task.Category == "F" && latest is not null
-                    ? await RunFixtureAsync(repoRoot, datasetRoot, latest.WorkspacePath, cancellation.Token)
+                    ? await RunFixtureAsync(repoRoot, datasetRoot, latest.WorkspacePath, task.Id, cancellation.Token)
                     : null;
                 timer.Stop();
 
@@ -546,20 +547,57 @@ internal static class Program
     }
 
     private static async Task<DotNetTestExecutionResult> RunFixtureAsync(string repoRoot, string datasetRoot,
-        string workspacePath, CancellationToken token)
+        string workspacePath, string taskId, CancellationToken token)
     {
+        if (taskId.Length != 3 || taskId[0] != 'F' || !int.TryParse(taskId.AsSpan(1), out var taskNumber)
+            || taskNumber is < 1 or > 10)
+            throw new ArgumentException("修复夹具只接受 F01–F10 题目 ID。", nameof(taskId));
+
         var fixtureRoot = Path.Combine(datasetRoot, "repair-fixture");
         var workspaceFixtureRoot = Path.Combine(workspacePath, "repair-fixture");
         foreach (var name in new[] { "Program.cs", "RepairFixture.csproj" })
         {
             var target = Path.Combine(workspaceFixtureRoot, name);
             if (File.Exists(target)) throw new InvalidDataException("模型工作区意外包含评测夹具文件；拒绝执行。");
-            File.Copy(Path.Combine(fixtureRoot, name), target, overwrite: false);
+            var source = Path.Combine(fixtureRoot, name);
+            if (name == "Program.cs")
+            {
+                var sourceText = File.ReadAllText(source, Encoding.UTF8);
+                var isolatedText = MakeRepairFixtureTaskScoped(sourceText, taskId);
+                File.WriteAllText(target, isolatedText, new UTF8Encoding(false));
+            }
+            else
+            {
+                File.Copy(source, target, overwrite: false);
+            }
         }
         var runner = new DotNetTestRunner(repoRoot);
         var executable = runner.ExecutablePath ?? throw new InvalidOperationException("仓库固定的 dotnet SDK 不可用。");
         var verificationRoot = Path.Combine(workspacePath, ".v");
         return await runner.RunOfflineRepairFixtureAsync(workspacePath, verificationRoot, executable, token);
+    }
+
+    private static string MakeRepairFixtureTaskScoped(string source, string taskId)
+    {
+        source = source.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var transformed = ReplaceExactlyOnce(source, "var failed = new List<string>();",
+            $"var failed = new List<string>();{Environment.NewLine}var selectedCase = \"{taskId}\";",
+            "失败用例列表声明");
+        transformed = ReplaceExactlyOnce(transformed, "void Check(string id, Func<bool> assertion)\n{",
+            "void Check(string id, Func<bool> assertion)\n{\n"
+                + "    if (!string.Equals(id, selectedCase, StringComparison.Ordinal)) return;",
+            "Check 断言入口");
+        transformed = ReplaceExactlyOnce(transformed, "Console.WriteLine($\"{10 - failed.Count}/10 cases pass\");",
+            "Console.WriteLine($\"{1 - failed.Count}/1 case pass\");", "夹具汇总输出");
+        return transformed;
+    }
+
+    private static string ReplaceExactlyOnce(string source, string oldValue, string newValue, string anchor)
+    {
+        var first = source.IndexOf(oldValue, StringComparison.Ordinal);
+        if (first < 0 || source.IndexOf(oldValue, first + oldValue.Length, StringComparison.Ordinal) >= 0)
+            throw new InvalidDataException($"固定修复夹具的{anchor}锚点缺失或不唯一；拒绝运行单题夹具。");
+        return source[..first] + newValue + source[(first + oldValue.Length)..];
     }
 
     private static string GetAggregateResultPath(string datasetVersion)
