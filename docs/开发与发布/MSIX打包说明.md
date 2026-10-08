@@ -4,7 +4,7 @@
 
 固定SDK 10.0.401 Release解决方案构建0警告、0错误；完整Windows安全套件113项通过、0项跳过，桌面交互专项61项通过。自包含签名MSIX位于`artifacts\msix-validation\a9b79224566d4ef6a0cde6617bae600f\XiaoK-signed-validation.msix`，124,630,936字节，SHA-256 `8C8B143729E3FFB8887A2A3627230E483123AEC806C86DA6328CE9D84F9A1B44`。SignTool验签0警告、0错误；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书已在`LocalMachine\TrustedPeople`，本轮未改信任。当前账户安装包`MingKaiLin.XiaoK_0.1.59.0_neutral__g0ndt6g65c8pe`状态`Ok`，本轮未启动正常用户界面。
 
-安装版只以`--diagnostics-profile --background`隔离启动。隐藏窗口无法经`Process.MainWindowHandle`访问，随后按PID枚举窗口、核验安装路径后向小K窗口投递注册的正常关闭消息；Host退出，启动/退出前台句柄均为`329536`。诊断模式拒绝普通桌面/文件/模型任务，因此这里只核验包身份、后台启动和正常退出，不代表产品UI或任务路由通过。该阶段CI状态在提交推送后核验。
+安装版只以`--diagnostics-profile --background`隔离启动。隐藏窗口无法经`Process.MainWindowHandle`访问，随后按PID枚举窗口、核验安装路径后向小K窗口投递注册的正常关闭消息；Host退出，启动/退出前台句柄均为`329536`。诊断模式拒绝普通桌面/文件/模型任务，因此这里只核验包身份、后台启动和正常退出，不代表产品UI或任务路由通过。源码提交`848d9ba`的GitHub Actions [Build #293](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37782793815)成功。
 
 ## v0.1.58.0 R1后台路由不打扰修正（2026-10-08）
 
