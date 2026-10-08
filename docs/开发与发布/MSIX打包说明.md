@@ -1,3 +1,11 @@
+## v0.1.58.0 R1后台路由不打扰修正（2026-10-08）
+
+本版包含源码提交`4360de8`：找文件、聊天分析/起草、发送预览、代码检索和隔离编程任务均从Host后台任务队列调用`ExecuteBackgroundAsync`。固定交互策略只将应用启动和窗口切换列为前台；任务审批和代码审阅仍以非模态任务待办呈现。没有接入真实微信/QQ发送适配器，本阶段未发送消息。
+
+固定SDK 10.0.401自包含发布与MSIX结构验证成功，包内含.NET 10.0.12和Windows Desktop 10.0.12，共614个载荷文件。签名MSIX位于`artifacts\msix-validation\f88ef1fee13f4a439aa3f024b9de0c7b\XiaoK-signed-validation.msix`，124,630,340字节，SHA-256 `464170AB1512857A53D4DFBCEFD0718102D7EDDFD9380224CBF51D82276D1B82`。SignTool验签成功，0警告、0错误；签名者`CN=XiaoK Local Development`，指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`。证书已在`LocalMachine\TrustedPeople`，本次未更改信任。MSIX已安装至当前账户，包`MingKaiLin.XiaoK_0.1.58.0_neutral__g0ndt6g65c8pe`状态`Ok`，安装目录`C:\Program Files\WindowsApps\MingKaiLin.XiaoK_0.1.58.0_neutral__g0ndt6g65c8pe`。安装后未启动应用；UI、消息预览与运行时路由需后续验收。
+
+Release解决方案构建0警告、0错误，后台交互专项58项通过，完整Windows安全套件113项通过、0项跳过。源码提交`4360de8`已推送；GitHub Actions [Build #287](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37777121163)成功。安装后核对当前账户MSIX版本和状态；当前无`XiaoK.Host`进程。
+
 ## v0.1.57.0 R1审批重启恢复修复（2026-10-08）
 
 本版包含`d4de23e`：重启后，内存中已经失效的普通审批任务不再显示成可继续处理的`AwaitingApproval`，而映射为`OutcomeUncertain` / `APPROVAL_NOT_RESTORED`并明确提示不会自动继续或重放。隔离代码任务的旧`awaiting_approval`同样标记为中断待核对；当前进程中的审批流程不受影响。安全套件113项通过、0项跳过；Release解决方案构建0警告、0错误。待审批内容并未持久化，因此本修复不恢复审批按钮或原批准动作。
