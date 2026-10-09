@@ -6,9 +6,13 @@ public static class TaskHistoryRecoveryPolicy
     public const string HostRestartedErrorCode = "HOST_RESTARTED";
     public const string ApprovalNotRestoredErrorCode = "APPROVAL_NOT_RESTORED";
 
-    public static TaskRecord ForDisplay(TaskRecord task, DateTimeOffset currentProcessStartedAtUtc)
+    public static TaskRecord ForDisplay(TaskRecord task, Guid currentHostSessionId)
     {
-        if (task.UpdatedAtUtc >= currentProcessStartedAtUtc) return task;
+        ArgumentNullException.ThrowIfNull(task);
+        if (currentHostSessionId == Guid.Empty)
+            throw new ArgumentException("当前Host会话标识无效。", nameof(currentHostSessionId));
+
+        if (task.HostSessionId == currentHostSessionId) return task;
 
         if (task.Status == TaskLifecycleState.AwaitingApproval)
         {

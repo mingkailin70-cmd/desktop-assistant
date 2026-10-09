@@ -1,3 +1,9 @@
+## v0.1.76.0 R1 Host会话标识与SQLite v6（2026-10-09）
+
+任务恢复改用持久Host会话标识，避免系统时钟回拨把旧会话中的任务误识别为当前任务。SQLite v5→v6迁移为旧任务增加会话列；升级前先生成一致性备份，并将旧表中的未完成任务转换为结果待核对状态，审批待办单独标记为未恢复。已完成、失败和取消终态不变，任务不自动续跑。设置页备份恢复只接受v6架构。
+
+固定SDK 10.0.401 Release解决方案构建0警告、0错误；完整Windows安全套件117项通过、0项跳过；桌面交互专项76项通过。签名MSIX位于`artifacts\msix-validation\f5d0d53eb2f4426bbe6f7f7047281d3b\XiaoK-signed-validation.msix`，137,417,967字节，SHA-256 `48A6643A27F43401BE2B32E58E19E484DB5AAE85102EF68D29431A1137E6BE4D`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本阶段未改动证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.76.0_neutral__g0ndt6g65c8pe`，状态`Ok`。隔离诊断配置后台启动后确认“小K”窗口不可见、前台句柄不变并正常退出，退出码0；没有启动普通界面、模型、麦克风或通知，也没有读取真实任务库。真实用户数据库迁移和常规任务流程仍待验收。提交及GitHub Actions结果待推送后补记。
+
 ## v0.1.73.0 R3动态网页卡死清理保护（2026-10-09）
 
 固定SDK 10.0.401 Release解决方案构建0警告、0错误；浏览器专项中的无限循环内联脚本约10.0秒触发单步/整体超时，隔离浏览器退出受3秒限制，检查未发现遗留Playwright无头Edge进程。Windows安全套件115项通过、0项跳过；桌面交互专项73项通过。签名MSIX位于`artifacts\msix-validation\32bdaf81b5bd4cb38e4bb14a746d440b\XiaoK-signed-validation.msix`，大小137,408,302字节，SHA-256 `CE6DBA91FF67FE9C412DB1101B34342D33BCC21BC022C1423CCC14528FA280F0`；SignTool验签有效，0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已位于`LocalMachine\TrustedPeople`，本阶段未改信任。当前账户包状态`Ok`、版本`0.1.73.0`；Host、Tools、Core和Browser程序集散列均与发布副本一致。安装器没有启动Host，当前Host进程数为0。真实公网网页读取和资源上限仍未验收。实现提交`6b55220`已推送至`origin/main`，GitHub Actions [Build #37863235673](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37863235673)成功。

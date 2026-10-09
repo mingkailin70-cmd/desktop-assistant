@@ -6,7 +6,7 @@ namespace XiaoK.Core;
 public enum TaskLifecycleState { Queued, Planning, AwaitingApproval, Running, Verifying, Completed, Failed, Cancelled, OutcomeUncertain }
 
 public sealed record TaskRecord(Guid Id, string Kind, string Summary, TaskLifecycleState Status, DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null);
+    DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null, Guid? HostSessionId = null);
 public sealed record ApprovalAuditRecord(Guid Id, string ActionId, string Outcome, DateTimeOffset CreatedAtUtc);
 
 [Flags]

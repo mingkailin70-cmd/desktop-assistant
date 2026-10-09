@@ -533,11 +533,14 @@ try
     await CheckSqliteTaskStoreRoundTripAndBackupAsync(tempRoot);
     passed.Add("SQLite 任务存储规范化状态字段、丢弃结果正文并可创建一致性备份");
 
+    await CheckSqliteV5ToV6SessionRecoveryMigrationAsync(tempRoot);
+    passed.Add("SQLite v5 到 v6 迁移先备份并将旧会话未完成任务标为待核对");
+
     await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
     await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
-    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1/v2/v3/v4 到 v5 架构备份迁移");
+    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1/v2/v3/v4 到 v6 架构备份迁移");
 
     await CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(tempRoot);
     passed.Add("本地历史清理删除 SQLite 个人记录并保留迁移标记，重启后不会从旧源重新导入");
@@ -3185,15 +3188,17 @@ static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
     var databasePath = Path.Combine(root, "sqlite-roundtrip", "tasks.sqlite3");
     var backupPath = Path.Combine(root, "sqlite-roundtrip", "tasks-backup.sqlite3");
     var id = Guid.NewGuid();
+    var hostSessionId = Guid.NewGuid();
     var now = DateTimeOffset.UtcNow;
     const string privateSentinel = "PRIVATE_CHAT_BODY_SENTINEL_DO_NOT_STORE";
     var store = new SqliteTaskStore(databasePath);
     await store.SaveAsync(new TaskRecord(id, "chat", "用户发来的完整私聊正文", TaskLifecycleState.Completed,
-        now.AddMinutes(-1), now, Result: privateSentinel, ErrorCode: "SAFE_TEST"), CancellationToken.None);
+        now.AddMinutes(-1), now, Result: privateSentinel, ErrorCode: "SAFE_TEST", HostSessionId: hostSessionId), CancellationToken.None);
 
     var recent = await store.GetRecentAsync(20, CancellationToken.None);
     Require(recent.Count == 1 && recent[0].Id == id && recent[0].Kind == "chat"
-        && recent[0].Summary == "本地对话" && recent[0].Result is null && recent[0].ErrorCode == "SAFE_TEST",
+        && recent[0].Summary == "本地对话" && recent[0].Result is null && recent[0].ErrorCode == "SAFE_TEST"
+        && recent[0].HostSessionId == hostSessionId,
         "SQLite 任务往返写入保留了非规范字段或遗漏了必要状态。");
 
     var expectedCategories = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -3238,6 +3243,65 @@ static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
     Require(DatabaseFilesOmitSentinel(databasePath, privateSentinel)
         && DatabaseFilesOmitSentinel(backupPath, privateSentinel),
         "任务结果正文哨兵被写入 SQLite 主文件、WAL 或备份。");
+}
+
+static async Task CheckSqliteV5ToV6SessionRecoveryMigrationAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-v5-to-v6");
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    Directory.CreateDirectory(directory);
+    var now = DateTimeOffset.UtcNow;
+    var previousSessionId = Guid.NewGuid();
+    var states = new Dictionary<TaskLifecycleState, Guid>
+    {
+        [TaskLifecycleState.Queued] = Guid.NewGuid(),
+        [TaskLifecycleState.Planning] = Guid.NewGuid(),
+        [TaskLifecycleState.AwaitingApproval] = Guid.NewGuid(),
+        [TaskLifecycleState.Running] = Guid.NewGuid(),
+        [TaskLifecycleState.Verifying] = Guid.NewGuid(),
+        [TaskLifecycleState.Completed] = Guid.NewGuid(),
+        [TaskLifecycleState.Cancelled] = Guid.NewGuid()
+    };
+    var store = new SqliteTaskStore(databasePath);
+    foreach (var (state, id) in states)
+    {
+        await store.SaveAsync(new TaskRecord(id, "app", "不得保存自由文本", state,
+            now.AddMinutes(-2), now.AddMinutes(-1), ErrorCode: "OLD_ERROR", HostSessionId: previousSessionId),
+            CancellationToken.None);
+    }
+
+    SqliteSchemaFixture.RevertToVersionFive(databasePath);
+    var migratedStore = new SqliteTaskStore(databasePath);
+    var migrated = await migratedStore.GetRecentAsync(20, CancellationToken.None);
+    var byId = migrated.ToDictionary(task => task.Id);
+    var backups = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").ToArray();
+
+    Require(backups.Length == 1 && new FileInfo(backups[0]).Length > 0
+        && migrated.Count == states.Count
+        && new[]
+        {
+            TaskLifecycleState.Queued, TaskLifecycleState.Planning, TaskLifecycleState.Running,
+            TaskLifecycleState.Verifying
+        }.All(state => byId[states[state]].Status == TaskLifecycleState.OutcomeUncertain
+            && byId[states[state]].ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
+            && byId[states[state]].HostSessionId is null)
+        && byId[states[TaskLifecycleState.AwaitingApproval]].Status == TaskLifecycleState.OutcomeUncertain
+        && byId[states[TaskLifecycleState.AwaitingApproval]].ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
+        && byId[states[TaskLifecycleState.Completed]].Status == TaskLifecycleState.Completed
+        && byId[states[TaskLifecycleState.Completed]].ErrorCode == "OLD_ERROR"
+        && byId[states[TaskLifecycleState.Cancelled]].Status == TaskLifecycleState.Cancelled
+        && byId[states[TaskLifecycleState.Cancelled]].ErrorCode == "OLD_ERROR",
+        "SQLite v5 到 v6 迁移没有先备份、保守标记旧会话未完成任务或保留终态任务。");
+
+    var newSessionId = Guid.NewGuid();
+    var newTask = new TaskRecord(Guid.NewGuid(), "app", "不得保存自由文本", TaskLifecycleState.Running,
+        now, now, HostSessionId: newSessionId);
+    await migratedStore.SaveAsync(newTask, CancellationToken.None);
+    var roundTripped = (await migratedStore.GetRecentAsync(20, CancellationToken.None))
+        .Single(task => task.Id == newTask.Id);
+    Require(roundTripped.HostSessionId == newSessionId
+        && TaskHistoryRecoveryPolicy.ForDisplay(roundTripped, newSessionId) == roundTripped,
+        "v6 迁移后无法保存并读取当前Host会话标识。");
 }
 
 static async Task CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(string root)
@@ -3574,29 +3638,40 @@ static bool DatabaseFilesOmitSentinel(string databasePath, string sentinel)
 static void CheckInterruptedTaskHistoryIsNotReplayed()
 {
     var processStartedAt = DateTimeOffset.UtcNow;
+    var currentSessionId = Guid.NewGuid();
+    var previousSessionId = Guid.NewGuid();
     var stale = new TaskRecord(Guid.NewGuid(), "app", "应用操作", TaskLifecycleState.Running,
-        processStartedAt.AddMinutes(-1), processStartedAt.AddSeconds(-1), "暂存结果");
+        processStartedAt.AddMinutes(-1), processStartedAt.AddSeconds(-1), "暂存结果",
+        HostSessionId: previousSessionId);
     var staleQueued = stale with { Status = TaskLifecycleState.Queued };
     var awaitingApproval = stale with { Status = TaskLifecycleState.AwaitingApproval };
-    var current = stale with { UpdatedAtUtc = processStartedAt.AddSeconds(1) };
-    var currentApproval = awaitingApproval with { UpdatedAtUtc = processStartedAt.AddSeconds(1) };
+    var staleWithFutureClock = stale with { UpdatedAtUtc = processStartedAt.AddMinutes(5) };
+    var unstampedInFlight = stale with { HostSessionId = null, UpdatedAtUtc = processStartedAt.AddMinutes(5) };
+    var current = stale with { UpdatedAtUtc = processStartedAt.AddMinutes(-10), HostSessionId = currentSessionId };
+    var currentApproval = awaitingApproval with
+    {
+        UpdatedAtUtc = processStartedAt.AddMinutes(-10),
+        HostSessionId = currentSessionId
+    };
 
-    var interrupted = TaskHistoryRecoveryPolicy.ForDisplay(stale, processStartedAt);
+    var interrupted = TaskHistoryRecoveryPolicy.ForDisplay(stale, currentSessionId);
     Require(interrupted.Status == TaskLifecycleState.OutcomeUncertain
         && interrupted.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
         && interrupted.Result is null, "上次进程中未结束的任务没有被标为待核对，或保留了旧结果内容。");
-    var interruptedApproval = TaskHistoryRecoveryPolicy.ForDisplay(awaitingApproval, processStartedAt);
+    var interruptedApproval = TaskHistoryRecoveryPolicy.ForDisplay(awaitingApproval, currentSessionId);
     Require(interruptedApproval.Status == TaskLifecycleState.OutcomeUncertain
         && interruptedApproval.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
         && interruptedApproval.Result is null,
         "重启后已失效的内存审批仍显示为可继续处理，或保留了旧结果内容。");
-    Require(TaskHistoryRecoveryPolicy.ForDisplay(staleQueued, processStartedAt).Status == TaskLifecycleState.OutcomeUncertain
-        && TaskHistoryRecoveryPolicy.ForDisplay(current, processStartedAt) == current
-        && TaskHistoryRecoveryPolicy.ForDisplay(currentApproval, processStartedAt) == currentApproval,
-        "旧的排队任务或当前进程内任务/审批状态投影错误。");
+    Require(TaskHistoryRecoveryPolicy.ForDisplay(staleQueued, currentSessionId).Status == TaskLifecycleState.OutcomeUncertain
+        && TaskHistoryRecoveryPolicy.ForDisplay(staleWithFutureClock, currentSessionId).Status == TaskLifecycleState.OutcomeUncertain
+        && TaskHistoryRecoveryPolicy.ForDisplay(unstampedInFlight, currentSessionId).Status == TaskLifecycleState.OutcomeUncertain
+        && TaskHistoryRecoveryPolicy.ForDisplay(current, currentSessionId) == current
+        && TaskHistoryRecoveryPolicy.ForDisplay(currentApproval, currentSessionId) == currentApproval,
+        "Host会话标识没有区分跨进程任务，或当前会话任务被时钟回拨误标。");
     Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
         && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt)
-        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", currentApproval.UpdatedAtUtc, processStartedAt),
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", processStartedAt.AddSeconds(1), processStartedAt),
         "隔离编程任务的旧审批没有标记为失效，或当前进程内审批被误标。");
 }
 
@@ -3689,7 +3764,7 @@ static void CheckQueuedTaskCancellationArbitration()
     Require(shutdownCancelled.Status == TaskLifecycleState.Cancelled
         && shutdownCancelled.UpdatedAtUtc == shutdownAt
         && shutdownCancelled.ErrorCode == TaskExecutionShutdownPolicy.ErrorCode
-        && TaskHistoryRecoveryPolicy.ForDisplay(shutdownCancelled, shutdownAt.AddSeconds(1)).Status
+        && TaskHistoryRecoveryPolicy.ForDisplay(shutdownCancelled, Guid.NewGuid()).Status
             == TaskLifecycleState.Cancelled
         && TaskHistoryDisplayPolicy.NextAction(shutdownCancelled.Status).Contains("不会自动重试", StringComparison.Ordinal),
         "退出时尚未开始的排队任务没有持久化为取消终态，或重启后被误标为待核对。");
@@ -7682,13 +7757,17 @@ internal static class SqliteSchemaFixture
     public static void SetUserVersion(string databasePath, int version) =>
         Execute(databasePath, $"PRAGMA user_version={version};");
 
+    public static void RevertToVersionFive(string databasePath) => RebuildTasksTableWithoutHostSession(databasePath, 5);
+
     public static void RevertToVersionTwo(string databasePath)
     {
+        RebuildTasksTableWithoutHostSession(databasePath, 2);
         Execute(databasePath, "BEGIN IMMEDIATE; DROP TABLE approval_audit; PRAGMA user_version=2; COMMIT;");
     }
 
     public static void RevertToVersionThree(string databasePath)
     {
+        RebuildTasksTableWithoutHostSession(databasePath, 3);
         Execute(databasePath, "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
             + "ALTER TABLE approval_audit RENAME TO approval_audit_v4; "
             + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
@@ -7702,6 +7781,7 @@ internal static class SqliteSchemaFixture
 
     public static void RevertToVersionFour(string databasePath)
     {
+        RebuildTasksTableWithoutHostSession(databasePath, 4);
         Execute(databasePath, "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
             + "ALTER TABLE approval_audit RENAME TO approval_audit_v5; "
             + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
@@ -7716,8 +7796,21 @@ internal static class SqliteSchemaFixture
 
     public static void RevertToVersionOne(string databasePath)
     {
+        RebuildTasksTableWithoutHostSession(databasePath, 1);
         Execute(databasePath, "BEGIN IMMEDIATE; DROP TABLE approval_audit; DROP TABLE contact_reply_styles; "
             + "DELETE FROM migration_state WHERE name='contact-styles-settings-v1'; PRAGMA user_version=1; COMMIT;");
+    }
+
+    private static void RebuildTasksTableWithoutHostSession(string databasePath, int version)
+    {
+        Execute(databasePath, "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_tasks_updated; "
+            + "ALTER TABLE tasks RENAME TO tasks_v6; "
+            + "CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, "
+            + "status INTEGER NOT NULL, created_utc_ticks INTEGER NOT NULL, updated_utc_ticks INTEGER NOT NULL, error_code TEXT NULL); "
+            + "INSERT INTO tasks(id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code) "
+            + "SELECT id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code FROM tasks_v6; "
+            + "DROP TABLE tasks_v6; CREATE INDEX ix_tasks_updated ON tasks(updated_utc_ticks DESC); "
+            + $"PRAGMA user_version={version}; COMMIT;");
     }
 
     private static void Execute(string databasePath, string sql)
@@ -7733,7 +7826,7 @@ internal static class SqliteSchemaFixture
             {
                 var message = error == IntPtr.Zero ? $"SQLite 错误码 {result}" : Marshal.PtrToStringUTF8(error);
                 if (error != IntPtr.Zero) sqlite3_free(error);
-                throw new IOException("无法构造合成 v1 SQLite 数据库：" + message);
+                throw new IOException("无法构造合成旧版 SQLite 数据库：" + message);
             }
         }
         finally

@@ -20,6 +20,7 @@ namespace XiaoK.Host;
 internal sealed class AssistantRuntime : IAsyncDisposable
 {
     private readonly DateTimeOffset _processStartedAtUtc = DateTimeOffset.UtcNow;
+    private readonly Guid _hostSessionId = Guid.NewGuid();
     private XiaoKSettings _settings;
     private readonly SqliteTaskStore _store;
     private readonly ILiveApprovalStateProvider? _liveApprovalStateProvider;
@@ -314,7 +315,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var records = (await _store.GetRecentAsync(30, cancellationToken))
             .Select(record =>
             {
-                var visible = TaskHistoryRecoveryPolicy.ForDisplay(record, _processStartedAtUtc);
+                var visible = TaskHistoryRecoveryPolicy.ForDisplay(record, _hostSessionId);
                 visible = visible with
                 {
                     Status = TaskHistoryDisplayPolicy.EffectiveState(visible.Status,
@@ -1084,7 +1085,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         // Category only: never persist user prompts, notification bodies, model replies or attachments.
         try
         {
-            await _store.SaveAsync(task, token);
+            await _store.SaveAsync(task with { HostSessionId = _hostSessionId }, token);
             return true;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
