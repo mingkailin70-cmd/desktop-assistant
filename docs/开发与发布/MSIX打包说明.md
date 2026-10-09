@@ -2,7 +2,7 @@
 
 只有客户端解析器确认通知属于私聊且提供不超过256字符的会话ID或发送者标识时，`MessageNoticePolicy.GateBodyReader`才把真实正文读取器交给通知适配器。当前微信/QQ解析器尚未接入，监视器传递的元数据仍未知，故适配器只得到空读取器。新增合成检查覆盖未知会话、群聊、无标识、超长标识和已核验私聊；没有读取真实通知。
 
-固定.NET SDK 10.0.401离线Release解决方案构建0警告、0错误；Windows安全套件121项通过、0项跳过。自包含发布包含`Microsoft.NETCore.App`和`Microsoft.WindowsDesktop.App` 10.0.12。签名MSIX位于`artifacts\msix-validation\031359898bb643de814022bf1eb74ab3\XiaoK-signed-validation.msix`，139,337,466字节，SHA-256 `C59021CC32F9C07B291FE52A1A62DE10034736E46964786E11DDE7FCFF3DE321`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已在`LocalMachine\TrustedPeople`，本次未改变信任。当前账户已安装`0.1.90.0`、状态`Ok`；安装包内Host DLL与自包含发布副本SHA-256均为`ADE5DC5FE109E11D58FEDD7A9CAE6F357D3B8C5C72DC728ED15249D59591CC05`。安装器没有启动Host；没有复查通知开关或权限，没有启动持续监听。
+固定.NET SDK 10.0.401离线Release解决方案构建0警告、0错误；Windows安全套件121项通过、0项跳过。自包含发布包含`Microsoft.NETCore.App`和`Microsoft.WindowsDesktop.App` 10.0.12。签名MSIX位于`artifacts\msix-validation\031359898bb643de814022bf1eb74ab3\XiaoK-signed-validation.msix`，139,337,466字节，SHA-256 `C59021CC32F9C07B291FE52A1A62DE10034736E46964786E11DDE7FCFF3DE321`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已在`LocalMachine\TrustedPeople`，本次未改变信任。当前账户已安装`0.1.90.0`、状态`Ok`；安装包内Host DLL与自包含发布副本SHA-256均为`ADE5DC5FE109E11D58FEDD7A9CAE6F357D3B8C5C72DC728ED15249D59591CC05`。安装器没有启动Host；安装后只读设置确认微信/QQ监控关闭、AUMID列表为空；Windows通知授权未复查，没有启动持续监听。
 
 此更新仅加强“未知私聊元数据不读取正文”这一失败关闭边界；真实微信/QQ来源、通知结构和私聊归属仍未核实，R0闸门未通过。
 
