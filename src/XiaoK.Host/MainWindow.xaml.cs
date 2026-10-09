@@ -88,6 +88,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         };
         _tray.DoubleClick += (_, _) => RestoreFromTray();
         SourceInitialized += OnSourceInitialized;
+        IsVisibleChanged += MainWindow_IsVisibleChanged;
         Closing += OnClosing;
         SetExpandedView(expanded: false);
     }
@@ -1220,7 +1221,19 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private void PetEngineViewbox_Loaded(object sender, RoutedEventArgs e)
     {
-        _petRendererInitializationTask ??= InitializePetRendererAsync();
+        EnsurePetRendererInitialization();
+    }
+
+    private void MainWindow_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true) EnsurePetRendererInitialization();
+    }
+
+    private void EnsurePetRendererInitialization()
+    {
+        if (_exiting || !IsVisible || Opacity <= 0 || !PetEngineViewbox.IsLoaded
+            || _petRenderer is not null || _petRendererInitializationTask is not null) return;
+        _petRendererInitializationTask = InitializePetRendererAsync();
     }
 
     private async Task InitializePetRendererAsync()
@@ -1374,6 +1387,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _tray.Dispose();
         _notificationMonitor.StatusChanged -= OnNotificationStatusChanged;
         _notificationMonitor.PrivateNoticeAccepted -= OnPrivateNoticeAccepted;
+        IsVisibleChanged -= MainWindow_IsVisibleChanged;
         _runtime.SpeechCaptureMaximumDurationReached -= OnSpeechCaptureMaximumDurationReached;
         _runtime.PrivateNoticeAnalysisCompleted -= OnPrivateNoticeAnalysisCompleted;
         _runtime.UserTaskStateChanged -= OnUserTaskStateChanged;

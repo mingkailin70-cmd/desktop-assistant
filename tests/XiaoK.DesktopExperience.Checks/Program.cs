@@ -126,6 +126,19 @@ var taskCenterXaml = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
     "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
 var taskCenterOpenStart = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
     "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+Require(taskCenterOpenStart.Contains("IsVisibleChanged += MainWindow_IsVisibleChanged;", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("if (e.NewValue is true) EnsurePetRendererInitialization();", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("!IsVisible || Opacity <= 0 || !PetEngineViewbox.IsLoaded", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("IsVisibleChanged -= MainWindow_IsVisibleChanged;", StringComparison.Ordinal),
+    "启动隐藏或托盘驻留时不能初始化VPet；主窗体之后可见时才启动，并在关闭时解除监听。 ");
+var petLoadedHandlerStart = taskCenterOpenStart.IndexOf("private void PetEngineViewbox_Loaded", StringComparison.Ordinal);
+var petLoadedHandlerEnd = taskCenterOpenStart.IndexOf("private void MainWindow_IsVisibleChanged", petLoadedHandlerStart, StringComparison.Ordinal);
+Require(petLoadedHandlerStart >= 0 && petLoadedHandlerEnd > petLoadedHandlerStart
+    && taskCenterOpenStart[petLoadedHandlerStart..petLoadedHandlerEnd]
+        .Contains("EnsurePetRendererInitialization();", StringComparison.Ordinal)
+    && !taskCenterOpenStart[petLoadedHandlerStart..petLoadedHandlerEnd]
+        .Contains("InitializePetRendererAsync()", StringComparison.Ordinal),
+    "桌宠控件的Loaded事件绕过了窗口可见性准入。 ");
 var openTaskCenterStart = taskCenterOpenStart.IndexOf("private Task ShowTaskHistoryAsync()", StringComparison.Ordinal);
 var openTaskCenterEnd = taskCenterOpenStart.IndexOf("private void ShowSettings()", openTaskCenterStart, StringComparison.Ordinal);
 Require(openTaskCenterStart >= 0 && openTaskCenterEnd > openTaskCenterStart,
