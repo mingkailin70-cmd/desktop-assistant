@@ -511,7 +511,7 @@
       ],
       "license": "apache-2.0",
       "status": "locally_evaluated",
-      "notes": "Google官方Gemma 4 E4B指令模型QAT Q4_0 GGUF。官方模型卡报告LiveCodeBench v6为52%，仅作为进入本机合成任务初筛的依据，不代表小K任务集成绩或生产准入。官方模型页标注Apache-2.0。2026-10-09在固定v82管线完成S01-S03，0/3通过；包括提出未请求的字符串值和补丁查找文本不唯一，安全门均拒绝且原项目未修改。详情见中文候选筛查记录。样本不完整，不构成完整40题准入结论。",
+      "notes": "Google官方Gemma 4 E4B指令模型QAT Q4_0 GGUF。官方模型卡报告LiveCodeBench v6为52%，仅作为进入本机合成任务初筛的依据，不代表小K任务集成绩或生产准入。官方模型页标注Apache-2.0。2026-10-09在固定v82管线完成S01-S10，0/10通过；失败包括补丁锚点不唯一、错误别名、错误表达式、占位逻辑和无效JSON。安全/独立评审门均拒绝，原项目未修改。因剩余30题全过也仅30/40，停止此候选与固定管线质量评分；不进入生产。详情见中文候选筛查记录。",
       "localDirectory": "llm/gemma-4-e4b-it-qat-q4-0/4b4a2c1d584be7264f87aac328a1bc739ce81b6c",
       "requiredForP0": false
     }
