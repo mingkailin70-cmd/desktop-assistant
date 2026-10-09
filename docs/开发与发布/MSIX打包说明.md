@@ -1,3 +1,11 @@
+## v0.1.77.0 R1隔离编程任务会话恢复（2026-10-09）
+
+隔离编程任务状态文件现保存`HostSessionId`，并按当前Host会话判断`planning`、`running`、`verifying`、`applying`与`awaiting_approval`是否仍属于本次运行。旧版没有标识、标识损坏或会话不匹配的活动状态只显示为待核对，不会续跑、重试或恢复审批；终态保持不变。
+
+固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件117项通过、0项跳过；桌面交互专项76项通过。签名MSIX位于`artifacts\msix-validation\e2a1cef5ff914379b7e0d7fb70b35f66\XiaoK-signed-validation.msix`，137,418,614字节，SHA-256 `018E3DFA84833DD4438342A4110EF18294BDF5C6E6B8757CB7CDE8B8CDA29C42`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信任，本阶段未修改证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.77.0_neutral__g0ndt6g65c8pe`，状态`Ok`。
+
+隔离诊断配置以`--diagnostics-profile --background`启动，窗口“小K”隐藏；启动、运行和正常退出前台HWND均为`329536`。向窗口投递应用注册的正常退出消息后，Host以退出码0结束；当前无Host进程。没有启动模型、麦克风、通知或普通任务。源码提交`d8ecacd`已推送至`origin/main`，GitHub Actions [Build #363](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37874507960)通过。
+
 ## v0.1.76.0 R1 Host会话标识与SQLite v6（2026-10-09）
 
 任务恢复改用持久Host会话标识，避免系统时钟回拨把旧会话中的任务误识别为当前任务。SQLite v5→v6迁移为旧任务增加会话列；升级前先生成一致性备份，并将旧表中的未完成任务转换为结果待核对状态，审批待办单独标记为未恢复。已完成、失败和取消终态不变，任务不自动续跑。设置页备份恢复只接受v6架构。
@@ -276,3 +284,4 @@ VS Code 新窗口核验修正（2026-10-03）：复核后发现旧启动验收�
 ~~~
 
 本机开发证书只用于当前用户测试，不可用于公开发行或分发。证书信任导入和安装会改变当前用户的证书信任与应用状态；开始这一步前应展示证书主题、SHA-256 指纹、安装包路径和回滚方式。公开发行前需采用正式签名身份，并确定应用身份、登录启动注册、升级和回滚行为。
+## v0.1.76.0 R1 Host会话标识与SQLite v6（2026-10-09）
