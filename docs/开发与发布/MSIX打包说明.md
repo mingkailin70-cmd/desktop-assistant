@@ -1,3 +1,9 @@
+## v0.1.89.0 R0通知来源诊断时间显示（2026-10-09）
+
+设置页的一次性只读通知来源诊断现按AUMID汇总通知数量和最近创建时间（本地时区），帮助用户将候选来源与自己识别的自然Toast对照。诊断只读取应用显示名、AUMID和创建时间，不读取正文、不保存候选、不填入白名单、不启动持续监听。
+
+固定.NET SDK 10.0.401离线Release全解决方案构建0警告、0错误；Windows安全套件120项通过、0项跳过。签名MSIX位于`artifacts\msix-validation\dae8dd9bd462441aa9395d3cd594bd38\XiaoK-signed-validation.msix`，139,337,062字节，SHA-256 `B9C7F947AA40707DB7DDDC658D1781FD499AF12E764158D51011C656831F207A`。SignTool验签有效、0警告、0错误；签名证书SHA-1指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已存在于`LocalMachine\TrustedPeople`，本次未修改信任。当前账户包版本`0.1.89.0`、状态`Ok`；安装版Host DLL与自包含发布目录文件SHA-256一致。安装器未启动Host；通知授权、监听开关和AUMID白名单本轮未复查。没有收集真实客户端样本，因此AUMID来源、通知正文格式和私聊归属仍未核验，R0通知闸门未通过。
+
 ## v0.1.88.0 R3固定导出目录文本创建工具（2026-10-09）
 
 新增固定后台命令“创建文本文件：文件名；内容：正文”，仅在小K导出目录新建不超过64 KiB的`.txt`或`.md`文件，不覆盖同名目标。定向安全检查通过；全量Windows安全套件120项通过、0项跳过；固定SDK Release全解决方案构建0警告、0错误。签名MSIX位于`artifacts\msix-validation\fef71760549f44cb8f6345da6cb036e1\XiaoK-signed-validation.msix`，139,336,460字节，SHA-256 `7AECA3A92093680EBC81946FBEC2B90596C9A74657EB405F0B6C7007BF558665`。SignTool验签`Valid`、0警告、0错误；证书已在`LocalMachine\TrustedPeople`，本次未改变信任。安装前当前账户没有运行中的小K Host；0.1.88.0已安装且状态`Ok`，未启动应用或抢占前台。用户界面实际创建、取消、冲突提示仍待验收；P0/P4发布闸门继续未通过。

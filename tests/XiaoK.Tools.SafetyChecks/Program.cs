@@ -687,7 +687,7 @@ try
     passed.Add("同一通知发布者不能同时归属微信和 QQ");
 
     CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral();
-    passed.Add("通知来源诊断只投影微信/QQ应用显示名和AUMID，限制数量且不包含正文");
+    passed.Add("通知来源诊断只投影微信/QQ应用显示名、AUMID和最近创建时间，限制数量且不包含正文");
 
     CheckPackagedAndDesktopAppUserModelIds();
     passed.Add("通知 allowlist 接受已核实的 MSIX 与经典桌面应用 AUMID，并拒绝空白、控制字符和超长值");
@@ -4663,22 +4663,23 @@ static void CheckNoticePublisherAssignmentsAreUnambiguous()
 
 static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
 {
-    var entries = new List<(string? DisplayName, string? AppUserModelId)>
+    var entries = new List<(string? DisplayName, string? AppUserModelId, DateTimeOffset CreationTimeUtc)>
     {
-        ("微信", "weixin.desktop!Main"),
-        ("微信", "weixin.desktop!Main"),
-        ("QQ", "QQ"),
-        ("Other Messenger", "other.app!Main"),
-        ("WeChat impostor", "not-a-valid-id!bad!extra")
+        ("微信", "weixin.desktop!Main", DateTimeOffset.UnixEpoch.AddSeconds(3)),
+        ("微信", "weixin.desktop!Main", DateTimeOffset.UnixEpoch.AddSeconds(7)),
+        ("QQ", "QQ", DateTimeOffset.UnixEpoch.AddSeconds(5)),
+        ("Other Messenger", "other.app!Main", DateTimeOffset.UnixEpoch.AddSeconds(9)),
+        ("WeChat impostor", "not-a-valid-id!bad!extra", DateTimeOffset.UnixEpoch.AddSeconds(10))
     };
     var projected = NotificationPublisherDiagnosticPolicy.Project(entries);
     Require(projected.Count == 2
         && projected.Single(item => item.AppUserModelId == "weixin.desktop!Main").NotificationCount == 2
-        && projected.Single(item => item.AppUserModelId == "QQ").NotificationCount == 1,
+        && projected.Single(item => item.AppUserModelId == "QQ").NotificationCount == 1
+        && projected.Single(item => item.AppUserModelId == "weixin.desktop!Main").LatestNotificationTimeUtc == DateTimeOffset.UnixEpoch.AddSeconds(7),
         "通知来源只读诊断没有按目标应用显示名筛选并聚合AUMID。 ");
 
     var overLimit = Enumerable.Range(0, NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications + 1)
-        .Select(index => ((string?)"QQ", (string?)$"qq.app!Id{index}"));
+        .Select(index => ((string?)"QQ", (string?)$"qq.app!Id{index}", DateTimeOffset.UnixEpoch.AddSeconds(index)));
     Require(NotificationPublisherDiagnosticPolicy.Project(overLimit).Count == NotificationPublisherDiagnosticPolicy.MaximumCandidates,
         "通知来源只读诊断未限制扫描数或结果候选数。 ");
 
@@ -4696,6 +4697,7 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
     var settingsXaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml"));
     Require(diagnostic.Contains("notification.AppInfo.DisplayInfo.DisplayName", StringComparison.Ordinal)
         && diagnostic.Contains("notification.AppInfo.AppUserModelId", StringComparison.Ordinal)
+        && diagnostic.Contains("notification.CreationTime", StringComparison.Ordinal)
         && !diagnostic.Contains("notification.Notification.Visual", StringComparison.Ordinal)
         && !diagnostic.Contains("ReadVisibleText", StringComparison.Ordinal)
         && !diagnostic.Contains("RequestAccessAsync", StringComparison.Ordinal)

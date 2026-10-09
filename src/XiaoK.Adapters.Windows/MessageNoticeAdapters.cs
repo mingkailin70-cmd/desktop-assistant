@@ -52,7 +52,11 @@ public static class MessageNoticePublisherAssignments
     }
 }
 
-public sealed record NotificationPublisherCandidate(string DisplayName, string AppUserModelId, int NotificationCount);
+public sealed record NotificationPublisherCandidate(
+    string DisplayName,
+    string AppUserModelId,
+    int NotificationCount,
+    DateTimeOffset LatestNotificationTimeUtc);
 
 /// <summary>Projects a bounded, ephemeral source-identity diagnostic. No toast body or sender data is accepted here.</summary>
 public static class NotificationPublisherDiagnosticPolicy
@@ -62,23 +66,25 @@ public static class NotificationPublisherDiagnosticPolicy
     private const int MaximumDisplayNameLength = 80;
 
     public static IReadOnlyList<NotificationPublisherCandidate> Project(
-        IEnumerable<(string? DisplayName, string? AppUserModelId)> sources)
+        IEnumerable<(string? DisplayName, string? AppUserModelId, DateTimeOffset CreationTimeUtc)> sources)
     {
         ArgumentNullException.ThrowIfNull(sources);
-        var candidates = new Dictionary<string, (string DisplayName, int Count)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (displayName, appUserModelId) in sources.Take(MaximumInspectedNotifications))
+        var candidates = new Dictionary<string, (string DisplayName, int Count, DateTimeOffset LatestNotificationTimeUtc)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (displayName, appUserModelId, creationTimeUtc) in sources.Take(MaximumInspectedNotifications))
         {
             if (!IsLikelyTargetClientName(displayName) || !AppUserModelIdPolicy.IsValid(appUserModelId)) continue;
 
             var safeName = new string(displayName!.Where(character => !char.IsControl(character)).Take(MaximumDisplayNameLength).ToArray()).Trim();
             if (safeName.Length == 0) continue;
             if (candidates.TryGetValue(appUserModelId!, out var existing))
-                candidates[appUserModelId!] = (existing.DisplayName, existing.Count + 1);
+                candidates[appUserModelId!] = (existing.DisplayName, existing.Count + 1,
+                    creationTimeUtc > existing.LatestNotificationTimeUtc ? creationTimeUtc : existing.LatestNotificationTimeUtc);
             else if (candidates.Count < MaximumCandidates)
-                candidates.Add(appUserModelId!, (safeName, 1));
+                candidates.Add(appUserModelId!, (safeName, 1, creationTimeUtc));
         }
 
-        return candidates.Select(pair => new NotificationPublisherCandidate(pair.Value.DisplayName, pair.Key, pair.Value.Count))
+        return candidates.Select(pair => new NotificationPublisherCandidate(
+                pair.Value.DisplayName, pair.Key, pair.Value.Count, pair.Value.LatestNotificationTimeUtc))
             .OrderBy(candidate => candidate.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(candidate => candidate.AppUserModelId, StringComparer.OrdinalIgnoreCase)
             .ToArray();

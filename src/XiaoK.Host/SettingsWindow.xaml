@@ -169,7 +169,7 @@
                         <Button x:Name="RequestNotificationAccessButton" Content="请求 Windows 通知访问权限" Click="RequestNotificationAccess_Click" HorizontalAlignment="Left" Margin="0,0,0,5"/>
                         <TextBlock x:Name="NotificationStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,9"/>
                         <Button x:Name="InspectNotificationPublishersButton" Content="只读检查近期微信 / QQ 通知来源" Click="InspectNotificationPublishers_Click" HorizontalAlignment="Left" Margin="0,0,0,5"/>
-                        <TextBlock Text="仅读取当前最多512条 Toast 的应用显示名和 AUMID；不读正文、不保存、不启用持续监听。候选不会自动加入白名单。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,5"/>
+                        <TextBlock Text="仅读取当前最多512条 Toast 的应用显示名、AUMID和创建时间；显示最近出现时间供手动对照。不读正文、不保存、不启用持续监听，候选不会自动加入白名单。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,5"/>
                         <TextBox x:Name="NotificationPublisherCandidatesBox" MinHeight="48" MaxHeight="140" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,0,0,9"/>
                         <TextBlock Text="资源读数按需采样；刷新时不会加载模型或启动后台监控。" TextWrapping="Wrap"/>
                         <Button x:Name="RefreshResourcesButton" Content="刷新 CPU / 内存 / NVIDIA 显存" Click="RefreshResources_Click"

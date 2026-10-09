@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Threading;
@@ -81,7 +82,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
                 return "Windows 通知访问权限尚未授予。先点击“请求 Windows 通知访问权限”，再运行只读诊断；没有枚举通知。";
 
-            // This one-shot diagnostic reads only display name and AUMID metadata from at most 512 current toasts.
+            // This one-shot diagnostic reads only display name, AUMID, and creation-time metadata from at most 512 current toasts.
             // It does not subscribe to events, request permission, read toast text, mutate settings, or persist results.
             var notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
             if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
@@ -90,14 +91,15 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             var sources = notifications.OrderByDescending(notification => notification.CreationTime)
                 .Take(NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications)
                 .Select(notification => ((string?)notification.AppInfo.DisplayInfo.DisplayName,
-                    (string?)notification.AppInfo.AppUserModelId));
+                    (string?)notification.AppInfo.AppUserModelId, notification.CreationTime));
             var candidates = NotificationPublisherDiagnosticPolicy.Project(sources);
             if (candidates.Count == 0)
-                return "最近的系统 Toast 中没有显示名含“微信 / WeChat / Weixin / QQ”的有效来源标识。只检查了应用显示名和 AUMID，没有读取正文、保存或启动持续监听。";
+                return "最近的系统 Toast 中没有显示名含“微信 / WeChat / Weixin / QQ”的有效来源标识。只检查了应用显示名、AUMID和创建时间，没有读取正文、保存或启动持续监听。";
 
-            var lines = candidates.Select(candidate => $"{candidate.DisplayName} | {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount}");
+            var lines = candidates.Select(candidate =>
+                $"{candidate.DisplayName} | {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount} | 最近出现：{candidate.LatestNotificationTimeUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}");
             return "只读来源候选（当前通知快照，最多检查512条）：\n" + string.Join("\n", lines)
-                + "\n仅为候选，尚未验证稳定身份；不会自动写入白名单。未读正文、未保存结果、未启用持续监听。请结合你明确识别的客户端通知核对后，再手动填入对应 AUMID。";
+                + "\n最近出现时间仅用于与你看到的通知对照。候选仍未验证稳定身份；不会自动写入白名单。未读正文、未保存结果、未启用持续监听。请结合你明确识别的客户端通知核对后，再手动填入对应 AUMID。";
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
