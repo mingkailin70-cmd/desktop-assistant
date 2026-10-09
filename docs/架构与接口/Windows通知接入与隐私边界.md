@@ -20,6 +20,30 @@
 - 只有策略明确确认私聊并取得可见正文时，正文才通过内存事件交给 Host；Host 复核当前开关、AUMID、会话归属和时效后，进入最多 32 项的低优先级本地分析队列。交互任务优先取得 ModelBroker 租约。停用监听、用户取消或退出会取消相应队列任务。结果只在小K界面和不含正文的托盘提示中短时呈现，不写入任务数据库或日志，也不会自动发送回复。
 - 通知正文没有写入任务数据库、日志、崩溃报告或遥测。当前消息通知策略和去重状态只在进程内存中保存。
 
+### R0：非前台 UI Automation 可行性初探（2026-10-09）
+
+为评估不抢前台的客户端自动化路径，对当前运行的 QQ 9.9.30.48762 和微信 4.1.15.13 进程做了只读 UI Automation Control View 与 Raw View 结构快照。探查只读取元素的控件类型、类名、AutomationId元数据和原生窗口句柄；没有读取元素名称、Value/Text内容、通知正文或聊天记录，没有点击、输入、移动窗口或改变焦点。Control View最多遍历250个元素、5层；Raw View最多遍历1200个元素、10层。
+
+| 客户端 | 当前观测到的结构元素 | 初步判断 |
+| --- | --- | --- |
+| QQ 9.9.30.48762 | Control View有4个元素：2个 `Window / Chrome_WidgetWin_1`、2个 `Pane / Intermediate D3D Window` | Control View只呈现渲染表面；Raw View结果见下表 |
+| 微信 4.1.15.13 | Control View有3个元素：1个 `Window / Qt51514QWindowIcon`、2个 `Pane`（`Qt51514QWindowIcon`、`MMUIRenderSubWindowHW`） | Control View只呈现Qt/渲染表面；Raw View结果见下表 |
+
+Raw View的只读结构结果：
+
+| 客户端 | Raw View元素概况 | 可用性边界 |
+| --- | --- | --- |
+| QQ 9.9.30.48762 | 完整遍历到630个元素：51个`Button`、1个`Edit`、2个`Document`、93个`Text`、400个`Custom`及其他容器；观测到按钮的`InvokePattern`、编辑框的`ValuePattern`和`InvokePattern`、文档的`ValuePattern`；上述按钮/编辑框/文档没有提供可用的`AutomationId` | 存在一定的程序化控件表面，但没有读取名称或值，无法确认哪个按钮是联系人、会话、消息输入或发送，也无法判断是否能在后台稳定操作 |
+| 微信 4.1.15.13 | 完整遍历到8个元素：4个`Button`、2个`Pane`、1个`TitleBar`、1个`Window`；4个按钮支持`InvokePattern`并有AutomationId；未观察到`Edit`或`Document` | 按钮用途未核实；没有观察到可用于确认会话、读取消息或编辑待发正文的语义控件 |
+
+这是当前窗口状态的一次快照：未读取窗口标题，因此不能证明命中的顶层窗口就是聊天主窗；也没有确认控件在不同窗口状态和客户端版本中的稳定性。微软说明，自定义控件若没有 UIA provider，可能只向 UI Automation 暴露有限的窗口句柄信息；这与Control View观察到的渲染表面相符。[UI Automation Providers Overview](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-providersoverview)
+
+Raw View确实暴露了一些按钮、文本及编辑/文档模式，但探查没有读取控件名称或内容，没有调用`ValuePattern.SetValue`、`Invoke`或其他动作，也没有验证目标联系人、会话类别、消息内容和发送结果。因此不能把控件数量或模式支持当作后台消息能力通过；也不能仅凭窗口坐标或模糊控件顺序构造发送适配器。后续若继续探索，必须先设计只读映射/合成目标核验，再由真实客户端样本验证；任何真实发送仍需针对最终内容单条确认。
+
+QQ官方机器人开放平台不是个人QQ账号的等价发送通道：官方消息文档列出单聊使用机器人侧的用户 `openid`，被动回复需引用收到的事件或消息；同一文档说明主动推送自2025年4月21日起不再提供。该API即使具备开发者凭据，也会以机器人身份发送，不能据此宣称小K能够在用户个人QQ客户端中任意向好友K主动发送。[腾讯QQ机器人发送消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
+
+所以目前既没有已验证的会话UIA解析器，也没有可替代用户个人QQ身份的官方主动发送路由。上述探查没有解决通知私聊归属问题，也没有读取真实通知样本、启用监听或发送消息。后续仍须在用户能够识别来源的自然通知上完成 AUMID 与私聊格式验证；若客户端 UIA 仍只暴露自绘表面，应报告真实限制，不得转用数据库、进程注入、协议逆向或抢前台坐标点击。
+
 ## Windows API 与软件包状态
 
 项目将目标框架固定为 `net10.0-windows10.0.26100.0`，通过 `WindowsSdkPackageVersion` 使用 `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87。`NuGet.Config` 仅映射该获准包；这不是客户端发送接口，也不自带微信或 QQ 会话标识。
@@ -32,7 +56,7 @@
 
 当前`WeChatNoticeAdapter`和`QQNoticeAdapter`仍需上游提供真实样本解析结果；`WindowsNotificationMonitor.ProcessAddedAsync`显式传入空`conversationId`、`sender`和私聊标记，所以不会读取正文。应先以真实微信/QQ后台通知验证是否存在稳定、可区分的可见格式；若没有，则R0消息通知闸门判定不可行，需另行评估官方接口或可验证的非前台UIA路径，不能弱化当前私聊判定或读取客户端数据库、注入客户端。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。当前账户签名MSIX为`0.1.87.0`，状态此前核验为`Ok`。最后一次已记录的系统授权检查发生于0.1.81.0只读来源诊断，当时通知访问权限为允许；诊断发现4条QQ候选、未发现微信候选，只显示应用名称和AUMID。最近一次设置只读检查确认微信/QQ通知开关均关闭、AUMID白名单均为空；本轮未重新检查系统授权。没有读取通知正文、启用持续监听或改白名单。真实来源身份、可见正文格式和私聊归属均未核实；编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。当前账户签名MSIX为`0.1.88.0`；本轮只读核验包状态为`Ok`。最后一次已记录的系统授权检查发生于0.1.81.0只读来源诊断，当时通知访问权限为允许；诊断发现4条QQ候选、未发现微信候选，只显示应用名称和AUMID。最近一次设置只读检查确认微信/QQ通知开关均关闭、AUMID白名单均为空；本轮未重新检查系统授权。没有读取通知正文、启用持续监听或改白名单。真实来源身份、可见正文格式和私聊归属均未核实；编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 
