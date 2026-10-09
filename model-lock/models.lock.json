@@ -490,6 +490,30 @@
       "notes": "AutoTrust官方JEV-9B权重的社区GGUF静态量化；固定revision和SHA-256已验证，Apache-2.0由上游模型页和JEV模型卡声明。2026-10-03使用本机llama.cpp b11259、12个GPU层、6,144上下文和coding-zh-v4/v23管线完成M01、R01–R10初筛，2/11通过（R03、R09）；关键错误包括虚构QQ别名、通知未知会话正文读取顺序、漏掉外发不确定时禁止重发、CodeAgent限制、显存零预算合法性和当前通知适配器行为。其余29题即使全部通过最高31/40（77.5%），低于80%门槛，停止此固定管线质量评分，不接受为首版模型。运行中最低空闲显存3,482 MiB、峰值占用4,418 MiB，工具范围检查通过，原项目未修改。上游自报HumanEval使用completion-style提示，不代替小K固定中文CodeAgent任务集；GGUF仅作文本生成评测，不预设专用System 1决策头或vLLM适配能力。",
       "localDirectory": "llm/autotrust-jev-9b-q4km/95be0d83b95147aa9d95ab3f462a2a727276d9a3",
       "requiredForP0": false
+    },
+    {
+      "id": "gemma-4-e4b-it-qat-q4-0-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf",
+      "baseModel": "google/gemma-4-E4B-it",
+      "revision": "4b4a2c1d584be7264f87aac328a1bc739ce81b6c",
+      "format": "GGUF",
+      "quantization": "Q4_0 QAT",
+      "quantizer": "Google official QAT GGUF",
+      "conversionRuntime": "llama.cpp compatible GGUF",
+      "files": [
+        {
+          "name": "gemma-4-E4B_q4_0-it.gguf",
+          "upstreamReportedSizeBytes": 5154941280,
+          "expectedUpstreamSha256": "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee",
+          "localVerifiedSha256": "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "locally_evaluated",
+      "notes": "Google官方Gemma 4 E4B指令模型QAT Q4_0 GGUF。官方模型卡报告LiveCodeBench v6为52%，仅作为进入本机合成任务初筛的依据，不代表小K任务集成绩或生产准入。官方模型页标注Apache-2.0。2026-10-09在固定v82管线完成S01-S03，0/3通过；包括提出未请求的字符串值和补丁查找文本不唯一，安全门均拒绝且原项目未修改。详情见中文候选筛查记录。样本不完整，不构成完整40题准入结论。",
+      "localDirectory": "llm/gemma-4-e4b-it-qat-q4-0/4b4a2c1d584be7264f87aac328a1bc739ce81b6c",
+      "requiredForP0": false
     }
   ]
 }

@@ -5944,6 +5944,31 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
     }
     catch (InvalidDataException) { }
 
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "gemma-4-e4b-it-qat-q4-0-eval",
+          "modelSha256": "5555555555555555555555555555555555555555555555555555555555555555",
+          "contextTokens": 6144,
+          "gpuLayers": 24,
+          "expectedGpuMemoryMiB": 4500
+        }
+        """);
+    var gemmaCandidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "gemma-4-e4b-it-qat-q4-0-eval", contextTokensOverride: 6144);
+    if (gemmaCandidate is null || gemmaCandidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 Gemma 4 E4B 评测清单未能通过专用候选入口加载。");
+    await gemmaCandidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 Gemma 4 E4B 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
     try
     {
         _ = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
