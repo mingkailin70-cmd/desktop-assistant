@@ -535,7 +535,7 @@
       ],
       "license": "mit",
       "status": "locally_evaluated",
-      "notes": "官方Ornith-1.5-9B GGUF仓库固定revision的Q4_K_M权重，2026-10-10本机文件大小与官方记录一致，SHA-256复核匹配。固定llama.cpp b11259、12个GPU层及coding-zh-v4无thinking构建完成R01–R10（7/10）和S01–S10（4/10），累计11/20；余下M/F题全通过也最多31/40（77.5%），低于32/40门槛，按规则早停。最低空闲显存3,265 MiB，采样峰值占用4,635 MiB；无显存保护取消。未接入生产配置。作者公布的外部基准只作候选线索，不代表本机结果；显式thinking配置若要评估，须作为独立管线重新记分。",
+      "notes": "官方Ornith-1.5-9B GGUF仓库固定revision的Q4_K_M权重，2026-10-10本机文件大小与官方记录一致，SHA-256复核匹配。固定llama.cpp b11259、12个GPU层及coding-zh-v4无thinking构建完成R01–R10（7/10）和S01–S10（4/10），累计11/20；余下M/F题全通过也最多31/40（77.5%），低于32/40门槛，按规则早停。最低空闲显存3,265 MiB，采样峰值占用4,635 MiB；无显存保护取消。未接入生产配置。另对显式thinking配置只做R01单题可行性探测：输出未通过结构化源码解释校验，耗时273.5秒，最低空闲显存3,436 MiB、峰值占用4,464 MiB；它不是完整thinking评测，不能与无thinking结果合并。作者公布的外部基准只作候选线索，不代表本机结果。",
       "localDirectory": "llm/ornith-1.5-9b-gguf-q4km/abdd624b12ebf020b767fff532ff44fe552b28c3",
       "requiredForP0": false
     }
