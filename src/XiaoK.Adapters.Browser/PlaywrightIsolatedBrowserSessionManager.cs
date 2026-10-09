@@ -307,6 +307,25 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             var closed = await CloseAsync(sessionId, cancellationToken).ConfigureAwait(false);
             var afterClose = await SnapshotAsync(sessionId, cancellationToken).ConfigureAwait(false);
             if (!closed.Success || afterClose.Success || afterClose.ErrorCode != "BROWSER_SESSION_NOT_FOUND") return 14;
+
+            const string firstPage = "<!doctype html><html><head><title>安装版第一页</title></head><body>安装版第一页正文</body></html>";
+            const string secondPage = "<!doctype html><html><head><title>安装版第二页</title></head><body>安装版第二页正文</body></html>";
+            var navigationOpened = await OpenHtmlForTestingAsync(firstPage, cancellationToken).ConfigureAwait(false);
+            if (!navigationOpened.Success || navigationOpened.Data is null) return 15;
+            sessionId = ExtractToken(navigationOpened.Data, "会话ID：");
+            snapshotId = ExtractToken(navigationOpened.Data, "快照ID：");
+            var navigated = await NavigateHtmlForTestingAsync(sessionId, snapshotId,
+                new Uri("https://example.org/installed-smoke-second-page"), secondPage, cancellationToken)
+                .ConfigureAwait(false);
+            if (!navigated.Success || navigated.Data is null
+                || !navigated.Data.Contains("安装版第二页正文", StringComparison.Ordinal)
+                || !navigated.Data.Contains("https://example.org/installed-smoke-second-page", StringComparison.Ordinal)) return 16;
+            var replay = await NavigateHtmlForTestingAsync(sessionId, snapshotId,
+                new Uri("https://example.org/installed-smoke-replay"), firstPage, cancellationToken)
+                .ConfigureAwait(false);
+            if (replay.Success || replay.ErrorCode != "BROWSER_STALE_SNAPSHOT") return 17;
+            var navigationClosed = await CloseAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (!navigationClosed.Success) return 18;
             return 0;
         }
         catch (PlaywrightException)
