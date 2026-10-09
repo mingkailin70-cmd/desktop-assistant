@@ -10,6 +10,7 @@ public static class TaskCategoryCatalog
         ["file"] = "文件查找",
         ["file-content-search"] = "文件内容查找",
         ["file-summary"] = "本机文件摘要",
+        ["file-create-text"] = "新建文本文件",
         ["file-copy"] = "文件复制",
         ["file-archive"] = "文件压缩",
         ["file-move"] = "文件移动",

@@ -57,7 +57,8 @@ public enum ToolExpectedOutcome
     BrowserSessionSnapshotReturned = 23,
     BrowserControlActionCompleted = 24,
     BrowserSessionClosed = 25,
-    BrowserSessionNavigated = 26
+    BrowserSessionNavigated = 26,
+    TextFileCreatedInConfiguredExport = 27
 }
 
 public static class ApprovalAuditCatalog

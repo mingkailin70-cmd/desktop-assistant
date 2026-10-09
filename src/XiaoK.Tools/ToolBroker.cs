@@ -64,6 +64,7 @@ public sealed class ToolBroker
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
             "file.summarize.text.v1" => await _desktop.ReadTextFileForLocalSummaryAsync(proposal, cancellationToken),
+            "file.create.text.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
@@ -136,6 +137,7 @@ public sealed class ToolBroker
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
             "file.summarize.text.v1" => ValidateLocalTextFileSummary(proposal),
+            "file.create.text.v1" => ValidateTextFileCreate(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
@@ -212,6 +214,16 @@ public sealed class ToolBroker
             return null;
         return InvalidProposal("文件内容搜索只接受1–120个字符的查询，并绑定到已配置的 user-files 搜索目录；结果只返回路径和行号。");
     }
+
+    private static ToolResult? ValidateTextFileCreate(ToolProposal proposal) =>
+        proposal.Arguments.Count == 2
+        && proposal.Arguments.TryGetValue("file_name", out var fileName)
+        && LocalTextFileCreatePolicy.IsValidFileName(fileName)
+        && proposal.Arguments.TryGetValue("content", out var content)
+        && LocalTextFileCreatePolicy.IsValidContent(content)
+        && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
+            ? null
+            : InvalidProposal("新建文本文件仅接受 .txt 或 .md 文件名和受限纯文本正文，并绑定固定小K导出目录；不会接受任意目标路径或覆盖。");
 
     private static ToolResult? ValidateLocalTextFileSummary(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
@@ -537,6 +549,7 @@ public sealed class ToolBroker
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.summarize.text.v1" => ToolPrecondition.ConfiguredSearchRoot,
+        "file.create.text.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
@@ -563,6 +576,7 @@ public sealed class ToolBroker
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,
         "file.summarize.text.v1" => ToolExpectedOutcome.LocalDocumentTextExtracted,
+        "file.create.text.v1" => ToolExpectedOutcome.TextFileCreatedInConfiguredExport,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,

@@ -880,6 +880,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return await ExecuteBackgroundAsync(proposal, token);
         }
 
+        if (category == "file-create-text")
+        {
+            if (!LocalTextFileCreatePolicy.TryParseRequest(request, out var fileName, out var content))
+                return new(false, "请按“创建文本文件：文件名；内容：正文”输入。仅在固定小K导出目录新建 .txt 或 .md 文件；不会覆盖现有文件，正文最多64 KiB。", "INVALID_TEXT_FILE_REQUEST");
+            var arguments = ImmutableDictionary<string, string>.Empty
+                .Add("file_name", fileName).Add("content", content);
+            return await ExecuteBackgroundAsync(new ToolProposal(LocalTextFileCreatePolicy.ToolId, arguments,
+                LocalTextFileCreatePolicy.ExportTargetId, ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.TextFileCreatedInConfiguredExport), token);
+        }
+
         if (category == "file-summary")
         {
             var proposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(request);
@@ -1200,6 +1211,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("填写网页文本")) return "browser-session-fill";
         if (lower.StartsWith("关闭网页会话")) return "browser-session-close";
         if (LocalDocumentSummaryPolicy.IsUserCommand(request)) return "file-summary";
+        if (lower.StartsWith("创建文本文件")) return "file-create-text";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";

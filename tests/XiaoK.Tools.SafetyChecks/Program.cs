@@ -116,6 +116,21 @@ if (args.Length == 1 && args[0] == "--only-file-copy")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-text-file-create")
+{
+    var textCreateRoot = Path.Combine(Path.GetTempPath(), "XiaoK-TextCreateProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(textCreateRoot);
+    try
+    {
+        await CheckTextFileCreationAsync(textCreateRoot);
+        Console.WriteLine("通过：新建文本文件绑定固定导出目录、严格限制纯文本、拒绝覆盖并核验最终散列。");
+    }
+    finally
+    {
+        if (Directory.Exists(textCreateRoot)) Directory.Delete(textCreateRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-archive")
 {
     var fileArchiveRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileArchiveProbe-" + Guid.NewGuid().ToString("N"));
@@ -385,6 +400,9 @@ try
     await CheckFileContentSearchAsync(tempRoot);
     passed.Add("本机文档摘要只读取配置搜索根内严格编码文本、受限DOCX或限页PDF，隔离不可信正文且取消有效");
     passed.Add("后台文本内容搜索仅读取搜索根内受限文本文件，只返回位置、不泄露匹配正文并核验目录/文件范围");
+
+    await CheckTextFileCreationAsync(tempRoot);
+    passed.Add("后台文本文件创建仅允许固定导出目录内的新建纯文本，拒绝覆盖并核验最终文件");
 
     await CheckFileCopyToExportAsync(tempRoot);
     passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
@@ -7007,6 +7025,98 @@ static string ExtractSessionToken(string data, string prefix)
     Require(token is { Length: 48 } && token.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f'),
         "隔离浏览器没有返回格式有效的短时会话或快照令牌。");
     return token!;
+}
+
+static async Task CheckTextFileCreationAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "text-file-create");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+
+    const string request = "创建文本文件：会议纪要.md；内容：第一行\r\n第二行";
+    Require(LocalTextFileCreatePolicy.TryParseRequest(request, out var parsedName, out var parsedContent)
+        && parsedName == "会议纪要.md" && parsedContent == "第一行\r\n第二行",
+        "创建文本文件命令未正确提取文件名和正文。");
+    Require(LocalTextFileCreatePolicy.IsValidFileName("每日计划.txt")
+        && LocalTextFileCreatePolicy.IsValidFileName("说明.MD")
+        && !LocalTextFileCreatePolicy.IsValidFileName("../escape.txt")
+        && !LocalTextFileCreatePolicy.IsValidFileName("CON.md")
+        && !LocalTextFileCreatePolicy.IsValidFileName("run.ps1"),
+        "纯文本文件名允许路径穿越、保留设备名或可执行扩展名。");
+    Require(!LocalTextFileCreatePolicy.IsValidContent(new string('a', LocalTextFileCreatePolicy.MaximumContentCharacters + 1))
+        && !LocalTextFileCreatePolicy.IsValidContent("bad\0content")
+        && !LocalTextFileCreatePolicy.IsValidContent("bad\uD800"),
+        "纯文本正文未拒绝超长、NUL或无效Unicode数据。");
+
+    var desktop = new WindowsDesktopTools([], [], exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal(LocalTextFileCreatePolicy.ToolId,
+        [new("file_name", parsedName), new("content", parsedContent)],
+        LocalTextFileCreatePolicy.ExportTargetId, ToolExpectedOutcome.TextFileCreatedInConfiguredExport);
+    Require(ToolInteractionPolicy.GetMode(LocalTextFileCreatePolicy.ToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check(LocalTextFileCreatePolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null,
+        "纯文本文件创建没有登记为后台工具。");
+
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var finalPath = Path.Combine(exportRoot, parsedName);
+    var expectedBytes = new UTF8Encoding(false, true).GetBytes(parsedContent);
+    var expectedHash = Convert.ToHexString(SHA256.HashData(expectedBytes));
+    Require(result.Success && result.Data == finalPath && File.Exists(finalPath),
+        $"有效创建请求未写入固定导出目录：success={result.Success}, code={result.ErrorCode}, data={result.Data}");
+    Require((await File.ReadAllBytesAsync(finalPath)).SequenceEqual(expectedBytes)
+        && result.Summary.Contains(expectedHash, StringComparison.Ordinal),
+        "新文件正文编码或独立SHA-256核验不一致。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "不能覆盖")
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(finalPath)).SequenceEqual(expectedBytes),
+        "同名冲突没有失败关闭，或覆盖了已有文本文件。");
+
+    var arbitraryTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = fixtureRoot }, CancellationToken.None);
+    Require(!arbitraryTarget.Success && arbitraryTarget.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文本文件创建接受了模型指定的任意目标路径。");
+    var wrongPreconditions = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Preconditions = ToolPrecondition.ConfiguredSearchRoot,
+        ExpectedOutcome = ToolExpectedOutcome.MatchingFilesListed
+    }, CancellationToken.None);
+    Require(!wrongPreconditions.Success && wrongPreconditions.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文本文件创建接受了错误的前置条件或预期结果。");
+
+    var traversal = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("file_name", "..\\escape.txt")
+    }, CancellationToken.None);
+    Require(!traversal.Success && traversal.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !File.Exists(Path.Combine(fixtureRoot, "escape.txt")),
+        "文本文件创建允许通过文件名越出固定导出目录。");
+    var executableName = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("file_name", "run.cmd")
+    }, CancellationToken.None);
+    Require(!executableName.Success && executableName.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文本文件创建接受了可执行或不支持的扩展名。");
+    var oversized = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", new string('x', LocalTextFileCreatePolicy.MaximumContentCharacters + 1))
+    }, CancellationToken.None);
+    Require(!oversized.Success && oversized.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "文本文件创建接受了超出正文上限的内容。");
+
+    using var cancelledSource = new CancellationTokenSource();
+    cancelledSource.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("file_name", "cancelled.txt")
+        }, cancelledSource.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.txt"))
+        && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
+        "预取消的文本创建请求仍写入文件，或留下了部分文件。");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)
