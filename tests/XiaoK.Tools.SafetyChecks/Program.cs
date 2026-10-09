@@ -3669,10 +3669,14 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
         && TaskHistoryRecoveryPolicy.ForDisplay(current, currentSessionId) == current
         && TaskHistoryRecoveryPolicy.ForDisplay(currentApproval, currentSessionId) == currentApproval,
         "Host会话标识没有区分跨进程任务，或当前会话任务被时钟回拨误标。");
-    Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", stale.UpdatedAtUtc, processStartedAt)
-        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", stale.UpdatedAtUtc, processStartedAt)
-        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", processStartedAt.AddSeconds(1), processStartedAt),
-        "隔离编程任务的旧审批没有标记为失效，或当前进程内审批被误标。");
+    Require(TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("running", previousSessionId, currentSessionId)
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("verifying", previousSessionId, currentSessionId)
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", null, currentSessionId)
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("applying", Guid.Empty, currentSessionId)
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("awaiting_approval", currentSessionId, currentSessionId)
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("completed", previousSessionId, currentSessionId)
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask("failed", null, currentSessionId),
+        "隔离编程任务没有按Host会话区分活动/终态状态，或旧审批仍可能恢复。");
 }
 
 static void CheckTaskHistoryDisplayPolicy()
@@ -5111,6 +5115,7 @@ static async Task CheckRetainedCodeTaskHistoryAsync(string root)
         createdAtUtc = DateTimeOffset.Parse("2026-09-30T12:34:56Z"),
         updatedAtUtc = DateTimeOffset.Parse("2026-09-30T12:35:56Z"),
         state = "awaiting_approval",
+        hostSessionId = Guid.NewGuid(),
         projectPath = Path.Combine(root, "private-project"),
         workspacePath = workspace,
         ignoredBody = "CHAT_BODY_MUST_NOT_BE_EXPOSED_2c7e"
@@ -5118,12 +5123,43 @@ static async Task CheckRetainedCodeTaskHistoryAsync(string root)
     await File.WriteAllTextAsync(statePath, System.Text.Json.JsonSerializer.Serialize(state), new UTF8Encoding(false));
 
     var history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
-    Require(history.Count == 1 && history[0].TaskId == taskId && history[0].State == "awaiting_approval",
-        "隔离任务历史没有恢复已保存的审批状态。");
+    Require(history.Count == 1 && history[0].TaskId == taskId && history[0].State == "awaiting_approval"
+        && history[0].HostSessionId == state.hostSessionId,
+        "隔离任务历史没有恢复已保存的审批状态和Host会话标识。");
     Require(Path.GetFullPath(history[0].WorkspacePath) == Path.GetFullPath(workspace),
         "隔离任务历史返回的工作区路径不匹配实际工作区。");
     Require(!System.Text.Json.JsonSerializer.Serialize(history).Contains("CHAT_BODY_MUST_NOT_BE_EXPOSED_2c7e", StringComparison.Ordinal),
         "隔离任务历史暴露了状态文件中的非白名单字段。");
+
+    var legacyState = new
+    {
+        taskId,
+        createdAtUtc = state.createdAtUtc,
+        updatedAtUtc = state.updatedAtUtc,
+        state = state.state,
+        projectPath = state.projectPath,
+        workspacePath = state.workspacePath
+    };
+    await File.WriteAllTextAsync(statePath, System.Text.Json.JsonSerializer.Serialize(legacyState), new UTF8Encoding(false));
+    history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
+    Require(history.Count == 1 && history[0].HostSessionId is null
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(history[0].State, history[0].HostSessionId, Guid.NewGuid()),
+        "旧版无Host会话字段的活动代码任务没有失败关闭为待核对。");
+
+    await File.WriteAllTextAsync(statePath, System.Text.Json.JsonSerializer.Serialize(new
+    {
+        taskId,
+        createdAtUtc = state.createdAtUtc,
+        updatedAtUtc = state.updatedAtUtc,
+        state = state.state,
+        hostSessionId = "not-a-guid",
+        projectPath = state.projectPath,
+        workspacePath = state.workspacePath
+    }), new UTF8Encoding(false));
+    history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
+    Require(history.Count == 1 && history[0].HostSessionId == Guid.Empty
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(history[0].State, history[0].HostSessionId, Guid.NewGuid()),
+        "损坏的Host会话标识没有被保守地视为不匹配。");
 }
 
 static async Task CheckHistoryRejectsHardLinkedStateAsync(string root)

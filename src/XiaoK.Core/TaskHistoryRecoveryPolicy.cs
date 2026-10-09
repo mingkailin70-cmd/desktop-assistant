@@ -34,10 +34,14 @@ public static class TaskHistoryRecoveryPolicy
         };
     }
 
-    public static bool IsInterruptedCodeTask(string state, DateTimeOffset updatedAtUtc,
-        DateTimeOffset currentProcessStartedAtUtc) =>
-        updatedAtUtc < currentProcessStartedAtUtc
-        && (state is "planning" or "running" or "applying" or "awaiting_approval");
+    public static bool IsInterruptedCodeTask(string state, Guid? storedHostSessionId, Guid currentHostSessionId)
+    {
+        if (currentHostSessionId == Guid.Empty)
+            throw new ArgumentException("当前Host会话标识无效。", nameof(currentHostSessionId));
+
+        return (state is "planning" or "running" or "verifying" or "applying" or "awaiting_approval")
+            && storedHostSessionId != currentHostSessionId;
+    }
 
     private static bool IsInFlight(TaskLifecycleState state) =>
         state is TaskLifecycleState.Queued or TaskLifecycleState.Planning

@@ -102,24 +102,29 @@ public sealed class CodeTaskAgent
     private readonly IDotNetTestRunner _dotNetTestRunner;
     private readonly ICodePatchFileReplacer _patchFileReplacer;
     private readonly bool _disableThinkingForInspection;
+    private readonly Guid _hostSessionId;
 
     public CodeTaskAgent(IInferenceClient inference, ModelBroker models, string? repositoryRoot,
-        IDotNetTestRunner? dotNetTestRunner = null, bool disableThinkingForInspection = true)
+        IDotNetTestRunner? dotNetTestRunner = null, bool disableThinkingForInspection = true,
+        Guid? hostSessionId = null)
         : this(inference, models, repositoryRoot, dotNetTestRunner, new WindowsCodePatchFileReplacer(),
-            disableThinkingForInspection)
+            disableThinkingForInspection, hostSessionId)
     {
     }
 
     internal CodeTaskAgent(IInferenceClient inference, ModelBroker models, string? repositoryRoot,
         IDotNetTestRunner? dotNetTestRunner, ICodePatchFileReplacer patchFileReplacer,
-        bool disableThinkingForInspection = true)
+        bool disableThinkingForInspection = true, Guid? hostSessionId = null)
     {
+        if (hostSessionId == Guid.Empty)
+            throw new ArgumentException("Host会话标识不能为空。", nameof(hostSessionId));
         _inference = inference;
         _models = models;
         _repositoryRoot = repositoryRoot;
         _dotNetTestRunner = dotNetTestRunner ?? new DotNetTestRunner(repositoryRoot);
         _patchFileReplacer = patchFileReplacer ?? throw new ArgumentNullException(nameof(patchFileReplacer));
         _disableThinkingForInspection = disableThinkingForInspection;
+        _hostSessionId = hostSessionId ?? Guid.NewGuid();
     }
 
     public static IReadOnlyList<CodeTaskWorkspaceHistory> ReadRetainedTasks(string workspaceRoot) =>
@@ -135,7 +140,8 @@ public sealed class CodeTaskAgent
         var phase = "创建安全隔离工作区";
         try
         {
-            snapshot = await Task.Run(() => CodeWorkspaceSnapshot.Create(projectRoot, workspaceRoot, _repositoryRoot, cancellationToken), cancellationToken);
+            snapshot = await Task.Run(() => CodeWorkspaceSnapshot.Create(projectRoot, workspaceRoot, _repositoryRoot,
+                _hostSessionId, cancellationToken), cancellationToken);
             await snapshot.WriteStateAsync("planning", CancellationToken.None);
 
             var candidates = snapshot.ReadTextCandidates(cancellationToken);
@@ -351,7 +357,7 @@ public sealed class CodeTaskAgent
         try
         {
             snapshot = await Task.Run(() => CodeWorkspaceSnapshot.Create(projectRoot, workspaceRoot, _repositoryRoot,
-                cancellationToken), cancellationToken);
+                _hostSessionId, cancellationToken), cancellationToken);
             await snapshot.WriteStateAsync("planning", CancellationToken.None);
 
             var candidates = snapshot.ReadTextCandidates(cancellationToken);
@@ -2976,7 +2982,7 @@ internal sealed record CodeFileContent(string Path, string Content, string Sha25
 internal sealed record CodeContextAnchor(string Path, int Line, string Text, int Score);
 internal sealed record CodeContextExcerpt(string Path, int StartLine, string Content);
 public sealed record CodeTaskWorkspaceHistory(string TaskId, string State, DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc, string WorkspacePath);
+    DateTimeOffset UpdatedAtUtc, string WorkspacePath, Guid? HostSessionId);
 
 internal sealed class CodeWorkspaceSnapshot
 {
@@ -3013,11 +3019,12 @@ internal sealed class CodeWorkspaceSnapshot
     private const int MaximumRetainedTasks = 5;
     private readonly List<string> _relativeFiles;
 
-    private CodeWorkspaceSnapshot(string taskId, string taskRoot, string baselinePath, string workspacePath,
+    private CodeWorkspaceSnapshot(string taskId, Guid hostSessionId, string taskRoot, string baselinePath, string workspacePath,
         string projectPath, string projectBoundary, string baselineBoundary, string workspaceBoundary,
         List<string> relativeFiles)
     {
         TaskId = taskId;
+        HostSessionId = hostSessionId;
         TaskRoot = taskRoot;
         BaselinePath = baselinePath;
         WorkspacePath = workspacePath;
@@ -3030,6 +3037,7 @@ internal sealed class CodeWorkspaceSnapshot
     }
 
     public string TaskId { get; }
+    public Guid HostSessionId { get; }
     public string TaskRoot { get; }
     public string BaselinePath { get; }
     public string WorkspacePath { get; }
@@ -3054,8 +3062,10 @@ internal sealed class CodeWorkspaceSnapshot
 
     public string GetVerificationRoot() => Path.Combine(WorkspacePath, ".xiaok-verification-" + TaskId);
 
-    public static CodeWorkspaceSnapshot Create(string projectRoot, string workspaceRoot, string? repositoryRoot, CancellationToken token)
+    public static CodeWorkspaceSnapshot Create(string projectRoot, string workspaceRoot, string? repositoryRoot,
+        Guid hostSessionId, CancellationToken token)
     {
+        if (hostSessionId == Guid.Empty) throw new ArgumentException("Host会话标识不能为空。", nameof(hostSessionId));
         var project = ValidateDirectory(projectRoot, "编程项目目录");
         var workspace = Path.GetFullPath(workspaceRoot.Trim());
         EnsureLocalNonRoot(workspace, "隔离工作区目录");
@@ -3086,7 +3096,7 @@ internal sealed class CodeWorkspaceSnapshot
             var baselineBoundary = GetCanonicalDirectoryPath(baseline);
             CopyTree(baseline, working, null, token, baselineBoundary);
             var workspaceBoundary = GetCanonicalDirectoryPath(working);
-            return new(taskId, taskRoot, baseline, working, project, projectBoundary,
+            return new(taskId, hostSessionId, taskRoot, baseline, working, project, projectBoundary,
                 baselineBoundary, workspaceBoundary, files);
         }
         catch
@@ -3130,11 +3140,21 @@ internal sealed class CodeWorkspaceSnapshot
                     || !TryReadStateDate(stateRoot, "createdAtUtc", out var createdAt)
                     || !TryReadStateDate(stateRoot, "updatedAtUtc", out var updatedAt)) continue;
 
+                Guid? hostSessionId = null;
+                if (stateRoot.TryGetProperty("hostSessionId", out var sessionProperty))
+                {
+                    hostSessionId = sessionProperty.ValueKind == JsonValueKind.String
+                        && Guid.TryParse(sessionProperty.GetString(), out var parsedSessionId)
+                        && parsedSessionId != Guid.Empty
+                            ? parsedSessionId
+                            : Guid.Empty;
+                }
+
                 var workingPath = Path.Combine(taskDirectory, "workspace");
                 if (!TryGetCanonicalPath(workingPath, isDirectory: true, out var workingCanonical)
                     || !IsSameOrChild(workingCanonical, taskBoundary)) continue;
 
-                result.Add(new(taskId, state, createdAt, updatedAt, workingCanonical));
+                result.Add(new(taskId, state, createdAt, updatedAt, workingCanonical, hostSessionId));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                 or ArgumentException or System.ComponentModel.Win32Exception or JsonException or InvalidDataException)
@@ -3207,7 +3227,9 @@ internal sealed class CodeWorkspaceSnapshot
 
     public async Task WriteStateAsync(string state, CancellationToken token)
     {
-        var data = JsonSerializer.Serialize(new { taskId = TaskId, createdAtUtc = CreatedAtUtc, updatedAtUtc = DateTimeOffset.UtcNow, state, projectPath = ProjectPath, workspacePath = WorkspacePath });
+        var data = JsonSerializer.Serialize(new { taskId = TaskId, hostSessionId = HostSessionId,
+            createdAtUtc = CreatedAtUtc, updatedAtUtc = DateTimeOffset.UtcNow, state,
+            projectPath = ProjectPath, workspacePath = WorkspacePath });
         var path = Path.Combine(TaskRoot, "task-state.json");
         var temporary = path + ".tmp";
         await File.WriteAllTextAsync(temporary, data, new UTF8Encoding(false), token);

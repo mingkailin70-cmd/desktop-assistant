@@ -19,7 +19,6 @@ namespace XiaoK.Host;
 
 internal sealed class AssistantRuntime : IAsyncDisposable
 {
-    private readonly DateTimeOffset _processStartedAtUtc = DateTimeOffset.UtcNow;
     private readonly Guid _hostSessionId = Guid.NewGuid();
     private XiaoKSettings _settings;
     private readonly SqliteTaskStore _store;
@@ -113,7 +112,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             ? Path.Combine(_settings.DataRoot, "AppContainerRecovery")
             : null;
         _dotNetTestRunner = new DotNetTestRunner(XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), recoveryRoot);
-        var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory), _dotNetTestRunner);
+        var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory),
+            _dotNetTestRunner, hostSessionId: _hostSessionId);
         var publicWebPageReader = new PlaywrightPublicWebPageReader();
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
                 exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
@@ -349,7 +349,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         history.AddRange(codeTasks.Select(task =>
         {
             var interrupted = TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(
-                task.State, task.UpdatedAtUtc, _processStartedAtUtc);
+                task.State, task.HostSessionId, _hostSessionId);
             return new TaskHistoryEntry(
                 $"code:{task.TaskId}",
                 null,
