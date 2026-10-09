@@ -4727,6 +4727,18 @@ static void CheckStartupWindowVisibilityPolicy()
         "显式后台启动参数未忽略大小写。");
     Require(!StartupWindowVisibilityPolicy.ShouldStartHidden([], isStartupTaskActivation: false),
         "普通前台启动被错误隐藏到托盘。");
+    Require(BrowserSessionDiagnosticPolicy.CanRunSyntheticSmoke(
+            ["--diagnostics-profile", "--background", "--browser-session-smoke"], hasPackageIdentity: true),
+        "安装包身份、隔离配置和后台参数齐全时，合成网页会话诊断未放行。");
+    Require(!BrowserSessionDiagnosticPolicy.CanRunSyntheticSmoke(
+            ["--diagnostics-profile", "--background", "--browser-session-smoke"], hasPackageIdentity: false),
+        "包外启动错误获得了已安装浏览器诊断能力。");
+    Require(!BrowserSessionDiagnosticPolicy.CanRunSyntheticSmoke(
+            ["--diagnostics-profile", "--browser-session-smoke"], hasPackageIdentity: true),
+        "缺少后台参数时仍允许网页会话诊断。");
+    Require(!BrowserSessionDiagnosticPolicy.CanRunSyntheticSmoke(
+            ["--background", "--browser-session-smoke"], hasPackageIdentity: true),
+        "缺少隔离诊断配置时仍允许网页会话诊断。");
 }
 
 static void CheckPackagedAndDesktopAppUserModelIds()

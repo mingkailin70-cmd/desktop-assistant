@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
+using XiaoK.Adapters.Browser;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 
@@ -26,12 +27,21 @@ public partial class App : System.Windows.Application
     internal static uint RestoreMessageId { get; private set; }
     internal static uint ShutdownMessageId { get; private set; }
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         if (e.Args.Length > 0 && string.Equals(e.Args[0], "--pdf-worker", StringComparison.Ordinal))
         {
             Environment.ExitCode = WindowsPdfTextWorkerEntryPoint.Run(e.Args);
+            Shutdown();
+            return;
+        }
+
+        var browserSessionSmokeRequested = e.Args.Contains("--browser-session-smoke", StringComparer.OrdinalIgnoreCase);
+        if (browserSessionSmokeRequested
+            && !BrowserSessionDiagnosticPolicy.CanRunSyntheticSmoke(e.Args, WindowsPackageIdentity.IsPresent))
+        {
+            Environment.ExitCode = 2;
             Shutdown();
             return;
         }
@@ -56,7 +66,8 @@ public partial class App : System.Windows.Application
             e.Args, IsStartupTaskActivation());
         if (!_ownsMutex)
         {
-            if (!startInTray) RestoreExistingInstance();
+            if (browserSessionSmokeRequested) Environment.ExitCode = 3;
+            else if (!startInTray) RestoreExistingInstance();
             Shutdown();
             return;
         }
@@ -76,6 +87,30 @@ public partial class App : System.Windows.Application
                 Shutdown();
                 return;
             }
+        }
+
+        if (browserSessionSmokeRequested)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(55));
+                await using var manager = new PlaywrightIsolatedBrowserSessionManager();
+                Environment.ExitCode = await manager.RunSyntheticSessionSmokeAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                Environment.ExitCode = 20;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException
+                or UnauthorizedAccessException or TimeoutException or System.ComponentModel.Win32Exception)
+            {
+                Environment.ExitCode = 21;
+            }
+            finally
+            {
+                Shutdown();
+            }
+            return;
         }
 
         MainWindow = new MainWindow();

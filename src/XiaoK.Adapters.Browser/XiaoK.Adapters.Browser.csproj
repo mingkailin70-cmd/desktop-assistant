@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="XiaoK.Tools.SafetyChecks" />
+    <InternalsVisibleTo Include="XiaoK.Host" />
     <ProjectReference Include="..\XiaoK.Core\XiaoK.Core.csproj" />
     <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
   </ItemGroup>

@@ -213,6 +213,73 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         finally { _gate.Release(); }
     }
 
+    internal async Task<int> RunSyntheticSessionSmokeAsync(CancellationToken cancellationToken)
+    {
+        const string html = """
+            <!doctype html><html><head><title>安装版隔离会话诊断</title></head><body>
+            <label for="query">本地搜索</label>
+            <input id="query" type="search" aria-label="本地搜索"
+              oninput="document.querySelector('#status').textContent='已填写'">
+            <button type="button" aria-label="更新诊断状态"
+              onclick="document.querySelector('#status').textContent='已点击'">更新</button>
+            <button type="submit" aria-label="禁止提交">提交</button>
+            <p id="status" role="status">等待操作</p>
+            </body></html>
+            """;
+
+        try
+        {
+            var opened = await OpenHtmlForTestingAsync(html, cancellationToken).ConfigureAwait(false);
+            if (!opened.Success || opened.Data is null
+                || !opened.Data.Contains("等待操作", StringComparison.Ordinal)) return 10;
+            var sessionId = ExtractToken(opened.Data, "会话ID：");
+            var snapshotId = ExtractToken(opened.Data, "快照ID：");
+
+            var filled = await FillTextAsync(sessionId, snapshotId, "searchbox", "本地搜索",
+                "安装版离线检查", cancellationToken).ConfigureAwait(false);
+            if (!filled.Success || filled.Data is null
+                || !filled.Data.Contains("已填写", StringComparison.Ordinal)) return 11;
+            snapshotId = ExtractToken(filled.Data, "快照ID：");
+
+            var clicked = await ClickButtonAsync(sessionId, snapshotId, "更新诊断状态", cancellationToken)
+                .ConfigureAwait(false);
+            if (!clicked.Success || clicked.Data is null
+                || !clicked.Data.Contains("已点击", StringComparison.Ordinal)) return 12;
+            snapshotId = ExtractToken(clicked.Data, "快照ID：");
+
+            var submit = await ClickButtonAsync(sessionId, snapshotId, "禁止提交", cancellationToken)
+                .ConfigureAwait(false);
+            if (submit.Success || submit.ErrorCode != "BROWSER_SUBMIT_CONTROL_BLOCKED") return 13;
+
+            var closed = await CloseAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var afterClose = await SnapshotAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (!closed.Success || afterClose.Success || afterClose.ErrorCode != "BROWSER_SESSION_NOT_FOUND") return 14;
+            return 0;
+        }
+        catch (PlaywrightException)
+        {
+            return 21;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return 20;
+        }
+        catch (InvalidDataException)
+        {
+            return 22;
+        }
+    }
+
+    private static string ExtractToken(string data, string label)
+    {
+        var line = data.Split('\n').FirstOrDefault(value => value.StartsWith(label, StringComparison.Ordinal));
+        var token = line?[label.Length..].Trim();
+        if (token is not { Length: 48 }
+            || token.Any(character => character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+            throw new InvalidDataException("Synthetic browser diagnostic returned an invalid session token.");
+        return token;
+    }
+
     private async Task<ToolResult> WithSessionAsync(string sessionId,
         Func<Session, Task<ToolResult>> operation, CancellationToken cancellationToken)
     {
