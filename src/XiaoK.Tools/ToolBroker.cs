@@ -17,12 +17,14 @@ public sealed class ToolBroker
     private readonly IPublicWebPageReader? _publicWebPageReader;
     private readonly IDynamicPublicWebPageReader? _dynamicPublicWebPageReader;
     private readonly IPublicFileDownloader? _publicFileDownloader;
+    private readonly IIsolatedBrowserSessionManager? _isolatedBrowserSessions;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
         IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot,
         IMessageSendPreviewPresenter? messageSendPreview = null, IPublicWebPageReader? publicWebPageReader = null,
         IPublicFileDownloader? publicFileDownloader = null,
-        IDynamicPublicWebPageReader? dynamicPublicWebPageReader = null)
+        IDynamicPublicWebPageReader? dynamicPublicWebPageReader = null,
+        IIsolatedBrowserSessionManager? isolatedBrowserSessions = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -35,6 +37,7 @@ public sealed class ToolBroker
         _publicWebPageReader = publicWebPageReader;
         _dynamicPublicWebPageReader = dynamicPublicWebPageReader;
         _publicFileDownloader = publicFileDownloader;
+        _isolatedBrowserSessions = isolatedBrowserSessions;
     }
 
     // 兼容直接由用户发起的交互入口；后台调用必须使用 ExecuteBackgroundAsync。
@@ -74,6 +77,24 @@ public sealed class ToolBroker
             "browser.read.dynamic.public.v1" => _dynamicPublicWebPageReader is null
                 ? new(false, "独立动态网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
                 : await _dynamicPublicWebPageReader.ReadDynamicPageAsync(proposal.Arguments["url"], cancellationToken),
+            "browser.session.open.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有启动浏览器。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.OpenAsync(proposal.Arguments["url"], cancellationToken),
+            "browser.session.snapshot.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有读取会话。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.SnapshotAsync(proposal.Arguments["session_id"], cancellationToken),
+            "browser.session.click-button.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有点击页面。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.ClickButtonAsync(proposal.Arguments["session_id"],
+                    proposal.Arguments["snapshot_id"], proposal.Arguments["name"], cancellationToken),
+            "browser.session.fill-text.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有填写页面。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.FillTextAsync(proposal.Arguments["session_id"],
+                    proposal.Arguments["snapshot_id"], proposal.Arguments["role"], proposal.Arguments["name"],
+                    proposal.Arguments["value"], cancellationToken),
+            "browser.session.close.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有关闭浏览器。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.CloseAsync(proposal.Arguments["session_id"], cancellationToken),
             "browser.download.public.v1" => await DownloadPublicFileAsync(proposal, cancellationToken),
             "message.analyze.v1" => await AnalyzeAsync(proposal, cancellationToken),
             "message.notice.analyze.v1" => await AnalyzeNoticeAsync(proposal, cancellationToken),
@@ -120,6 +141,10 @@ public sealed class ToolBroker
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
             "browser.read.dynamic.public.v1" => ValidateDynamicPublicWebPageRead(proposal),
+            "browser.session.open.v1" => ValidateBrowserSessionOpen(proposal),
+            "browser.session.snapshot.v1" or "browser.session.close.v1" => ValidateBrowserSessionIdOnly(proposal),
+            "browser.session.click-button.v1" => ValidateBrowserSessionClick(proposal),
+            "browser.session.fill-text.v1" => ValidateBrowserSessionFill(proposal),
             "browser.download.public.v1" => ValidatePublicFileDownload(proposal),
             "message.analyze.v1" => ValidateMessage(proposal, "message"),
             "message.notice.analyze.v1" => ValidateVerifiedNotice(proposal),
@@ -354,6 +379,59 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("动态网页读取只接受用户明确提供的 HTTPS 公网地址；文件、内网和其他协议不会交给浏览器。");
 
+    private static ToolResult? ValidateBrowserSessionOpen(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("url", out var url)
+        && PublicWebUrlPolicy.IsAllowedUrlShape(url)
+        && proposal.Target == "isolated-public-web-session"
+            ? null
+            : InvalidProposal("隔离网页会话只接受用户提供的 HTTPS 公网网址，并绑定到临时无登录态会话。");
+
+    private static ToolResult? ValidateBrowserSessionIdOnly(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("session_id", out var sessionId)
+        && IsBrowserSessionToken(sessionId)
+        && proposal.Target == "isolated-public-web-session"
+            ? null
+            : InvalidProposal("网页会话读取或关闭只接受当前运行时生成的会话令牌。");
+
+    private static ToolResult? ValidateBrowserSessionClick(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        return args.Count == 3
+            && args.Keys.All(key => key is "session_id" or "snapshot_id" or "name")
+            && IsBrowserSessionToken(args.GetValueOrDefault("session_id"))
+            && IsBrowserSessionToken(args.GetValueOrDefault("snapshot_id"))
+            && IsSafeAccessibleName(args.GetValueOrDefault("name"))
+            && proposal.Target == "isolated-public-web-session"
+                ? null
+                : InvalidProposal("网页按钮动作必须绑定有效会话、当前快照和唯一可访问名称。");
+    }
+
+    private static ToolResult? ValidateBrowserSessionFill(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var role = args.GetValueOrDefault("role");
+        var value = args.GetValueOrDefault("value");
+        return args.Count == 5
+            && args.Keys.All(key => key is "session_id" or "snapshot_id" or "role" or "name" or "value")
+            && IsBrowserSessionToken(args.GetValueOrDefault("session_id"))
+            && IsBrowserSessionToken(args.GetValueOrDefault("snapshot_id"))
+            && role is "textbox" or "searchbox"
+            && IsSafeAccessibleName(args.GetValueOrDefault("name"))
+            && value is { Length: > 0 and <= 3_000 }
+            && !value.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t'))
+            && proposal.Target == "isolated-public-web-session"
+                ? null
+                : InvalidProposal("网页文本填写只允许绑定当前快照中的普通 textbox/searchbox 控件，内容最长3000字符。");
+    }
+
+    private static bool IsBrowserSessionToken(string? value) => value is { Length: 48 }
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static bool IsSafeAccessibleName(string? value) => value is { Length: > 0 and <= 160 }
+        && !value.Any(char.IsControl);
+
     private static ToolResult? ValidatePublicFileDownload(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
         && proposal.Arguments.TryGetValue("url", out var url)
@@ -453,6 +531,8 @@ public sealed class ToolBroker
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "browser.read.dynamic.public.v1" => ToolPrecondition.UserProvidedDynamicPublicWebPageUrl,
+        "browser.session.open.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
+            or "browser.session.fill-text.v1" or "browser.session.close.v1" => ToolPrecondition.UserRequestedIsolatedBrowserSession,
         "browser.download.public.v1" => ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
         "message.notice.analyze.v1" => ToolPrecondition.VerifiedPrivateNotice,
@@ -477,6 +557,10 @@ public sealed class ToolBroker
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
         "browser.read.dynamic.public.v1" => ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned,
+        "browser.session.open.v1" => ToolExpectedOutcome.BrowserSessionOpened,
+        "browser.session.snapshot.v1" => ToolExpectedOutcome.BrowserSessionSnapshotReturned,
+        "browser.session.click-button.v1" or "browser.session.fill-text.v1" => ToolExpectedOutcome.BrowserControlActionCompleted,
+        "browser.session.close.v1" => ToolExpectedOutcome.BrowserSessionClosed,
         "browser.download.public.v1" => ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport,
         "message.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,
         "message.notice.analyze.v1" => ToolExpectedOutcome.LocalMessageAnalysis,

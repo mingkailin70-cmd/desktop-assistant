@@ -32,6 +32,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly string _voiceStatus;
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models;
+    private readonly IIsolatedBrowserSessionManager _browserSessions;
     private readonly SemaphoreSlim _executionGate = new(1, 1);
     private readonly Channel<UserTaskWork> _userTaskQueue = Channel.CreateBounded<UserTaskWork>(
         new BoundedChannelOptions(16) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
@@ -115,10 +116,12 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var codeAgent = new CodeTaskAgent(_inference, _models, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory),
             _dotNetTestRunner, hostSessionId: _hostSessionId);
         var publicWebPageReader = new PlaywrightPublicWebPageReader();
+        _browserSessions = new PlaywrightIsolatedBrowserSessionManager();
         _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
                 exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
-            approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader);
+            approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader,
+            _browserSessions);
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -769,6 +772,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _userTaskQueue.Writer.TryComplete();
         }
         await _userTaskWorker.ConfigureAwait(false);
+        await _browserSessions.DisposeAsync().ConfigureAwait(false);
         foreach (var work in cancelledBeforeStart)
         {
             var now = DateTimeOffset.UtcNow;
@@ -1017,6 +1021,57 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned), token);
         }
 
+        if (category == "browser-session-open")
+        {
+            var url = ExtractPayload(request, ["打开隔离网页会话"]);
+            if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
+                return new(false, "请按“打开隔离网页会话：https://公开网站/页面”输入。会话使用临时无头 Edge，不读取用户登录态；网络请求、提交、下载和弹窗均阻止。", "WEB_URL_NOT_ALLOWED");
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.session.open.v1",
+                ImmutableDictionary<string, string>.Empty.Add("url", url), "isolated-public-web-session",
+                ToolPrecondition.UserRequestedIsolatedBrowserSession,
+                ToolExpectedOutcome.BrowserSessionOpened), token);
+        }
+
+        if (category == "browser-session-snapshot" || category == "browser-session-close")
+        {
+            var prefix = category == "browser-session-snapshot" ? "查看网页会话" : "关闭网页会话";
+            var sessionId = ExtractPayload(request, [prefix]).Trim();
+            if (!IsBrowserSessionTokenShape(sessionId))
+                return new(false, $"请按“{prefix}：会话ID”输入，并使用最近一次会话返回的完整 ID。", "BROWSER_SESSION_ID_INVALID");
+            var isClose = category == "browser-session-close";
+            var toolId = isClose ? "browser.session.close.v1" : "browser.session.snapshot.v1";
+            var outcome = isClose ? ToolExpectedOutcome.BrowserSessionClosed : ToolExpectedOutcome.BrowserSessionSnapshotReturned;
+            return await ExecuteBackgroundAsync(new ToolProposal(toolId,
+                ImmutableDictionary<string, string>.Empty.Add("session_id", sessionId), "isolated-public-web-session",
+                ToolPrecondition.UserRequestedIsolatedBrowserSession, outcome), token);
+        }
+
+        if (category == "browser-session-click")
+        {
+            if (!TryExtractSeparatedPayload(request, "点击网页按钮", expectedSeparators: 2, out var parts)
+                || !IsBrowserSessionTokenShape(parts[0]) || !IsBrowserSessionTokenShape(parts[1])
+                || string.IsNullOrWhiteSpace(parts[2]) || parts[2].Length > 160)
+                return new(false, "请按“点击网页按钮：会话ID；快照ID；按钮可访问名称”输入。只会点击当前快照中唯一的非提交按钮。", "BROWSER_SESSION_COMMAND_INVALID");
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.session.click-button.v1",
+                ImmutableDictionary<string, string>.Empty.Add("session_id", parts[0]).Add("snapshot_id", parts[1])
+                    .Add("name", parts[2]), "isolated-public-web-session",
+                ToolPrecondition.UserRequestedIsolatedBrowserSession, ToolExpectedOutcome.BrowserControlActionCompleted), token);
+        }
+
+        if (category == "browser-session-fill")
+        {
+            if (!TryExtractSeparatedPayload(request, "填写网页文本", expectedSeparators: 4, out var parts, preserveTail: true)
+                || !IsBrowserSessionTokenShape(parts[0]) || !IsBrowserSessionTokenShape(parts[1])
+                || parts[2] is not ("textbox" or "searchbox") || string.IsNullOrWhiteSpace(parts[3])
+                || parts[3].Length > 160 || string.IsNullOrWhiteSpace(parts[4]) || parts[4].Length > 3_000)
+                return new(false, "请按“填写网页文本：会话ID；快照ID；textbox或searchbox；控件可访问名称；文本”输入。密码、邮箱、文件和提交控件不会填写。", "BROWSER_SESSION_COMMAND_INVALID");
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.session.fill-text.v1",
+                ImmutableDictionary<string, string>.Empty.Add("session_id", parts[0]).Add("snapshot_id", parts[1])
+                    .Add("role", parts[2]).Add("name", parts[3]).Add("value", parts[4]),
+                "isolated-public-web-session", ToolPrecondition.UserRequestedIsolatedBrowserSession,
+                ToolExpectedOutcome.BrowserControlActionCompleted), token);
+        }
+
         if (category == "web-download")
         {
             var url = ExtractPublicFileUrl(request);
@@ -1126,6 +1181,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (lower.StartsWith("打开隔离网页会话")) return "browser-session-open";
+        if (lower.StartsWith("查看网页会话")) return "browser-session-snapshot";
+        if (lower.StartsWith("点击网页按钮")) return "browser-session-click";
+        if (lower.StartsWith("填写网页文本")) return "browser-session-fill";
+        if (lower.StartsWith("关闭网页会话")) return "browser-session-close";
         if (LocalDocumentSummaryPolicy.IsUserCommand(request)) return "file-summary";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("移入回收站")) return "file-delete";
@@ -1186,6 +1246,22 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             if (request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return request[prefix.Length..].Trim(' ', '，', ',', '：', ':');
         return string.Empty;
     }
+
+    private static bool TryExtractSeparatedPayload(string request, string prefix, int expectedSeparators,
+        out string[] parts, bool preserveTail = false)
+    {
+        parts = [];
+        if (expectedSeparators < 1 || expectedSeparators > 8) return false;
+        var payload = ExtractPayload(request, [prefix]);
+        var split = payload.Split('；', expectedSeparators + 1, StringSplitOptions.None);
+        if (split.Length != expectedSeparators + 1) return false;
+        parts = split.Select(part => part.Trim()).ToArray();
+        if (preserveTail) parts[^1] = split[^1];
+        return true;
+    }
+
+    private static bool IsBrowserSessionTokenShape(string value) => value.Length == 48
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static string ExtractFileCopySource(string request)
     {

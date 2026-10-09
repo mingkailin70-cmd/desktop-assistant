@@ -250,6 +250,12 @@ if (args.Length == 1 && args[0] == "--only-browser-render")
     Console.WriteLine("通过：静态模式禁用脚本；动态模式仅运行沙箱内联脚本、阻断外联，并在无限循环脚本超时时关闭隔离浏览器。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-browser-session")
+{
+    await CheckIsolatedBrowserSessionAsync();
+    Console.WriteLine("通过：合成网页会话支持受限的多步读取/交互；旧快照、提交按钮、敏感输入和关闭后访问均失败关闭。");
+    return;
+}
 if (args.Length == 2 && args[0] == "--probe-public-web-read")
 {
     var pageResult = await new PlaywrightPublicWebPageReader().ReadPageAsync(args[1], CancellationToken.None);
@@ -6607,6 +6613,56 @@ static async Task CheckPublicWebPageReadPolicyAsync()
         Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && dynamicReader.CallCount == 1,
             "动态网页提案目标、参数或固定前置条件错误时仍调用了读取器。");
     }
+
+    var sessionManager = new FakeIsolatedBrowserSessionManager();
+    var sessionBroker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "",
+        isolatedBrowserSessions: sessionManager);
+    var sessionId = new string('a', 48);
+    var snapshotId = new string('b', 48);
+    var sessionOpen = ToolBroker.Proposal("browser.session.open.v1", [new("url", "https://example.com/")],
+        "isolated-public-web-session", ToolExpectedOutcome.BrowserSessionOpened);
+    Require(ToolInteractionPolicy.GetMode("browser.session.open.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("browser.session.open.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "隔离网页会话未登记为后台操作。");
+    Require((await sessionBroker.ExecuteBackgroundAsync(sessionOpen, CancellationToken.None)).Success
+        && sessionManager.OpenCount == 1, "有效的隔离会话打开提案没有到达固定会话管理器。");
+    foreach (var invalid in new[]
+    {
+        sessionOpen with { Arguments = sessionOpen.Arguments.SetItem("url", "http://example.com/") },
+        sessionOpen with { Target = "user-edge-session" },
+        sessionOpen with { ExpectedOutcome = ToolExpectedOutcome.PublicWebPageSnapshotReturned },
+        sessionOpen with { Arguments = sessionOpen.Arguments.Add("script", "arbitrary") }
+    })
+    {
+        var rejected = await sessionBroker.ExecuteBackgroundAsync(invalid, CancellationToken.None);
+        Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && sessionManager.OpenCount == 1,
+            "隔离网页会话打开提案的URL、目标或参数无效时仍调用了会话管理器。");
+    }
+
+    var sessionRead = ToolBroker.Proposal("browser.session.snapshot.v1", [new("session_id", sessionId)],
+        "isolated-public-web-session", ToolExpectedOutcome.BrowserSessionSnapshotReturned);
+    Require((await sessionBroker.ExecuteBackgroundAsync(sessionRead, CancellationToken.None)).Success
+        && sessionManager.SnapshotCount == 1, "有效的隔离会话快照提案没有到达会话管理器。");
+    var click = ToolBroker.Proposal("browser.session.click-button.v1",
+        [new("session_id", sessionId), new("snapshot_id", snapshotId), new("name", "继续")],
+        "isolated-public-web-session", ToolExpectedOutcome.BrowserControlActionCompleted);
+    Require((await sessionBroker.ExecuteBackgroundAsync(click, CancellationToken.None)).Success
+        && sessionManager.ClickCount == 1, "有效的绑定快照按钮提案没有到达会话管理器。");
+    var invalidClick = click with { Arguments = click.Arguments.SetItem("name", "\n任意") };
+    var rejectedClick = await sessionBroker.ExecuteBackgroundAsync(invalidClick, CancellationToken.None);
+    Require(!rejectedClick.Success && rejectedClick.ErrorCode == "INVALID_TOOL_PROPOSAL" && sessionManager.ClickCount == 1,
+        "无效的网页控件名称仍调用了会话管理器。");
+
+    var fill = ToolBroker.Proposal("browser.session.fill-text.v1",
+        [new("session_id", sessionId), new("snapshot_id", snapshotId), new("role", "searchbox"),
+            new("name", "搜索"), new("value", "合成查询")],
+        "isolated-public-web-session", ToolExpectedOutcome.BrowserControlActionCompleted);
+    Require((await sessionBroker.ExecuteBackgroundAsync(fill, CancellationToken.None)).Success
+        && sessionManager.FillCount == 1, "有效的普通文本框提案没有到达会话管理器。");
+    var invalidFill = fill with { Arguments = fill.Arguments.SetItem("role", "button") };
+    var rejectedFill = await sessionBroker.ExecuteBackgroundAsync(invalidFill, CancellationToken.None);
+    Require(!rejectedFill.Success && rejectedFill.ErrorCode == "INVALID_TOOL_PROPOSAL" && sessionManager.FillCount == 1,
+        "网页文本提案接受了非 textbox/searchbox 角色。");
 }
 
 static async Task CheckPublicFileDownloadAsync(string root)
@@ -6765,7 +6821,7 @@ static async Task CheckStaticBrowserRenderingAsync()
         <!-- hostile prefix: <head><script>this is only a comment, but a string-based CSP inserter can be fooled</script></head> -->
         <!doctype html><html><head><meta charset="utf-8"><title>动态测试页</title></head><body>
         <main><h1 id="content">初始占位</h1></main>
-        <script>try { parent.document.body.setAttribute('data-xiaok-script-escaped', 'true'); document.querySelector('#content').textContent = '脚本逃出了沙箱'; } catch { document.querySelector('#content').textContent = '沙箱隔离后的动态正文'; } fetch('http://127.0.0.1:{{port}}/must-not-fetch').catch(() => {});</script>
+        <script>try { parent.document.body.setAttribute('data-xiaok-script-escaped', 'true'); document.querySelector('#content').textContent = '脚本逃出了沙箱'; } catch { document.querySelector('#content').textContent = typeof RTCPeerConnection === 'undefined' && typeof WebSocket === 'undefined' ? '沙箱隔离后的动态正文；网络API已禁用' : '网络API仍可用'; } fetch('http://127.0.0.1:{{port}}/must-not-fetch').catch(() => {});</script>
         <script src="http://127.0.0.1:{{port}}/must-not-run.js"></script>
         <img src="http://127.0.0.1:{{port}}/must-not-connect.png">
         </body></html>
@@ -6773,9 +6829,10 @@ static async Task CheckStaticBrowserRenderingAsync()
     var dynamic = await PlaywrightPublicWebPageReader.RenderDynamicHtmlAsync(dynamicHtml, timeout.Token);
     Require(dynamic.Title == "动态测试页"
         && dynamic.BodyText.Contains("沙箱隔离后的动态正文", StringComparison.Ordinal)
+        && dynamic.BodyText.Contains("网络API已禁用", StringComparison.Ordinal)
         && !dynamic.BodyText.Contains("初始占位", StringComparison.Ordinal),
         "隔离动态读取没有执行沙箱内下载HTML中的内联脚本并提取更新后的DOM。");
-    Require(dynamic.AriaSnapshot.Contains("heading \"沙箱隔离后的动态正文\" [level=1]", StringComparison.Ordinal)
+    Require(dynamic.AriaSnapshot.Contains("heading \"沙箱隔离后的动态正文；网络API已禁用\" [level=1]", StringComparison.Ordinal)
         && !listener.Pending(),
         $"动态读取未生成更新后的ARIA快照，或访问了页面中的本机子资源：{dynamic.AriaSnapshot}");
 
@@ -6796,6 +6853,78 @@ static async Task CheckStaticBrowserRenderingAsync()
     Require(hostileScriptStopped && hostileScriptClock.Elapsed < TimeSpan.FromSeconds(15),
         $"无限循环脚本没有在单步/整体时限内终止并关闭隔离浏览器：stopped={hostileScriptStopped}, elapsed={hostileScriptClock.Elapsed}");
     Console.WriteLine($"通过：无限循环内联脚本在 {hostileScriptClock.Elapsed.TotalSeconds:F1} 秒内触发时限，隔离浏览器已关闭。");
+}
+
+static async Task CheckIsolatedBrowserSessionAsync()
+{
+    await using var manager = new PlaywrightIsolatedBrowserSessionManager();
+    const string html = """
+        <!doctype html><html><head><title>会话合成测试</title></head><body>
+        <form><label for="query">搜索</label>
+          <input id="query" type="search" aria-label="搜索" oninput="document.querySelector('#status').textContent = '已填写'">
+          <button type="button" aria-label="更新状态" onclick="document.querySelector('#status').textContent = '已点击'">更新</button>
+          <button type="submit" aria-label="提交表单">提交</button>
+          <label for="password">口令</label><input id="password" type="password" aria-label="口令">
+          <label for="contact">联系地址</label><input id="contact" type="text" autocomplete="email" aria-label="联系地址">
+          <label for="notes">备注</label><textarea id="notes" autocomplete="current-password" aria-label="备注"></textarea>
+          <input type="text" aria-label="银行卡号">
+        </form><p id="status" role="status">等待操作</p>
+        </body></html>
+        """;
+    var opened = await manager.OpenHtmlForTestingAsync(html, CancellationToken.None);
+    Require(opened.Success && opened.Data is not null, "隔离浏览器会话未能载入合成页面。");
+    var sessionId = ExtractSessionToken(opened.Data!, "会话ID：");
+    var initialSnapshot = ExtractSessionToken(opened.Data!, "快照ID：");
+
+    var filled = await manager.FillTextAsync(sessionId, initialSnapshot, "searchbox", "搜索", "本地检索", CancellationToken.None);
+    Require(filled.Success && filled.Data?.Contains("已填写", StringComparison.Ordinal) == true,
+        "会话没有填写普通搜索框或没有观察到本地 DOM 更新。");
+    var afterFillSnapshot = ExtractSessionToken(filled.Data!, "快照ID：");
+    var stale = await manager.ClickButtonAsync(sessionId, initialSnapshot, "更新状态", CancellationToken.None);
+    Require(!stale.Success && stale.ErrorCode == "BROWSER_STALE_SNAPSHOT", "旧页面快照仍能执行按钮动作。");
+
+    var clicked = await manager.ClickButtonAsync(sessionId, afterFillSnapshot, "更新状态", CancellationToken.None);
+    Require(clicked.Success && clicked.Data?.Contains("已点击", StringComparison.Ordinal) == true,
+        "隔离会话没有点击明确标记的非提交按钮。");
+    var afterClickSnapshot = ExtractSessionToken(clicked.Data!, "快照ID：");
+    var submit = await manager.ClickButtonAsync(sessionId, afterClickSnapshot, "提交表单", CancellationToken.None);
+    Require(!submit.Success && submit.ErrorCode == "BROWSER_SUBMIT_CONTROL_BLOCKED",
+        "提交按钮没有被拒绝。");
+
+    var current = await manager.SnapshotAsync(sessionId, CancellationToken.None);
+    var currentSnapshot = ExtractSessionToken(current.Data!, "快照ID：");
+    var password = await manager.FillTextAsync(sessionId, currentSnapshot, "textbox", "口令", "不能写入", CancellationToken.None);
+    Require(!password.Success && password.ErrorCode == "BROWSER_SENSITIVE_CONTROL_BLOCKED",
+        "密码输入框没有被拒绝。");
+    current = await manager.SnapshotAsync(sessionId, CancellationToken.None);
+    currentSnapshot = ExtractSessionToken(current.Data!, "快照ID：");
+    var email = await manager.FillTextAsync(sessionId, currentSnapshot, "textbox", "联系地址", "person@example.test", CancellationToken.None);
+    Require(!email.Success && email.ErrorCode == "BROWSER_SENSITIVE_CONTROL_BLOCKED",
+        "autocomplete=email 的文本字段没有被拒绝。");
+    current = await manager.SnapshotAsync(sessionId, CancellationToken.None);
+    currentSnapshot = ExtractSessionToken(current.Data!, "快照ID：");
+    var credentialTextarea = await manager.FillTextAsync(sessionId, currentSnapshot, "textbox", "备注", "不能写入", CancellationToken.None);
+    Require(!credentialTextarea.Success && credentialTextarea.ErrorCode == "BROWSER_SENSITIVE_CONTROL_BLOCKED",
+        "带current-password自动填充标记的textarea没有被拒绝。");
+    current = await manager.SnapshotAsync(sessionId, CancellationToken.None);
+    currentSnapshot = ExtractSessionToken(current.Data!, "快照ID：");
+    var wallet = await manager.FillTextAsync(sessionId, currentSnapshot, "textbox", "银行卡号", "4111111111111111", CancellationToken.None);
+    Require(!wallet.Success && wallet.ErrorCode == "BROWSER_SENSITIVE_CONTROL_BLOCKED",
+        "名称包含支付/银行卡语义的输入框没有被拒绝。");
+    var closed = await manager.CloseAsync(sessionId, CancellationToken.None);
+    Require(closed.Success, "隔离网页会话未能主动关闭。");
+    var afterClose = await manager.SnapshotAsync(sessionId, CancellationToken.None);
+    Require(!afterClose.Success && afterClose.ErrorCode == "BROWSER_SESSION_NOT_FOUND",
+        "关闭后的网页会话仍可继续访问。");
+}
+
+static string ExtractSessionToken(string data, string prefix)
+{
+    var line = data.Split('\n').FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
+    var token = line?[prefix.Length..].Trim();
+    Require(token is { Length: 48 } && token.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f'),
+        "隔离浏览器没有返回格式有效的短时会话或快照令牌。");
+    return token!;
 }
 
 static async Task CheckFileCopyToExportAsync(string root)
@@ -7704,6 +7833,54 @@ internal sealed class FakeDynamicPublicWebPageReader : IDynamicPublicWebPageRead
         LastUrl = url;
         return Task.FromResult(new ToolResult(true, "合成动态网页读取结果。", Data: "合成DOM正文"));
     }
+}
+
+internal sealed class FakeIsolatedBrowserSessionManager : IIsolatedBrowserSessionManager
+{
+    public int OpenCount { get; private set; }
+    public int SnapshotCount { get; private set; }
+    public int ClickCount { get; private set; }
+    public int FillCount { get; private set; }
+    public int CloseCount { get; private set; }
+
+    public Task<ToolResult> OpenAsync(string url, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        OpenCount++;
+        return Task.FromResult(new ToolResult(true, "合成会话已打开。"));
+    }
+
+    public Task<ToolResult> SnapshotAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        SnapshotCount++;
+        return Task.FromResult(new ToolResult(true, "合成快照已返回。"));
+    }
+
+    public Task<ToolResult> ClickButtonAsync(string sessionId, string snapshotId, string accessibleName,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ClickCount++;
+        return Task.FromResult(new ToolResult(true, "合成非提交按钮已点击。"));
+    }
+
+    public Task<ToolResult> FillTextAsync(string sessionId, string snapshotId, string role, string accessibleName,
+        string value, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        FillCount++;
+        return Task.FromResult(new ToolResult(true, "合成文本框已填写。"));
+    }
+
+    public Task<ToolResult> CloseAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CloseCount++;
+        return Task.FromResult(new ToolResult(true, "合成会话已关闭。"));
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 internal sealed class FakePublicFileDownloader(PublicFileDownloadResult result) : IPublicFileDownloader

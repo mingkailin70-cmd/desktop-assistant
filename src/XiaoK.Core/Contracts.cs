@@ -25,7 +25,8 @@ public enum ToolPrecondition
     ConfiguredClassificationDirectory = 512,
     ConfiguredMoveDestination = 1024,
     UserProvidedPublicFileUrl = 2048,
-    UserProvidedDynamicPublicWebPageUrl = 4096
+    UserProvidedDynamicPublicWebPageUrl = 4096,
+    UserRequestedIsolatedBrowserSession = 8192
 }
 
 public enum ToolExpectedOutcome
@@ -51,7 +52,11 @@ public enum ToolExpectedOutcome
     FileSentToRecycleBin = 18,
     DynamicPublicWebPageSnapshotReturned = 19,
     LocalTextFileRead = 20,
-    LocalDocumentTextExtracted = 21
+    LocalDocumentTextExtracted = 21,
+    BrowserSessionOpened = 22,
+    BrowserSessionSnapshotReturned = 23,
+    BrowserControlActionCompleted = 24,
+    BrowserSessionClosed = 25
 }
 
 public static class ApprovalAuditCatalog
@@ -85,6 +90,18 @@ public interface IPublicWebPageReader
 public interface IDynamicPublicWebPageReader
 {
     Task<ToolResult> ReadDynamicPageAsync(string url, CancellationToken cancellationToken);
+}
+
+/// <summary>短时、无用户浏览器登录态的受限网页会话；状态只保留在进程内存中。</summary>
+public interface IIsolatedBrowserSessionManager : IAsyncDisposable
+{
+    Task<ToolResult> OpenAsync(string url, CancellationToken cancellationToken);
+    Task<ToolResult> SnapshotAsync(string sessionId, CancellationToken cancellationToken);
+    Task<ToolResult> ClickButtonAsync(string sessionId, string snapshotId, string accessibleName,
+        CancellationToken cancellationToken);
+    Task<ToolResult> FillTextAsync(string sessionId, string snapshotId, string role, string accessibleName,
+        string value, CancellationToken cancellationToken);
+    Task<ToolResult> CloseAsync(string sessionId, CancellationToken cancellationToken);
 }
 
 public sealed record PublicFileDownloadResult(bool Success, string Summary, string? ErrorCode = null,

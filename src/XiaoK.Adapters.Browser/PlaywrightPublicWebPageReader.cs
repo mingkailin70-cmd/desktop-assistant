@@ -95,7 +95,7 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
         }
     }
 
-    private static async Task<FetchedPage> FetchHtmlAsync(Uri initialUri, CancellationToken cancellationToken)
+    internal static async Task<FetchedPage> FetchHtmlAsync(Uri initialUri, CancellationToken cancellationToken)
     {
         using var handler = new SocketsHttpHandler
         {
@@ -304,21 +304,22 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
         .Select(line => new string(line.Where(character => character == '\t' || !char.IsControl(character)).ToArray()))
         .Where(line => !string.IsNullOrWhiteSpace(line))).Trim();
 
-    private static string AddInlineScriptOnlyPolicy(string html)
+    internal static string AddInlineScriptOnlyPolicy(string html)
     {
         var meta = $"<meta http-equiv=\"Content-Security-Policy\" content=\"{InlineScriptOnlyPolicy}\">";
+        const string disableNetworkApis = "<script>(function(){const deny=(target,key)=>{try{Object.defineProperty(target,key,{value:undefined,writable:false,configurable:false})}catch{}};for(const key of ['RTCPeerConnection','webkitRTCPeerConnection','WebSocket','EventSource','Worker','SharedWorker','BroadcastChannel'])deny(window,key);deny(Navigator.prototype,'sendBeacon');deny(Navigator.prototype,'serviceWorker');deny(window,'open')})();</script>";
         // Put policy bytes before all downloaded markup. Searching for a remote <head> is unsafe:
         // malformed HTML, comments, or script text could make the policy land after attacker code.
         // The browser's HTML parser will process the original document after the trusted head and
         // cannot relax a CSP that has already taken effect.
-        return "<!doctype html><html><head>" + meta + html + "</head></html>";
+        return "<!doctype html><html><head>" + meta + disableNetworkApis + html + "</head></html>";
     }
 
     private static bool IsRedirect(HttpStatusCode status) => status is HttpStatusCode.MovedPermanently
         or HttpStatusCode.Redirect or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect
         or HttpStatusCode.PermanentRedirect;
 
-    private sealed record FetchedPage(Uri FinalUri, string Html, int StatusCode);
+    internal sealed record FetchedPage(Uri FinalUri, string Html, int StatusCode);
 }
 
 internal sealed record RenderedPageSnapshot(string Title, string BodyText, string AriaSnapshot);

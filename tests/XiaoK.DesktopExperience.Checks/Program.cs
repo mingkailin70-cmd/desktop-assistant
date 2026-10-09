@@ -84,7 +84,7 @@ foreach (var tool in new[] { "app.launch.v1", "window.activate.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.ExplicitUserInteraction) is null,
         "阻止明确的用户交互。");
 }
-foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.archive.directory.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1" })
+foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.archive.directory.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "browser.session.open.v1", "browser.session.snapshot.v1", "browser.session.click-button.v1", "browser.session.fill-text.v1", "browser.session.close.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台工具。");
 Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.ExplicitUserInteraction)?.ErrorCode == "UNKNOWN_TOOL",
     "未知工具被放行。");
@@ -111,6 +111,10 @@ var requiredBackgroundRoutes = new[]
     "ExecuteBackgroundAsync(new ToolProposal(tool, arguments,",
     "ExecuteBackgroundAsync(new ToolProposal(\"message.send.v1\"",
     "ExecuteBackgroundAsync(new ToolProposal(\"browser.read.dynamic.public.v1\"",
+    "ExecuteBackgroundAsync(new ToolProposal(\"browser.session.open.v1\"",
+    "ExecuteBackgroundAsync(new ToolProposal(\"browser.session.click-button.v1\"",
+    "ExecuteBackgroundAsync(new ToolProposal(\"browser.session.fill-text.v1\"",
+    "var toolId = isClose ? \"browser.session.close.v1\" : \"browser.session.snapshot.v1\";",
     "ExecuteBackgroundAsync(new ToolProposal(\"code.inspect.v1\"",
     "ExecuteBackgroundAsync(new ToolProposal(\"code.task.create.v1\""
 };
