@@ -9,6 +9,7 @@ public static class TaskCategoryCatalog
         ["window"] = "窗口切换",
         ["file"] = "文件查找",
         ["file-content-search"] = "文件内容查找",
+        ["file-summary"] = "本机文件摘要",
         ["file-copy"] = "文件复制",
         ["file-archive"] = "文件压缩",
         ["file-move"] = "文件移动",

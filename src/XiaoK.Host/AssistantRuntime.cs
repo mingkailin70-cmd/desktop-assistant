@@ -876,6 +876,36 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return await ExecuteBackgroundAsync(proposal, token);
         }
 
+        if (category == "file-summary")
+        {
+            var proposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(request);
+            if (proposal is null)
+                return new(false, "请按“总结文本文件：本机完整路径”输入。仅支持设置搜索目录内的普通文本文件，正文只在本机短时处理，不写入历史。", "INVALID_TEXT_FILE_PATH");
+
+            var document = await ExecuteBackgroundAsync(proposal, token);
+            if (!document.Success) return document;
+            try
+            {
+                var summary = await LocalDocumentSummaryPolicy.SummarizeAsync(document.Data ?? string.Empty,
+                    (systemPrompt, userPrompt, inferenceToken) => _models.RunInteractiveAsync(
+                        inner => _inference.CompleteAsync(systemPrompt, userPrompt, inner), inferenceToken), token)
+                    .ConfigureAwait(false);
+                return new(true,
+                    "已使用本机模型总结用户指定的文本文件；文件正文只在当前任务内存中处理，不写入历史或日志。",
+                    Data: summary);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException
+                and not StackOverflowException and not AccessViolationException)
+            {
+                return new(false, "本机摘要未完成；文件正文未保存，也未发送到云端。请检查本地模型状态后重试。",
+                    "LOCAL_SUMMARY_FAILED");
+            }
+        }
+
         if (category == "file")
         {
             var query = request;
@@ -1096,6 +1126,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
+        if (LocalDocumentSummaryPolicy.IsUserCommand(request)) return "file-summary";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";

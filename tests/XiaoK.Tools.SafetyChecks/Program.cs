@@ -205,7 +205,7 @@ if (args.Length == 1 && args[0] == "--only-file-content-search")
     try
     {
         await CheckFileContentSearchAsync(fileContentSearchRoot);
-        Console.WriteLine("通过：本机内容搜索只在配置范围内读取受限文本文件，结果仅含路径与行号，正文不返回、不持久化。");
+        Console.WriteLine("通过：本机文本摘要限制配置根、严格文本编码和64 KiB上限，提示隔离不可信正文、长文本合并及取消；内容搜索仍只返回受限位置。");
     }
     finally
     {
@@ -367,6 +367,7 @@ try
     passed.Add("文件搜索根缺失和查询无效时失败关闭，预取消不执行搜索");
 
     await CheckFileContentSearchAsync(tempRoot);
+    passed.Add("本机文本摘要只读取配置搜索根内不超过64 KiB的严格编码文本，分段提示隔离不可信正文且取消有效");
     passed.Add("后台文本内容搜索仅读取搜索根内受限文本文件，只返回位置、不泄露匹配正文并核验目录/文件范围");
 
     await CheckFileCopyToExportAsync(tempRoot);
@@ -3207,7 +3208,7 @@ static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
     var expectedCategories = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["app"] = "应用操作", ["window"] = "窗口切换", ["file"] = "文件查找",
-        ["file-content-search"] = "文件内容查找", ["file-copy"] = "文件复制",
+        ["file-content-search"] = "文件内容查找", ["file-summary"] = "本机文件摘要", ["file-copy"] = "文件复制",
         ["file-archive"] = "文件压缩", ["file-move"] = "文件移动", ["file-rename"] = "文件重命名",
         ["file-delete"] = "移入回收站", ["file-classify"] = "文件分类预览",
         ["web-read"] = "静态网页读取", ["web-download"] = "公网文件下载",
@@ -3702,6 +3703,7 @@ static void CheckTaskHistoryDisplayPolicy()
 
     Require(TaskHistoryDisplayPolicy.TargetScope("file-move").Contains("同卷目标目录", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("file-delete").Contains("回收站", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("file-summary").Contains("本地模型摘要", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file-delete").Contains("任务中心逐项确认", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
@@ -6174,6 +6176,10 @@ static async Task CheckFileContentSearchAsync(string root)
     await File.WriteAllTextAsync(validUtf16Path, "UTF16 竹子", new UnicodeEncoding(false, true, true));
     var validUtf16BePath = Path.Combine(allowed, "utf16be.txt");
     await File.WriteAllTextAsync(validUtf16BePath, "UTF16BE 编码标记", new UnicodeEncoding(true, true, true));
+    const string summarySentinel = "DOCUMENT_SUMMARY_PRIVATE_SENTINEL";
+    var summaryPath = Path.Combine(allowed, "summary-source.md");
+    var summaryText = "这是用户选定的摘要测试正文。" + summarySentinel + "\n文档内容只用于当前任务。\n";
+    await File.WriteAllTextAsync(summaryPath, summaryText, new UTF8Encoding(false));
     await File.WriteAllTextAsync(Path.Combine(allowed, ".env"), "Needle must-not-be-scanned", new UTF8Encoding(false));
     await File.WriteAllBytesAsync(Path.Combine(allowed, "binary.png"), Encoding.UTF8.GetBytes("Needle"));
     await File.WriteAllBytesAsync(Path.Combine(allowed, "invalid-encoding.txt"), [0xFF, 0xFE, 0x00, 0x00, 0xFF]);
@@ -6254,12 +6260,112 @@ static async Task CheckFileContentSearchAsync(string root)
         && LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：") is null,
         "无查询的内容搜索命令没有进入明确的格式错误路径。");
 
+    await CheckLocalDocumentSummaryPolicyAsync(broker, desktop, summaryPath, summaryText, summarySentinel,
+        Path.Combine(outside, "outside.txt"));
+
     using var cancellation = new CancellationTokenSource();
     cancellation.Cancel();
     var cancelled = false;
     try { await desktop.SearchFileContentsAsync(proposal, cancellation.Token); }
     catch (OperationCanceledException) { cancelled = true; }
     Require(cancelled, "已取消的文件内容搜索仍继续读取文件。");
+}
+
+static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, WindowsDesktopTools desktop,
+    string summaryPath, string summaryText, string summarySentinel, string outsidePath)
+{
+    var command = "总结文本文件：" + summaryPath;
+    var proposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(command)
+        ?? throw new InvalidOperationException("有效的用户文件摘要命令没有生成提案。");
+    Require(LocalDocumentSummaryPolicy.IsUserCommand(command)
+        && proposal.ToolId == LocalDocumentSummaryPolicy.ToolId
+        && proposal.Target == LocalDocumentSummaryPolicy.UserSearchRootId
+        && proposal.Preconditions == ToolPrecondition.ConfiguredSearchRoot
+        && proposal.ExpectedOutcome == ToolExpectedOutcome.LocalTextFileRead
+        && proposal.Arguments.Count == 1
+        && proposal.Arguments.GetValueOrDefault("path") == summaryPath,
+        "本机文件摘要提案没有绑定单个路径、配置搜索根和固定读取结果。");
+    Require(ToolInteractionPolicy.GetMode(LocalDocumentSummaryPolicy.ToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check(LocalDocumentSummaryPolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null,
+        "本机文本摘要没有登记为无前台交互的后台工具。");
+
+    var read = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(read.Success && read.Data == summaryText
+        && !read.Summary.Contains(summarySentinel, StringComparison.Ordinal)
+        && !read.Summary.Contains(summaryPath, StringComparison.Ordinal),
+        "文件适配器未读取到精确文本，或把正文/路径写入了摘要字段。");
+
+    var wrongTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = "outside-root" }, CancellationToken.None);
+    Require(!wrongTarget.Success && wrongTarget.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "摘要工具接受了配置搜索根以外的提案目标。");
+    var outside = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("path", outsidePath)
+    }, CancellationToken.None);
+    Require(!outside.Success && outside.ErrorCode == "TEXT_FILE_OUTSIDE_ALLOWED_ROOT" && outside.Data is null,
+        "摘要工具读取了配置搜索根外的文件，或把越界正文传给了后续模型。");
+    var invalidEncodingPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "invalid-encoding.txt");
+    var invalidEncodingProposal = LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + invalidEncodingPath)!;
+    var invalidEncoding = await broker.ExecuteBackgroundAsync(invalidEncodingProposal, CancellationToken.None);
+    Require(!invalidEncoding.Success && invalidEncoding.ErrorCode == "TEXT_FILE_UNSTABLE_OR_UNSUPPORTED"
+        && invalidEncoding.Data is null,
+        "摘要工具接受了无效编码文本，或将它传给了本机模型。");
+    foreach (var invalidPath in new[] { "\\\\server\\share\\note.txt", Path.ChangeExtension(summaryPath, ".png"), "\0.txt" })
+        Require(!LocalDocumentSummaryPolicy.IsValidPath(invalidPath), "本机摘要策略接受网络、非文本或无效路径。");
+    using (var oversized = new FileStream(Path.Combine(Path.GetDirectoryName(summaryPath)!, "summary-too-large.txt"),
+        FileMode.CreateNew, FileAccess.Write))
+        oversized.SetLength(LocalDocumentSummaryPolicy.MaximumFileBytes + 1L);
+    var oversizedProposal = LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件："
+        + Path.Combine(Path.GetDirectoryName(summaryPath)!, "summary-too-large.txt"))!;
+    var oversizedResult = await broker.ExecuteBackgroundAsync(oversizedProposal, CancellationToken.None);
+    Require(!oversizedResult.Success && oversizedResult.ErrorCode == "TEXT_FILE_TOO_LARGE"
+        && oversizedResult.Data is null,
+        "超过64 KiB的文本文件没有在送入本机模型前被拒绝。");
+
+    var modelCalls = new List<(string System, string User)>();
+    var onePiece = await LocalDocumentSummaryPolicy.SummarizeAsync(summaryText,
+        (system, user, _) =>
+        {
+            modelCalls.Add((system, user));
+            return Task.FromResult("测试摘要");
+        }, CancellationToken.None);
+    Require(onePiece == "测试摘要" && modelCalls.Count == 1
+        && modelCalls[0].System.Contains("不可信数据", StringComparison.Ordinal)
+        && modelCalls[0].User.Contains(summarySentinel, StringComparison.Ordinal)
+        && !modelCalls[0].User.Contains(summaryPath, StringComparison.Ordinal)
+        && modelCalls[0].User.Contains("untrusted_document_content", StringComparison.Ordinal),
+        "模型摘要提示没有把文件正文明确包成不可信数据，或泄漏本机路径。");
+
+    modelCalls.Clear();
+    var longText = string.Concat(Enumerable.Repeat("中文摘要分段内容。\n", 1_600));
+    var longSummary = await LocalDocumentSummaryPolicy.SummarizeAsync(longText,
+        (system, user, _) =>
+        {
+            modelCalls.Add((system, user));
+            return Task.FromResult("分段要点");
+        }, CancellationToken.None);
+    Require(modelCalls.Count == 4 && longSummary == "分段要点"
+        && modelCalls.All(call => call.System.Contains("不可信数据", StringComparison.Ordinal))
+        && modelCalls[^1].User.Contains("untrusted_segment_summaries", StringComparison.Ordinal),
+        "长文本没有按固定段数执行摘要与最终合并，或合并提示缺少不可信数据边界。");
+
+    var oversizedSummary = await LocalDocumentSummaryPolicy.SummarizeAsync(summaryText,
+        (_, _, _) => Task.FromResult(new string('a', LocalDocumentSummaryPolicy.MaximumResultCharacters - 1)
+            + "😀" + "z"), CancellationToken.None);
+    var truncationMarker = oversizedSummary.IndexOf("…（摘要已截断）", StringComparison.Ordinal);
+    Require(truncationMarker > 0 && !char.IsHighSurrogate(oversizedSummary[truncationMarker - 1]),
+        "摘要长度限制把UTF-16代理对拆开。");
+
+    using var cancelledToken = new CancellationTokenSource();
+    cancelledToken.Cancel();
+    var cancelled = false;
+    try
+    {
+        await LocalDocumentSummaryPolicy.SummarizeAsync(summaryText,
+            (_, _, _) => Task.FromResult("不应运行"), cancelledToken.Token);
+    }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled, "已取消的文件摘要任务仍继续调用本机模型。");
 }
 
 static async Task CheckPublicWebPageReadPolicyAsync()

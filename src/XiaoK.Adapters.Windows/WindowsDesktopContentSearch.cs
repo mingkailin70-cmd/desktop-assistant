@@ -6,6 +6,56 @@ namespace XiaoK.Adapters.Windows;
 
 public sealed partial class WindowsDesktopTools
 {
+    public Task<ToolResult> ReadTextFileForLocalSummaryAsync(ToolProposal proposal,
+        CancellationToken cancellationToken) =>
+        Task.Run(() => ReadTextFileForLocalSummary(proposal, cancellationToken), cancellationToken);
+
+    private ToolResult ReadTextFileForLocalSummary(ToolProposal proposal, CancellationToken cancellationToken)
+    {
+        if (proposal.Arguments.Count != 1 || !proposal.Arguments.TryGetValue("path", out var requestedPath)
+            || !LocalDocumentSummaryPolicy.IsValidPath(requestedPath))
+            return new(false, "请指定搜索范围内、扩展名受支持的本机文本文件。", "INVALID_TEXT_FILE_PATH");
+        if (proposal.Target != LocalDocumentSummaryPolicy.UserSearchRootId)
+            return new(false, "文本文件读取只使用设置中配置的搜索目录。", "INVALID_SEARCH_ROOT");
+
+        var safeRoots = new List<string>();
+        foreach (var configuredRoot in _searchRoots.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryOpenOrdinaryPath(configuredRoot, expectedDirectory: true, enumerateDirectory: false,
+                    out var rootHandle, out var canonicalRoot, out _)) continue;
+            rootHandle.Dispose();
+            if (safeRoots.All(root => !root.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase)))
+                safeRoots.Add(canonicalRoot);
+        }
+        if (safeRoots.Count == 0)
+            return new(false, "没有可用的已配置搜索目录；没有读取文件内容。", "SEARCH_ROOT_UNAVAILABLE");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryOpenOrdinaryFileForRead(requestedPath, out var fileHandle, out var canonicalFile,
+                out _, out var fileLength, out var writeTime))
+            return new(false, "文本文件不存在、不可读，或属于链接/特殊文件；没有读取内容。", "TEXT_FILE_UNAVAILABLE");
+
+        using (fileHandle)
+        {
+            if (!safeRoots.Any(root => IsWithinRoot(canonicalFile, root)))
+                return new(false, "文本文件不在设置中允许的搜索目录内；没有读取内容。", "TEXT_FILE_OUTSIDE_ALLOWED_ROOT");
+            if (fileLength > LocalDocumentSummaryPolicy.MaximumFileBytes)
+                return new(false, "文本文件超过64 KiB本机摘要上限；没有把正文交给模型。", "TEXT_FILE_TOO_LARGE");
+
+            if (!TryReadStableTextFile(fileHandle, fileLength, writeTime,
+                    LocalDocumentSummaryPolicy.MaximumFileBytes, cancellationToken,
+                    out var text, out _, out var exceededBudget))
+                return new(false,
+                    exceededBudget ? "文本文件读取超过64 KiB上限；正文未提交给模型。"
+                        : "文本文件在读取期间发生变化、编码不受支持，或内容不是可读文本；没有提交给模型。",
+                    exceededBudget ? "TEXT_FILE_TOO_LARGE" : "TEXT_FILE_UNSTABLE_OR_UNSUPPORTED");
+
+            return new(true, "已从设置中允许的搜索目录读取文本；正文只在当前任务内存中交给本机模型，不写入本地历史或日志。",
+                Data: text);
+        }
+    }
+
     public Task<ToolResult> SearchFileContentsAsync(ToolProposal proposal, CancellationToken cancellationToken) =>
         Task.Run(() => SearchFileContents(proposal, cancellationToken), cancellationToken);
 

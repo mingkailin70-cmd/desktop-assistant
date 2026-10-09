@@ -49,7 +49,8 @@ public enum ToolExpectedOutcome
     FileArchivedToConfiguredExport = 16,
     MatchingFileContentLocationsListed = 17,
     FileSentToRecycleBin = 18,
-    DynamicPublicWebPageSnapshotReturned = 19
+    DynamicPublicWebPageSnapshotReturned = 19,
+    LocalTextFileRead = 20
 }
 
 public static class ApprovalAuditCatalog

@@ -60,6 +60,7 @@ public sealed class ToolBroker
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
+            "file.summarize.text.v1" => await _desktop.ReadTextFileForLocalSummaryAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
@@ -109,6 +110,7 @@ public sealed class ToolBroker
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
+            "file.summarize.text.v1" => ValidateLocalTextFileSummary(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
@@ -180,6 +182,14 @@ public sealed class ToolBroker
             return null;
         return InvalidProposal("文件内容搜索只接受1–120个字符的查询，并绑定到已配置的 user-files 搜索目录；结果只返回路径和行号。");
     }
+
+    private static ToolResult? ValidateLocalTextFileSummary(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("path", out var path)
+        && LocalDocumentSummaryPolicy.IsValidPath(path)
+        && proposal.Target == LocalDocumentSummaryPolicy.UserSearchRootId
+            ? null
+            : InvalidProposal("本机文件摘要只接受搜索目录中扩展名受支持的单个文本文件；不会读取任意路径。");
 
     private static ToolResult? ValidateMessage(ToolProposal proposal, string key)
     {
@@ -433,6 +443,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
+        "file.summarize.text.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
@@ -456,6 +467,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,
+        "file.summarize.text.v1" => ToolExpectedOutcome.LocalTextFileRead,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
