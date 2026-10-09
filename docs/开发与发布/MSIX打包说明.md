@@ -2,7 +2,7 @@
 
 任务恢复改用持久Host会话标识，避免系统时钟回拨把旧会话中的任务误识别为当前任务。SQLite v5→v6迁移为旧任务增加会话列；升级前先生成一致性备份，并将旧表中的未完成任务转换为结果待核对状态，审批待办单独标记为未恢复。已完成、失败和取消终态不变，任务不自动续跑。设置页备份恢复只接受v6架构。
 
-固定SDK 10.0.401 Release解决方案构建0警告、0错误；完整Windows安全套件117项通过、0项跳过；桌面交互专项76项通过。签名MSIX位于`artifacts\msix-validation\f5d0d53eb2f4426bbe6f7f7047281d3b\XiaoK-signed-validation.msix`，137,417,967字节，SHA-256 `48A6643A27F43401BE2B32E58E19E484DB5AAE85102EF68D29431A1137E6BE4D`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本阶段未改动证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.76.0_neutral__g0ndt6g65c8pe`，状态`Ok`。隔离诊断配置后台启动后确认“小K”窗口不可见、前台句柄不变并正常退出，退出码0；没有启动普通界面、模型、麦克风或通知，也没有读取真实任务库。真实用户数据库迁移和常规任务流程仍待验收。阶段源码提交`778b836`已推送至`origin/main`；GitHub Actions [Build #360](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37871837632)全部成功，包括锁定模型状态检查、Release构建和桌面体验检查。
+固定SDK 10.0.401 Release解决方案构建0警告、0错误；完整Windows安全套件117项通过、0项跳过；桌面交互专项76项通过。签名MSIX位于`artifacts\msix-validation\f5d0d53eb2f4426bbe6f7f7047281d3b\XiaoK-signed-validation.msix`，137,417,967字节，SHA-256 `48A6643A27F43401BE2B32E58E19E484DB5AAE85102EF68D29431A1137E6BE4D`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本阶段未改动证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.76.0_neutral__g0ndt6g65c8pe`，状态`Ok`。隔离诊断配置后台启动后确认“小K”窗口不可见、前台句柄不变并正常退出，退出码0；没有启动普通界面、模型、麦克风或通知，也没有读取真实任务库。隔离诊断进程没有打开真实库；随后在Host未运行时通过相同`SqliteTaskStore`入口完成真实用户数据库v4→v6迁移，自动生成v4一致性备份，备份和迁移后均`quick_check=ok`，任务行和终态保持不变，未读取任务正文。常规任务中心仍待验收。阶段源码提交`778b836`已推送至`origin/main`；GitHub Actions [Build #360](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37871837632)全部成功，包括锁定模型状态检查、Release构建和桌面体验检查。
 
 ## v0.1.73.0 R3动态网页卡死清理保护（2026-10-09）
 
