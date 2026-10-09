@@ -16,6 +16,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
     private const int MaximumAccessibleNameCharacters = 160;
     private const int MaximumFillCharacters = 3_000;
     private static readonly TimeSpan OpenTimeout = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan NavigationTimeout = TimeSpan.FromSeconds(25);
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan BrowserCloseTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(45);
@@ -106,6 +107,49 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             var snapshot = await CaptureSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
             return new(true, "已读取当前隔离网页快照。", Data: FormatSnapshot(session, snapshot));
         }, cancellationToken);
+
+    public Task<ToolResult> NavigateAsync(string sessionId, string snapshotId, string url,
+        CancellationToken cancellationToken)
+    {
+        if (!PublicWebUrlPolicy.IsAllowedUrlShape(url))
+            return Task.FromResult(new ToolResult(false,
+                "只允许导航到用户明确提供的 HTTPS 公网网址（443端口）；内网、文件和其他协议已拒绝。",
+                "WEB_URL_NOT_ALLOWED"));
+
+        return WithCurrentSnapshotAsync(sessionId, snapshotId, async session =>
+        {
+            try
+            {
+                var fetched = await PlaywrightPublicWebPageReader.FetchHtmlAsync(
+                    new Uri(url, UriKind.Absolute), cancellationToken).ConfigureAwait(false);
+                await SetPageHtmlAsync(session, fetched.FinalUri, fetched.Html, cancellationToken).ConfigureAwait(false);
+                var snapshot = await CaptureSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+                return new(true,
+                    "已在匿名隔离会话中打开用户明确提供的下一条公网网址。没有用户 Edge 登录态；页面网络子请求、提交、下载和弹窗仍被阻止。",
+                    Data: FormatSnapshot(session, snapshot));
+            }
+            catch (PublicWebHostResolutionException)
+            {
+                return new(false, "目标网页主机名无法解析；当前页面没有改变。请查看会话以获取新的快照令牌。",
+                    "WEB_DNS_RESOLUTION_FAILED");
+            }
+            catch (PublicWebAddressException)
+            {
+                return new(false, "目标网页或重定向地址不是可确认的 HTTPS 公网地址；连接已阻止，当前页面没有改变。请查看会话以获取新的快照令牌。",
+                    "WEB_PRIVATE_ADDRESS_BLOCKED");
+            }
+            catch (HttpRequestException)
+            {
+                return new(false, "目标网页无法通过受限 HTTPS 连接读取；当前页面没有改变。请查看会话以获取新的快照令牌。",
+                    "WEB_FETCH_FAILED");
+            }
+            catch (IOException)
+            {
+                return new(false, "目标网页超过内容上限或无法读取；当前页面没有改变。请查看会话以获取新的快照令牌。",
+                    "WEB_CONTENT_UNAVAILABLE");
+            }
+        }, cancellationToken, NavigationTimeout);
+    }
 
     public Task<ToolResult> ClickButtonAsync(string sessionId, string snapshotId, string accessibleName,
         CancellationToken cancellationToken) => WithCurrentSnapshotAsync(sessionId, snapshotId, async session =>
@@ -213,6 +257,15 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         finally { _gate.Release(); }
     }
 
+    internal Task<ToolResult> NavigateHtmlForTestingAsync(string sessionId, string snapshotId, Uri finalUri,
+        string html, CancellationToken cancellationToken) =>
+        WithCurrentSnapshotAsync(sessionId, snapshotId, async session =>
+        {
+            await SetPageHtmlAsync(session, finalUri, html, cancellationToken).ConfigureAwait(false);
+            var snapshot = await CaptureSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            return new(true, "synthetic navigation", Data: FormatSnapshot(session, snapshot));
+        }, cancellationToken);
+
     internal async Task<int> RunSyntheticSessionSmokeAsync(CancellationToken cancellationToken)
     {
         const string html = """
@@ -281,7 +334,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
     }
 
     private async Task<ToolResult> WithSessionAsync(string sessionId,
-        Func<Session, Task<ToolResult>> operation, CancellationToken cancellationToken)
+        Func<Session, Task<ToolResult>> operation, CancellationToken cancellationToken, TimeSpan? actionTimeout = null)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -291,7 +344,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(ActionTimeout);
+                timeout.CancelAfter(actionTimeout ?? ActionTimeout);
                 var result = await operation(_session!).WaitAsync(timeout.Token).ConfigureAwait(false);
                 _session!.LastActivityUtc = DateTimeOffset.UtcNow;
                 return result;
@@ -304,12 +357,12 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             catch (OperationCanceledException)
             {
                 await CloseCurrentSessionAsync().ConfigureAwait(false);
-                return new(false, "网页操作超过5秒时限；隔离浏览器已关闭。", "BROWSER_ACTION_TIMEOUT");
+                return new(false, $"网页操作超过{(actionTimeout ?? ActionTimeout).TotalSeconds:0}秒时限；隔离浏览器已关闭。", "BROWSER_ACTION_TIMEOUT");
             }
             catch (TimeoutException)
             {
                 await CloseCurrentSessionAsync().ConfigureAwait(false);
-                return new(false, "网页操作超过5秒时限；隔离浏览器已关闭。", "BROWSER_ACTION_TIMEOUT");
+                return new(false, $"网页操作超过{(actionTimeout ?? ActionTimeout).TotalSeconds:0}秒时限；隔离浏览器已关闭。", "BROWSER_ACTION_TIMEOUT");
             }
             catch (PlaywrightException)
             {
@@ -321,7 +374,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
     }
 
     private Task<ToolResult> WithCurrentSnapshotAsync(string sessionId, string snapshotId,
-        Func<Session, Task<ToolResult>> operation, CancellationToken cancellationToken) =>
+        Func<Session, Task<ToolResult>> operation, CancellationToken cancellationToken, TimeSpan? actionTimeout = null) =>
         WithSessionAsync(sessionId, async session =>
         {
             if (!FixedTokenEquals(session.CurrentSnapshotId, snapshotId))
@@ -329,7 +382,23 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             // Consume the snapshot before any page action. A failed or cancelled action can never replay it.
             session.CurrentSnapshotId = string.Empty;
             return await operation(session).ConfigureAwait(false);
-        }, cancellationToken);
+        }, cancellationToken, actionTimeout);
+
+    private static async Task SetPageHtmlAsync(Session session, Uri finalUri, string html,
+        CancellationToken cancellationToken)
+    {
+        await session.Page.Locator("#xiaok-page")
+            .EvaluateAsync("(frame, source) => { frame.srcdoc = source; }",
+                PlaywrightPublicWebPageReader.AddInlineScriptOnlyPolicy(html))
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+        await session.Frame.Locator("body").WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 8_000
+        }).WaitAsync(cancellationToken).ConfigureAwait(false);
+        await session.Page.WaitForTimeoutAsync(250).WaitAsync(cancellationToken).ConfigureAwait(false);
+        session.FinalUri = finalUri;
+    }
 
     private static async Task<Session> CreateSessionAsync(Uri finalUri, string html, CancellationToken cancellationToken)
     {
@@ -498,7 +567,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
     {
         public string Id { get; } = id;
         public string CurrentSnapshotId { get; set; } = currentSnapshotId;
-        public Uri FinalUri { get; } = finalUri;
+        public Uri FinalUri { get; set; } = finalUri;
         public IPlaywright Playwright { get; } = playwright;
         public IBrowser Browser { get; } = browser;
         public IPage Page { get; } = page;

@@ -80,6 +80,10 @@ public sealed class ToolBroker
             "browser.session.open.v1" => _isolatedBrowserSessions is null
                 ? new(false, "隔离网页会话未配置；没有启动浏览器。", "BROWSER_SESSION_UNAVAILABLE")
                 : await _isolatedBrowserSessions.OpenAsync(proposal.Arguments["url"], cancellationToken),
+            "browser.session.navigate.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有导航页面。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.NavigateAsync(proposal.Arguments["session_id"],
+                    proposal.Arguments["snapshot_id"], proposal.Arguments["url"], cancellationToken),
             "browser.session.snapshot.v1" => _isolatedBrowserSessions is null
                 ? new(false, "隔离网页会话未配置；没有读取会话。", "BROWSER_SESSION_UNAVAILABLE")
                 : await _isolatedBrowserSessions.SnapshotAsync(proposal.Arguments["session_id"], cancellationToken),
@@ -142,6 +146,7 @@ public sealed class ToolBroker
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
             "browser.read.dynamic.public.v1" => ValidateDynamicPublicWebPageRead(proposal),
             "browser.session.open.v1" => ValidateBrowserSessionOpen(proposal),
+            "browser.session.navigate.v1" => ValidateBrowserSessionNavigate(proposal),
             "browser.session.snapshot.v1" or "browser.session.close.v1" => ValidateBrowserSessionIdOnly(proposal),
             "browser.session.click-button.v1" => ValidateBrowserSessionClick(proposal),
             "browser.session.fill-text.v1" => ValidateBrowserSessionFill(proposal),
@@ -387,6 +392,16 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("隔离网页会话只接受用户提供的 HTTPS 公网网址，并绑定到临时无登录态会话。");
 
+    private static ToolResult? ValidateBrowserSessionNavigate(ToolProposal proposal) =>
+        proposal.Arguments.Count == 3
+        && proposal.Arguments.Keys.All(key => key is "session_id" or "snapshot_id" or "url")
+        && IsBrowserSessionToken(proposal.Arguments.GetValueOrDefault("session_id"))
+        && IsBrowserSessionToken(proposal.Arguments.GetValueOrDefault("snapshot_id"))
+        && PublicWebUrlPolicy.IsAllowedUrlShape(proposal.Arguments.GetValueOrDefault("url"))
+        && proposal.Target == "isolated-public-web-session"
+            ? null
+            : InvalidProposal("隔离会话导航只接受当前快照绑定的用户 HTTPS 公网网址。");
+
     private static ToolResult? ValidateBrowserSessionIdOnly(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
         && proposal.Arguments.TryGetValue("session_id", out var sessionId)
@@ -531,7 +546,7 @@ public sealed class ToolBroker
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "browser.read.dynamic.public.v1" => ToolPrecondition.UserProvidedDynamicPublicWebPageUrl,
-        "browser.session.open.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
+        "browser.session.open.v1" or "browser.session.navigate.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
             or "browser.session.fill-text.v1" or "browser.session.close.v1" => ToolPrecondition.UserRequestedIsolatedBrowserSession,
         "browser.download.public.v1" => ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
@@ -558,6 +573,7 @@ public sealed class ToolBroker
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
         "browser.read.dynamic.public.v1" => ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned,
         "browser.session.open.v1" => ToolExpectedOutcome.BrowserSessionOpened,
+        "browser.session.navigate.v1" => ToolExpectedOutcome.BrowserSessionNavigated,
         "browser.session.snapshot.v1" => ToolExpectedOutcome.BrowserSessionSnapshotReturned,
         "browser.session.click-button.v1" or "browser.session.fill-text.v1" => ToolExpectedOutcome.BrowserControlActionCompleted,
         "browser.session.close.v1" => ToolExpectedOutcome.BrowserSessionClosed,

@@ -253,7 +253,7 @@ if (args.Length == 1 && args[0] == "--only-browser-render")
 if (args.Length == 1 && args[0] == "--only-browser-session")
 {
     await CheckIsolatedBrowserSessionAsync();
-    Console.WriteLine("通过：合成网页会话支持受限的多步读取/交互；旧快照、提交按钮、敏感输入和关闭后访问均失败关闭。");
+    Console.WriteLine("通过：合成网页会话支持多步读取、当前快照绑定的网址导航和受限交互；旧快照、提交按钮、敏感输入和关闭后访问均失败关闭。");
     return;
 }
 if (args.Length == 2 && args[0] == "--probe-public-web-read")
@@ -6676,6 +6676,31 @@ static async Task CheckPublicWebPageReadPolicyAsync()
             "隔离网页会话打开提案的URL、目标或参数无效时仍调用了会话管理器。");
     }
 
+    var navigate = ToolBroker.Proposal("browser.session.navigate.v1",
+        [new("session_id", sessionId), new("snapshot_id", snapshotId), new("url", "https://example.org/next")],
+        "isolated-public-web-session", ToolExpectedOutcome.BrowserSessionNavigated);
+    Require(ToolInteractionPolicy.GetMode("browser.session.navigate.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("browser.session.navigate.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "隔离网页导航未登记为后台操作。");
+    Require((await sessionBroker.ExecuteBackgroundAsync(navigate, CancellationToken.None)).Success
+        && sessionManager.NavigateCount == 1 && sessionManager.LastNavigationUrl == "https://example.org/next",
+        "有效的、绑定当前快照的公网网址没有到达隔离会话管理器。");
+    foreach (var invalid in new[]
+    {
+        navigate with { Arguments = navigate.Arguments.SetItem("url", "http://example.org/") },
+        navigate with { Arguments = navigate.Arguments.SetItem("url", "https://127.0.0.1/") },
+        navigate with { Arguments = navigate.Arguments.SetItem("snapshot_id", "invalid") },
+        navigate with { Target = "user-edge-session" },
+        navigate with { Preconditions = ToolPrecondition.UserProvidedPublicWebPageUrl },
+        navigate with { ExpectedOutcome = ToolExpectedOutcome.BrowserControlActionCompleted },
+        navigate with { Arguments = navigate.Arguments.Add("script", "arbitrary") }
+    })
+    {
+        var rejected = await sessionBroker.ExecuteBackgroundAsync(invalid, CancellationToken.None);
+        Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL" && sessionManager.NavigateCount == 1,
+            "웹 세션 탐색이 URL, 세션, 스냅샷, 목적지 또는 도구 경界无效时仍被执行。");
+    }
+
     var sessionRead = ToolBroker.Proposal("browser.session.snapshot.v1", [new("session_id", sessionId)],
         "isolated-public-web-session", ToolExpectedOutcome.BrowserSessionSnapshotReturned);
     Require((await sessionBroker.ExecuteBackgroundAsync(sessionRead, CancellationToken.None)).Success
@@ -6953,6 +6978,26 @@ static async Task CheckIsolatedBrowserSessionAsync()
     var afterClose = await manager.SnapshotAsync(sessionId, CancellationToken.None);
     Require(!afterClose.Success && afterClose.ErrorCode == "BROWSER_SESSION_NOT_FOUND",
         "关闭后的网页会话仍可继续访问。");
+
+    var secondOpen = await manager.OpenHtmlForTestingAsync(
+        "<!doctype html><html><head><title>第一页</title></head><body>第一页正文</body></html>", CancellationToken.None);
+    Require(secondOpen.Success && secondOpen.Data is not null, "导航合成会话未能初始化。");
+    sessionId = ExtractSessionToken(secondOpen.Data!, "会话ID：");
+    initialSnapshot = ExtractSessionToken(secondOpen.Data!, "快照ID：");
+    var navigated = await manager.NavigateHtmlForTestingAsync(sessionId, initialSnapshot,
+        new Uri("https://example.org/second"),
+        "<!doctype html><html><head><title>第二页</title></head><body>第二页正文</body></html>",
+        CancellationToken.None);
+    Require(navigated.Success && navigated.Data?.Contains("第二页正文", StringComparison.Ordinal) == true
+        && navigated.Data.Contains("https://example.org/second", StringComparison.Ordinal)
+        && ExtractSessionToken(navigated.Data!, "快照ID：") != initialSnapshot,
+        "隔离会话导航没有替换页面、更新网址并轮换快照令牌。");
+    var replay = await manager.NavigateHtmlForTestingAsync(sessionId, initialSnapshot,
+        new Uri("https://example.org/third"), "<!doctype html><html><body>第三页</body></html>",
+        CancellationToken.None);
+    Require(!replay.Success && replay.ErrorCode == "BROWSER_STALE_SNAPSHOT",
+        "旧快照仍可重复导航到其他网页。");
+    await manager.CloseAsync(sessionId, CancellationToken.None);
 }
 
 static string ExtractSessionToken(string data, string prefix)
@@ -7876,6 +7921,8 @@ internal sealed class FakeIsolatedBrowserSessionManager : IIsolatedBrowserSessio
 {
     public int OpenCount { get; private set; }
     public int SnapshotCount { get; private set; }
+    public int NavigateCount { get; private set; }
+    public string? LastNavigationUrl { get; private set; }
     public int ClickCount { get; private set; }
     public int FillCount { get; private set; }
     public int CloseCount { get; private set; }
@@ -7892,6 +7939,15 @@ internal sealed class FakeIsolatedBrowserSessionManager : IIsolatedBrowserSessio
         cancellationToken.ThrowIfCancellationRequested();
         SnapshotCount++;
         return Task.FromResult(new ToolResult(true, "合成快照已返回。"));
+    }
+
+    public Task<ToolResult> NavigateAsync(string sessionId, string snapshotId, string url,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        NavigateCount++;
+        LastNavigationUrl = url;
+        return Task.FromResult(new ToolResult(true, "合成会话已导航。"));
     }
 
     public Task<ToolResult> ClickButtonAsync(string sessionId, string snapshotId, string accessibleName,

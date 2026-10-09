@@ -56,7 +56,8 @@ public enum ToolExpectedOutcome
     BrowserSessionOpened = 22,
     BrowserSessionSnapshotReturned = 23,
     BrowserControlActionCompleted = 24,
-    BrowserSessionClosed = 25
+    BrowserSessionClosed = 25,
+    BrowserSessionNavigated = 26
 }
 
 public static class ApprovalAuditCatalog
@@ -96,6 +97,7 @@ public interface IDynamicPublicWebPageReader
 public interface IIsolatedBrowserSessionManager : IAsyncDisposable
 {
     Task<ToolResult> OpenAsync(string url, CancellationToken cancellationToken);
+    Task<ToolResult> NavigateAsync(string sessionId, string snapshotId, string url, CancellationToken cancellationToken);
     Task<ToolResult> SnapshotAsync(string sessionId, CancellationToken cancellationToken);
     Task<ToolResult> ClickButtonAsync(string sessionId, string snapshotId, string accessibleName,
         CancellationToken cancellationToken);

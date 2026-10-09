@@ -12,7 +12,7 @@ public static class ToolInteractionPolicy
             or "file.delete.recycle-bin.v1"
             or "file.classify.preview.v1" or "file.archive.single.v1" or "file.archive.directory.v1"
             or "browser.read.public.v1" or "browser.read.dynamic.public.v1" or "browser.download.public.v1"
-            or "browser.session.open.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
+            or "browser.session.open.v1" or "browser.session.navigate.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
             or "browser.session.fill-text.v1" or "browser.session.close.v1"
             or "code.inspect.v1" or "code.task.create.v1" or "message.analyze.v1"
             or "message.notice.analyze.v1" or "message.draft.v1" or "message.send.v1" => ToolInteractionMode.Background,

@@ -19,6 +19,7 @@ public static class TaskCategoryCatalog
         ["web-read"] = "静态网页读取",
         ["web-read-dynamic"] = "动态网页读取",
         ["browser-session-open"] = "隔离网页会话",
+        ["browser-session-navigate"] = "网页会话导航",
         ["browser-session-snapshot"] = "网页会话读取",
         ["browser-session-click"] = "网页按钮操作",
         ["browser-session-fill"] = "网页文本填写",
