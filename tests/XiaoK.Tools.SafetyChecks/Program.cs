@@ -3704,9 +3704,12 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Queued).Contains("不会执行", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running).Contains("副作用", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.OutcomeUncertain).Contains("不会自动重试", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.CodeTaskStateLabel("verifying") == "核验中"
+        && TaskHistoryDisplayPolicy.NextActionForCodeTask("verifying", interrupted: false)
+            .Contains("等待独立核验完成", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextActionForCodeTask("running", interrupted: true)
             .Contains("不会自动重试", StringComparison.Ordinal),
-        "任务中心的取消、待核对或失败后指引错误，可能引导重复执行。");
+        "任务中心的代码任务状态、核验指引、取消或待核对指引错误，可能引导重复执行。");
 
     Require(TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("file-delete", routeStarted: true)
@@ -3730,6 +3733,7 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
         && xaml.Contains("Binding ExecutionMode", StringComparison.Ordinal)
         && xaml.Contains("Binding NextAction", StringComparison.Ordinal)
+        && host.Contains("TaskHistoryDisplayPolicy.CodeTaskStateLabel(task.State)", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.EffectiveState(visible.Status,", StringComparison.Ordinal)
         && host.Contains("HasPendingActionConfirmationForTask(visible.Id) == true", StringComparison.Ordinal)

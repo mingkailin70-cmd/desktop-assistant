@@ -1,3 +1,11 @@
+## v0.1.78.0 R1编程任务核验状态显示（2026-10-09）
+
+任务中心此前没有把隔离编程任务的`verifying`状态映射到中文标签和独立核验提示，导致该状态显示为未知并给出不准确的防重复操作建议。现在`TaskHistoryDisplayPolicy`统一提供代码任务状态文案，`verifying`显示“核验中”，下一步提示用户等待独立核验完成。
+
+固定SDK 10.0.401 Release解决方案构建0警告、0错误；Windows安全套件118项通过、0项跳过；桌面交互专项76项通过。签名MSIX位于`artifacts\msix-validation\71a7cdfe067c420ba67a4524a94c6351\XiaoK-signed-validation.msix`，137,418,612字节，SHA-256 `C8500C137EC439099A83B07C220057E58358CE47EF332BC050CA70AC0ECA2103`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信任，本阶段未修改证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.78.0_neutral__g0ndt6g65c8pe`，状态`Ok`。
+
+隔离`--diagnostics-profile --background`启动得到PID 45260，标题“小K”的窗口不可见；启动前、运行中和退出后的前台HWND均为`329536`。向匹配PID和窗口标题的主窗口投递应用注册的正常退出消息后，进程以退出码0结束。未打开普通用户界面、加载模型、启用麦克风或通知，也未执行用户任务；任务中心的普通可视布局和真实任务执行仍待验收。
+
 ## v0.1.77.0 R1隔离编程任务会话恢复（2026-10-09）
 
 隔离编程任务状态文件现保存`HostSessionId`，并按当前Host会话判断`planning`、`running`、`verifying`、`applying`与`awaiting_approval`是否仍属于本次运行。旧版没有标识、标识损坏或会话不匹配的活动状态只显示为待核对，不会续跑、重试或恢复审批；终态保持不变。

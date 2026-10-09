@@ -354,11 +354,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 $"code:{task.TaskId}",
                 null,
                 $"隔离编程任务 · {task.TaskId[^8..]}",
-                interrupted ? "上次中断，需核对" : CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
+                interrupted ? "上次中断，需核对" : TaskHistoryDisplayPolicy.CodeTaskStateLabel(task.State), task.UpdatedAtUtc,
                 interrupted
                     ? $"小K不会自动续跑。请检查隔离工作区后手动决定下一步：{task.WorkspacePath}"
                     : $"隔离工作区：{task.WorkspacePath}", false,
-                interrupted ? "上次运行中断；不会自动恢复或重试。" : $"编程任务：{CodeTaskStateLabel(task.State)}",
+                interrupted ? "上次运行中断；不会自动恢复或重试。" : $"编程任务：{TaskHistoryDisplayPolicy.CodeTaskStateLabel(task.State)}",
                 TaskHistoryDisplayPolicy.TargetScope("code"),
                 TaskHistoryDisplayPolicy.ExecutionMode("code"),
                 TaskHistoryDisplayPolicy.NextActionForCodeTask(task.State, interrupted));
@@ -1145,14 +1145,6 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         TaskLifecycleState.Verifying => "核验中", TaskLifecycleState.Completed => "已完成",
         TaskLifecycleState.Failed => "失败", TaskLifecycleState.Cancelled => "已取消",
         TaskLifecycleState.OutcomeUncertain => "结果待核对", _ => "未知状态"
-    };
-
-    private static string CodeTaskStateLabel(string state) => state switch
-    {
-        "planning" => "规划中", "running" => "生成中", "awaiting_approval" => "等待审阅",
-        "applying" => "应用中", "outcome_uncertain" => "结果待核对",
-        "completed" => "已完成",
-        "failed" => "失败", "cancelled" => "已取消", _ => "未知状态"
     };
 
     private static string ExtractPayload(string request, IEnumerable<string> prefixes)

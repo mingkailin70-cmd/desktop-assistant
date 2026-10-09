@@ -54,10 +54,25 @@ public static class TaskHistoryDisplayPolicy
         _ => "状态未知；先检查目标状态，不要重复执行。"
     };
 
+    public static string CodeTaskStateLabel(string state) => state switch
+    {
+        "planning" => "规划中",
+        "running" => "生成中",
+        "verifying" => "核验中",
+        "awaiting_approval" => "等待审阅",
+        "applying" => "应用中",
+        "outcome_uncertain" => "结果待核对",
+        "completed" => "已完成",
+        "failed" => "失败",
+        "cancelled" => "已取消",
+        _ => "未知状态"
+    };
+
     public static string NextActionForCodeTask(string state, bool interrupted) =>
         NextAction(interrupted ? TaskLifecycleState.OutcomeUncertain : state switch
         {
             "planning" or "running" or "applying" => TaskLifecycleState.Running,
+            "verifying" => TaskLifecycleState.Verifying,
             "awaiting_approval" => TaskLifecycleState.AwaitingApproval,
             "completed" => TaskLifecycleState.Completed,
             "failed" => TaskLifecycleState.Failed,
