@@ -4706,6 +4706,12 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
         && projected.Single(item => item.AppUserModelId == "weixin.desktop!Main").LatestNotificationTimeUtc == DateTimeOffset.UnixEpoch.AddSeconds(7),
         "通知来源只读诊断没有按目标应用显示名筛选并聚合AUMID。 ");
 
+    var offsetTimestamp = new DateTimeOffset(2026, 10, 9, 10, 41, 6, TimeSpan.FromHours(8));
+    var normalizedTimestamp = NotificationPublisherDiagnosticPolicy.Project(
+        [("QQ", "QQ", offsetTimestamp)]).Single().LatestNotificationTimeUtc;
+    Require(normalizedTimestamp == new DateTimeOffset(2026, 10, 9, 2, 41, 6, TimeSpan.Zero),
+        "通知来源诊断没有把创建时间规范化为 UTC。 ");
+
     var overLimit = Enumerable.Range(0, NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications + 1)
         .Select(index => ((string?)"QQ", (string?)$"qq.app!Id{index}", DateTimeOffset.UnixEpoch.AddSeconds(index)));
     Require(NotificationPublisherDiagnosticPolicy.Project(overLimit).Count == NotificationPublisherDiagnosticPolicy.MaximumCandidates,

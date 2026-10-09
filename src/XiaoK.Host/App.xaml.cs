@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Principal;
+using System.Text.Json;
 using System.Threading;
 using System.Windows;
 using Windows.ApplicationModel;
@@ -33,6 +34,16 @@ public partial class App : System.Windows.Application
         if (e.Args.Length > 0 && string.Equals(e.Args[0], "--pdf-worker", StringComparison.Ordinal))
         {
             Environment.ExitCode = WindowsPdfTextWorkerEntryPoint.Run(e.Args);
+            Shutdown();
+            return;
+        }
+
+        if (e.Args.Contains("--notification-source-diagnostic", StringComparer.OrdinalIgnoreCase))
+        {
+            var report = await WindowsNotificationSourceDiagnostic.RunAsync();
+            Console.Out.WriteLine(JsonSerializer.Serialize(report));
+            Console.Out.Flush();
+            Environment.ExitCode = report.ExitCode;
             Shutdown();
             return;
         }

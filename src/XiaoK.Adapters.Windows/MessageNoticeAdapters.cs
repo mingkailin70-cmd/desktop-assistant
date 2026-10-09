@@ -76,11 +76,14 @@ public static class NotificationPublisherDiagnosticPolicy
 
             var safeName = new string(displayName!.Where(character => !char.IsControl(character)).Take(MaximumDisplayNameLength).ToArray()).Trim();
             if (safeName.Length == 0) continue;
+            var normalizedCreationTimeUtc = creationTimeUtc.ToUniversalTime();
             if (candidates.TryGetValue(appUserModelId!, out var existing))
                 candidates[appUserModelId!] = (existing.DisplayName, existing.Count + 1,
-                    creationTimeUtc > existing.LatestNotificationTimeUtc ? creationTimeUtc : existing.LatestNotificationTimeUtc);
+                    normalizedCreationTimeUtc > existing.LatestNotificationTimeUtc
+                        ? normalizedCreationTimeUtc
+                        : existing.LatestNotificationTimeUtc);
             else if (candidates.Count < MaximumCandidates)
-                candidates.Add(appUserModelId!, (safeName, 1, creationTimeUtc));
+                candidates.Add(appUserModelId!, (safeName, 1, normalizedCreationTimeUtc));
         }
 
         return candidates.Select(pair => new NotificationPublisherCandidate(

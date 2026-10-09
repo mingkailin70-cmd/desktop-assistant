@@ -1,3 +1,11 @@
+## v0.1.92.0 R0无窗口通知来源诊断（2026-10-09）
+
+新增安装包命令行参数`--notification-source-diagnostic`。该分支在创建单实例互斥、WPF主窗口、托盘、AssistantRuntime或持续监控前执行；只要求已有MSIX身份和现有Windows通知授权为Allowed，从最多512条当前Toast读取显示名、AUMID及创建时间，聚合微信/QQ候选后将JSON写入调用进程的stdout并退出。它不请求权限、不访问通知视觉树/正文、不订阅通知变化、不改个人设置、不落盘，也不启动语音、模型或桌宠窗口。诊断的stdout由父进程通过匿名管道在内存中接收；未写入文件。
+
+当前机器安装版实测：权限`Allowed`，检查37条当前Toast，返回`QQ`/AUMID `QQ`候选4条、没有微信候选；该AUMID与唯一开始菜单QQ注册项`AppID=QQ`及当前QQ程序路径`D:\QQ\QQ.exe`一致。诊断退出码0、stderr为空、Host进程数0。安装后设置未改变：微信/QQ监控均关闭，两个AUMID数组仍为空。未读取通知正文或发送消息；私聊/群聊分类、联系人稳定身份与30条/95%真实样本门槛仍未通过。
+
+Release全解决方案构建0警告、0错误；Windows安全套件121项通过、0项跳过。签名MSIX位于`artifacts\msix-validation\c8adbc20da2045ba8f276b072c96d9ed\XiaoK-signed-validation.msix`，139,341,132字节，SHA-256 `86E9AB22CEAC74653D45433552D69460AE274926BBE7B5ECD095AF3557FB3B91`。SignTool验签有效、0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已存在于`LocalMachine\TrustedPeople`，本次未改信任。当前账户安装版本`0.1.92.0`、状态`Ok`；安装版与自包含发布版Host DLL SHA-256均为`DD1A0E41161423F95EF19FD0D51D4F905A95FCD87CD1172BC0258DBE6F7AEDE2`。安装器没有启动Host，只有上述独立命令启动后立即退出。
+
 ## v0.1.90.0 R0通知正文读取器二次门控（2026-10-09）
 
 只有客户端解析器确认通知属于私聊且提供不超过256字符的会话ID或发送者标识时，`MessageNoticePolicy.GateBodyReader`才把真实正文读取器交给通知适配器。当前微信/QQ解析器尚未接入，监视器传递的元数据仍未知，故适配器只得到空读取器。新增合成检查覆盖未知会话、群聊、无标识、超长标识和已核验私聊；没有读取真实通知。
