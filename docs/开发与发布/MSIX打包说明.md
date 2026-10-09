@@ -311,4 +311,6 @@ VS Code 新窗口核验修正（2026-10-03）：复核后发现旧启动验收�
 
 隔离`--diagnostics-profile --background`启动PID 11740，窗口“小K”保持隐藏，启动后前台HWND不变；向该Host窗口投递应用注册的正常退出消息后，退出码0，当前无Host进程。本次没有打开普通桌面界面、读取个人文件、加载模型、启用麦克风或通知。实测显存空闲约5,578 MiB，低于6,024 MiB模型准入门槛；因此本阶段不宣称摘要模型质量或延迟已验收。普通用户界面中的真实任务、摘要质量和时延仍待之后验证。
 
+阶段实现提交`9fa931c`已推送至`origin/main`；GitHub Actions [Build #37881025791](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37881025791)成功。
+
 ## v0.1.79.0 R1待办数量可见性（2026-10-09）
