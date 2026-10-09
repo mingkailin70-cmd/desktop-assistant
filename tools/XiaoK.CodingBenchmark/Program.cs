@@ -413,7 +413,8 @@ internal static class Program
             "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "gemma-4-e4b-it-qat-q4-0-eval" => new ModelProfile("gemma-4-E4B_q4_0-it.gguf", 24, 4_500, 5_524, true),
             "ornith-1.5-9b-q4km-eval" => new ModelProfile("Ornith-1.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
-            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0 或 Ornith-1.5-9B Q4_K_M 模型。", nameof(modelId))
+            "oxcoder-9b-q4km-eval" => new ModelProfile("OxCoder-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
+            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M 或 OxCoder-9B Q4_K_M 模型。", nameof(modelId))
         };
         var model = modelLock.Models.Single(item => item.Id == modelId);
         var runtime = runtimeLock.Runtimes.Single(item => item.Id == "llama.cpp");

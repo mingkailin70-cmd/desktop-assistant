@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "p0-required-model-assets-downloaded-and-verified",
-  "lastSourceReviewDate": "2026-10-03",
+  "lastSourceReviewDate": "2026-10-10",
   "models": [
     {
       "id": "qwen3.5-4b-q4km",
@@ -537,6 +537,32 @@
       "status": "locally_evaluated",
       "notes": "官方Ornith-1.5-9B GGUF仓库固定revision的Q4_K_M权重，2026-10-10本机文件大小与官方记录一致，SHA-256复核匹配。固定llama.cpp b11259、12个GPU层及coding-zh-v4无thinking构建完成R01–R10（7/10）和S01–S10（4/10），累计11/20；余下M/F题全通过也最多31/40（77.5%），低于32/40门槛，按规则早停。最低空闲显存3,265 MiB，采样峰值占用4,635 MiB；无显存保护取消。未接入生产配置。另对显式thinking配置只做R01单题可行性探测：输出未通过结构化源码解释校验，耗时273.5秒，最低空闲显存3,436 MiB、峰值占用4,464 MiB；它不是完整thinking评测，不能与无thinking结果合并。作者公布的外部基准只作候选线索，不代表本机结果。",
       "localDirectory": "llm/ornith-1.5-9b-gguf-q4km/abdd624b12ebf020b767fff532ff44fe552b28c3",
+      "requiredForP0": false
+    },
+    {
+      "id": "oxcoder-9b-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/mradermacher/OxCoder-9B-GGUF",
+      "baseModel": "OrionLLM/OxCoder-9B",
+      "baseModelRevision": "07ba04e2149bace1b43c66448471a70378a7a708",
+      "revision": "525d7144604d67d86d138cde41e93c7bb545f82a",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "mradermacher community quantization",
+      "conversionRuntime": "llama.cpp GGUF conversion reported by the quantizer",
+      "files": [
+        {
+          "name": "OxCoder-9B.Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 5629117888,
+          "upstreamXetHash": "1bf4826f1bdf951de6f12e99d2f94c94f5b26576e570ebd98e7716fe21e33449",
+          "expectedUpstreamSha256": "00ba21659dc68e5dba5fb7a084fbdeb0f1f29e866dc04d1dc21b89bc4b572c3c",
+          "localVerifiedSha256": "00ba21659dc68e5dba5fb7a084fbdeb0f1f29e866dc04d1dc21b89bc4b572c3c"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "locally_evaluated",
+      "notes": "OrionLLM官方OxCoder-9B模型卡将其描述为Qwen3.5-9B基础上的代码代理微调，并报告Agentic Coding基准；GGUF由mradermacher在固定revision转换。公开讨论对源仓库Safetensors是否包含训练后权重提出过争议，官方回复与讨论内容需谨慎解读；社区GGUF身份和训练效果尚未独立证实。仅作为隔离本机筛查候选。2026-10-10以coding-zh-v4、固定构建cb9c75258401ac2f84d40c3317ed5ef6322d17746efa58637b8ed46562fef6af完成R01–R10，1/10通过；剩余30题全部通过也最多31/40，低于32/40门槛，按规则早停，不进入生产。GGUF固定文件树报告5,629,117,888字节及Xet内容标识；此文件无LFS整文件SHA，按固定HTTPS revision下载后计算本机SHA-256并锁定。作者外部基准不等同本机结果。",
+      "localDirectory": "llm/oxcoder-9b-q4km-eval/525d7144604d67d86d138cde41e93c7bb545f82a",
       "requiredForP0": false
     }
   ]

@@ -6048,6 +6048,31 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
     }
     catch (InvalidDataException) { }
 
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "oxcoder-9b-q4km-eval",
+          "modelSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+          "contextTokens": 6144,
+          "gpuLayers": 12,
+          "expectedGpuMemoryMiB": 3500
+        }
+        """);
+    var oxCoderCandidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "oxcoder-9b-q4km-eval", contextTokensOverride: 6144);
+    if (oxCoderCandidate is null || oxCoderCandidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 OxCoder-9B 评测清单未能通过专用候选入口加载。");
+    await oxCoderCandidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 OxCoder-9B 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
     try
     {
         _ = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
