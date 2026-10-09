@@ -222,7 +222,7 @@ if (args.Length == 1 && args[0] == "--only-public-web-download")
 if (args.Length == 1 && args[0] == "--only-browser-render")
 {
     await CheckStaticBrowserRenderingAsync();
-    Console.WriteLine("通过：静态模式禁用脚本；动态模式只运行沙箱内联脚本，CSP与路由均阻止外部及本机子请求。");
+    Console.WriteLine("通过：静态模式禁用脚本；动态模式仅运行沙箱内联脚本、阻断外联，并在无限循环脚本超时时关闭隔离浏览器。");
     return;
 }
 if (args.Length == 2 && args[0] == "--probe-public-web-read")
@@ -6331,6 +6331,24 @@ static async Task CheckStaticBrowserRenderingAsync()
     Require(dynamic.AriaSnapshot.Contains("heading \"沙箱隔离后的动态正文\" [level=1]", StringComparison.Ordinal)
         && !listener.Pending(),
         $"动态读取未生成更新后的ARIA快照，或访问了页面中的本机子资源：{dynamic.AriaSnapshot}");
+
+    const string nonTerminatingScript = "<!doctype html><html><body><script>while (true) {}</script><p>永不读取</p></body></html>";
+    using var hostileScriptTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+    var hostileScriptClock = Stopwatch.StartNew();
+    var hostileScriptStopped = false;
+    try
+    {
+        _ = await PlaywrightPublicWebPageReader.RenderDynamicHtmlAsync(nonTerminatingScript,
+            hostileScriptTimeout.Token);
+    }
+    catch (TimeoutException) { hostileScriptStopped = true; }
+    catch (OperationCanceledException) when (hostileScriptTimeout.IsCancellationRequested)
+    {
+        hostileScriptStopped = true;
+    }
+    Require(hostileScriptStopped && hostileScriptClock.Elapsed < TimeSpan.FromSeconds(15),
+        $"无限循环脚本没有在单步/整体时限内终止并关闭隔离浏览器：stopped={hostileScriptStopped}, elapsed={hostileScriptClock.Elapsed}");
+    Console.WriteLine($"通过：无限循环内联脚本在 {hostileScriptClock.Elapsed.TotalSeconds:F1} 秒内触发时限，隔离浏览器已关闭。");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)

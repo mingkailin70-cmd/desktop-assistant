@@ -8,7 +8,7 @@ using XiaoK.Core;
 
 namespace XiaoK.Adapters.Browser;
 
-/// <summary>通过无持久数据、禁用脚本的独立 Edge 进程读取公开网页静态正文。</summary>
+/// <summary>通过无持久数据的独立 Edge 进程读取公开网页；动态模式仅运行隔离内联脚本。</summary>
 public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynamicPublicWebPageReader
 {
     private const int MaximumHtmlBytes = 2 * 1024 * 1024;
@@ -16,6 +16,7 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
     private const int MaximumAriaSnapshotCharacters = 6_000;
     private const string InlineScriptOnlyPolicy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; media-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; worker-src 'none'; manifest-src 'none'";
     private static readonly TimeSpan OverallTimeout = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan BrowserCloseTimeout = TimeSpan.FromSeconds(3);
 
     public Task<ToolResult> ReadPageAsync(string url, CancellationToken cancellationToken) =>
         ReadPageCoreAsync(url, runInlineScripts: false, cancellationToken);
@@ -65,6 +66,12 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
             return new(false, runInlineScripts
                 ? "动态网页读取超过25秒时限，已关闭独立浏览器；没有使用用户Edge登录态或提交页面内容。"
                 : "网页读取超过25秒时限，已停止；没有执行网页脚本或下载文件。", "WEB_READ_TIMEOUT");
+        }
+        catch (TimeoutException)
+        {
+            return new(false, runInlineScripts
+                ? "动态网页未能在单步时限内生成快照；隔离浏览器已关闭，没有使用用户Edge登录态。"
+                : "网页未能在单步时限内生成快照；独立浏览器已关闭，没有执行网页脚本。", "WEB_RENDER_STEP_TIMEOUT");
         }
         catch (PublicWebHostResolutionException)
         {
@@ -202,75 +209,89 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
     private static async Task<RenderedPageSnapshot> RenderHtmlAsync(string html, bool runInlineScripts,
         CancellationToken cancellationToken)
     {
-        using var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
-        var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-        {
-            Channel = "msedge",
-            Headless = true,
-            ChromiumSandbox = true,
-            Timeout = 8_000,
-            Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
-                "--no-default-browser-check", "--disable-component-update"]
-        }).ConfigureAwait(false);
+        var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
+        IBrowser? browser = null;
         try
         {
+            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Channel = "msedge",
+                Headless = true,
+                ChromiumSandbox = true,
+                Timeout = 8_000,
+                Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
+                    "--no-default-browser-check", "--disable-component-update"]
+            }).ConfigureAwait(false);
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 JavaScriptEnabled = runInlineScripts,
                 ServiceWorkers = ServiceWorkerPolicy.Block,
                 AcceptDownloads = false
             }).ConfigureAwait(false);
+            await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient")).ConfigureAwait(false);
+            var page = await context.NewPageAsync().ConfigureAwait(false);
+            context.Page += (_, popup) =>
+            {
+                if (!ReferenceEquals(page, popup)) _ = popup.CloseAsync();
+            };
+            page.Dialog += (_, dialog) => _ = dialog.DismissAsync();
+            ILocator body;
+            string title;
+            if (runInlineScripts)
+            {
+                await page.SetContentAsync("<!doctype html><html><body><iframe id=\"xiaok-page\" title=\"隔离网页\" sandbox=\"allow-scripts\"></iframe></body></html>",
+                    new PageSetContentOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 8_000 })
+                    .WaitAsync(cancellationToken).ConfigureAwait(false);
+                var isolatedFrame = page.FrameLocator("#xiaok-page");
+                await page.Locator("#xiaok-page")
+                    .EvaluateAsync("(frame, source) => { frame.srcdoc = source; }", AddInlineScriptOnlyPolicy(html))
+                    .WaitAsync(cancellationToken).ConfigureAwait(false);
+                body = isolatedFrame.Locator("body");
+                await body.WaitForAsync(new LocatorWaitForOptions
+                {
+                    State = WaitForSelectorState.Visible,
+                    Timeout = 8_000
+                }).WaitAsync(cancellationToken).ConfigureAwait(false);
+                await page.WaitForTimeoutAsync(250).WaitAsync(cancellationToken).ConfigureAwait(false);
+                title = await isolatedFrame.Locator("title")
+                    .TextContentAsync(new LocatorTextContentOptions { Timeout = 3_000 })
+                    .WaitAsync(cancellationToken).ConfigureAwait(false) ?? string.Empty;
+            }
+            else
+            {
+                await page.SetContentAsync(html, new PageSetContentOptions
+                {
+                    WaitUntil = WaitUntilState.DOMContentLoaded,
+                    Timeout = 8_000
+                }).WaitAsync(cancellationToken).ConfigureAwait(false);
+                body = page.Locator("body");
+                title = await page.TitleAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            var bodyText = await body.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 3_000 })
+                .WaitAsync(cancellationToken).ConfigureAwait(false);
+            var ariaSnapshot = await body.AriaSnapshotAsync()
+                .WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new RenderedPageSnapshot(title, bodyText, ariaSnapshot);
+        }
+        finally
+        {
             try
             {
-                await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient")).ConfigureAwait(false);
-                var page = await context.NewPageAsync().ConfigureAwait(false);
-                context.Page += (_, popup) =>
-                {
-                    if (!ReferenceEquals(page, popup)) _ = popup.CloseAsync();
-                };
-                page.Dialog += (_, dialog) => _ = dialog.DismissAsync();
-                ILocator body;
-                string title;
-                if (runInlineScripts)
-                {
-                    await page.SetContentAsync("<!doctype html><html><body><iframe id=\"xiaok-page\" title=\"隔离网页\" sandbox=\"allow-scripts\"></iframe></body></html>",
-                        new PageSetContentOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 8_000 })
-                        .WaitAsync(cancellationToken).ConfigureAwait(false);
-                    var isolatedFrame = page.FrameLocator("#xiaok-page");
-                    await page.Locator("#xiaok-page")
-                        .EvaluateAsync("(frame, source) => { frame.srcdoc = source; }", AddInlineScriptOnlyPolicy(html))
-                        .WaitAsync(cancellationToken).ConfigureAwait(false);
-                    body = isolatedFrame.Locator("body");
-                    await body.WaitForAsync(new LocatorWaitForOptions
-                    {
-                        State = WaitForSelectorState.Visible,
-                        Timeout = 8_000
-                    }).WaitAsync(cancellationToken).ConfigureAwait(false);
-                    await page.WaitForTimeoutAsync(250).WaitAsync(cancellationToken).ConfigureAwait(false);
-                    title = await isolatedFrame.Locator("title")
-                        .TextContentAsync(new LocatorTextContentOptions { Timeout = 3_000 })
-                        .WaitAsync(cancellationToken).ConfigureAwait(false) ?? string.Empty;
-                }
-                else
-                {
-                    await page.SetContentAsync(html, new PageSetContentOptions
-                    {
-                        WaitUntil = WaitUntilState.DOMContentLoaded,
-                        Timeout = 8_000
-                    }).WaitAsync(cancellationToken).ConfigureAwait(false);
-                    body = page.Locator("body");
-                    title = await page.TitleAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
-                }
-
-                var bodyText = await body.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 3_000 })
-                    .WaitAsync(cancellationToken).ConfigureAwait(false);
-                var ariaSnapshot = await body.AriaSnapshotAsync()
-                    .WaitAsync(cancellationToken).ConfigureAwait(false);
-                return new RenderedPageSnapshot(title, bodyText, ariaSnapshot);
+                if (browser is not null)
+                    await browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false);
             }
-            finally { await context.CloseAsync().ConfigureAwait(false); }
+            catch (TimeoutException)
+            {
+                // The browser has no persistent state or artifacts; disposing Playwright below
+                // tears down its driver if Chromium cannot complete the force-close in time.
+            }
+            catch (PlaywrightException) when (browser is { IsConnected: false })
+            {
+                // A renderer crash already disconnected and ended the browser process.
+            }
+            finally { playwright.Dispose(); }
         }
-        finally { await browser.CloseAsync().ConfigureAwait(false); }
     }
 
     private static string NormalizeText(string value) => string.Join('\n', value
