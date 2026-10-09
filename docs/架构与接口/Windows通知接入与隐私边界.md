@@ -1,6 +1,6 @@
 # Windows 通知接入与隐私边界
 
-更新：2026-10-09。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。当前账户已安装签名MSIX `0.1.83.0`。0.1.81.0设置页曾运行一次性来源诊断：当时Windows通知访问权限为允许，最多512条Toast快照中找到4条QQ显示名/AUMID候选、未找到微信候选；诊断只读应用显示名和AUMID，未读通知视觉树或正文。该候选未与用户可识别的真实来源对应，通知开关仍关闭，不能据此启用正文分析。
+更新：2026-10-09。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。当前账户已安装签名MSIX `0.1.87.0`。0.1.81.0设置页曾运行一次性来源诊断：当时Windows通知访问权限为允许，最多512条Toast快照中找到4条QQ显示名/AUMID候选、未找到微信候选；诊断只读应用显示名和AUMID，未读通知视觉树或正文。该候选未与用户可识别的真实来源对应。最近一次只读核对当前安装版设置时，微信/QQ监控开关均关闭、两个AUMID白名单均为空；本轮未重新检查系统通知授权，也未读取Toast正文或启用监听。
 
 ## 当前实现
 
@@ -26,13 +26,13 @@
 
 ### R0：标准监听接口能提供哪些会话信息
 
-微软 `UserNotificationListener` 文档列出的单条`UserNotification`字段是应用信息、创建时间、通知ID和`Notification`内容；文档示例从`Notification.Visual`的`ToastGeneric`绑定读取文本元素，并将首项当标题、后续项当正文。`Notification`本身公开`Visual`，而Windows Toast定义中的`launch`参数是点击通知时交给原应用用于跳转的激活上下文。参见[Notification listener](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/notification-listener)、[UserNotification](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.usernotification?view=winrt-28000)、[Notification.Visual](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.notification.visual?view=winrt-28000)和[通知内容结构](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/app-notifications-content)。
+微软 `UserNotificationListener` 文档列出的单条`UserNotification`字段是应用信息、创建时间、通知ID和`Notification`内容；文档示例从`Notification.Visual`的`ToastGeneric`绑定读取文本元素，并将首项当标题、后续项当正文。`Notification`本身公开`Visual`，而Windows Toast定义中的`launch`参数是点击通知时交给原应用用于跳转的激活上下文。参见[Notification listener](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/notification-listener)、[UserNotification](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.usernotification?view=winrt-26100)、[UserNotification.Notification](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.usernotification.notification?view=winrt-26100)、[Notification.Visual](https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.notification.visual?view=winrt-26100)和[通知内容结构](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/app-notifications-content)。
 
 **基于这些公开成员清单的判断：Windows标准监听对象没有结构化`conversationId`、联系人稳定ID或`isPrivateConversation`字段，也没有文档化的`launch`读取属性。** 因此必须由微信/QQ各自的可见通知格式提供足够证据，才能尝试构造会话键并区分私聊/群聊；标题/正文的通用位置只能说明显示文本，不能自行证明私聊。此结论是从微软文档描述的API面作出的推断，不代表已经检查了本机真实客户端Toast XML，也不证明某一客户端一定不在其可见文本中放入可识别标记。
 
 当前`WeChatNoticeAdapter`和`QQNoticeAdapter`仍需上游提供真实样本解析结果；`WindowsNotificationMonitor.ProcessAddedAsync`显式传入空`conversationId`、`sender`和私聊标记，所以不会读取正文。应先以真实微信/QQ后台通知验证是否存在稳定、可区分的可见格式；若没有，则R0消息通知闸门判定不可行，需另行评估官方接口或可验证的非前台UIA路径，不能弱化当前私聊判定或读取客户端数据库、注入客户端。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。当前账户签名MSIX为`0.1.83.0`，状态`Ok`。最后一次已记录的系统授权检查发生于0.1.81.0只读来源诊断，当时通知访问权限为允许；诊断发现4条QQ候选、未发现微信候选，只显示应用名称和AUMID。该次没有读取正文、启用持续监听或改白名单。当前微信/QQ通知开关保持关闭；通知访问授权状态未在0.1.83.0重新检查。真实来源身份、可见正文格式和私聊归属均未核实；编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。当前账户签名MSIX为`0.1.87.0`，状态此前核验为`Ok`。最后一次已记录的系统授权检查发生于0.1.81.0只读来源诊断，当时通知访问权限为允许；诊断发现4条QQ候选、未发现微信候选，只显示应用名称和AUMID。最近一次设置只读检查确认微信/QQ通知开关均关闭、AUMID白名单均为空；本轮未重新检查系统授权。没有读取通知正文、启用持续监听或改白名单。真实来源身份、可见正文格式和私聊归属均未核实；编译、签名、安装和窗口可见都不能代替系统授权或真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 
