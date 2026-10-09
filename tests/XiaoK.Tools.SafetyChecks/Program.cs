@@ -569,6 +569,9 @@ try
     await CheckRetainedCodeTaskHistoryAsync(tempRoot);
     passed.Add("重启后可安全读取隔离编程任务状态与工作区路径");
 
+    await CheckCodeTaskHostSessionRoundTripAsync(tempRoot);
+    passed.Add("隔离编程任务状态写入并读回同一Host会话标识");
+
     await CheckHistoryRejectsHardLinkedStateAsync(tempRoot);
     passed.Add("任务历史拒绝读取指向工作区外的硬链接状态文件");
 
@@ -5160,6 +5163,27 @@ static async Task CheckRetainedCodeTaskHistoryAsync(string root)
     Require(history.Count == 1 && history[0].HostSessionId == Guid.Empty
         && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(history[0].State, history[0].HostSessionId, Guid.NewGuid()),
         "损坏的Host会话标识没有被保守地视为不匹配。");
+}
+
+static async Task CheckCodeTaskHostSessionRoundTripAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "code-task-session-roundtrip");
+    var projectRoot = Path.Combine(fixtureRoot, "project");
+    var workspaceRoot = Path.Combine(fixtureRoot, "workspaces");
+    Directory.CreateDirectory(projectRoot);
+    await File.WriteAllTextAsync(Path.Combine(projectRoot, "Readme.md"), "isolated fixture", new UTF8Encoding(false));
+
+    var hostSessionId = Guid.NewGuid();
+    var snapshot = CodeWorkspaceSnapshot.Create(projectRoot, workspaceRoot, repositoryRoot: null,
+        hostSessionId: hostSessionId, token: CancellationToken.None);
+    await snapshot.WriteStateAsync("verifying", CancellationToken.None);
+
+    var history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
+    Require(history.Count == 1 && history[0].HostSessionId == hostSessionId
+        && history[0].State == "verifying"
+        && !TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(history[0].State, history[0].HostSessionId, hostSessionId)
+        && TaskHistoryRecoveryPolicy.IsInterruptedCodeTask(history[0].State, history[0].HostSessionId, Guid.NewGuid()),
+        "生产状态写入路径没有持久化Host会话标识，或同会话/跨会话恢复判断不一致。");
 }
 
 static async Task CheckHistoryRejectsHardLinkedStateAsync(string root)
