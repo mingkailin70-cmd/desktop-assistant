@@ -6023,6 +6023,31 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
     }
     catch (InvalidDataException) { }
 
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "ornith-1.5-9b-q4km-eval",
+          "modelSha256": "6666666666666666666666666666666666666666666666666666666666666666",
+          "contextTokens": 6144,
+          "gpuLayers": 12,
+          "expectedGpuMemoryMiB": 3500
+        }
+        """);
+    var ornithCandidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "ornith-1.5-9b-q4km-eval", contextTokensOverride: 6144);
+    if (ornithCandidate is null || ornithCandidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 Ornith-1.5-9B 评测清单未能通过专用候选入口加载。");
+    await ornithCandidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 Ornith-1.5-9B 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
     try
     {
         _ = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,

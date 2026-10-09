@@ -514,6 +514,30 @@
       "notes": "Google官方Gemma 4 E4B指令模型QAT Q4_0 GGUF。官方模型卡报告LiveCodeBench v6为52%，仅作为进入本机合成任务初筛的依据，不代表小K任务集成绩或生产准入。官方模型页标注Apache-2.0。2026-10-09在固定v82管线完成S01-S10，0/10通过；失败包括补丁锚点不唯一、错误别名、错误表达式、占位逻辑和无效JSON。安全/独立评审门均拒绝，原项目未修改。因剩余30题全过也仅30/40，停止此候选与固定管线质量评分；不进入生产。详情见中文候选筛查记录。",
       "localDirectory": "llm/gemma-4-e4b-it-qat-q4-0/4b4a2c1d584be7264f87aac328a1bc739ce81b6c",
       "requiredForP0": false
+    },
+    {
+      "id": "ornith-1.5-9b-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/ornith-ai/Ornith-1.5-9B-GGUF",
+      "baseModel": "ornith-ai/Ornith-1.5-9B",
+      "revision": "abdd624b12ebf020b767fff532ff44fe552b28c3",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "ornith-ai official GGUF",
+      "conversionRuntime": "llama.cpp compatible GGUF",
+      "files": [
+        {
+          "name": "Ornith-1.5-9B-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 5780090816,
+          "expectedUpstreamSha256": "70c112196e0b7023803c9762752e46d29e612a92c83f995bc3ba1ceb07e8fab6",
+          "localVerifiedSha256": "70c112196e0b7023803c9762752e46d29e612a92c83f995bc3ba1ceb07e8fab6"
+        }
+      ],
+      "license": "mit",
+      "status": "locally_evaluated",
+      "notes": "官方Ornith-1.5-9B GGUF仓库固定revision的Q4_K_M权重，2026-10-10本机文件大小与官方记录一致，SHA-256复核匹配。固定llama.cpp b11259、12个GPU层及coding-zh-v4无thinking构建完成R01–R10（7/10）和S01–S10（4/10），累计11/20；余下M/F题全通过也最多31/40（77.5%），低于32/40门槛，按规则早停。最低空闲显存3,265 MiB，采样峰值占用4,635 MiB；无显存保护取消。未接入生产配置。作者公布的外部基准只作候选线索，不代表本机结果；显式thinking配置若要评估，须作为独立管线重新记分。",
+      "localDirectory": "llm/ornith-1.5-9b-gguf-q4km/abdd624b12ebf020b767fff532ff44fe552b28c3",
+      "requiredForP0": false
     }
   ]
 }
