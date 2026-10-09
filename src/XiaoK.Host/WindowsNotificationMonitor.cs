@@ -295,7 +295,14 @@ internal sealed class WindowsNotificationMonitor : IDisposable
                     () => ReadVisibleText(notification),
                     out bodyGateFailure);
 
-                var decision = adapter.Inspect(sourceAppId, null, null, null, ReadBodyIfStillAllowed,
+                // No verified WeChat/QQ conversation parser is connected yet. Keep these metadata unknown and
+                // do not hand the real toast-body reader to an adapter unless a future parser verifies a private target.
+                string? conversationId = null;
+                string? sender = null;
+                bool? isPrivateConversation = null;
+                var visibleBodyReader = MessageNoticePolicy.GateBodyReader(
+                    isPrivateConversation, conversationId, sender, ReadBodyIfStillAllowed);
+                var decision = adapter.Inspect(sourceAppId, conversationId, sender, isPrivateConversation, visibleBodyReader,
                     notification.CreationTime, key, true, true);
 
                 if (bodyGateFailure == NoticeBodyAccessFailure.PermissionUnavailable)

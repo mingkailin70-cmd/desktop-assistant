@@ -68,7 +68,7 @@ public sealed class MessageNoticePolicy
             return new(true, false, "通知已超过24小时，已跳过自动分析；请手动查看会话。", notice);
         if (isPrivateConversation != true)
             return new(true, false, "无法确定这是私聊，已保留为普通提示，不做自动分析。", notice);
-        if (safeConversationId is null && safeSender is null)
+        if (!HasVerifiedPrivateConversation(isPrivateConversation, safeConversationId, safeSender))
             return new(true, false, "无法核实通知对应的会话，已跳过自动分析；请手动查看会话。", notice);
 
         var rateIdentity = safeConversationId ?? safeSender!;
@@ -112,6 +112,23 @@ public sealed class MessageNoticePolicy
         return new(true, true, "收到微信/QQ私聊通知，正在本地分析可见正文。", notice);
     }
 
+    /// <summary>Returns whether client metadata is sufficient to authorize exposing a toast-body reader.</summary>
+    public static bool HasVerifiedPrivateConversation(bool? isPrivateConversation, string? conversationId, string? sender) =>
+        isPrivateConversation == true && (IsUsableConversationIdentifier(conversationId) || IsUsableConversationIdentifier(sender));
+
+    /// <summary>
+    /// Prevents adapters from receiving a reader that can materialize notification content until the client parser
+    /// has established a private conversation and supplied a bounded conversation or sender identifier.
+    /// </summary>
+    public static Func<string?> GateBodyReader(bool? isPrivateConversation, string? conversationId, string? sender,
+        Func<string?> visibleBodyReader)
+    {
+        ArgumentNullException.ThrowIfNull(visibleBodyReader);
+        return HasVerifiedPrivateConversation(isPrivateConversation, conversationId, sender)
+            ? visibleBodyReader
+            : static () => null;
+    }
+
     private string? ResolveApplication(string? sourceAppId)
     {
         if (string.IsNullOrWhiteSpace(sourceAppId)) return null;
@@ -124,6 +141,8 @@ public sealed class MessageNoticePolicy
 
     private static string? LimitMetadata(string? value, int maximumLength) =>
         string.IsNullOrWhiteSpace(value) || value.Length > maximumLength ? null : value;
+
+    private static bool IsUsableConversationIdentifier(string? value) => LimitMetadata(value, 256) is not null;
 
     private static string HashKey(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

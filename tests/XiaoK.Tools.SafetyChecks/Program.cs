@@ -671,6 +671,9 @@ try
     CheckUnknownNoticeConversationDoesNotReadBody();
     passed.Add("会话类型未知时不读取通知正文且不自动分析");
 
+    CheckNoticeBodyReaderRequiresVerifiedPrivateConversation();
+    passed.Add("未核验私聊及会话标识时不会向通知适配器暴露正文读取器");
+
     CheckNoticePermissionAndLockState();
     passed.Add("权限缺失或锁屏时不读取通知正文");
 
@@ -2423,7 +2426,7 @@ static async Task CheckCodeInspectionRendersMessageSendFactsAsync(string root)
         && File.ReadAllText(invalidTarget) == source,
         $"发送事实展示了模型错配的引用，而不是由本地程序按该主题源码行重新生成引用。实际claim：{renderedSendClaim}");
 
-    var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var repositoryRoot = FindRepositoryRoot();
     var actualSource = File.ReadAllText(Path.Combine(repositoryRoot, targetPath.Replace('/', Path.DirectorySeparatorChar)));
     int ActualLineFor(string fragment)
     {
@@ -2604,7 +2607,7 @@ static async Task CheckCodeInspectionRendersCodeAgentPolicyFactsAsync(string roo
         && File.ReadAllText(legacyTarget) == legacySource,
         $"锁定版编程代理的数值限制或只读边界未由源码确定性生成。错误={legacyResult.ErrorCode}，摘要={legacyResult.Summary}");
 
-    var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var repositoryRoot = FindRepositoryRoot();
     var currentSource = File.ReadAllText(Path.Combine(repositoryRoot, targetPath.Replace('/', Path.DirectorySeparatorChar)));
     var currentProject = CreateProject(root, "code-inspection-code-agent-current-facts", currentSource);
     var currentTarget = Path.Combine(currentProject, targetPath.Replace('/', Path.DirectorySeparatorChar));
@@ -2629,7 +2632,7 @@ static async Task CheckCodeInspectionRendersModelBrokerPriorityFactsAsync(string
     const string targetPath = "src/XiaoK.Inference/ModelBroker.cs";
     const string prompt = "只依据以下目标文件回答，不要猜测仓库外上下文：src/XiaoK.Inference/ModelBroker.cs\n说明交互/后台推理排队和后台让位方式。";
     var topics = new[] { "交互", "后台推理排队", "后台让位方式" };
-    var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var repositoryRoot = FindRepositoryRoot();
     var source = File.ReadAllText(Path.Combine(repositoryRoot, targetPath.Replace('/', Path.DirectorySeparatorChar)));
     int LineFor(string fragment)
     {
@@ -4598,11 +4601,36 @@ static void CheckUnknownNoticeConversationDoesNotReadBody()
 {
     var policy = CreateNoticePolicy();
     var bodyReads = 0;
+    var gatedReader = MessageNoticePolicy.GateBodyReader(null, null, null,
+        () => { bodyReads++; return "不应读到"; });
     var result = policy.Inspect("wechat", "wechat.package!Main", null, null, null,
-        () => { bodyReads++; return "不应读到"; }, DateTimeOffset.UtcNow, "notice-unknown-chat", true, true);
+        gatedReader, DateTimeOffset.UtcNow, "notice-unknown-chat", true, true);
 
     Require(result.Accepted && !result.AnalyzeBody && result.Notice?.Body is null && bodyReads == 0,
         "会话类型未知时读取了正文或触发了自动分析。");
+}
+
+static void CheckNoticeBodyReaderRequiresVerifiedPrivateConversation()
+{
+    var reads = 0;
+    string? ReadBody() { reads++; return "合成通知正文"; }
+
+    var unknown = MessageNoticePolicy.GateBodyReader(null, null, null, ReadBody);
+    var group = MessageNoticePolicy.GateBodyReader(false, "group-1", "Alice", ReadBody);
+    var unattributed = MessageNoticePolicy.GateBodyReader(true, null, null, ReadBody);
+    var oversized = MessageNoticePolicy.GateBodyReader(true, new string('x', 257), null, ReadBody);
+    Require(unknown() is null && group() is null && unattributed() is null && oversized() is null && reads == 0,
+        "未知、群聊、无会话标识或超长标识仍将真实通知正文读取器暴露给适配器。");
+
+    var verified = MessageNoticePolicy.GateBodyReader(true, "chat-1", null, ReadBody);
+    Require(MessageNoticePolicy.HasVerifiedPrivateConversation(true, "chat-1", null)
+        && verified() == "合成通知正文" && reads == 1,
+        "已核验私聊且有会话标识时没有提供受控的正文读取器。");
+
+    var monitor = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "WindowsNotificationMonitor.cs"));
+    Require(monitor.Contains("MessageNoticePolicy.GateBodyReader(", StringComparison.Ordinal)
+        && monitor.Contains("bool? isPrivateConversation = null;", StringComparison.Ordinal),
+        "Windows通知监视器没有在适配器边界应用正文读取器闸门，或当前未知会话被默认放行。");
 }
 
 static void CheckNoticePermissionAndLockState()
