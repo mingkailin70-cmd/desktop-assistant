@@ -232,6 +232,13 @@ if (args.Length == 2 && args[0] == "--probe-public-web-read")
     Console.WriteLine("通过：只读 HTTPS 网页端到端快照；正文未写入诊断输出。 " + pageResult.Summary);
     return;
 }
+if (args.Length == 2 && args[0] == "--probe-public-web-read-dynamic")
+{
+    var pageResult = await new PlaywrightPublicWebPageReader().ReadDynamicPageAsync(args[1], CancellationToken.None);
+    if (!pageResult.Success) throw new InvalidOperationException(pageResult.Summary + " [" + pageResult.ErrorCode + "]");
+    Console.WriteLine("通过：只读 HTTPS 动态网页端到端快照；正文未写入诊断输出。 " + pageResult.Summary);
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-pet-position-store")
 {
     var petPositionRoot = Path.Combine(Path.GetTempPath(), "XiaoK-PetPositionProbe-" + Guid.NewGuid().ToString("N"));
