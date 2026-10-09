@@ -205,7 +205,7 @@ if (args.Length == 1 && args[0] == "--only-file-content-search")
     try
     {
         await CheckFileContentSearchAsync(fileContentSearchRoot);
-        Console.WriteLine("通过：本机文本摘要限制配置根、严格文本编码和64 KiB上限，提示隔离不可信正文、长文本合并及取消；内容搜索仍只返回受限位置。");
+        Console.WriteLine("通过：本机文本摘要限制配置根、严格文本编码、64 KiB文本及DOCX归档/XML/正文上限，拒绝DTD并验证不可信正文、长文本合并和取消；内容搜索仍只返回受限位置。");
     }
     finally
     {
@@ -367,7 +367,7 @@ try
     passed.Add("文件搜索根缺失和查询无效时失败关闭，预取消不执行搜索");
 
     await CheckFileContentSearchAsync(tempRoot);
-    passed.Add("本机文本摘要只读取配置搜索根内不超过64 KiB的严格编码文本，分段提示隔离不可信正文且取消有效");
+    passed.Add("本机文本摘要只读取配置搜索根内严格编码文本或受限DOCX，分段提示隔离不可信正文且取消有效");
     passed.Add("后台文本内容搜索仅读取搜索根内受限文本文件，只返回位置、不泄露匹配正文并核验目录/文件范围");
 
     await CheckFileCopyToExportAsync(tempRoot);
@@ -6274,6 +6274,20 @@ static async Task CheckFileContentSearchAsync(string root)
 static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, WindowsDesktopTools desktop,
     string summaryPath, string summaryText, string summarySentinel, string outsidePath)
 {
+    static void WriteDocx(string path, string? documentXml, int extraEntries = 0)
+    {
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Create);
+        if (documentXml is not null)
+        {
+            var document = archive.CreateEntry("word/document.xml", CompressionLevel.Optimal);
+            using var writer = new StreamWriter(document.Open(), new UTF8Encoding(false));
+            writer.Write(documentXml);
+        }
+        for (var index = 0; index < extraEntries; index++)
+            archive.CreateEntry($"word/extra-{index:D4}.xml", CompressionLevel.NoCompression);
+    }
+
     var command = "总结文本文件：" + summaryPath;
     var proposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(command)
         ?? throw new InvalidOperationException("有效的用户文件摘要命令没有生成提案。");
@@ -6310,8 +6324,83 @@ static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, Window
     Require(!invalidEncoding.Success && invalidEncoding.ErrorCode == "TEXT_FILE_UNSTABLE_OR_UNSUPPORTED"
         && invalidEncoding.Data is null,
         "摘要工具接受了无效编码文本，或将它传给了本机模型。");
-    foreach (var invalidPath in new[] { "\\\\server\\share\\note.txt", Path.ChangeExtension(summaryPath, ".png"), "\0.txt" })
+    foreach (var invalidPath in new[] { "\\\\server\\share\\note.txt", Path.ChangeExtension(summaryPath, ".png"),
+                 Path.ChangeExtension(summaryPath, ".pdf"), Path.ChangeExtension(summaryPath, ".docm"), "\0.txt" })
         Require(!LocalDocumentSummaryPolicy.IsValidPath(invalidPath), "本机摘要策略接受网络、非文本或无效路径。");
+    Require(LocalDocumentSummaryPolicy.IsValidPath(Path.ChangeExtension(summaryPath, ".DOCX")),
+        "本机摘要策略没有按大小写不敏感方式接受DOCX扩展名。");
+
+    const string wordNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const string docxSentinel = "DOCX_DOCUMENT_PRIVATE_SENTINEL";
+    var docxPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "summary-source.docx");
+    var docxXml = $"<w:document xmlns:w=\"{wordNamespace}\"><w:body>"
+        + $"<w:p><w:r><w:t>第一段 {docxSentinel}</w:t></w:r></w:p>"
+        + "<w:p><w:r><w:t>第二段</w:t><w:tab/><w:t>内容</w:t><w:br/><w:t>换行</w:t></w:r></w:p>"
+        + "</w:body></w:document>";
+    WriteDocx(docxPath, docxXml);
+    var docxProposal = LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + docxPath)!;
+    var docxRead = await broker.ExecuteBackgroundAsync(docxProposal, CancellationToken.None);
+    var expectedDocxText = $"第一段 {docxSentinel}\n第二段\t内容\n换行\n";
+    Require(docxRead.Success && docxRead.Data == expectedDocxText
+        && !docxRead.Summary.Contains(docxSentinel, StringComparison.Ordinal)
+        && !docxRead.Summary.Contains(docxPath, StringComparison.Ordinal),
+        "DOCX安全读取没有只提取主文档文字，或把正文/路径写入摘要字段。");
+
+    var missingDocumentPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "missing-document.docx");
+    WriteDocx(missingDocumentPath, null, extraEntries: 1);
+    var missingDocument = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + missingDocumentPath)!, CancellationToken.None);
+    Require(!missingDocument.Success && missingDocument.ErrorCode == "DOCX_UNSTABLE_OR_UNSUPPORTED"
+        && missingDocument.Data is null,
+        "缺少word/document.xml的DOCX没有在送入模型前被拒绝。");
+
+    var dtdPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "dtd.docx");
+    WriteDocx(dtdPath, $"<!DOCTYPE w:document [<!ENTITY xxe SYSTEM \"file:///C:/Windows/win.ini\">]>"
+        + $"<w:document xmlns:w=\"{wordNamespace}\"><w:body><w:p><w:r><w:t>&xxe;</w:t>"
+        + "</w:r></w:p></w:body></w:document>");
+    var dtdResult = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + dtdPath)!, CancellationToken.None);
+    Require(!dtdResult.Success && dtdResult.ErrorCode == "DOCX_UNSTABLE_OR_UNSUPPORTED"
+        && dtdResult.Data is null,
+        "DOCX中的DTD或外部实体没有在送入模型前被拒绝。");
+
+    var oversizedXmlPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "oversized-xml.docx");
+    WriteDocx(oversizedXmlPath, $"<w:document xmlns:w=\"{wordNamespace}\"><w:body><w:p><w:r><w:t>"
+        + new string('A', LocalDocumentSummaryPolicy.MaximumDocxXmlBytes + 1)
+        + "</w:t></w:r></w:p></w:body></w:document>");
+    var oversizedXml = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + oversizedXmlPath)!, CancellationToken.None);
+    Require(!oversizedXml.Success && oversizedXml.ErrorCode == "DOCX_UNSTABLE_OR_UNSUPPORTED"
+        && oversizedXml.Data is null,
+        "超过1 MiB的DOCX主文档XML没有在送入模型前被拒绝。");
+
+    var oversizedTextPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "oversized-text.docx");
+    WriteDocx(oversizedTextPath, $"<w:document xmlns:w=\"{wordNamespace}\"><w:body><w:p><w:r><w:t>"
+        + new string('A', LocalDocumentSummaryPolicy.MaximumDocxTextCharacters + 1)
+        + "</w:t></w:r></w:p></w:body></w:document>");
+    var oversizedText = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + oversizedTextPath)!, CancellationToken.None);
+    Require(!oversizedText.Success && oversizedText.ErrorCode == "DOCX_UNSTABLE_OR_UNSUPPORTED"
+        && oversizedText.Data is null,
+        "超过64 KiB的DOCX提取正文没有在送入本机模型前被拒绝。");
+
+    var tooManyEntriesPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "too-many-entries.docx");
+    WriteDocx(tooManyEntriesPath, docxXml, extraEntries: LocalDocumentSummaryPolicy.MaximumDocxEntries);
+    var tooManyEntries = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + tooManyEntriesPath)!, CancellationToken.None);
+    Require(!tooManyEntries.Success && tooManyEntries.ErrorCode == "DOCX_UNSTABLE_OR_UNSUPPORTED"
+        && tooManyEntries.Data is null,
+        "超过512个条目的DOCX没有在提取文本前被拒绝。");
+
+    var oversizedDocxPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "oversized.docx");
+    using (var oversizedDocx = new FileStream(oversizedDocxPath, FileMode.CreateNew, FileAccess.Write))
+        oversizedDocx.SetLength(LocalDocumentSummaryPolicy.MaximumDocxFileBytes + 1L);
+    var oversizedDocxResult = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结文本文件：" + oversizedDocxPath)!, CancellationToken.None);
+    Require(!oversizedDocxResult.Success && oversizedDocxResult.ErrorCode == "TEXT_FILE_TOO_LARGE"
+        && oversizedDocxResult.Data is null,
+        "超过8 MiB的DOCX没有在读取或送入本机模型前被拒绝。");
+
     using (var oversized = new FileStream(Path.Combine(Path.GetDirectoryName(summaryPath)!, "summary-too-large.txt"),
         FileMode.CreateNew, FileAccess.Write))
         oversized.SetLength(LocalDocumentSummaryPolicy.MaximumFileBytes + 1L);

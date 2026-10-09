@@ -9,6 +9,10 @@ public static class LocalDocumentSummaryPolicy
     public const string ToolId = "file.summarize.text.v1";
     public const string UserSearchRootId = "user-files";
     public const int MaximumFileBytes = 64 * 1024;
+    public const int MaximumDocxFileBytes = 8 * 1024 * 1024;
+    public const int MaximumDocxXmlBytes = 1024 * 1024;
+    public const int MaximumDocxTextCharacters = 64 * 1024;
+    public const int MaximumDocxEntries = 512;
     public const int MaximumPathLength = LocalFileCopyPolicy.MaximumSourcePathLength;
     public const int MaximumSegmentCharacters = 6_000;
     public const int MaximumSegments = 16;
@@ -30,15 +34,27 @@ public static class LocalDocumentSummaryPolicy
     {
         try
         {
+            var extension = path is null ? null : Path.GetExtension(path);
             return LocalFileCopyPolicy.IsValidSourcePath(path)
                 && path!.Length <= MaximumPathLength
-                && LocalFileContentSearchPolicy.IsSearchableExtension(Path.GetExtension(path));
+                && (LocalFileContentSearchPolicy.IsSearchableExtension(extension)
+                    || IsDocxExtension(extension));
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
         {
             return false;
         }
     }
+
+    public static bool IsDocxPath(string? path)
+    {
+        try { return IsDocxExtension(path is null ? null : Path.GetExtension(path)); }
+        catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
+        { return false; }
+    }
+
+    private static bool IsDocxExtension(string? extension) =>
+        string.Equals(extension, ".docx", StringComparison.OrdinalIgnoreCase);
 
     public static bool TryParseUserCommand(string? request, out string path)
     {

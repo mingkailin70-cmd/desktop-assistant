@@ -40,8 +40,26 @@ public sealed partial class WindowsDesktopTools
         {
             if (!safeRoots.Any(root => IsWithinRoot(canonicalFile, root)))
                 return new(false, "文本文件不在设置中允许的搜索目录内；没有读取内容。", "TEXT_FILE_OUTSIDE_ALLOWED_ROOT");
-            if (fileLength > LocalDocumentSummaryPolicy.MaximumFileBytes)
-                return new(false, "文本文件超过64 KiB本机摘要上限；没有把正文交给模型。", "TEXT_FILE_TOO_LARGE");
+            var isDocx = LocalDocumentSummaryPolicy.IsDocxPath(canonicalFile);
+            var maximumBytes = isDocx
+                ? LocalDocumentSummaryPolicy.MaximumDocxFileBytes
+                : LocalDocumentSummaryPolicy.MaximumFileBytes;
+            if (fileLength > maximumBytes)
+                return new(false, isDocx
+                    ? "DOCX文件超过8 MiB读取上限；没有把正文交给模型。"
+                    : "文本文件超过64 KiB本机摘要上限；没有把正文交给模型。", "TEXT_FILE_TOO_LARGE");
+
+            if (isDocx)
+            {
+                if (!TryReadStableDocxText(fileHandle, fileLength, writeTime, cancellationToken, out var docxText))
+                    return new(false,
+                        "DOCX结构、主文档XML或读取状态不受支持；正文未提交给模型。",
+                        "DOCX_UNSTABLE_OR_UNSUPPORTED");
+
+                return new(true,
+                    "已从设置中允许的搜索目录安全提取DOCX主文档文本；正文只在当前任务内存中交给本机模型，不写入本地历史或日志。",
+                    Data: docxText);
+            }
 
             if (!TryReadStableTextFile(fileHandle, fileLength, writeTime,
                     LocalDocumentSummaryPolicy.MaximumFileBytes, cancellationToken,

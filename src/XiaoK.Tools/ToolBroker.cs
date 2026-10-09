@@ -189,7 +189,7 @@ public sealed class ToolBroker
         && LocalDocumentSummaryPolicy.IsValidPath(path)
         && proposal.Target == LocalDocumentSummaryPolicy.UserSearchRootId
             ? null
-            : InvalidProposal("本机文件摘要只接受搜索目录中扩展名受支持的单个文本文件；不会读取任意路径。");
+            : InvalidProposal("本机文件摘要只接受搜索目录中扩展名受支持的文本文件或DOCX；不会读取任意路径。");
 
     private static ToolResult? ValidateMessage(ToolProposal proposal, string key)
     {
