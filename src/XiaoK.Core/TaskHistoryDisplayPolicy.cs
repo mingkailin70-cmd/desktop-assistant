@@ -3,6 +3,10 @@ namespace XiaoK.Core;
 /// <summary>为任务中心提供不含请求正文的目标范围、执行模式和下一步提示。</summary>
 public static class TaskHistoryDisplayPolicy
 {
+    public static string ApprovalTabHeader(int pendingCount) => pendingCount <= 0
+        ? "待办确认"
+        : $"待办确认（{pendingCount}）";
+
     public static TaskLifecycleState EffectiveState(TaskLifecycleState storedState, bool hasPendingActionConfirmation) =>
         storedState == TaskLifecycleState.Running && hasPendingActionConfirmation
             ? TaskLifecycleState.AwaitingApproval

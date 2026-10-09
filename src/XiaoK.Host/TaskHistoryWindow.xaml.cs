@@ -91,6 +91,7 @@ public partial class TaskHistoryWindow : Window
             if (_lifetime.IsCancellationRequested) return;
             var approvals = _loadApprovals();
             if (_lifetime.IsCancellationRequested) return;
+            ApprovalTab.Header = TaskHistoryDisplayPolicy.ApprovalTabHeader(approvals.Count);
 
             var currentHistory = HistoryList.ItemsSource as IEnumerable<TaskHistoryEntry>;
             if (currentHistory is null || !currentHistory.SequenceEqual(history))

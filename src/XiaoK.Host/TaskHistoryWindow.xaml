@@ -58,7 +58,7 @@
                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                 </Grid>
             </TabItem>
-            <TabItem Header="待办确认">
+            <TabItem x:Name="ApprovalTab" Header="待办确认">
                 <Grid Margin="0,8,0,0">
                     <ListBox x:Name="ApprovalList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5">
                         <ListBox.ItemTemplate>

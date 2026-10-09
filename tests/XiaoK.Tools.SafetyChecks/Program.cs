@@ -3684,6 +3684,12 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
 
 static void CheckTaskHistoryDisplayPolicy()
 {
+    Require(TaskHistoryDisplayPolicy.ApprovalTabHeader(0) == "待办确认"
+        && TaskHistoryDisplayPolicy.ApprovalTabHeader(-1) == "待办确认"
+        && TaskHistoryDisplayPolicy.ApprovalTabHeader(1) == "待办确认（1）"
+        && TaskHistoryDisplayPolicy.ApprovalTabHeader(16) == "待办确认（16）",
+        "待办数量标签对空列表、异常负数或多个待办显示不正确。");
+
     Require(TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Running, hasPendingActionConfirmation: true)
             == TaskLifecycleState.AwaitingApproval
         && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Running, hasPendingActionConfirmation: false)
@@ -3733,6 +3739,9 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
         && xaml.Contains("Binding ExecutionMode", StringComparison.Ordinal)
         && xaml.Contains("Binding NextAction", StringComparison.Ordinal)
+        && xaml.Contains("x:Name=\"ApprovalTab\"", StringComparison.Ordinal)
+        && File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml.cs"))
+            .Contains("TaskHistoryDisplayPolicy.ApprovalTabHeader(approvals.Count)", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.CodeTaskStateLabel(task.State)", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.TargetScope(record.Kind)", StringComparison.Ordinal)
         && host.Contains("TaskHistoryDisplayPolicy.EffectiveState(visible.Status,", StringComparison.Ordinal)
