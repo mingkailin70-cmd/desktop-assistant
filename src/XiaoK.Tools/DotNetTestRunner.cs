@@ -289,6 +289,10 @@ public sealed class DotNetTestRunner : IDotNetTestRunner
         environment["PROGRAMFILES"] = dotNetRoot;
         environment["DOTNET_ROOT"] = dotNetRoot;
         environment["DOTNET_ROOT_X64"] = dotNetRoot;
+        // SDK compiler apphosts (for example csc.exe) consult DOTNET_HOST_PATH
+        // when starting their managed compiler. Keep that child process on the
+        // repository-pinned runtime instead of resolving a machine-wide dotnet.
+        environment["DOTNET_HOST_PATH"] = Path.Combine(dotNetRoot, "dotnet.exe");
         environment["DOTNET_CLI_HOME"] = dotNetHome;
         environment["NUGET_PACKAGES"] = packageCache;
         environment["TEMP"] = tempRoot;
