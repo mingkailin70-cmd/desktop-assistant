@@ -6,7 +6,7 @@
 
 隔离`--diagnostics-profile --background`启动得到PID 50516，窗口“小K”不可见；启动、运行和退出前台HWND保持不变。向匹配PID和标题的窗口投递应用注册的正常退出消息后，进程以退出码0结束。未打开普通用户界面、加载模型、启用麦克风或通知，也未执行用户任务。数量标签的普通可见渲染和真实待办流转仍待实机验收；本次不代表R1退出条件通过。
 
-源码提交和GitHub Actions结果将在推送后补记。
+实现提交`19f7089`已推送至`origin/main`；GitHub Actions [Build #37878718735](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37878718735)通过。
 
 ## v0.1.78.0 R1编程任务核验状态显示（2026-10-09）
 
