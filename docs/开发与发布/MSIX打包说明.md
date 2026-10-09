@@ -1,6 +1,6 @@
 ## v0.1.73.0 R3动态网页卡死清理保护（2026-10-09）
 
-固定SDK 10.0.401 Release解决方案构建0警告、0错误；浏览器专项中的无限循环内联脚本约10.0秒触发单步/整体超时，隔离浏览器退出受3秒限制，检查未发现遗留Playwright无头Edge进程。Windows安全套件115项通过、0项跳过；桌面交互专项73项通过。签名MSIX位于`artifacts\msix-validation\32bdaf81b5bd4cb38e4bb14a746d440b\XiaoK-signed-validation.msix`，大小137,408,302字节，SHA-256 `CE6DBA91FF67FE9C412DB1101B34342D33BCC21BC022C1423CCC14528FA280F0`；SignTool验签有效，0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已位于`LocalMachine\TrustedPeople`，本阶段未改信任。当前账户包状态`Ok`、版本`0.1.73.0`；Host、Tools、Core和Browser程序集散列均与发布副本一致。安装器没有启动Host，当前Host进程数为0。真实公网网页读取和资源上限仍未验收。
+固定SDK 10.0.401 Release解决方案构建0警告、0错误；浏览器专项中的无限循环内联脚本约10.0秒触发单步/整体超时，隔离浏览器退出受3秒限制，检查未发现遗留Playwright无头Edge进程。Windows安全套件115项通过、0项跳过；桌面交互专项73项通过。签名MSIX位于`artifacts\msix-validation\32bdaf81b5bd4cb38e4bb14a746d440b\XiaoK-signed-validation.msix`，大小137,408,302字节，SHA-256 `CE6DBA91FF67FE9C412DB1101B34342D33BCC21BC022C1423CCC14528FA280F0`；SignTool验签有效，0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已位于`LocalMachine\TrustedPeople`，本阶段未改信任。当前账户包状态`Ok`、版本`0.1.73.0`；Host、Tools、Core和Browser程序集散列均与发布副本一致。安装器没有启动Host，当前Host进程数为0。真实公网网页读取和资源上限仍未验收。实现提交`6b55220`已推送至`origin/main`，GitHub Actions [Build #37863235673](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37863235673)成功。
 
 ## v0.1.71.0 R2桌宠姿态渲染器接入（2026-10-09）
 
