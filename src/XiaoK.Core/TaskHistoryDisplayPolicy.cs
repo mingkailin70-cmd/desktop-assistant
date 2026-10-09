@@ -24,7 +24,7 @@ public static class TaskHistoryDisplayPolicy
         "file-delete" => "配置搜索根中的单个文件；批准后移入 Windows 回收站",
         "file-classify" => "用户指定的本机目录（只读）",
         "file-content-search" => "用户指定的文本查询（只返回路径与行号）",
-        "file-summary" => "用户指定的本机文本文件（只读，本地模型摘要）",
+        "file-summary" => "用户指定的本机文档（只读，本地模型摘要）",
         "web-read" => "用户提供的公开 HTTPS 页面",
         "web-read-dynamic" => "用户提供的公开 HTTPS 页面（启用内联脚本，只读提取）",
         "web-download" => "用户提供的公开 HTTPS 文件与小K导出目录",

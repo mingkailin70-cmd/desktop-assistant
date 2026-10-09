@@ -50,7 +50,8 @@ public enum ToolExpectedOutcome
     MatchingFileContentLocationsListed = 17,
     FileSentToRecycleBin = 18,
     DynamicPublicWebPageSnapshotReturned = 19,
-    LocalTextFileRead = 20
+    LocalTextFileRead = 20,
+    LocalDocumentTextExtracted = 21
 }
 
 public static class ApprovalAuditCatalog

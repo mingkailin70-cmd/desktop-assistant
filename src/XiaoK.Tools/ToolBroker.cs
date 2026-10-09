@@ -189,7 +189,7 @@ public sealed class ToolBroker
         && LocalDocumentSummaryPolicy.IsValidPath(path)
         && proposal.Target == LocalDocumentSummaryPolicy.UserSearchRootId
             ? null
-            : InvalidProposal("本机文件摘要只接受搜索目录中扩展名受支持的文本文件或DOCX；不会读取任意路径。");
+            : InvalidProposal("本机文件摘要只接受搜索目录中的受支持文本文件、DOCX或PDF；不会读取任意路径。");
 
     private static ToolResult? ValidateMessage(ToolProposal proposal, string key)
     {
@@ -467,7 +467,7 @@ public sealed class ToolBroker
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,
-        "file.summarize.text.v1" => ToolExpectedOutcome.LocalTextFileRead,
+        "file.summarize.text.v1" => ToolExpectedOutcome.LocalDocumentTextExtracted,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,

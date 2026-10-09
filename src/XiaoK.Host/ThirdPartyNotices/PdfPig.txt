@@ -1,0 +1,10 @@
+PdfPig 0.1.16
+Copyright and license information: Apache License, Version 2.0.
+Source: https://github.com/UglyToad/PdfPig
+Package: https://www.nuget.org/packages/PdfPig/0.1.16
+
+This dependency is used only to extract selectable text from a user-selected PDF.
+It is not used to execute PDF JavaScript, read forms or annotations, extract
+attachments, perform OCR, or modify PDF files.
+
+The complete Apache-2.0 license text is distributed in the adjacent Apache-2.0.txt file.

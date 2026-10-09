@@ -8,9 +8,10 @@ public sealed partial class WindowsDesktopTools
 {
     public Task<ToolResult> ReadTextFileForLocalSummaryAsync(ToolProposal proposal,
         CancellationToken cancellationToken) =>
-        Task.Run(() => ReadTextFileForLocalSummary(proposal, cancellationToken), cancellationToken);
+        Task.Run(() => ReadTextFileForLocalSummaryCoreAsync(proposal, cancellationToken), cancellationToken);
 
-    private ToolResult ReadTextFileForLocalSummary(ToolProposal proposal, CancellationToken cancellationToken)
+    private async Task<ToolResult> ReadTextFileForLocalSummaryCoreAsync(ToolProposal proposal,
+        CancellationToken cancellationToken)
     {
         if (proposal.Arguments.Count != 1 || !proposal.Arguments.TryGetValue("path", out var requestedPath)
             || !LocalDocumentSummaryPolicy.IsValidPath(requestedPath))
@@ -41,13 +42,15 @@ public sealed partial class WindowsDesktopTools
             if (!safeRoots.Any(root => IsWithinRoot(canonicalFile, root)))
                 return new(false, "文本文件不在设置中允许的搜索目录内；没有读取内容。", "TEXT_FILE_OUTSIDE_ALLOWED_ROOT");
             var isDocx = LocalDocumentSummaryPolicy.IsDocxPath(canonicalFile);
-            var maximumBytes = isDocx
-                ? LocalDocumentSummaryPolicy.MaximumDocxFileBytes
+            var isPdf = LocalDocumentSummaryPolicy.IsPdfPath(canonicalFile);
+            var maximumBytes = isDocx ? LocalDocumentSummaryPolicy.MaximumDocxFileBytes
+                : isPdf ? LocalDocumentSummaryPolicy.MaximumPdfFileBytes
                 : LocalDocumentSummaryPolicy.MaximumFileBytes;
             if (fileLength > maximumBytes)
-                return new(false, isDocx
-                    ? "DOCX文件超过8 MiB读取上限；没有把正文交给模型。"
-                    : "文本文件超过64 KiB本机摘要上限；没有把正文交给模型。", "TEXT_FILE_TOO_LARGE");
+                return new(false, isDocx ? "DOCX文件超过8 MiB读取上限；没有把正文交给模型。"
+                    : isPdf ? "PDF文件超过8 MiB读取上限；没有把正文交给模型。"
+                    : "文本文件超过64 KiB本机摘要上限；没有把正文交给模型。",
+                    isPdf ? "PDF_TOO_LARGE" : "TEXT_FILE_TOO_LARGE");
 
             if (isDocx)
             {
@@ -59,6 +62,29 @@ public sealed partial class WindowsDesktopTools
                 return new(true,
                     "已从设置中允许的搜索目录安全提取DOCX主文档文本；正文只在当前任务内存中交给本机模型，不写入本地历史或日志。",
                     Data: docxText);
+            }
+
+            if (isPdf)
+            {
+                var pdfResult = await TryReadStablePdfTextAsync(fileHandle, fileLength, writeTime,
+                    cancellationToken).ConfigureAwait(false);
+                if (!pdfResult.Success)
+                {
+                    var message = pdfResult.ErrorCode switch
+                    {
+                        "PDF_TOO_MANY_PAGES" => "PDF超过100页读取上限；没有把正文交给模型。",
+                        "PDF_TEXT_TOO_LARGE" => "PDF提取文字超过64 Ki字符上限；没有把正文交给模型。",
+                        "PDF_WORKER_TIMEOUT" => "PDF解析超过20秒时限；已结束隔离解析进程，正文未提交给模型。",
+                        "PDF_WORKER_UNAVAILABLE" => "无法启动隔离PDF解析进程；正文未提交给模型。",
+                        "PDF_WORKER_FAILED" => "隔离PDF解析进程异常退出；正文未提交给模型。",
+                        _ => "PDF结构不受支持、加密、读取期间发生变化，或无法提取文字；正文未提交给模型。"
+                    };
+                    return new(false, message, pdfResult.ErrorCode);
+                }
+
+                return new(true,
+                    "已从设置中允许的搜索目录提取PDF可选择文字；解析在低优先级子进程中运行，内存上限512 MiB、时限20秒；不执行PDF脚本、不读表单/附件、不做OCR，正文只在当前任务内存中交给本机模型。",
+                    Data: pdfResult.Text);
             }
 
             if (!TryReadStableTextFile(fileHandle, fileLength, writeTime,

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
+using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 
 namespace XiaoK.Host;
@@ -28,6 +29,13 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length > 0 && string.Equals(e.Args[0], "--pdf-worker", StringComparison.Ordinal))
+        {
+            Environment.ExitCode = WindowsPdfTextWorkerEntryPoint.Run(e.Args);
+            Shutdown();
+            return;
+        }
+
         RestoreMessageId = RegisterWindowMessage(RestoreMessageName);
         ShutdownMessageId = RegisterWindowMessage(ShutdownMessageName);
 

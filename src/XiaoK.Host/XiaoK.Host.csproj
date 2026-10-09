@@ -14,6 +14,8 @@
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ThirdPartyNotices\SkiaSharp-MIT.txt"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="ThirdPartyNotices\PdfPig.txt"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="VPet-Simulator.Core" Version="[1.1.0.66]" />
     <ProjectReference Include="..\XiaoK.Inference\XiaoK.Inference.csproj" />
     <ProjectReference Include="..\XiaoK.Voice\XiaoK.Voice.csproj" />

@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\XiaoK.Core\XiaoK.Core.csproj" />
+    <PackageReference Include="PdfPig" Version="[0.1.16]" />
   </ItemGroup>
 
   <PropertyGroup>

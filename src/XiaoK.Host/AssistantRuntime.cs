@@ -880,7 +880,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             var proposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(request);
             if (proposal is null)
-                return new(false, "请按“总结文本文件：本机完整路径”输入。仅支持设置搜索目录内的普通文本文件，正文只在本机短时处理，不写入历史。", "INVALID_TEXT_FILE_PATH");
+                return new(false, "请按“总结文本文件：本机完整路径”或“总结PDF文件：本机完整路径”输入。只支持设置搜索目录中的普通文本文件、DOCX或PDF；正文只在本机短时处理，不写入历史。", "INVALID_TEXT_FILE_PATH");
 
             var document = await ExecuteBackgroundAsync(proposal, token);
             if (!document.Success) return document;
@@ -891,7 +891,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                         inner => _inference.CompleteAsync(systemPrompt, userPrompt, inner), inferenceToken), token)
                     .ConfigureAwait(false);
                 return new(true,
-                    "已使用本机模型总结用户指定的文本文件；文件正文只在当前任务内存中处理，不写入历史或日志。",
+                    "已使用本机模型总结用户指定的文档；正文只在当前任务内存中处理，不写入历史或日志。",
                     Data: summary);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)

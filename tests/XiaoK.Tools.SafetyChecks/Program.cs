@@ -14,6 +14,10 @@ using System.Text;
 using System.Text.Json;
 using System.Net.Sockets;
 using Microsoft.Win32.SafeHandles;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
+using UglyToad.PdfPig.Fonts.Standard14Fonts;
+using UglyToad.PdfPig.Writer;
 using XiaoK.Adapters.Browser;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
@@ -21,6 +25,12 @@ using XiaoK.Inference;
 using XiaoK.Storage;
 using XiaoK.Tools;
 using XiaoK.Voice;
+
+if (args.Length > 0 && string.Equals(args[0], "--pdf-worker", StringComparison.Ordinal))
+{
+    Environment.ExitCode = WindowsPdfTextWorkerEntryPoint.Run(args);
+    return;
+}
 
 try
 {
@@ -367,7 +377,7 @@ try
     passed.Add("文件搜索根缺失和查询无效时失败关闭，预取消不执行搜索");
 
     await CheckFileContentSearchAsync(tempRoot);
-    passed.Add("本机文本摘要只读取配置搜索根内严格编码文本或受限DOCX，分段提示隔离不可信正文且取消有效");
+    passed.Add("本机文档摘要只读取配置搜索根内严格编码文本、受限DOCX或限页PDF，隔离不可信正文且取消有效");
     passed.Add("后台文本内容搜索仅读取搜索根内受限文本文件，只返回位置、不泄露匹配正文并核验目录/文件范围");
 
     await CheckFileCopyToExportAsync(tempRoot);
@@ -6288,6 +6298,18 @@ static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, Window
             archive.CreateEntry($"word/extra-{index:D4}.xml", CompressionLevel.NoCompression);
     }
 
+    static byte[] BuildPdf(params string[] pageTexts)
+    {
+        var builder = new PdfDocumentBuilder();
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        foreach (var pageText in pageTexts)
+        {
+            var page = builder.AddPage(PageSize.A4);
+            if (pageText.Length > 0) page.AddText(pageText, 12, new PdfPoint(25, 700), font);
+        }
+        return builder.Build();
+    }
+
     var command = "总结文本文件：" + summaryPath;
     var proposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(command)
         ?? throw new InvalidOperationException("有效的用户文件摘要命令没有生成提案。");
@@ -6295,7 +6317,7 @@ static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, Window
         && proposal.ToolId == LocalDocumentSummaryPolicy.ToolId
         && proposal.Target == LocalDocumentSummaryPolicy.UserSearchRootId
         && proposal.Preconditions == ToolPrecondition.ConfiguredSearchRoot
-        && proposal.ExpectedOutcome == ToolExpectedOutcome.LocalTextFileRead
+        && proposal.ExpectedOutcome == ToolExpectedOutcome.LocalDocumentTextExtracted
         && proposal.Arguments.Count == 1
         && proposal.Arguments.GetValueOrDefault("path") == summaryPath,
         "本机文件摘要提案没有绑定单个路径、配置搜索根和固定读取结果。");
@@ -6325,10 +6347,68 @@ static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, Window
         && invalidEncoding.Data is null,
         "摘要工具接受了无效编码文本，或将它传给了本机模型。");
     foreach (var invalidPath in new[] { "\\\\server\\share\\note.txt", Path.ChangeExtension(summaryPath, ".png"),
-                 Path.ChangeExtension(summaryPath, ".pdf"), Path.ChangeExtension(summaryPath, ".docm"), "\0.txt" })
+                 Path.ChangeExtension(summaryPath, ".docm"), Path.ChangeExtension(summaryPath, ".xlsx"), "\0.txt" })
         Require(!LocalDocumentSummaryPolicy.IsValidPath(invalidPath), "本机摘要策略接受网络、非文本或无效路径。");
     Require(LocalDocumentSummaryPolicy.IsValidPath(Path.ChangeExtension(summaryPath, ".DOCX")),
         "本机摘要策略没有按大小写不敏感方式接受DOCX扩展名。");
+
+    var pdfPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "summary-source.pdf");
+    const string pdfSentinel = "PDF_TEXT_PRIVATE_SENTINEL";
+    await File.WriteAllBytesAsync(pdfPath, BuildPdf(pdfSentinel, "SECOND_PAGE_TEXT"));
+    var pdfCommand = "总结PDF文件：" + pdfPath;
+    var pdfProposal = LocalDocumentSummaryPolicy.CreateUserToolProposal(pdfCommand)
+        ?? throw new InvalidOperationException("PDF摘要命令没有生成工具提案。");
+    Require(LocalDocumentSummaryPolicy.IsUserCommand(pdfCommand)
+        && LocalDocumentSummaryPolicy.IsValidPath(Path.ChangeExtension(pdfPath, ".PDF"))
+        && pdfProposal.ToolId == LocalDocumentSummaryPolicy.ToolId
+        && pdfProposal.ExpectedOutcome == ToolExpectedOutcome.LocalDocumentTextExtracted,
+        "PDF摘要入口未绑定为配置搜索根内的本机文档文本提取。");
+    var pdfRead = await broker.ExecuteBackgroundAsync(pdfProposal, CancellationToken.None);
+    Require(pdfRead.Success && pdfRead.Data is not null
+        && pdfRead.Data.Contains(pdfSentinel, StringComparison.Ordinal)
+        && pdfRead.Data.Contains("SECOND_PAGE_TEXT", StringComparison.Ordinal)
+        && !pdfRead.Summary.Contains(pdfSentinel, StringComparison.Ordinal)
+        && !pdfRead.Summary.Contains(pdfPath, StringComparison.Ordinal),
+        "PDF读取没有只提取可选择页面文字，或在摘要字段泄露了正文/路径。");
+
+    var blankPdfPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "scan-only.pdf");
+    await File.WriteAllBytesAsync(blankPdfPath, BuildPdf(string.Empty));
+    var blankPdf = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结PDF文件：" + blankPdfPath)!, CancellationToken.None);
+    Require(blankPdf.Success && string.IsNullOrEmpty(blankPdf.Data),
+        "无可选择文字的扫描型PDF没有作为空文本返回；该切片不得假称支持OCR。");
+
+    var oversizedPdfPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "oversized.pdf");
+    using (var oversizedPdfFile = new FileStream(oversizedPdfPath, FileMode.CreateNew, FileAccess.Write))
+        oversizedPdfFile.SetLength(LocalDocumentSummaryPolicy.MaximumPdfFileBytes + 1L);
+    var oversizedPdfResult = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结PDF文件：" + oversizedPdfPath)!, CancellationToken.None);
+    Require(!oversizedPdfResult.Success && oversizedPdfResult.ErrorCode == "PDF_TOO_LARGE" && oversizedPdfResult.Data is null,
+        "超过8 MiB的PDF没有在解析或送入本机模型前被拒绝。");
+
+    var tooManyPagesPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "too-many-pages.pdf");
+    await File.WriteAllBytesAsync(tooManyPagesPath, BuildPdf(Enumerable.Repeat("PAGE", LocalDocumentSummaryPolicy.MaximumPdfPages + 1).ToArray()));
+    var tooManyPages = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结PDF文件：" + tooManyPagesPath)!, CancellationToken.None);
+    Require(!tooManyPages.Success && tooManyPages.ErrorCode == "PDF_TOO_MANY_PAGES" && tooManyPages.Data is null,
+        "超过100页的PDF没有在提取文字或送入本机模型前被拒绝。");
+
+    var oversizedPdfTextPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "oversized-text.pdf");
+    await File.WriteAllBytesAsync(oversizedPdfTextPath,
+        BuildPdf(new string('A', LocalDocumentSummaryPolicy.MaximumPdfTextCharacters + 1)));
+    var oversizedPdfText = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结PDF文件：" + oversizedPdfTextPath)!, CancellationToken.None);
+    Require(!oversizedPdfText.Success && oversizedPdfText.ErrorCode == "PDF_TEXT_TOO_LARGE"
+        && oversizedPdfText.Data is null,
+        "超过64 Ki字符的PDF提取文本没有在送入本机模型前被拒绝。");
+
+    var malformedPdfPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "malformed.pdf");
+    await File.WriteAllTextAsync(malformedPdfPath, "not a pdf", new UTF8Encoding(false));
+    var malformedPdf = await broker.ExecuteBackgroundAsync(
+        LocalDocumentSummaryPolicy.CreateUserToolProposal("总结PDF文件：" + malformedPdfPath)!, CancellationToken.None);
+    Require(!malformedPdf.Success && malformedPdf.ErrorCode == "PDF_UNSUPPORTED_OR_UNSTABLE"
+        && malformedPdf.Data is null,
+        "损坏PDF没有在送入本机模型前失败关闭。");
 
     const string wordNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const string docxSentinel = "DOCX_DOCUMENT_PRIVATE_SENTINEL";
