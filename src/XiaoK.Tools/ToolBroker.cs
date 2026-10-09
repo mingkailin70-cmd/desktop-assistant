@@ -65,6 +65,7 @@ public sealed class ToolBroker
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
             "file.delete.recycle-bin.v1" => await RecycleFileToBinAsync(proposal, cancellationToken, taskId),
             "file.archive.single.v1" => await _desktop.ArchiveSingleFileToExportAsync(proposal, cancellationToken),
+            "file.archive.directory.v1" => await _desktop.ArchiveDirectoryToExportAsync(proposal, cancellationToken),
             "file.classify.preview.v1" => await _desktop.ClassifyFilesAsync(proposal, cancellationToken),
             "browser.read.public.v1" => _publicWebPageReader is null
                 ? new(false, "独立网页读取器未配置；没有启动浏览器。", "BROWSER_READER_UNAVAILABLE")
@@ -113,6 +114,7 @@ public sealed class ToolBroker
             "file.move.v1" => ValidateFileMove(proposal),
             "file.delete.recycle-bin.v1" => ValidateFileRecycleBin(proposal),
             "file.archive.single.v1" => ValidateFileArchive(proposal),
+            "file.archive.directory.v1" => ValidateDirectoryFileArchive(proposal),
             "file.classify.preview.v1" => ValidateFileClassification(proposal),
             "browser.read.public.v1" => ValidatePublicWebPageRead(proposal),
             "browser.read.dynamic.public.v1" => ValidateDynamicPublicWebPageRead(proposal),
@@ -358,6 +360,14 @@ public sealed class ToolBroker
             ? null
             : InvalidProposal("文件压缩只接受搜索范围内的单个本机普通文件，并固定保存至小K导出目录。");
 
+    private static ToolResult? ValidateDirectoryFileArchive(ToolProposal proposal) =>
+        proposal.Arguments.Count == 1
+        && proposal.Arguments.TryGetValue("directory_path", out var directoryPath)
+        && LocalDirectoryArchivePolicy.IsValidSourcePath(directoryPath)
+        && proposal.Target == "configured-export"
+            ? null
+            : InvalidProposal("目录压缩只接受搜索范围内的本机完整目录路径，并固定保存至小K导出目录。");
+
     private async Task<ToolResult> DownloadPublicFileAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {
         if (_publicFileDownloader is null)
@@ -428,6 +438,7 @@ public sealed class ToolBroker
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
         "file.delete.recycle-bin.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.archive.single.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
+        "file.archive.directory.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "browser.read.dynamic.public.v1" => ToolPrecondition.UserProvidedDynamicPublicWebPageUrl,
@@ -450,6 +461,7 @@ public sealed class ToolBroker
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
         "file.delete.recycle-bin.v1" => ToolExpectedOutcome.FileSentToRecycleBin,
         "file.archive.single.v1" => ToolExpectedOutcome.FileArchivedToConfiguredExport,
+        "file.archive.directory.v1" => ToolExpectedOutcome.FileArchivedToConfiguredExport,
         "file.classify.preview.v1" => ToolExpectedOutcome.FileClassificationPreviewReturned,
         "browser.read.public.v1" => ToolExpectedOutcome.PublicWebPageSnapshotReturned,
         "browser.read.dynamic.public.v1" => ToolExpectedOutcome.DynamicPublicWebPageSnapshotReturned,

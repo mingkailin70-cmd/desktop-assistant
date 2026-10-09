@@ -933,6 +933,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
         if (category == "file-archive")
         {
+            if (request.StartsWith("压缩文件夹", StringComparison.OrdinalIgnoreCase))
+            {
+                var directoryPath = ExtractFileArchiveDirectory(request);
+                if (!LocalDirectoryArchivePolicy.IsValidSourcePath(directoryPath))
+                    return new(false, "请用“压缩文件夹：完整本机目录路径”指定一个文件夹。小K只会压缩设置搜索范围内的普通文件，最多5层、5,000个目录项、1,000个文件和500 MiB；原文件夹会保留。", "INVALID_ARCHIVE_DIRECTORY");
+                var directoryArguments = ImmutableDictionary<string, string>.Empty.Add("directory_path", directoryPath);
+                return await ExecuteBackgroundAsync(new ToolProposal("file.archive.directory.v1", directoryArguments,
+                    "configured-export", ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
+                    ToolExpectedOutcome.FileArchivedToConfiguredExport), token);
+            }
+
             var sourcePath = ExtractFileArchiveSource(request);
             if (!LocalFileArchivePolicy.IsValidSourcePath(sourcePath))
                 return new(false, "请用“压缩文件：完整本机路径”指定一个本机文件。小K只会压缩搜索目录内的单个普通文件到固定导出目录，原文件会保留。", "INVALID_ARCHIVE_SOURCE");
@@ -1166,6 +1177,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string ExtractFileArchiveSource(string request)
     {
         const string prefix = "压缩文件";
+        if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+        var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();
+        return TrimOptionalQuotes(value, trimWhitespace: true);
+    }
+
+    private static string ExtractFileArchiveDirectory(string request)
+    {
+        const string prefix = "压缩文件夹";
         if (!request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return string.Empty;
         var value = request[prefix.Length..].TrimStart(' ', '：', ':').Trim();
         return TrimOptionalQuotes(value, trimWhitespace: true);

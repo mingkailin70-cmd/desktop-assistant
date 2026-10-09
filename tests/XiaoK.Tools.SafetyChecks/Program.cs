@@ -121,6 +121,21 @@ if (args.Length == 1 && args[0] == "--only-file-archive")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-directory-archive")
+{
+    var directoryArchiveRoot = Path.Combine(Path.GetTempPath(), "XiaoK-DirectoryArchiveProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directoryArchiveRoot);
+    try
+    {
+        await CheckDirectoryArchiveToExportAsync(directoryArchiveRoot);
+        Console.WriteLine("通过：目录压缩限制递归范围、普通文件、总大小和导出目标，并独立核验每个 ZIP 条目内容散列。");
+    }
+    finally
+    {
+        if (Directory.Exists(directoryArchiveRoot)) Directory.Delete(directoryArchiveRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-rename")
 {
     var fileRenameRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileRenameProbe-" + Guid.NewGuid().ToString("N"));
@@ -361,7 +376,9 @@ try
     else passed.Add("小K文件导出拒绝被重解析点替换的导出目录");
 
     await CheckFileArchiveToExportAsync(tempRoot);
+    await CheckDirectoryArchiveToExportAsync(tempRoot);
     passed.Add("后台单文件压缩仅接受搜索根内普通文件，固定写入专用导出目录、不覆盖，并核验 ZIP 条目和内容 SHA-256");
+    passed.Add("后台目录压缩仅读取搜索根内普通目录，限制深度/数量/体积，拒绝链接，并逐项核验归档内容 SHA-256");
 
     await CheckFileRenameAsync(tempRoot);
     passed.Add("后台文件重命名只在配置搜索根内同目录执行，拒绝越界/链接/无效名/冲突且核验文件身份和元数据");
@@ -6519,6 +6536,141 @@ static async Task CheckFileArchiveToExportAsync(string root)
     catch (OperationCanceledException) { cancelled = true; }
     Require(cancelled && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.OrdinalIgnoreCase)),
         "预取消的文件压缩仍执行，或留下临时压缩包。");
+}
+
+static async Task CheckDirectoryArchiveToExportAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "directory-archive");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    var sourceDirectory = Path.Combine(allowedRoot, "Project");
+    var sourceSubdirectory = Path.Combine(sourceDirectory, "资料");
+    Directory.CreateDirectory(sourceSubdirectory);
+    Directory.CreateDirectory(outsideRoot);
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+    var firstPath = Path.Combine(sourceDirectory, "说明.txt");
+    var secondPath = Path.Combine(sourceSubdirectory, "数据.bin");
+    var firstPayload = Encoding.UTF8.GetBytes("目录归档合成样本\r\n不得改动源文件");
+    var secondPayload = Enumerable.Range(0, 4096).Select(value => (byte)(value % 251)).ToArray();
+    await File.WriteAllBytesAsync(firstPath, firstPayload);
+    await File.WriteAllBytesAsync(secondPath, secondPayload);
+    await File.WriteAllTextAsync(Path.Combine(outsideRoot, "outside.txt"), "outside sentinel", new UTF8Encoding(false));
+
+    var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowedRoot)],
+        exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal("file.archive.directory.v1", [new("directory_path", sourceDirectory)],
+        "configured-export", ToolExpectedOutcome.FileArchivedToConfiguredExport);
+    Require(ToolInteractionPolicy.GetMode("file.archive.directory.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check("file.archive.directory.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "目录压缩没有登记为后台工具。");
+    Require(LocalDirectoryArchivePolicy.IsValidSourcePath(sourceDirectory)
+        && !LocalDirectoryArchivePolicy.IsValidSourcePath(Path.GetPathRoot(sourceDirectory)),
+        "目录压缩路径策略没有区分普通目录和卷根目录。");
+
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var archivePath = Path.Combine(exportRoot, "Project.zip");
+    Require(result.Success && result.Data == archivePath && File.Exists(archivePath)
+        && result.Summary.Contains("2个文件", StringComparison.Ordinal),
+        $"有效文件夹没有写入固定导出目录：{result.ErrorCode} {result.Summary} {result.Data}");
+    using (var stream = File.OpenRead(archivePath))
+    using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
+    {
+        Require(archive.Entries.Count == 2, "文件夹压缩包条目数与源文件数不一致。");
+        var entries = archive.Entries.ToDictionary(entry => entry.FullName, StringComparer.Ordinal);
+        Require(entries.ContainsKey("Project/说明.txt") && entries.ContainsKey("Project/资料/数据.bin"),
+            "文件夹压缩包没有保留根目录和相对路径。");
+        foreach (var (entryName, expected) in new[]
+                 {
+                     ("Project/说明.txt", firstPayload), ("Project/资料/数据.bin", secondPayload)
+                 })
+        {
+            using var entry = entries[entryName].Open();
+            using var content = new MemoryStream();
+            await entry.CopyToAsync(content);
+            Require(content.ToArray().SequenceEqual(expected), $"压缩包条目 {entryName} 与源文件内容不一致。");
+        }
+    }
+    Require((await File.ReadAllBytesAsync(firstPath)).SequenceEqual(firstPayload)
+        && (await File.ReadAllBytesAsync(secondPath)).SequenceEqual(secondPayload)
+        && Directory.Exists(sourceDirectory), "压缩文件夹操作改变了源内容或删除了源文件夹。");
+
+    var trailingDirectory = Path.Combine(allowedRoot, "Trailing");
+    Directory.CreateDirectory(trailingDirectory);
+    await File.WriteAllTextAsync(Path.Combine(trailingDirectory, "item.txt"), "trailing separator", new UTF8Encoding(false));
+    var trailingProposal = ToolBroker.Proposal("file.archive.directory.v1",
+        [new("directory_path", trailingDirectory + Path.DirectorySeparatorChar)], "configured-export",
+        ToolExpectedOutcome.FileArchivedToConfiguredExport);
+    var trailingResult = await broker.ExecuteBackgroundAsync(trailingProposal, CancellationToken.None);
+    Require(trailingResult.Success && File.Exists(Path.Combine(exportRoot, "Trailing.zip")),
+        "目录路径带尾部分隔符时压缩失败。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(firstPath)).SequenceEqual(firstPayload),
+        "目录压缩同名冲突没有失败关闭或改变源文件。");
+
+    var outside = Path.Combine(outsideRoot, "OutsideProject");
+    Directory.CreateDirectory(outside);
+    var outsideProposal = ToolBroker.Proposal("file.archive.directory.v1", [new("directory_path", outside)],
+        "configured-export", ToolExpectedOutcome.FileArchivedToConfiguredExport);
+    var outsideResult = await broker.ExecuteBackgroundAsync(outsideProposal, CancellationToken.None);
+    Require(!outsideResult.Success && outsideResult.ErrorCode == "SOURCE_OUTSIDE_ALLOWED_ROOT"
+        && !File.Exists(Path.Combine(exportRoot, "OutsideProject.zip")),
+        "目录压缩读取或写出了配置搜索根以外的文件。");
+
+    foreach (var invalid in new[]
+    {
+        proposal with { Target = outsideRoot },
+        proposal with { Preconditions = ToolPrecondition.ConfiguredSearchRoot },
+        proposal with { ExpectedOutcome = ToolExpectedOutcome.FileCopiedToConfiguredExport },
+        proposal with { Arguments = proposal.Arguments.Add("destination", "C:\\Users\\Public\\payload.zip") }
+    })
+    {
+        var rejected = await broker.ExecuteBackgroundAsync(invalid, CancellationToken.None);
+        Require(!rejected.Success && rejected.ErrorCode == "INVALID_TOOL_PROPOSAL",
+            "目录压缩接受了任意目标、错误前置条件/结果或额外参数。");
+    }
+
+    var linkedDirectory = Path.Combine(allowedRoot, "LinkedProject");
+    Directory.CreateDirectory(linkedDirectory);
+    var junctionPath = Path.Combine(linkedDirectory, "external");
+    if (JunctionFixture.TryCreate(outsideRoot, junctionPath, out var junctionFailure))
+    {
+        try
+        {
+            var linkedProposal = ToolBroker.Proposal("file.archive.directory.v1", [new("directory_path", linkedDirectory)],
+                "configured-export", ToolExpectedOutcome.FileArchivedToConfiguredExport);
+            var linkedResult = await broker.ExecuteBackgroundAsync(linkedProposal, CancellationToken.None);
+            Require(!linkedResult.Success && linkedResult.ErrorCode == "ARCHIVE_REPARSE_POINT_BLOCKED"
+                && !File.Exists(Path.Combine(exportRoot, "LinkedProject.zip")), "目录压缩遍历了目录联接。");
+        }
+        finally { Directory.Delete(junctionPath, recursive: false); }
+    }
+    else Console.WriteLine("跳过：目录压缩目录联接用例无法创建：" + junctionFailure);
+
+    var tooDeep = Path.Combine(allowedRoot, "TooDeep");
+    var deepest = tooDeep;
+    for (var index = 0; index <= LocalDirectoryArchivePolicy.MaximumDepth; index++)
+    {
+        deepest = Path.Combine(deepest, "d");
+        Directory.CreateDirectory(deepest);
+    }
+    await File.WriteAllTextAsync(Path.Combine(deepest, "deep.txt"), "depth sentinel", new UTF8Encoding(false));
+    var depthProposal = ToolBroker.Proposal("file.archive.directory.v1", [new("directory_path", tooDeep)],
+        "configured-export", ToolExpectedOutcome.FileArchivedToConfiguredExport);
+    var depthResult = await broker.ExecuteBackgroundAsync(depthProposal, CancellationToken.None);
+    Require(!depthResult.Success && depthResult.ErrorCode == "ARCHIVE_DIRECTORY_DEPTH_LIMIT"
+        && !File.Exists(Path.Combine(exportRoot, "TooDeep.zip")), "超过深度限制的目录被压缩。");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var cancelled = false;
+    try { await broker.ExecuteBackgroundAsync(proposal, cancellation.Token); }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.OrdinalIgnoreCase)),
+        "预取消的目录压缩仍执行，或留下临时压缩包。");
 }
 
 static bool CheckFileCopyRejectsLinkedExport(string root, out string skipReason)
