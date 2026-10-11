@@ -1,3 +1,9 @@
+## v0.1.101.0 只读 UIA 控件状态等待（2026-10-12）
+
+增加固定工具`app.ui.wait-enabled.v1`，在唯一已登记应用窗口中等待唯一、安全语义控件的`IsEnabled`变为true；等待上限2.5秒，辅助进程硬超时5秒。它只读取启用状态，不执行Invoke/Value/Toggle、不截图、不注入输入、不切换焦点，也不返回控件名称或正文。离屏WPF合成探针通过延迟启用、禁用超时、重复AutomationId拒绝和前台HWND不变；Windows安全套件122项通过、0项跳过，桌面体验检查91项通过，固定SDK 10.0.401 Release全解决方案构建0警告、0错误。真实第三方UIA Provider、微信/QQ界面以及用户并发操作仍待实机验收。
+
+源码提交`91a6222`和版本提交`70fd9cb`已推送至`origin/main`。自包含签名MSIX位于`artifacts\msix-validation\0f237035bfc14e67a63ad077384e3ea8\XiaoK-signed-validation.msix`，139,390,752字节，SHA-256 `6E6C5480651AF6476BAF691B6034B9953EB72D1EBD3E53A7E6674FC162F8076F`；Authenticode签名有效，证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信任，本阶段没有修改信任。发布版及安装版Host DLL SHA-256均为`248B1AAD6161034DB2BD36170599D4CC17861F5D27AE66D35937F00791D30A66`。当前用户包`MingKaiLin.XiaoK_0.1.101.0_neutral__g0ndt6g65c8pe`状态`Ok`。安装器未启动Host，当前Host进程数为0；没有读取真实窗口内容、通知正文或聊天，没有运行模型、麦克风或消息发送。
+
 ## v0.1.100.0 重复源码锚点补丁支持（2026-10-12）
 
 隔离编程代理的精确补丁上下文现在提供片段绝对起始行`start_line`，严格JSON Schema允许模型在查找文本重复时给出可选`startLine`。固定解析器继续核验该绝对行与授权片段/基线源码中的唯一匹配；错行不能定位重复文本。对应源码提交`d8cbe1d`与版本提交`6ec2bda`均已推送至`origin/main`。该修复通过合成安全用例，不代表新管线的真实模型评分或代码任务门槛已通过。
