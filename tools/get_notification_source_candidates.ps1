@@ -58,11 +58,33 @@ try {
         }
     })
 
+    $startApps = @(Get-StartApps)
+    $identityHints = @(
+        [pscustomobject]@{ Platform = 'QQ'; DisplayNames = @('QQ'); ProcessNames = @('QQ') }
+        [pscustomobject]@{ Platform = 'WeChat'; DisplayNames = @('微信', 'WeChat', 'Weixin'); ProcessNames = @('Weixin') }
+    ) | ForEach-Object {
+        $platform = $_
+        $registered = @($startApps | Where-Object { $_.Name -in $platform.DisplayNames } | ForEach-Object {
+            [pscustomobject]@{ DisplayName = $_.Name; StartMenuAppId = $_.AppID }
+        })
+        $processes = @(Get-Process -Name $platform.ProcessNames -ErrorAction SilentlyContinue)
+        [pscustomobject]@{
+            Platform = $platform.Platform
+            StartMenuRegistrations = $registered
+            RunningProcessCount = $processes.Count
+            RunningExecutablePaths = @($processes | ForEach-Object {
+                try { $_.Path } catch { $null }
+            } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        }
+    }
+
     [pscustomobject]@{
         Status = $report.Status
         AccessStatus = $report.AccessStatus
         InspectedNotificationCount = $report.InspectedNotificationCount
         Candidates = $candidates
+        ClientIdentityHints = @($identityHints)
+        IdentityHintNote = 'StartMenuAppId and process paths are local metadata hints only; they do not prove the Toast AppUserModelId.'
         Note = $report.Note
         ExitCode = $process.ExitCode
     }
