@@ -8763,6 +8763,13 @@ internal sealed class FakeIsolatedBrowserSessionManager : IIsolatedBrowserSessio
         return Task.FromResult(new ToolResult(true, "合成快照已返回。"));
     }
 
+    public Task<ToolResult> FollowLinkAsync(string sessionId, string snapshotId, string accessibleName,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new ToolResult(true, "合成站内链接已打开。"));
+    }
+
     public Task<ToolResult> NavigateAsync(string sessionId, string snapshotId, string url,
         CancellationToken cancellationToken)
     {

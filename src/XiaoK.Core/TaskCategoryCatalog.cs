@@ -28,6 +28,7 @@ public static class TaskCategoryCatalog
         ["browser-session-open"] = "隔离网页会话",
         ["browser-session-navigate"] = "网页会话导航",
         ["browser-session-snapshot"] = "网页会话读取",
+        ["browser-session-follow-link"] = "网页站内链接",
         ["browser-session-click"] = "网页按钮操作",
         ["browser-session-fill"] = "网页文本填写",
         ["browser-session-close"] = "关闭网页会话",

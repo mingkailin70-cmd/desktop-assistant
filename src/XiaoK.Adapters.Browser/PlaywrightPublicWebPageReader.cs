@@ -95,7 +95,8 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
         }
     }
 
-    internal static async Task<FetchedPage> FetchHtmlAsync(Uri initialUri, CancellationToken cancellationToken)
+    internal static async Task<FetchedPage> FetchHtmlAsync(Uri initialUri, CancellationToken cancellationToken,
+        Uri? requiredOrigin = null)
     {
         using var handler = new SocketsHttpHandler
         {
@@ -114,6 +115,8 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
             cancellationToken.ThrowIfCancellationRequested();
             if (!PublicWebUrlPolicy.IsAllowedUriShape(currentUri))
                 throw new PublicWebAddressException("网页重定向地址不符合 HTTPS 公网策略。");
+            if (requiredOrigin is not null && !HasSameOrigin(requiredOrigin, currentUri))
+                throw new PublicWebOriginException("站内链接重定向到了其他网站。");
             _ = await PublicWebUrlPolicy.ResolvePublicAddressesAsync(currentUri.IdnHost, cancellationToken).ConfigureAwait(false);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
@@ -147,6 +150,11 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
 
         throw new HttpRequestException("网页重定向次数超过上限。");
     }
+
+    internal static bool HasSameOrigin(Uri expected, Uri candidate) =>
+        expected.Scheme.Equals(candidate.Scheme, StringComparison.OrdinalIgnoreCase)
+        && expected.IdnHost.Equals(candidate.IdnHost, StringComparison.OrdinalIgnoreCase)
+        && expected.Port == candidate.Port;
 
     private static async ValueTask<Stream> ConnectToPublicAddressAsync(
         SocketsHttpConnectionContext context, CancellationToken cancellationToken)
@@ -323,3 +331,5 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
 }
 
 internal sealed record RenderedPageSnapshot(string Title, string BodyText, string AriaSnapshot);
+
+internal sealed class PublicWebOriginException(string message) : Exception(message);

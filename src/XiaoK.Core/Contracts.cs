@@ -114,6 +114,8 @@ public interface IIsolatedBrowserSessionManager : IAsyncDisposable
     Task<ToolResult> OpenAsync(string url, CancellationToken cancellationToken);
     Task<ToolResult> NavigateAsync(string sessionId, string snapshotId, string url, CancellationToken cancellationToken);
     Task<ToolResult> SnapshotAsync(string sessionId, CancellationToken cancellationToken);
+    Task<ToolResult> FollowLinkAsync(string sessionId, string snapshotId, string accessibleName,
+        CancellationToken cancellationToken);
     Task<ToolResult> ClickButtonAsync(string sessionId, string snapshotId, string accessibleName,
         CancellationToken cancellationToken);
     Task<ToolResult> FillTextAsync(string sessionId, string snapshotId, string role, string accessibleName,

@@ -2,6 +2,13 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 GitHub参考：Microsoft Playwright MCP
+
+- 项目：[microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp)，微软维护的Playwright浏览器自动化MCP服务；仓库显示Apache-2.0许可证。README说明它用结构化可访问性快照定位网页对象，不依赖截图坐标，并明确提示MCP服务本身不是安全边界。
+- 小K采用的设计思路：继续使用现有锁定的Microsoft.Playwright程序集，以用户明确命令、当前快照令牌、ARIA角色与精确名称绑定单次动作；新增只读解析href和受限同源导航，让模型/网页内容仍无权自行发起动作。
+- 小K没有安装或集成Playwright MCP、Node服务或其工具集合；此项目能力面包含更广泛的点击、拖拽、下载和其他浏览器操作，不符合小K固定ToolBroker、匿名网络和逐工具授权边界。小K独立实现的同源检查、重定向阻断、DNS公网验证、无Cookie GET和会话过期策略仍由本项目负责。
+- 来源：[官方仓库与许可证入口](https://github.com/microsoft/playwright-mcp)、[README中的可访问性快照说明及安全边界声明](https://github.com/microsoft/playwright-mcp#playwright-mcp)。只阅读公开资料，没有克隆、运行或复制其代码。
+
 ## 2026-10-12 GitHub采用记录：微软 Open XML SDK
 
 - 项目：[dotnet/Open-XML-SDK](https://github.com/dotnet/Open-XML-SDK)，官方最新稳定发行版为 `v3.5.1`，固定上游提交 `3139fdfd27414548a41555f7848d5728f6e71a42`；NuGet 包为 `DocumentFormat.OpenXml 3.5.1`，MIT 许可。

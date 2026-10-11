@@ -112,6 +112,10 @@ public sealed class ToolBroker
             "browser.session.snapshot.v1" => _isolatedBrowserSessions is null
                 ? new(false, "隔离网页会话未配置；没有读取会话。", "BROWSER_SESSION_UNAVAILABLE")
                 : await _isolatedBrowserSessions.SnapshotAsync(proposal.Arguments["session_id"], cancellationToken),
+            "browser.session.follow-link.v1" => _isolatedBrowserSessions is null
+                ? new(false, "隔离网页会话未配置；没有打开网页链接。", "BROWSER_SESSION_UNAVAILABLE")
+                : await _isolatedBrowserSessions.FollowLinkAsync(proposal.Arguments["session_id"],
+                    proposal.Arguments["snapshot_id"], proposal.Arguments["name"], cancellationToken),
             "browser.session.click-button.v1" => _isolatedBrowserSessions is null
                 ? new(false, "隔离网页会话未配置；没有点击页面。", "BROWSER_SESSION_UNAVAILABLE")
                 : await _isolatedBrowserSessions.ClickButtonAsync(proposal.Arguments["session_id"],
@@ -180,6 +184,7 @@ public sealed class ToolBroker
             "browser.session.open.v1" => ValidateBrowserSessionOpen(proposal),
             "browser.session.navigate.v1" => ValidateBrowserSessionNavigate(proposal),
             "browser.session.snapshot.v1" or "browser.session.close.v1" => ValidateBrowserSessionIdOnly(proposal),
+            "browser.session.follow-link.v1" => ValidateBrowserSessionClick(proposal),
             "browser.session.click-button.v1" => ValidateBrowserSessionClick(proposal),
             "browser.session.fill-text.v1" => ValidateBrowserSessionFill(proposal),
             "browser.download.public.v1" => ValidatePublicFileDownload(proposal),
@@ -660,7 +665,7 @@ public sealed class ToolBroker
         "file.classify.preview.v1" => ToolPrecondition.ConfiguredClassificationDirectory,
         "browser.read.public.v1" => ToolPrecondition.UserProvidedPublicWebPageUrl,
         "browser.read.dynamic.public.v1" => ToolPrecondition.UserProvidedDynamicPublicWebPageUrl,
-        "browser.session.open.v1" or "browser.session.navigate.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
+        "browser.session.open.v1" or "browser.session.navigate.v1" or "browser.session.snapshot.v1" or "browser.session.follow-link.v1" or "browser.session.click-button.v1"
             or "browser.session.fill-text.v1" or "browser.session.close.v1" => ToolPrecondition.UserRequestedIsolatedBrowserSession,
         "browser.download.public.v1" => ToolPrecondition.UserProvidedPublicFileUrl | ToolPrecondition.ConfiguredFileExportRoot,
         "message.analyze.v1" or "message.draft.v1" => ToolPrecondition.UserProvidedSingleMessage,
@@ -696,6 +701,7 @@ public sealed class ToolBroker
         "browser.session.open.v1" => ToolExpectedOutcome.BrowserSessionOpened,
         "browser.session.navigate.v1" => ToolExpectedOutcome.BrowserSessionNavigated,
         "browser.session.snapshot.v1" => ToolExpectedOutcome.BrowserSessionSnapshotReturned,
+        "browser.session.follow-link.v1" => ToolExpectedOutcome.BrowserSessionNavigated,
         "browser.session.click-button.v1" or "browser.session.fill-text.v1" => ToolExpectedOutcome.BrowserControlActionCompleted,
         "browser.session.close.v1" => ToolExpectedOutcome.BrowserSessionClosed,
         "browser.download.public.v1" => ToolExpectedOutcome.PublicFileDownloadedToConfiguredExport,

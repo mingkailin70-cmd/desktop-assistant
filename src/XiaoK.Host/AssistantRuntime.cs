@@ -1146,6 +1146,18 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolPrecondition.UserRequestedIsolatedBrowserSession, outcome), token);
         }
 
+        if (category == "browser-session-follow-link")
+        {
+            if (!TryExtractSeparatedPayload(request, "打开网页链接", expectedSeparators: 2, out var parts)
+                || !IsBrowserSessionTokenShape(parts[0]) || !IsBrowserSessionTokenShape(parts[1])
+                || string.IsNullOrWhiteSpace(parts[2]) || parts[2].Length > 160)
+                return new(false, "请按“打开网页链接：会话ID；快照ID；链接可访问名称”输入。仅允许当前快照中的唯一同源HTTPS链接。", "BROWSER_SESSION_COMMAND_INVALID");
+            return await ExecuteBackgroundAsync(new ToolProposal("browser.session.follow-link.v1",
+                ImmutableDictionary<string, string>.Empty.Add("session_id", parts[0]).Add("snapshot_id", parts[1])
+                    .Add("name", parts[2]), "isolated-public-web-session",
+                ToolPrecondition.UserRequestedIsolatedBrowserSession, ToolExpectedOutcome.BrowserSessionNavigated), token);
+        }
+
         if (category == "browser-session-click")
         {
             if (!TryExtractSeparatedPayload(request, "点击网页按钮", expectedSeparators: 2, out var parts)
@@ -1287,6 +1299,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("打开隔离网页会话")) return "browser-session-open";
         if (lower.StartsWith("导航隔离网页会话")) return "browser-session-navigate";
         if (lower.StartsWith("查看网页会话")) return "browser-session-snapshot";
+        if (lower.StartsWith("打开网页链接")) return "browser-session-follow-link";
         if (lower.StartsWith("点击网页按钮")) return "browser-session-click";
         if (lower.StartsWith("填写网页文本")) return "browser-session-fill";
         if (lower.StartsWith("关闭网页会话")) return "browser-session-close";
