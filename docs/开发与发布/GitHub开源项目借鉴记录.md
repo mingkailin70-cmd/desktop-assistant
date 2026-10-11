@@ -46,6 +46,13 @@
 - [RavelloH/WinToastRelay](https://github.com/RavelloH/WinToastRelay) 标注 MIT，README 使用 `UserNotificationListener`、启动时建立通知基线、按新增通知 ID 处理，并采用应用白名单。这个通用监听生命周期与小K现有实现相符，可作代码审查清单；它面向把通知转发至 webhook/第三方服务，违反小K推理及通知正文留在本机的要求，因此不接入其转发、凭据、持久队列或网络代码，也没有引入该项目依赖。
 - 官方 [Windows 通知监听文档](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/notification-listener)将 `UserNotification`描述为来源应用、时间、ID和通知对象；通用 Toast 文本通过 `ToastGeneric`绑定读取。文档没有定义微信/QQ的会话ID、联系人稳定ID或私聊标记。客户端格式判断仍须以本机自然到达的真实通知为证，不能由第三方项目的功能宣称替代。
 
+## UIInspect.MCP：UIA目标绑定与能力分层的低置信度参考
+
+- 项目：[ChrisPulman/UIInspect.MCP](https://github.com/ChrisPulman/UIInspect.MCP/tree/810e67c2f96b44d8857ffea586e4d55b0113a35c)，本次固定检查提交 `810e67c2f96b44d8857ffea586e4d55b0113a35c`。仓库标注MIT，README描述为.NET 10、FlaUI/UIA3的MCP stdio服务，含有限控件树、目标引用、能力分层和确认/速率限制等设计。项目较新且社区使用量低，本次只检查仓库说明、文件清单和许可证，没有逐行审计实现、安装或本机复现。
+- 可借鉴处：将操作目标绑定到精确进程/会话及受限控件引用；将只读能力和可写能力分开；限制树读取规模并在审计中隐藏敏感值。这些只能转化为小K内部 `ToolBroker` 的设计检查点。
+- 当前决定：不安装、不接MCP，也不复用其自动化执行实现。仓库包含启动时自动安装Codex技能的逻辑，并提供 `--unrestricted` 运行选项以关闭同意/租约/速率限制；两者都不适合小K的无Codex连接器和固定授权边界。必须独立核对底层UIA调用的焦点、输入和第三方应用副作用，不能仅凭README的“后台”或“安全”描述认定不打扰。
+- 来源：[固定提交仓库](https://github.com/ChrisPulman/UIInspect.MCP/tree/810e67c2f96b44d8857ffea586e4d55b0113a35c)、[该提交的MIT许可证](https://github.com/ChrisPulman/UIInspect.MCP/blob/810e67c2f96b44d8857ffea586e4d55b0113a35c/LICENSE)。以上项目特性来自维护者材料；未由小K独立验证。
+
 本轮只阅读公开仓库页面和官方文档，没有克隆、安装、运行这些候选，也没有读取本机通知正文或聊天窗口。可借鉴项限于独立来源适配、通知ID基线/队列和显式白名单；第三方采集、数据存储、网络转发和前台自动化均不复用。
 
 ## 后续调研规则

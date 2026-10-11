@@ -1,6 +1,14 @@
 # MiMo、Qwen 与 JEV 编码任务初筛记录
 
-更新日期：2026-10-10（持续追加离线候选筛查）。
+更新日期：2026-10-11（持续追加离线候选筛查）。
+
+## Ornith-1.0-9B Q4_K_M 新增候选（2026-10-11，尚未评测）
+
+为扩展近期编码模型候选，固定上游GGUF仓库revision `d6b5f9b2ef835df5085615e0c405ce0092cc8b53`，文件 `ornith-1.0-9b-Q4_K_M.gguf`，上游报告大小5,629,108,704字节，LFS SHA-256 `5720d1f671b4996481274fffe01868c3c36e87c135cc8538471cc7bd6087b106`。本机锁定下载脚本完成文件大小与SHA-256核对，模型条目标记为 `downloaded_and_verified`；模型卡声明MIT许可。
+
+上游模型卡报告其在若干编码代理基准中的成绩，但任务集、上下文长度和测试硬件条件与小K本机不同，不能据此推断本机质量或性能。本轮没有启动该模型，没有占用GPU做推理，也未运行代码任务；llama.cpp b11259兼容性、中文任务质量、延迟、内存和显存均待独立验证，不属于生产模型，不进入40题发布门槛的已通过集合。
+
+来源：[Ornith-1.0-9B模型卡](https://huggingface.co/ornith-ai/Ornith-1.0-9B)、[固定revision的GGUF文件树](https://huggingface.co/ornith-ai/Ornith-1.0-9B-GGUF/tree/d6b5f9b2ef835df5085615e0c405ce0092cc8b53)、[仓库锁定条目](../../model-lock/models.lock.json)。
 
 ## OxCoder-9B Q4_K_M 当前构建R类首筛与早停（2026-10-10）
 

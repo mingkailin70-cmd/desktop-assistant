@@ -564,6 +564,30 @@
       "notes": "OrionLLM官方OxCoder-9B模型卡将其描述为Qwen3.5-9B基础上的代码代理微调，并报告Agentic Coding基准；GGUF由mradermacher在固定revision转换。公开讨论对源仓库Safetensors是否包含训练后权重提出过争议，官方回复与讨论内容需谨慎解读；社区GGUF身份和训练效果尚未独立证实。仅作为隔离本机筛查候选。2026-10-10以coding-zh-v4、固定构建cb9c75258401ac2f84d40c3317ed5ef6322d17746efa58637b8ed46562fef6af完成R01–R10，1/10通过；剩余30题全部通过也最多31/40，低于32/40门槛，按规则早停，不进入生产。GGUF固定文件树报告5,629,117,888字节及Xet内容标识；此文件无LFS整文件SHA，按固定HTTPS revision下载后计算本机SHA-256并锁定。作者外部基准不等同本机结果。",
       "localDirectory": "llm/oxcoder-9b-q4km-eval/525d7144604d67d86d138cde41e93c7bb545f82a",
       "requiredForP0": false
+    },
+    {
+      "id": "ornith-1.0-9b-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/ornith-ai/Ornith-1.0-9B-GGUF",
+      "baseModel": "ornith-ai/Ornith-1.0-9B",
+      "revision": "d6b5f9b2ef835df5085615e0c405ce0092cc8b53",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "Ornith 模型组织发布的 GGUF 权重",
+      "conversionRuntime": "上游 GGUF；当前锁定 llama.cpp b11259 的实际兼容性待本机确认",
+      "files": [
+        {
+          "name": "ornith-1.0-9b-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 5629108704,
+          "expectedUpstreamSha256": "5720d1f671b4996481274fffe01868c3c36e87c135cc8538471cc7bd6087b106",
+          "localVerifiedSha256": "5720d1f671b4996481274fffe01868c3c36e87c135cc8538471cc7bd6087b106"
+        }
+      ],
+      "license": "mit",
+      "status": "downloaded_and_verified",
+      "notes": "Ornith 官方模型组织的 1.0 9B Q4_K_M 候选；固定仓库 revision 与上游 LFS SHA-256 来自 Hugging Face 文件树。模型卡声称其在多项 coding-agent benchmark 上领先同级模型，并声明 MIT；这些结果由上游报告，使用长上下文和较大内存/算力条件，不能代表这台 8GB 显卡上的表现。先作隔离本机候选；llama.cpp b11259 兼容性、资源与 coding-zh-v4 完整 40 题质量均待核验。不得据下载或上游跑分切换生产配置。",
+      "localDirectory": "llm/ornith-1.0-9b-gguf-q4km/d6b5f9b2ef835df5085615e0c405ce0092cc8b53",
+      "requiredForP0": false
     }
   ]
 }
