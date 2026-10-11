@@ -17,6 +17,20 @@
 - 限制与决定：本次GitHub页面仅显示1颗Star，项目自述的“后台安全”和工具覆盖尚无独立证据；公开工具面还包括键盘、截图、窗口生命周期、录制和回放。当前只作低置信度设计参考，不安装、不接MCP、不复用键盘/`PostMessage`/截图实现。需审阅源码、逐API核实第三方App副作用，并在合成窗口独立复现后再重新评估。
 - 来源：[仓库README与架构概述](https://github.com/wosoolsoft/WinProbe)、[架构说明](https://github.com/wosoolsoft/WinProbe/blob/main/docs/architecture.md)、[安全说明](https://github.com/wosoolsoft/WinProbe/blob/main/SECURITY.md)、[MIT许可证](https://github.com/wosoolsoft/WinProbe/blob/main/LICENSE)。功能与许可证为仓库自述；没有作为小K验收结果。
 
+## 2026-10-12 GitHub 桌面自动化候选复核
+
+这次复核补充了几个可借鉴的方向。仓库页面和README是候选线索，不代表小K已复现其功能；没有克隆或运行候选。
+
+| 项目 | 可借鉴点 | 与小K的差距及决定 |
+| --- | --- | --- |
+| [FlaUI/FlaUI](https://github.com/FlaUI/FlaUI) | 维护时间较长的.NET UIA2/UIA3封装，可用于独立UI测试宿主和测试夹具。仓库自述以MIT许可发布。 | 官方定位是Windows UI自动化测试库；封装不会自动获得“不改变焦点或不干扰用户”的保证。小K已有Windows UIA基础调用，暂不为包装层增加生产依赖；若后续测试需要更广的Provider兼容，再固定NuGet版本和散列评估。 |
+| [wosoolsoft/WinProbe](https://github.com/wosoolsoft/WinProbe) | README提出分层Core/WPF/Recording/MCP、验证式动作和录制回放，可供测试结构参考。 | README声称44个MCP工具和后台操作，但当前仓库页面显示1颗Star，不能据此判定成熟或安全；不接入其广泛执行工具。 |
+| [ibraheem-mustafa-dev/windowsagent](https://github.com/ibraheem-mustafa-dev/windowsagent) | UIA可访问性树可作为语义观察路线；README还展示了动作后独立验证。 | 项目同时包含输入动作、视觉回退、HTTP服务、进程启动和Shell工具；授权模型、后台焦点保证及第三方Provider副作用未按小K要求审计，不接入。 |
+| [xuyw1997/agent-desktop-harness](https://github.com/xuyw1997/agent-desktop-harness) | 先把探索固化为可读工作流、执行前验证、固定步骤和失败证据，可借鉴于小K的离线评测及未来通用任务流程。 | 项目定位为可见桌面自动化/RPA，使用截图和原生输入；GitHub显示6颗Star，仓库说明仍处于0.x阶段，演示成绩为维护者自述。不能用于小K后台并发操作。 |
+| [lessenings-prog/OpenGUI](https://github.com/lessenings-prog/OpenGUI) | 命名管道拆分客户端与Windows常驻服务，动作前后状态核对、崩溃恢复日志可作为IPC与诊断设计线索。 | README明确含`SendInput`键鼠注入、自动登录启动和运行日志；会影响用户当前桌面，且不能作为无干扰后台执行实现。 |
+
+**本次结论：** 这些项目没有提供可直接复用且已证明适合小K的“任意应用后台操作而不干扰用户”的现成模块。下一步优先扩展小K自己的固定动作接口：先用合成窗口/隔离测试验证目标、能力、取消、超时与结果核验；每款真实应用单独验证Provider和并发风险。需要全局鼠标键盘、截图或前台焦点的能力继续明确标为前台操作，不能包装成后台能力。以上GitHub仓库均未固定到提交，后续若考虑复制代码或依赖，先核对精确提交、许可证、维护状态、传递依赖和数据/网络路径。
+
 ## FlaUI：Windows UIA 验收参考
 
 - 项目：[FlaUI/FlaUI](https://github.com/FlaUI/FlaUI)，官方仓库说明它基于 Windows UI Automation，覆盖 WPF、Win32、WinForms 和 Store 应用；官方发布页列有 v5.0.0。
