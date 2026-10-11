@@ -1536,7 +1536,9 @@ static async Task CheckCodeTaskModelOutputRequiresExactJsonSchemaAsync(string ro
                         && item.GetProperty("properties").GetProperty("path").GetProperty("enum")[0].GetString() == "Sample.cs"
                         && properties.GetProperty("find").GetProperty("maxLength").GetInt32() == 8_000
                         && properties.GetProperty("replace").GetProperty("maxLength").GetInt32() == 40_000
-                        && !properties.TryGetProperty("startLine", out _)
+                        && properties.GetProperty("startLine").GetProperty("type").GetString() == "integer"
+                        && properties.GetProperty("startLine").GetProperty("minimum").GetInt32() == 1
+                        && properties.GetProperty("startLine").GetProperty("maximum").GetInt32() == 1_000_000
                         && !properties.TryGetProperty("endLine", out _)
                         && !properties.TryGetProperty("replacementLines", out _);
                 }))),
@@ -1676,6 +1678,18 @@ static async Task CheckLineAnchoredEditDisambiguatesDuplicateTextAsync(string ro
         && File.ReadAllText(workspace) == "class Sample {\n    int Value = 1;\n    int Value = 3;\n}\n"
         && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
         "绝对行号没有只定位到授权片段中的重复源码实例，或修改了原项目。" + result.Summary);
+    var contextPrompt = inference.Prompts.Single(prompt => prompt.Contains("受限源码JSON", StringComparison.Ordinal));
+    var patchSchema = inference.RequestOptions.Single().JsonSchema!.Value;
+    var editItemSchema = patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items");
+    var patchSystemPrompt = inference.SystemPrompts.Single(prompt =>
+        prompt.Contains("你是本地隔离编程代理。用户任务", StringComparison.Ordinal));
+    Require(contextPrompt.Contains("\"start_line\":1", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("重复文本需要消歧时可增加整数startLine", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("startLine只能依据start_line与source_excerpt逐行计算", StringComparison.Ordinal)
+        && editItemSchema.GetProperty("properties").TryGetProperty("startLine", out _)
+        && !editItemSchema.GetProperty("required").EnumerateArray()
+            .Any(property => property.GetString() == "startLine"),
+        "重复源码任务没有向模型提供可信片段起始行、可选 startLine Schema 或受限行锚提示。");
 
     var rejectedProject = CreateProject(root, "line-anchored-edit-outside", source);
     var rejectedWorkspace = Path.Combine(root, "line-anchored-edit-outside-workspaces");
@@ -1725,10 +1739,13 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
         && File.ReadAllText(Path.Combine(project, "Sample.cs")) == source,
         "按行范围编辑未只修改所选重复源码，或没有保留 CRLF/原项目未保持不变。" + result.Summary);
     Require(contextPrompt.Contains("\"source_excerpt\":\"class Sample", StringComparison.Ordinal)
+        && contextPrompt.Contains("\"start_line\":1", StringComparison.Ordinal)
         && contextPrompt.Contains("int Value = 1;\\r\\n    int Value = 1;", StringComparison.Ordinal)
         && !contextPrompt.Contains("\"line\":", StringComparison.Ordinal),
-        "补丁上下文没有直接提供原文片段，或仍要求模型计算行号。");
-    Require(patchSystemPrompt.Contains("程序会验证find在整个授权文件中唯一出现且位于该片段内", StringComparison.Ordinal)
+        "补丁上下文没有提供原文片段与片段绝对起始行号。");
+    Require(patchSystemPrompt.Contains("重复文本需要消歧时可增加整数startLine", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("没有startLine时程序会验证find在整个授权文件中唯一出现且位于该片段内", StringComparison.Ordinal)
+        && patchSystemPrompt.Contains("提供startLine时它必须指向find在原文件和所给片段中开始的同一绝对行", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("新增别名或映射时优先只改匹配条件并保留原分支结果", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("保持原有 Contains、StartsWith、相等判断、StringComparison 参数和旧别名原样", StringComparison.Ordinal)
         && patchSystemPrompt.Contains("不得改写原有return、throw、break或continue", StringComparison.Ordinal)
@@ -1746,6 +1763,10 @@ static async Task CheckLineRangeEditUsesProgramNumberedSourceAsync(string root)
             .GetProperty("required")[1].GetString() == "find"
         && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
             .GetProperty("required")[2].GetString() == "replace"
+        && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
+            .GetProperty("properties").GetProperty("startLine").GetProperty("type").GetString() == "integer"
+        && !patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
+            .GetProperty("required").EnumerateArray().Any(property => property.GetString() == "startLine")
         && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
             .GetProperty("properties").GetProperty("path").GetProperty("enum")[0].GetString() == "Sample.cs"
         && patchSchema.GetProperty("properties").GetProperty("edits").GetProperty("items")
