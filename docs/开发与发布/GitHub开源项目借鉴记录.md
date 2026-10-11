@@ -2,6 +2,19 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 GitHub参考：Aider 仓库地图
+
+- 项目：[Aider-AI/aider](https://github.com/Aider-AI/aider)，Apache-2.0。官方仓库地图文档说明，它把仓库文件及关键类、函数和签名压缩到有限上下文，并用依赖图排序挑选适合当前 token 预算的内容。
+- 小K采用的子集：编程代理给模型选择文件前，从已脱敏的 C# 快照中本地提取命名空间、类型和方法声明名；按用户任务词与路径/符号的重合度优先分配摘要，每个文件最多给5个符号，整个清单仍严格不超过12,000字符。模型仍只可从清单精确选择最多4个路径，工具权限、写入审批和隔离工作区不变。
+- 小K没有引入Aider代码、Tree-sitter或依赖图；摘要由限时正则提取，属于轻量导航线索，不等于完整语法分析。该变化尚未用40题编码集复测，因此不能声称提高了任务通过率。
+- 来源：[官方仓库地图说明](https://github.com/Aider-AI/aider/blob/main/aider/website/docs/repomap.md)、[许可证](https://github.com/Aider-AI/aider/blob/main/LICENSE)。只阅读公开文档，没有克隆、运行或复制代码。
+
+## 2026-10-12 GitHub评估：µagent
+
+- 项目：[majiang213/mu-agent](https://github.com/majiang213/mu-agent)，ISC许可。README描述其面向本地7B/8B模型，采用按状态限制可用工具和编辑检查点等方法；页面当时显示1个Star、0个Fork，按低采用度参考处理。
+- 不集成其CLI：项目同时提供Shell命令、Git及可选联网研究等宽能力，不符合小K唯一ToolBroker入口、固定工具白名单和无云端推理边界。分状态约束与检查点理念已由小K自己的阶段式模型调用、固定ToolBroker和隔离补丁审阅覆盖，没有复制实现。
+- 来源：[官方仓库](https://github.com/majiang213/mu-agent)、[README安全边界](https://github.com/majiang213/mu-agent#additional-harness-level-guardrails)、[ISC许可证](https://github.com/majiang213/mu-agent/blob/main/LICENSE)。只读公开资料，没有克隆、运行或集成。
+
 ## 2026-10-12 GitHub参考：Microsoft Playwright MCP
 
 - 项目：[microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp)，微软维护的Playwright浏览器自动化MCP服务；仓库显示Apache-2.0许可证。README说明它用结构化可访问性快照定位网页对象，不依赖截图坐标，并明确提示MCP服务本身不是安全边界。

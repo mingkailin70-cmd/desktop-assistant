@@ -1,3 +1,11 @@
+## v0.1.112.0 编码代理 C# 符号摘要（2026-10-12）
+
+本版在CodeTaskAgent的文件选择清单中加入本地C#符号摘要：从已脱敏源码提取命名空间、类型和方法名，按用户任务与文件路径/符号的词项重合度分配摘要预算；每个文件最多5个符号，清单仍限制12,000字符，模型只能输出精确路径并最多选择4个文件。文件写入、差异审阅、用户批准、验证命令和ToolBroker权限均未改变。该实现参考Aider仓库地图思想，没有引入Aider代码、第三方依赖或Tree-sitter。
+
+固定.NET SDK 10.0.401全解决方案Release构建0警告、0错误；测试套件和40题编码评估未运行。自包含签名MSIX位于 `artifacts\msix-validation\690943a39c394712a2894901314c1b1c\XiaoK-signed-validation.msix`，141,538,291字节，SHA-256 `BF51B69134B3814EDC4B141D01416E5976676A6A9997764EB4450A568DEF334A`。SignTool验签成功，0警告、0错误；签名证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，本次未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.112.0_neutral__g0ndt6g65c8pe`，状态`Ok`；安装版与发布版Host DLL SHA-256均为`B48C1C8F0CB94E28A0A3E796851A0548C8740F5E05891F278C85E051BF786CEC`。安装器没有启动Host或模型。
+
+源码提交`2f6fe0d`已推送，GitHub Actions Build #492成功（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38180321630)）。未以40题任务集复测，尚无证据说明该变化提升模型通过率；真实项目、普通安装界面和端到端行为待验收。
+
 ## v0.1.111.0 隔离网页同源链接导航（2026-10-12）
 
 本版新增 `browser.session.follow-link.v1`，只按用户给定的会话、最新快照ID与ARIA可访问名称跟随唯一可见链接。执行前重算ARIA与链接属性指纹；页面结构或目标改变时拒绝执行并要求刷新。只允许同源HTTPS（443、公网DNS）；拒绝下载、新窗口、跨源重定向及非HTTPS目标；不运行页面click处理器，使用已有无Cookie受限读取器请求目标HTML。新功能参考微软Playwright MCP的结构化ARIA快照做法，没有集成MCP或新增依赖。
