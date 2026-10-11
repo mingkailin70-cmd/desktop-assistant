@@ -1,3 +1,9 @@
+## v0.1.104.0 AppContainer后台命令CPU优先级（2026-10-12）
+
+隔离编程命令通过`CreateProcessW`启动时即设`BELOW_NORMAL_PRIORITY_CLASS`，之后才恢复主线程执行。实际Windows AppContainer探针读取到子进程优先级`BelowNormal`。固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows完整安全套件122项通过、0项跳过；代码提交`7966f46`对应[GitHub Actions Build #474](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38166945515)成功。该设置只影响CPU调度，不限制CPU总量、内存或GPU，不保证命令即时完成，也可能延长后台任务时间。
+
+自包含签名MSIX `artifacts\msix-validation\aadc287f06304aaeaa3ebe0fb48d86e0\XiaoK-signed-validation.msix`，139,391,867字节，SHA-256 `971B114E5FA9BA503128F5F74A51D647C165A45C6009EB2A8216762D0D0579AD`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本次没有更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.104.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版和发布版Host DLL SHA-256均为`8C3403E32C8E2C3C34ECC7FEE0DC81983B2D299DA6C40A7558313EF6297DB6DA`。版本提交`6de9c63`对应[GitHub Actions Build #475](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38167151707)成功。安装未启动Host或模型；安装后Host与llama-server进程数均为0。此项不等于整机后台自动化或模型负载的无干扰验收。
+
 ## v0.1.103.0 后台推理CPU优先级（2026-10-12）
 
 llama.cpp托管模型进程在后台推理租约期间使用Windows `BelowNormal`，交互推理前恢复`Normal`；设置失败时拒绝执行该次推理。它只改变操作系统CPU调度，不释放显存、不减少GPU利用率，也不会抢占当前模型步骤。固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows安全检查程序退出码0；短命子进程验证优先级可写入并读回。没有启动llama-server或模型，真实模型负载时延与用户工作响应性仍待实测。
