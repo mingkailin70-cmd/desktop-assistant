@@ -16,6 +16,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     private const int MaximumRequestBytes = 8 * 1024;
     private const int MaximumResponseBytes = 32 * 1024;
     private static readonly TimeSpan WorkerTimeout = TimeSpan.FromSeconds(5);
+    private const int ControlWaitMilliseconds = 2_500;
     private readonly WindowsDesktopTools _desktop;
     private readonly IUiAutomationWorkerProcessStarter _workerProcessStarter;
 
@@ -32,30 +33,65 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     public async Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!OperatingSystem.IsWindows()) return new(false, "当前平台不支持 Windows UI Automation。", "UIA_UNAVAILABLE");
+        var (response, failure) = await RunWorkerAsync(applicationId, new WorkerCommand("snapshot", null, 0), cancellationToken)
+            .ConfigureAwait(false);
+        if (failure is not null) return failure;
+        if (response is null || !response.Success)
+            return new(false, "无法读取已选应用的界面快照；没有执行控件动作。", response?.ErrorCode ?? "UIA_READ_FAILED");
+
+        var display = FormatSnapshot(response.Items ?? [], response.Truncated);
+        return new(true, "已读取目标应用的有限 UIA 快照；没有点击、输入、读取剪贴板或切换窗口。", Data: display);
+    }
+
+    public async Task<ToolResult> WaitForEnabledControlAsync(string applicationId, string automationId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            return new(false, "AutomationId 格式无效；没有访问应用界面。", "UIA_INVALID_SELECTOR");
+
+        var (response, failure) = await RunWorkerAsync(applicationId,
+            new WorkerCommand("wait_enabled", automationId, ControlWaitMilliseconds), cancellationToken)
+            .ConfigureAwait(false);
+        if (failure is not null) return failure;
+        if (response is null || !response.Success)
+            return new(false, "无法核验指定控件状态；没有执行控件动作。", response?.ErrorCode ?? "UIA_READ_FAILED");
+        if (response.ConditionMet != true)
+            return new(false, "等待结束时指定控件仍未唯一出现并启用；没有执行控件动作。", "UIA_CONDITION_NOT_MET");
+        return new(true, "已核验指定 AutomationId 对应的唯一控件当前已启用；没有点击、输入、读取剪贴板或切换窗口。",
+            Data: "控件可用");
+    }
+
+    private async Task<(WorkerResponse? Response, ToolResult? Failure)> RunWorkerAsync(string applicationId,
+        WorkerCommand command, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+            return (null, new(false, "当前平台不支持 Windows UI Automation。", "UIA_UNAVAILABLE"));
         if (!_desktop.TryResolveUiAutomationTarget(applicationId, out var target, out var targetError))
-            return targetError switch
+            return (null, targetError switch
             {
                 "APP_NOT_ALLOWLISTED" => new(false, "目标应用未登记在本机允许列表；没有访问窗口。", targetError),
                 "APP_WINDOW_NOT_FOUND" => new(false, "没有找到该应用的可见窗口；没有切换窗口。", targetError),
                 "APP_WINDOW_AMBIGUOUS" => new(false, "该应用有多个可见窗口，无法安全确定目标；没有访问窗口。", targetError),
                 _ => new(false, "无法核验该应用窗口的进程身份；没有访问窗口。", targetError)
-            };
+            });
 
         var executablePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
-            return new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
+            return (null, new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
 
         var entryAssemblyPath = Assembly.GetEntryAssembly()?.Location;
         var needsEntryAssemblyArgument = string.Equals(Path.GetFileNameWithoutExtension(executablePath),
             "dotnet", StringComparison.OrdinalIgnoreCase);
         if (needsEntryAssemblyArgument && (string.IsNullOrWhiteSpace(entryAssemblyPath) || !File.Exists(entryAssemblyPath)))
-            return new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
+            return (null, new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
 
         var request = JsonSerializer.SerializeToUtf8Bytes(new WorkerRequest(
-            target!.WindowHandle, target.ProcessId, target.ExecutablePath));
+            target!.WindowHandle, target.ProcessId, target.ExecutablePath,
+            command.Mode, command.AutomationId, command.WaitMilliseconds));
         if (request.Length > MaximumRequestBytes)
-            return new(false, "目标信息超出固定上限；没有访问窗口。", "UIA_REQUEST_TOO_LARGE");
+            return (null, new(false, "目标信息超出固定上限；没有访问窗口。", "UIA_REQUEST_TOO_LARGE"));
 
         var startInfo = new ProcessStartInfo(executablePath)
         {
@@ -76,7 +112,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         try
         {
             worker = _workerProcessStarter.Start(startInfo);
-            if (worker is null) return new(false, "只读 UIA 工作进程启动失败；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
+            if (worker is null)
+                return (null, new(false, "只读 UIA 工作进程启动失败；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
             process = worker.Process;
             try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
             catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { }
@@ -91,13 +128,10 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
             await errorTask.ConfigureAwait(false);
             var responseBytes = await outputTask.WaitAsync(linked.Token).ConfigureAwait(false);
-            if (process.ExitCode != 0 || !TryParseResponse(responseBytes, out var response))
-                return new(false, "UIA 查询未能可靠完成；没有执行控件动作。", "UIA_WORKER_FAILED");
-            if (!response.Success)
-                return new(false, "无法读取已选应用的界面快照；没有执行控件动作。", response.ErrorCode ?? "UIA_READ_FAILED");
-
-            var display = FormatSnapshot(response.Items ?? [], response.Truncated);
-            return new(true, "已读取目标应用的有限 UIA 快照；没有点击、输入、读取剪贴板或切换窗口。", Data: display);
+            if (!TryParseResponse(responseBytes, out var response)
+                || process.ExitCode != (response.Success ? 0 : 2))
+                return (null, new(false, "UIA 查询未能可靠完成；没有执行控件动作。", "UIA_WORKER_FAILED"));
+            return (response, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -109,7 +143,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         {
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
-            return new(false, "UIA 查询超过 5 秒，已终止隔离工作进程；没有执行控件动作。", "UIA_WORKER_TIMEOUT");
+            return (null, new(false, "UIA 查询超过 5 秒，已终止隔离工作进程；没有执行控件动作。", "UIA_WORKER_TIMEOUT"));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException
             or ArgumentException or InvalidOperationException or InvalidDataException or Win32Exception
@@ -117,10 +151,12 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         {
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
-            return new(false, "UIA 查询失败或返回内容超出限制；没有执行控件动作。", "UIA_WORKER_FAILED");
+            return (null, new(false, "UIA 查询失败或返回内容超出限制；没有执行控件动作。", "UIA_WORKER_FAILED"));
         }
         finally { worker?.Dispose(); }
     }
+
+    private sealed record WorkerCommand(string Mode, string? AutomationId, int WaitMilliseconds);
 
     private static async Task<byte[]> ReadBoundedOutputAsync(Stream stream, int maximumBytes, CancellationToken token)
     {
@@ -189,9 +225,10 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         return builder.ToString();
     }
 
-    public sealed record WorkerRequest(long WindowHandle, int ProcessId, string ExecutablePath);
+    public sealed record WorkerRequest(long WindowHandle, int ProcessId, string ExecutablePath,
+        string Mode = "snapshot", string? AutomationId = null, int WaitMilliseconds = 0);
     public sealed record WorkerResponse(bool Success, string? ErrorCode, UiAutomationSnapshotItem[] Items,
-        bool Truncated = false);
+        bool Truncated = false, bool? ConditionMet = null);
 }
 
 internal interface IUiAutomationWorkerProcessStarter

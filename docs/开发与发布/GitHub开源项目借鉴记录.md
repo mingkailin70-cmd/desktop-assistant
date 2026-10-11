@@ -46,11 +46,11 @@
 - 当前决定：不安装CLI、不增加其NuGet依赖、不启用Windows Sandbox，也未对真实应用发送输入。它是公共预览，官方README提醒`main`与稳定发布行为可能不同；其宽泛工具面和命令协调不直接接入小K。小K现已在Core实现并由ToolBroker持有自己的仲裁租约：只读UIA查询按目标共享、目标状态变更按目标独占并要求活动探针、物理桌面操作按全局独占串行，后台不能取得桌面租约。Windows前台占用探针已接入Host，只比对固定应用ID对应的可执行映像路径。现新增显式用户请求`app.ui.snapshot.v1`：只映射本机已登记应用和唯一可见窗口，进程身份由Host与工作进程双重核验；查询在5秒限时的单次子进程内执行，Windows Job Object限制进程内存256 MiB并在所有者句柄关闭时终止；结果只返回有限语义控件属性并留在当前任务内存。小K自有合成窗经该隔离子进程读取后AutomationId/Name/启用状态正确，前台HWND不变、控件未触发；无响应子进程故障注入确认取消、5秒超时和所有者进程强制退出时工作进程均退出。没有读取真实第三方应用，也没有新增UIA依赖。当前安全检查122项、桌面体验检查86项通过，Release解决方案构建0警告/0错误。故障注入未模拟真实UIA Provider挂起；真实应用Provider、MSIX下的子进程运行、锁屏和用户并发切换仍待验收。本机合成窗通过不证明第三方应用都能无扰读取。下一步继续对照固定应用配置和实际客户端Provider验证，绝不自动启动监控或读取真实聊天内容。
 - 来源：[v0.7.1 UI Automation 文档](https://github.com/microsoft/winappCli/blob/v0.7.1/docs/ui-automation.md)、[v0.7.1 Release](https://github.com/microsoft/winappCli/releases/tag/v0.7.1)、[MIT许可证](https://github.com/microsoft/winappCli/blob/v0.7.1/LICENSE)、[官方README的Public Preview说明](https://github.com/microsoft/winappCli/blob/main/README.md)、Microsoft Learn [`AutomationElement.FromHandle`](https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.automationelement.fromhandle?view=windowsdesktop-10.0)与[WPF UI Automation Peer](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/controls/ui-automation-of-a-wpf-custom-control)。文档中的“不取焦点”属于CLI对其特定命令路径的描述，不代表小K直接调用同类UIA pattern已通过本机无干扰验收。
 
-### 2026-10-12：当前主分支文档中的定位与断言细节
+### 2026-10-12：唯一控件状态等待的只读实现
 
-当前可变`main`文档进一步说明：唯一`AutomationId`是优先稳定定位器；没有唯一ID时可用带会话身份的语义slug；显式动作类型对模糊选择失败关闭，不改试其他Pattern；`wait-for`的属性/值条件可作为动作后断言。小K可以借鉴“动作目标唯一 + 明确能力 + 独立后置条件”这三个契约，不照搬其全局输入、截图和进程启动能力。该页面指向未固定的`main`，不代表v0.7.1或小K已经提供这些能力；仍不安装、不依赖CLI。
+当前可变`main`文档说明唯一`AutomationId`可用于稳定目标定位，`wait-for`可按属性/值条件等待；UIA只读查询和`wait-for`是只读命令。小K据此增加独立工具`app.ui.wait-enabled.v1`：只允许用户显式提供已登记应用与AutomationId，最多等待2.5秒，目标须在有限遍历内唯一且当前启用；歧义、树上限、目标变化和超时均失败关闭。它只读`IsEnabled`，没有复用该CLI、NuGet库、截图或写操作；离屏合成窗口验证了延迟启用成功、持续禁用超时和重复AutomationId拒绝，前台HWND保持不变。此参考仅支持“查询后置条件”的设计，不证明第三方Provider或任何后台写操作安全。
 
-来源：[winapp CLI 当前 UI Automation 文档](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)。此为2026-10-12只读页面核对，内容可变；如后续依赖具体行为，需固定发布版/提交并复核许可证与本机效果。
+来源：[winapp CLI 当前 UI Automation 文档](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)。官方文档展示了用属性/值条件等待控件状态的方式；此页面指向可变`main`，本次只借鉴只读断言概念，不引入CLI或依赖。
 
 ## Microsoft PowerToys：稳定AutomationId的UI测试实践
 

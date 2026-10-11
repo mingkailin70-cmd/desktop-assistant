@@ -8,7 +8,8 @@ public static class ToolInteractionPolicy
 {
     public static ToolInteractionOperation GetOperation(string toolId) => GetMode(toolId) switch
     {
-        _ when toolId == ApplicationUiAutomationPolicy.ToolId => ToolInteractionOperation.ReadOnlyTarget,
+        _ when toolId is ApplicationUiAutomationPolicy.ToolId or ApplicationUiAutomationPolicy.WaitForEnabledToolId
+            => ToolInteractionOperation.ReadOnlyTarget,
         ToolInteractionMode.Background => ToolInteractionOperation.NonInteractive,
         ToolInteractionMode.Foreground => ToolInteractionOperation.DesktopExclusive,
         _ => ToolInteractionOperation.Unknown
@@ -25,7 +26,7 @@ public static class ToolInteractionPolicy
             or "browser.session.fill-text.v1" or "browser.session.close.v1"
             or "code.inspect.v1" or "code.task.create.v1" or "message.analyze.v1"
             or "message.notice.analyze.v1" or "message.draft.v1" or "message.send.v1"
-            or "app.status.v1" or ApplicationUiAutomationPolicy.ToolId => ToolInteractionMode.Background,
+            or "app.status.v1" or ApplicationUiAutomationPolicy.ToolId or ApplicationUiAutomationPolicy.WaitForEnabledToolId => ToolInteractionMode.Background,
         // 启动程序和切换窗口会改变用户当前桌面状态，只能由明确用户交互触发。
         "app.launch.v1" or "window.activate.v1" => ToolInteractionMode.Foreground,
         _ => ToolInteractionMode.Unknown

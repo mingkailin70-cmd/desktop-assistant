@@ -850,6 +850,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId);
 
         var lower = request.ToLowerInvariant();
+        if (category == "app-ui-wait-enabled")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“等待界面控件可用：应用名|AutomationId”输入；仅等待已登记应用当前可见窗口中的唯一控件，不会点击或输入。", "UIA_WAIT_TARGET_NOT_SUPPORTED");
+            return await ExecuteBackgroundAsync(proposal, token);
+        }
+
         if (category == "app-ui-snapshot")
         {
             var proposal = ApplicationUiAutomationPolicy.CreateUserToolProposal(request, GetConfiguredAppAliases());
@@ -1221,6 +1229,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (ApplicationUiAutomationPolicy.IsWaitForEnabledUserRequest(request)) return "app-ui-wait-enabled";
         if (ApplicationUiAutomationPolicy.IsUserRequest(request)) return "app-ui-snapshot";
         if (AppLaunchIntentResolver.IsApplicationStatusRequest(request)) return "app-status";
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";

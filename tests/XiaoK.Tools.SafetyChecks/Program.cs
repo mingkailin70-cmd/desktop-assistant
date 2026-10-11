@@ -4130,6 +4130,26 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
         appId, ToolExpectedOutcome.ApplicationWindowVisible);
     var broker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "");
 
+    var waitForUiControl = ToolBroker.Proposal("app.ui.wait-enabled.v1",
+        [new KeyValuePair<string, string>("app_id", appId),
+         new KeyValuePair<string, string>("automation_id", "SendButton_1")],
+        appId, ToolExpectedOutcome.ApplicationUiConditionObserved);
+    var waitTargetDenied = await broker.ExecuteAsync(waitForUiControl, CancellationToken.None);
+    Require(!waitTargetDenied.Success && waitTargetDenied.ErrorCode == "UIA_SNAPSHOT_UNAVAILABLE",
+        "只读UIA状态等待没有在固定参数校验后到达其未配置的只读适配器。");
+    var unsafeAutomationId = waitForUiControl with
+    {
+        Arguments = waitForUiControl.Arguments.SetItem("automation_id", "Send Button")
+    };
+    var unsafeWaitDenied = await broker.ExecuteAsync(unsafeAutomationId, CancellationToken.None);
+    Require(!unsafeWaitDenied.Success && unsafeWaitDenied.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "只读UIA状态等待接受了非固定字符集的AutomationId。");
+    var wrongWaitOutcome = await broker.ExecuteAsync(
+        waitForUiControl with { ExpectedOutcome = ToolExpectedOutcome.ApplicationUiSnapshotReturned },
+        CancellationToken.None);
+    Require(!wrongWaitOutcome.Success && wrongWaitOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "只读UIA状态等待没有拒绝错配的预期结果。");
+
     var reachedAdapter = await broker.ExecuteAsync(valid, CancellationToken.None);
     Require(!reachedAdapter.Success && reachedAdapter.ErrorCode == "APP_NOT_ALLOWLISTED",
         "匹配的提案条件没有到达应用允许列表核验。");

@@ -126,7 +126,7 @@ foreach (var tool in new[] { "app.launch.v1", "window.activate.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.ExplicitUserInteraction) is null,
         "阻止明确的用户交互。");
 }
-foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.archive.directory.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "browser.session.open.v1", "browser.session.navigate.v1", "browser.session.snapshot.v1", "browser.session.click-button.v1", "browser.session.fill-text.v1", "browser.session.close.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1" })
+foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.archive.directory.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "browser.session.open.v1", "browser.session.navigate.v1", "browser.session.snapshot.v1", "browser.session.click-button.v1", "browser.session.fill-text.v1", "browser.session.close.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1", ApplicationUiAutomationPolicy.WaitForEnabledToolId })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台工具。");
 Require(ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.ToolId) == ToolInteractionOperation.ReadOnlyTarget
     && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.ToolId) == ToolInteractionMode.Background
@@ -138,11 +138,30 @@ Require(uiSnapshotProposal?.ToolId == ApplicationUiAutomationPolicy.ToolId
     && uiSnapshotProposal.Preconditions == (ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow)
     && uiSnapshotProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiSnapshotReturned,
     "显式微信UIA只读请求没有解析到固定白名单目标。");
+Require(ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.WaitForEnabledToolId) == ToolInteractionOperation.ReadOnlyTarget
+    && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.WaitForEnabledToolId) == ToolInteractionMode.Background,
+    "控件状态等待没有进入只读后台仲裁路径。");
+var uiWaitProposal = ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(
+    "等待界面控件可用：微信|SendButton_1", []);
+Require(uiWaitProposal?.ToolId == ApplicationUiAutomationPolicy.WaitForEnabledToolId
+    && uiWaitProposal.Target == "wechat"
+    && uiWaitProposal.Arguments.GetValueOrDefault("automation_id") == "SendButton_1"
+    && uiWaitProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiConditionObserved,
+    "显式UIA状态等待没有绑定白名单应用和AutomationId。");
+Require(ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(
+        "等待界面控件可用：未知应用|SendButton", []) is null
+    && ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(
+        "等待界面控件可用：微信|SendButton|Other", []) is null
+    && ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(
+        "等待界面控件可用：微信|Send Button", []) is null,
+    "UIA状态等待接受了未知目标、歧义分隔符或不安全AutomationId。");
 Require(ApplicationUiAutomationPolicy.CreateUserToolProposal("读取界面控件：未知应用", []) is null
     && ApplicationUiAutomationPolicy.CreateUserToolProposal("读取界面控件：微信\n并打开网页", []) is null,
     "UIA快照接受了未知目标或多行扩展指令。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-snapshot", out var uiSnapshotLabel)
     && uiSnapshotLabel == "只读界面检查", "任务中心没有显示只读界面检查类别。");
+Require(TaskCategoryCatalog.TryGetLabel("app-ui-wait-enabled", out var uiWaitLabel)
+    && uiWaitLabel == "等待界面控件状态", "任务中心没有显示UIA状态等待类别。");
 Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.ExplicitUserInteraction)?.ErrorCode == "UNKNOWN_TOOL",
     "未知工具被放行。");
 Require(ToolInteractionPolicy.Check("file.search.v1", (ToolExecutionAccess)999)?.ErrorCode == "INVALID_EXECUTION_CONTEXT",
@@ -163,6 +182,7 @@ Require(directToolRoutes.SequenceEqual(new[] { "window.activate.v1", "app.launch
 var requiredBackgroundRoutes = new[]
 {
     "ExecuteBackgroundAsync(proposal, token)",
+    "CreateWaitForEnabledToolProposal(request, GetConfiguredAppAliases())",
     "ExecuteBackgroundAsync(new ToolProposal(\"file.search.v1\"",
     "var tool = category == \"draft\" ? \"message.draft.v1\" : \"message.analyze.v1\";",
     "ExecuteBackgroundAsync(new ToolProposal(tool, arguments,",

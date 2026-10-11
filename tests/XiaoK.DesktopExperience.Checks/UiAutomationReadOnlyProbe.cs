@@ -23,10 +23,16 @@ internal static class UiAutomationReadOnlyProbe
         {
             try
             {
-                var button = new Button { Content = "合成控件" };
+                var button = new Button { Content = "合成控件", IsEnabled = false };
                 AutomationProperties.SetAutomationId(button, AutomationId);
                 AutomationProperties.SetName(button, AccessibleName);
                 button.Click += (_, _) => Interlocked.Increment(ref activationCount);
+                var waitButton = new Button { Content = "等待控件", IsEnabled = false };
+                AutomationProperties.SetAutomationId(waitButton, "xiaok-synthetic-never-enabled");
+                var duplicateWaitButton = new Button { Content = "重复目标", IsEnabled = true };
+                AutomationProperties.SetAutomationId(duplicateWaitButton, "xiaok-synthetic-duplicate");
+                var secondDuplicateWaitButton = new Button { Content = "重复目标二", IsEnabled = true };
+                AutomationProperties.SetAutomationId(secondDuplicateWaitButton, "xiaok-synthetic-duplicate");
 
                 var window = new Window
                 {
@@ -38,14 +44,14 @@ internal static class UiAutomationReadOnlyProbe
                     WindowStyle = WindowStyle.ToolWindow,
                     ShowInTaskbar = false,
                     ShowActivated = false,
-                    Content = new StackPanel { Children = { button } }
+                    Content = new StackPanel { Children = { button, waitButton, duplicateWaitButton, secondDuplicateWaitButton } }
                 };
                 var dispatcher = window.Dispatcher;
                 window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
                 window.SourceInitialized += (_, _) =>
                 {
                     var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
-                    created.TrySetResult(new ProbeWindow(handle, dispatcher, window));
+                    created.TrySetResult(new ProbeWindow(handle, dispatcher, window, button));
                 };
                 window.Show();
                 Dispatcher.Run();
@@ -66,17 +72,43 @@ internal static class UiAutomationReadOnlyProbe
                 throw new InvalidOperationException("显示离屏合成窗口改变了前台窗口。");
 
             var result = await Task.Run(() => ReadOnlyInspect(probe.Handle)).WaitAsync(TimeSpan.FromSeconds(10));
-            if (result.AutomationId != AutomationId || result.Name != AccessibleName || !result.IsEnabled)
-                throw new InvalidOperationException("UIA只读查询没有返回合成控件的预期标识属性。");
+            if (result.AutomationId != AutomationId || result.Name != AccessibleName || result.IsEnabled)
+                throw new InvalidOperationException("UIA只读查询没有返回合成控件的预期标识与禁用状态。");
             var desktop = new WindowsDesktopTools(
                 [new DesktopApp("uia-probe", Environment.ProcessPath!)],
                 [], new SyntheticWindowProcessController(probe.Handle));
+            var unlisted = await new WindowsUiAutomationSnapshotAdapter(new WindowsDesktopTools([], []))
+                .WaitForEnabledControlAsync("uia-probe", AutomationId, CancellationToken.None);
+            if (unlisted.Success || unlisted.ErrorCode != "APP_NOT_ALLOWLISTED")
+                throw new InvalidOperationException("UIA状态等待未在启动辅助进程前拒绝未登记应用。");
             var isolated = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .ReadSnapshotAsync("uia-probe", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
             if (!isolated.Success || isolated.Data is null
                 || !isolated.Data.Contains(AutomationId, StringComparison.Ordinal)
-                || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal))
+                || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal)
+                || !isolated.Data.Contains("禁用", StringComparison.Ordinal))
                 throw new InvalidOperationException($"隔离UIA工作进程未返回合成控件快照：{isolated.ErrorCode ?? isolated.Summary}");
+            var enableSyntheticControl = Task.Run(async () =>
+            {
+                await Task.Delay(350);
+                await probe.Dispatcher.InvokeAsync(() => probe.Button.IsEnabled = true);
+            });
+            var waitForEnabled = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .WaitForEnabledControlAsync("uia-probe", AutomationId, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(8));
+            await enableSyntheticControl;
+            if (!waitForEnabled.Success || waitForEnabled.Data != "控件可用")
+                throw new InvalidOperationException($"唯一合成控件启用后的只读状态等待失败：{waitForEnabled.ErrorCode ?? waitForEnabled.Summary}");
+            var timedCondition = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .WaitForEnabledControlAsync("uia-probe", "xiaok-synthetic-never-enabled", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(8));
+            if (timedCondition.Success || timedCondition.ErrorCode != "UIA_CONDITION_NOT_MET")
+                throw new InvalidOperationException("控件未启用时没有按固定时限失败关闭。");
+            var ambiguousCondition = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .WaitForEnabledControlAsync("uia-probe", "xiaok-synthetic-duplicate", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(8));
+            if (ambiguousCondition.Success || ambiguousCondition.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS")
+                throw new InvalidOperationException($"重复AutomationId没有失败关闭：{ambiguousCondition.ErrorCode ?? "NO_ERROR"} / {ambiguousCondition.Summary}");
             await VerifyWorkerCancellationAndTimeoutAsync(desktop);
             if (Volatile.Read(ref activationCount) != 0)
                 throw new InvalidOperationException("只读UIA查询触发了合成控件动作。");
@@ -233,5 +265,5 @@ internal static class UiAutomationReadOnlyProbe
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
-    private sealed record ProbeWindow(IntPtr Handle, Dispatcher Dispatcher, Window Window);
+    private sealed record ProbeWindow(IntPtr Handle, Dispatcher Dispatcher, Window Window, Button Button);
 }
