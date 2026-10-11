@@ -81,6 +81,12 @@ if (args.Length == 1 && args[0] == "--only-window-activation")
     Console.WriteLine("通过：窗口切换成功、未找到、被拒绝和取消路径。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-app-status")
+{
+    await CheckApplicationStatusAsync();
+    Console.WriteLine("通过：应用状态同时报告白名单进程和可见窗口，并对未知/不可核验目标失败关闭。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-window-selection")
 {
     CheckWindowMatchSelection();
@@ -438,6 +444,9 @@ try
 
     await CheckWindowActivationOutcomesAsync();
     passed.Add("窗口切换成功、未找到、被拒绝和取消路径均如实处理");
+
+    await CheckApplicationStatusAsync();
+    passed.Add("应用状态只按当前会话内已登记的可执行映像返回进程/可见窗口数量，不读取标题内容或改变前台");
 
     CheckWindowMatchSelection();
     passed.Add("窗口目标选择忽略零句柄、去重并拒绝多个不同目标");
@@ -4301,6 +4310,39 @@ static async Task CheckWindowActivationOutcomesAsync()
         .ActivateWindowAsync(proposal, afterCancellation.Token);
     Require(completedAfterDispatch.Success && afterController.CallCount == 1,
         "窗口切换请求发出后取消被误报为失败，而未等待独立核验结果。");
+}
+
+static async Task CheckApplicationStatusAsync()
+{
+    const string appId = "demo";
+    var app = new DesktopApp(appId, @"C:\Synthetic\Demo.exe", DisplayName: "演示程序");
+    var controller = new FakeDesktopAppStatusController(new DesktopAppStatus(1, 0));
+    var desktop = new WindowsDesktopTools([app], [], controller);
+    var proposal = ToolBroker.Proposal("app.status.v1",
+        [new KeyValuePair<string, string>("app_id", appId)], appId,
+        ToolExpectedOutcome.ApplicationStatusObserved);
+
+    var result = await desktop.GetApplicationStatusAsync(proposal, CancellationToken.None);
+    Require(result.Success && result.Summary.Contains("匹配进程数：1", StringComparison.Ordinal)
+        && result.Summary.Contains("可见窗口数：0", StringComparison.Ordinal)
+        && !result.Summary.Contains(app.Executable, StringComparison.OrdinalIgnoreCase)
+        && controller.StatusQueryCount == 1 && controller.StartCount == 0
+        && ToolInteractionPolicy.Check("app.status.v1", ToolExecutionAccess.BackgroundOnly) is null,
+        "只读应用状态没有区分后台进程与可见窗口，或意外启动/暴露了应用路径。");
+
+    var unavailableController = new FakeDesktopAppStatusController(DesktopAppStatus.Unavailable);
+    var unavailable = await new WindowsDesktopTools([app], [], unavailableController)
+        .GetApplicationStatusAsync(proposal, CancellationToken.None);
+    Require(!unavailable.Success && unavailable.ErrorCode == "APP_STATUS_UNAVAILABLE",
+        "进程或窗口数量无法核验时没有失败关闭。");
+
+    var unknownProposal = ToolBroker.Proposal("app.status.v1",
+        [new KeyValuePair<string, string>("app_id", "unlisted")], "unlisted",
+        ToolExpectedOutcome.ApplicationStatusObserved);
+    var unknown = await desktop.GetApplicationStatusAsync(unknownProposal, CancellationToken.None);
+    Require(!unknown.Success && unknown.ErrorCode == "APP_NOT_ALLOWLISTED"
+        && controller.StatusQueryCount == 1,
+        "未登记应用的状态查询到达了本机进程枚举器。");
 }
 
 static async Task CheckAppLaunchRoutingAndFailureAsync()
@@ -8519,6 +8561,29 @@ internal sealed class IdleRetainingModelRuntime : IIdleRetainedModelRuntime
             if (current is not null) Interlocked.Decrement(ref current._activeLeases);
             return ValueTask.CompletedTask;
         }
+    }
+}
+
+internal sealed class FakeDesktopAppStatusController(DesktopAppStatus status) : IDesktopAppProcessController, IDesktopAppStatusController
+{
+    public int StartCount { get; private set; }
+    public int StatusQueryCount { get; private set; }
+    public IDisposable? Start(ProcessStartInfo startInfo)
+    {
+        StartCount++;
+        return new EmptyDisposable();
+    }
+
+    public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => [];
+    public DesktopAppStatus GetApplicationStatus(DesktopApp app)
+    {
+        StatusQueryCount++;
+        return status;
+    }
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        public void Dispose() { }
     }
 }
 

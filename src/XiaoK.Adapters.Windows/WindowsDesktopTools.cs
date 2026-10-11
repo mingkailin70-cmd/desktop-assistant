@@ -20,7 +20,12 @@ public interface IDesktopAppProcessController
 
 public interface IDesktopAppStatusController
 {
-    int GetVisibleWindowCount(DesktopApp app);
+    DesktopAppStatus GetApplicationStatus(DesktopApp app);
+}
+
+public readonly record struct DesktopAppStatus(int RunningProcessCount, int VisibleWindowCount)
+{
+    public static DesktopAppStatus Unavailable => new(-1, -1);
 }
 
 public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
@@ -205,18 +210,20 @@ public sealed partial class WindowsDesktopTools
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            // This path counts visible top-level windows by allowlisted executable image only.
+            // This path counts processes and visible top-level windows by allowlisted executable image only.
             // It does not read titles or content and cannot change focus or send input.
             if (_appProcessController is not IDesktopAppStatusController statusController)
-                return Task.FromResult(new ToolResult(false, "当前状态检查器不能安全枚举窗口；没有读取窗口内容。", "APP_STATUS_UNAVAILABLE"));
-            var count = statusController.GetVisibleWindowCount(app);
-            if (count < 0) return Task.FromResult(new ToolResult(false, "无法确认该应用的可见窗口数量。", "APP_STATUS_UNAVAILABLE"));
-            return Task.FromResult(new ToolResult(true, $"{GetDisplayName(app)} 当前可见窗口数：{count}。"));
+                return Task.FromResult(new ToolResult(false, "当前状态检查器不能安全核对应用进程和窗口；没有读取窗口内容。", "APP_STATUS_UNAVAILABLE"));
+            var status = statusController.GetApplicationStatus(app);
+            if (status.RunningProcessCount < 0 || status.VisibleWindowCount < 0)
+                return Task.FromResult(new ToolResult(false, "无法确认该应用的进程和可见窗口数量。", "APP_STATUS_UNAVAILABLE"));
+            return Task.FromResult(new ToolResult(true,
+                $"{GetDisplayName(app)} 当前匹配进程数：{status.RunningProcessCount}；可见窗口数：{status.VisibleWindowCount}。"));
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UnauthorizedAccessException
             or SecurityException or NotSupportedException or ArgumentException or IOException)
         {
-            return Task.FromResult(new ToolResult(false, "无法读取该应用的可见窗口数量；没有切换窗口或发送输入。", "APP_STATUS_UNAVAILABLE"));
+            return Task.FromResult(new ToolResult(false, "无法读取该应用的进程和可见窗口数量；没有切换窗口或发送输入。", "APP_STATUS_UNAVAILABLE"));
         }
     }
 
@@ -1157,17 +1164,27 @@ public sealed partial class WindowsDesktopTools
         return matchingHandles.ToArray();
     }
 
-    private static int CountVisibleWindowsByExecutable(DesktopApp app)
+    private static DesktopAppStatus GetApplicationStatusByExecutable(DesktopApp app)
     {
         var processName = Path.GetFileNameWithoutExtension(app.Executable);
-        if (string.IsNullOrWhiteSpace(processName)) return -1;
+        if (string.IsNullOrWhiteSpace(processName)) return DesktopAppStatus.Unavailable;
+        int currentSessionId;
+        using (var currentProcess = Process.GetCurrentProcess())
+        {
+            try { currentSessionId = currentProcess.SessionId; }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or UnauthorizedAccessException
+                or SecurityException or NotSupportedException)
+            { return DesktopAppStatus.Unavailable; }
+        }
+
         var allowedProcessIds = new HashSet<int>();
         foreach (var process in Process.GetProcessesByName(processName))
         {
             try
             {
+                if (process.SessionId != currentSessionId) continue;
                 var imagePath = process.MainModule?.FileName;
-                if (string.IsNullOrWhiteSpace(imagePath)) return -1;
+                if (string.IsNullOrWhiteSpace(imagePath)) return DesktopAppStatus.Unavailable;
                 if (string.Equals(Path.GetFullPath(imagePath), app.Executable, StringComparison.OrdinalIgnoreCase))
                     allowedProcessIds.Add(process.Id);
             }
@@ -1175,12 +1192,12 @@ public sealed partial class WindowsDesktopTools
                 or SecurityException or NotSupportedException or ArgumentException)
             {
                 // A same-name process with an unreadable image makes the count ambiguous.
-                return -1;
+                return DesktopAppStatus.Unavailable;
             }
             finally { process.Dispose(); }
         }
 
-        if (allowedProcessIds.Count == 0) return 0;
+        if (allowedProcessIds.Count == 0) return new DesktopAppStatus(0, 0);
         var matchingHandles = new HashSet<IntPtr>();
         EnumWindowsProc callback = (handle, lParam) =>
         {
@@ -1190,14 +1207,16 @@ public sealed partial class WindowsDesktopTools
                 matchingHandles.Add(handle);
             return true;
         };
-        return EnumWindows(callback, IntPtr.Zero) ? matchingHandles.Count : -1;
+        return EnumWindows(callback, IntPtr.Zero)
+            ? new DesktopAppStatus(allowedProcessIds.Count, matchingHandles.Count)
+            : DesktopAppStatus.Unavailable;
     }
 
     private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController, IDesktopAppStatusController
     {
         public IDisposable? Start(ProcessStartInfo startInfo) => Process.Start(startInfo);
         public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => FindMatchingWindows(app);
-        public int GetVisibleWindowCount(DesktopApp app) => CountVisibleWindowsByExecutable(app);
+        public DesktopAppStatus GetApplicationStatus(DesktopApp app) => GetApplicationStatusByExecutable(app);
     }
 
     private sealed class SystemDesktopWindowController : IDesktopWindowController
