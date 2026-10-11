@@ -16,7 +16,7 @@
 
 本机代码模型均未通过首版统一准入。Qwen3.5-4B `coding-zh-v4`完整40题为9/40（R6/10、S0/10、M0/10、F3/10）；Ornith-1.0-9B在记录管线通过5/14后按早停门槛停止；MiMo、JEV、Qwen3.5-9B、Gemma与OxCoder没有达到完整40题门槛的证据。补丁锚点修复之后评测程序集集合SHA-256变为`59535ffaa40eb76a9f294fb5701e35225f31cef5281dac2262df1f5291de36b4`，旧结果不得视为新管线分数。2026-10-12新版评测程序集集合SHA-256为`958d587b39dbabd210ebb861ecea42cd6f53972fcb6fc120c8ba9e4c94c38a49`；Qwen3.5-4B完成R01–R10（6/10）及S01–S05（0/5），15题6/15后按最大31/40早停，M类未跑，生产配置不切换。
 
-桌宠普通用户会话、真实缩放/DPI/睡眠恢复、麦克风/扬声器、消息和通用UI后台可行性、六类场景端到端、登录/重启恢复、长期运行和回滚仍逐项待验收。持续从GitHub筛选WeChatNotifier（读本地会话库/进程内存）、FlaUI-MCP（含焦点、键盘、截图等宽工具）、AutoPi、Rynne、Ghost、Open Computer Use、DesktopAgent、dsh-computer-use-native、Netwright和FastCUA；均未安装或接入。只参考适合ToolBroker边界的取消/中断显示、锁定后台策略、计划预览、动作后结果差异、等待稳定和逐步核验思路；不采纳会抢焦点/鼠标/剪贴板、默认宽授权或依赖客户端内部数据的路线。具体边界见[开发进度与待办](docs/产品与进度/开发进度与待办.md)、[后续开发完整计划](docs/产品与进度/后续开发完整计划.md)及[GitHub开源项目借鉴记录](docs/开发与发布/GitHub开源项目借鉴记录.md)。
+桌宠普通用户会话、真实缩放/DPI/睡眠恢复、麦克风/扬声器、消息和通用UI后台可行性、六类场景端到端、登录/重启恢复、长期运行和回滚仍逐项待验收。持续从GitHub筛选WeChatNotifier（读本地会话库/进程内存）、FlaUI-MCP（含焦点、键盘、截图等宽工具）、AutoPi、Rynne、Ghost、Open Computer Use、DesktopAgent、dsh-computer-use-native、Netwright和FastCUA；均未安装或接入。只参考适合ToolBroker边界的取消/中断显示、锁定后台策略、计划预览、动作后结果差异、等待稳定和逐步核验思路；不采纳会抢焦点/鼠标/剪贴板、默认宽授权或依赖客户端内部数据的路线。R2桌宠复核另比较了四个固定GitHub快照；当前Host的VPet Core、自有银渐层姿态图及40%–160%缩放保存仍是首选，连续3D渲染仅作后续原型候选。具体判断见[开发进度与待办](docs/产品与进度/开发进度与待办.md)、[后续开发完整计划](docs/产品与进度/后续开发完整计划.md)及[GitHub开源项目借鉴记录](docs/开发与发布/GitHub开源项目借鉴记录.md)。
 
 ## 项目目标与首版边界
 

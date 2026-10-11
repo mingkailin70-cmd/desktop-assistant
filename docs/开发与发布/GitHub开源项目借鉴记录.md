@@ -2,6 +2,17 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 桌宠缩放、DPI与三维渲染对照
+
+| 项目与固定快照 | 公开资料核对 | 小K的取舍 |
+| --- | --- | --- |
+| [SixOfFive/DesktopPet](https://github.com/SixOfFive/DesktopPet/tree/4eeb333e1866f52163af1ea2f9c02d499141ddce)，`main`提交`4eeb333e1866f52163af1ea2f9c02d499141ddce` | README描述WinForms托盘与窗口、Silk.NET隐藏OpenGL上下文、离屏帧缓冲及`UpdateLayeredWindow`透明桌宠；角色可用GLB动画，贴图可替换。README当时列44个提交；Kenney角色素材注明CC0。该仓库的项目代码许可本轮未确认，素材许可不代表代码许可。 | 可作为“3D场景离屏渲染后合成透明窗口”的研究样例；不复制代码或素材，也不替换小K现有WPF/VPet Host。渲染循环、Win32分层窗口与WPF内容桥接会新增一套技术栈，尚无证据表明它比现有路线更省GPU或更稳定。 |
+| [woooooooooolf/deskpet3d](https://github.com/woooooooooolf/deskpet3d/tree/503361c788b83b836d47ac7c0027423c2eb43fe8)，`main`提交`503361c788b83b836d47ac7c0027423c2eb43fe8` | README说明其为C99、raylib 6.0、cJSON与Win32项目，支持透明窗口和GLB/glTF动作配置；LICENSE文件为GPL-3.0。README还声明由Codex生成实现和工程文档。 | 只参考模型/动作资源清单与可配置状态的组织方式。GPL-3.0与本项目依赖边界需要另行评估，且整套C渲染宿主不适合直接塞进WPF Host；不接入、不复制代码。 |
+| [ejwhf/DesktopPet-cc](https://github.com/ejwhf/DesktopPet-cc/tree/d3e77210e88ca355ad32d29977bd8237ef9ab6bb)，唯一提交`d3e77210e88ca355ad32d29977bd8237ef9ab6bb` | README描述.NET 8/WPF透明桌宠、40%–160%大小、托盘设置、配置备份和姿态清单；页面只显示1个提交，GitHub未检测到代码许可证。 | 缩放和配置持久化与小K已有`PetSizingPolicy`、外层Host窗口设置及`PetWindowPositionStore`重叠；不移植其实现。小K仍需真实桌面会话验收不同尺寸、重启、多屏与DPI。 |
+| [SorrowGod/desktop-pai-zong](https://github.com/SorrowGod/desktop-pai-zong/tree/99e8710c831c7548c1efc12749bd7f56b79c85be)，`main`提交`99e8710c831c7548c1efc12749bd7f56b79c85be` | README描述.NET 8/WPF、Per-Monitor V2、多屏/负坐标、按透明像素划分鼠标命中区和不激活的桌宠窗口；页面列16个提交。仓库元数据未检测到代码许可证；README还介绍远程兼容API设置。 | 仅把DPI、鼠标命中区域和窗口不激活列为小K实机验收检查点。不复用代码；远程模型路线不符合小K只在本机推理的要求。 |
+
+**本轮选择：** 小K已有固定.NET 10/WPF Host、VPet Core适配器、自制银渐层姿态PNG、40%–160%手动缩放和缩放/位置保存实现。上述项目没有提供可以不改架构直接嵌入、许可清晰且实机证明适合小K的三维组件；因此保持当前Host，继续使用自有3D渲染风格PNG驱动姿态，并把连续3D建模/动画作为独立原型候选，而不是替换助手核心。代码中缩放存在不等于界面验收通过；真实窗口合成、40/70/100/160%、重启、多屏/DPI、位置恢复、睡眠恢复和资源占用仍未验收。此次只读各项目公开README/许可证和GitHub提交元数据；没有克隆、安装、运行、复制代码或改动小K运行时依赖。
+
 ## 2026-10-12 复核 Trope CUA 与 Agent Desktop Harness
 
 - [tropeai/trope-cua](https://github.com/tropeai/trope-cua)（MIT）针对 Windows/macOS 桌面代理。其[安全约定](https://github.com/tropeai/trope-cua/blob/main/SAFETY.md)区分工具成功与后台安全：只有动作回执同时证明 `background_safe=true`、`cursor_moved=false`、`foreground_changed=false`，才把动作视为无打扰；[已知限制](https://github.com/tropeai/trope-cua/blob/main/docs/limits.md)说明部分 UIA 提供器、Chromium、游戏/画布界面仍会激活窗口或只能走隔离会话。可借鉴为小K未来的真实动作回执与“安全路由不可用即停止”准则；源码实现和实机表现未审计，本次未集成。
