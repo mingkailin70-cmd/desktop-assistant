@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using XiaoK.Adapters.Windows;
 
 internal static class UiAutomationReadOnlyProbe
 {
@@ -66,6 +67,15 @@ internal static class UiAutomationReadOnlyProbe
             var result = await Task.Run(() => ReadOnlyInspect(probe.Handle)).WaitAsync(TimeSpan.FromSeconds(10));
             if (result.AutomationId != AutomationId || result.Name != AccessibleName || !result.IsEnabled)
                 throw new InvalidOperationException("UIA只读查询没有返回合成控件的预期标识属性。");
+            var desktop = new WindowsDesktopTools(
+                [new DesktopApp("uia-probe", Environment.ProcessPath!)],
+                [], new SyntheticWindowProcessController(probe.Handle));
+            var isolated = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .ReadSnapshotAsync("uia-probe", CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
+            if (!isolated.Success || isolated.Data is null
+                || !isolated.Data.Contains(AutomationId, StringComparison.Ordinal)
+                || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal))
+                throw new InvalidOperationException($"隔离UIA工作进程未返回合成控件快照：{isolated.ErrorCode ?? isolated.Summary}");
             if (Volatile.Read(ref activationCount) != 0)
                 throw new InvalidOperationException("只读UIA查询触发了合成控件动作。");
             if (GetForegroundWindow() != foregroundBefore)
@@ -92,6 +102,12 @@ internal static class UiAutomationReadOnlyProbe
         var button = root.FindFirst(TreeScope.Descendants, condition)
             ?? throw new InvalidOperationException("UIA树中未找到合成按钮。");
         return (button.Current.AutomationId, button.Current.Name, button.Current.IsEnabled);
+    }
+
+    private sealed class SyntheticWindowProcessController(IntPtr handle) : IDesktopAppProcessController
+    {
+        public IDisposable? Start(System.Diagnostics.ProcessStartInfo startInfo) => null;
+        public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => [handle];
     }
 
     [DllImport("user32.dll")]

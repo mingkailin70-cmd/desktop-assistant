@@ -5,9 +5,12 @@
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/XiaoK.Adapters.Windows/XiaoK.Adapters.Windows.csproj" />
     <ProjectReference Include="../../src/XiaoK.Core/XiaoK.Core.csproj" />
+    <ProjectReference Include="../../src/XiaoK.Host/XiaoK.Host.csproj" />
     <ProjectReference Include="../../src/XiaoK.Storage/XiaoK.Storage.csproj" />
   </ItemGroup>
 </Project>

@@ -121,7 +121,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _broker = new ToolBroker(desktopTools, _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
             approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader,
-            _browserSessions, new InteractionCoordinator(desktopTools));
+            _browserSessions, new InteractionCoordinator(desktopTools), new WindowsUiAutomationSnapshotAdapter(desktopTools));
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -850,6 +850,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId);
 
         var lower = request.ToLowerInvariant();
+        if (category == "app-ui-snapshot")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateUserToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“读取界面控件：应用名”输入；目标必须是小K已登记的应用，且只能解析到一个当前可见窗口。", "UIA_TARGET_NOT_SUPPORTED");
+            return await ExecuteBackgroundAsync(proposal, token);
+        }
+
         if (category == "window")
         {
             var intent = AppLaunchIntentResolver.ResolveWindowActivation(request, GetConfiguredAppAliases());
@@ -1213,6 +1221,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (ApplicationUiAutomationPolicy.IsUserRequest(request)) return "app-ui-snapshot";
         if (AppLaunchIntentResolver.IsApplicationStatusRequest(request)) return "app-status";
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
         if (lower.StartsWith("打开隔离网页会话")) return "browser-session-open";

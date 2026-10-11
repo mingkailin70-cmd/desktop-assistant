@@ -59,7 +59,8 @@ public enum ToolExpectedOutcome
     BrowserSessionClosed = 25,
     BrowserSessionNavigated = 26,
     TextFileCreatedInConfiguredExport = 27,
-    ApplicationStatusObserved = 28
+    ApplicationStatusObserved = 28,
+    ApplicationUiSnapshotReturned = 29
 }
 
 public static class ApprovalAuditCatalog
@@ -93,6 +94,12 @@ public interface IPublicWebPageReader
 public interface IDynamicPublicWebPageReader
 {
     Task<ToolResult> ReadDynamicPageAsync(string url, CancellationToken cancellationToken);
+}
+
+/// <summary>Reads a bounded, transient snapshot of an explicitly selected allowlisted app UI.</summary>
+public interface IReadOnlyUiAutomationSnapshotReader
+{
+    Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken);
 }
 
 /// <summary>短时、无用户浏览器登录态的受限网页会话；状态只保留在进程内存中。</summary>

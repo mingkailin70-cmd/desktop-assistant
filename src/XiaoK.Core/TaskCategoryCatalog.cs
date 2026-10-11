@@ -7,6 +7,7 @@ public static class TaskCategoryCatalog
     {
         ["app"] = "应用操作",
         ["app-status"] = "应用状态查询",
+        ["app-ui-snapshot"] = "只读界面检查",
         ["window"] = "窗口切换",
         ["file"] = "文件查找",
         ["file-content-search"] = "文件内容查找",

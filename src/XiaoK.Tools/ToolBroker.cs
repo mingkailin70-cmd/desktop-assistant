@@ -18,6 +18,7 @@ public sealed class ToolBroker
     private readonly IDynamicPublicWebPageReader? _dynamicPublicWebPageReader;
     private readonly IPublicFileDownloader? _publicFileDownloader;
     private readonly IIsolatedBrowserSessionManager? _isolatedBrowserSessions;
+    private readonly IReadOnlyUiAutomationSnapshotReader? _uiAutomationSnapshots;
     private readonly InteractionCoordinator _interactionCoordinator;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
@@ -26,7 +27,8 @@ public sealed class ToolBroker
         IPublicFileDownloader? publicFileDownloader = null,
         IDynamicPublicWebPageReader? dynamicPublicWebPageReader = null,
         IIsolatedBrowserSessionManager? isolatedBrowserSessions = null,
-        InteractionCoordinator? interactionCoordinator = null)
+        InteractionCoordinator? interactionCoordinator = null,
+        IReadOnlyUiAutomationSnapshotReader? uiAutomationSnapshots = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -40,6 +42,7 @@ public sealed class ToolBroker
         _dynamicPublicWebPageReader = dynamicPublicWebPageReader;
         _publicFileDownloader = publicFileDownloader;
         _isolatedBrowserSessions = isolatedBrowserSessions;
+        _uiAutomationSnapshots = uiAutomationSnapshots;
         _interactionCoordinator = interactionCoordinator ?? new InteractionCoordinator();
     }
 
@@ -71,6 +74,9 @@ public sealed class ToolBroker
         {
             "app.launch.v1" => await _desktop.LaunchAsync(proposal, cancellationToken),
             "app.status.v1" => await _desktop.GetApplicationStatusAsync(proposal, cancellationToken),
+            "app.ui.snapshot.v1" => _uiAutomationSnapshots is null
+                ? new(false, "只读界面检查器未配置；没有访问应用界面。", "UIA_SNAPSHOT_UNAVAILABLE")
+                : await _uiAutomationSnapshots.ReadSnapshotAsync(proposal.Arguments["app_id"], cancellationToken),
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
@@ -145,6 +151,7 @@ public sealed class ToolBroker
         {
             "app.launch.v1" => ValidateAppLaunch(proposal),
             "app.status.v1" => ValidateAppStatus(proposal),
+            "app.ui.snapshot.v1" => ValidateApplicationUiSnapshot(proposal),
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
@@ -204,6 +211,16 @@ public sealed class ToolBroker
             && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
                 ? null
                 : InvalidProposal("应用状态查询只接受一个已登记 app_id，且目标必须与 app_id 一致。");
+    }
+
+    private static ToolResult? ValidateApplicationUiSnapshot(ToolProposal proposal)
+    {
+        var appId = proposal.Arguments.GetValueOrDefault("app_id");
+        return proposal.Arguments.Count == 1 && proposal.Arguments.ContainsKey("app_id")
+            && !string.IsNullOrWhiteSpace(appId) && appId.Length <= 64
+            && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : InvalidProposal("界面只读检查只接受一个已登记 app_id，且目标必须与 app_id 一致。");
     }
 
     private static ToolResult? ValidateWindowActivation(ToolProposal proposal)
@@ -569,6 +586,7 @@ public sealed class ToolBroker
     {
         "app.launch.v1" => ToolPrecondition.ApplicationAllowlisted,
         "app.status.v1" => ToolPrecondition.ApplicationAllowlisted,
+        "app.ui.snapshot.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
@@ -597,6 +615,7 @@ public sealed class ToolBroker
     {
         "app.launch.v1" => ToolExpectedOutcome.ApplicationWindowVisible,
         "app.status.v1" => ToolExpectedOutcome.ApplicationStatusObserved,
+        "app.ui.snapshot.v1" => ToolExpectedOutcome.ApplicationUiSnapshotReturned,
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,

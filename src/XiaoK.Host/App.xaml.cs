@@ -31,6 +31,12 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length > 0 && string.Equals(e.Args[0], "--uia-readonly-worker", StringComparison.Ordinal))
+        {
+            Environment.ExitCode = await WindowsUiAutomationWorkerEntryPoint.RunAsync();
+            Shutdown();
+            return;
+        }
         if (e.Args.Length > 0 && string.Equals(e.Args[0], "--pdf-worker", StringComparison.Ordinal))
         {
             Environment.ExitCode = WindowsPdfTextWorkerEntryPoint.Run(e.Args);

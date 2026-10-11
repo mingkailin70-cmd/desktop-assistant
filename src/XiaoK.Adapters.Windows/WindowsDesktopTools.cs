@@ -28,6 +28,8 @@ public readonly record struct DesktopAppStatus(int RunningProcessCount, int Visi
     public static DesktopAppStatus Unavailable => new(-1, -1);
 }
 
+public sealed record DesktopUiAutomationTarget(long WindowHandle, int ProcessId, string ExecutablePath);
+
 public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
 
 internal enum WindowMatchStatus { NotFound, Unique, Ambiguous }
@@ -130,6 +132,63 @@ public sealed partial class WindowsDesktopTools
         }
         _searchRoots = allowedRoots;
         _exportRoot = NormalizeLocalPath(exportRoot);
+    }
+
+    public bool TryResolveUiAutomationTarget(string appId, out DesktopUiAutomationTarget? target, out string errorCode)
+    {
+        target = null;
+        errorCode = "UIA_TARGET_UNAVAILABLE";
+        if (string.IsNullOrWhiteSpace(appId) || !_apps.TryGetValue(appId, out var app))
+        {
+            errorCode = "APP_NOT_ALLOWLISTED";
+            return false;
+        }
+
+        IReadOnlyCollection<IntPtr> candidates;
+        try { candidates = _appProcessController.GetVisibleWindowHandles(app); }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception
+            or UnauthorizedAccessException or SecurityException or NotSupportedException or ArgumentException)
+        { return false; }
+
+        var selection = WindowMatchSelector.Select(candidates);
+        if (selection.Status == WindowMatchStatus.NotFound)
+        {
+            errorCode = "APP_WINDOW_NOT_FOUND";
+            return false;
+        }
+        if (selection.Status == WindowMatchStatus.Ambiguous)
+        {
+            errorCode = "APP_WINDOW_AMBIGUOUS";
+            return false;
+        }
+
+        var handle = selection.Handle;
+        if (!IsWindow(handle) || !IsWindowVisible(handle))
+        {
+            errorCode = "APP_WINDOW_UNAVAILABLE";
+            return false;
+        }
+
+        var threadId = GetWindowThreadProcessId(handle, out var rawProcessId);
+        if (threadId == 0 || rawProcessId == 0 || rawProcessId > int.MaxValue) return false;
+        try
+        {
+            using var process = Process.GetProcessById((int)rawProcessId);
+            using var currentProcess = Process.GetCurrentProcess();
+            if (process.SessionId != currentProcess.SessionId) return false;
+            var imagePath = process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(imagePath)
+                || !string.Equals(Path.GetFullPath(imagePath), app.Executable, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            target = new DesktopUiAutomationTarget(handle.ToInt64(), (int)rawProcessId, app.Executable);
+            errorCode = string.Empty;
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception
+            or UnauthorizedAccessException or SecurityException or NotSupportedException or ArgumentException
+            or IOException)
+        { return false; }
     }
 
     public async Task<ToolResult> LaunchAsync(ToolProposal proposal, CancellationToken cancellationToken)
