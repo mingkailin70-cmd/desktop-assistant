@@ -26,11 +26,11 @@
 
 ## Microsoft winapp CLI：后台 UIA 与隔离验收候选
 
-- 项目：[microsoft/winappCli](https://github.com/microsoft/WinAppCli)，本次核对的公开稳定发布为 `v0.7.1`，仓库许可证为 MIT；官方项目仍标记为 Public Preview，处于实验与积极开发阶段。
-- 可借鉴处：官方 UI 自动化文档区分 UIA 模式调用和系统级输入。`inspect`、`search`、`get-value`、`wait-for`、`set-value`、`invoke` 等使用 UIA pattern；`send-keys`、鼠标手势等需要交互桌面且目标窗口前台。UIA 只读命令可以并发；会接触物理桌面的命令使用轮次仲裁。官方还展示以 `--on sandbox` 将应用和 UI 操作放进 Windows Sandbox。
-- 与小K的关系：未来可用于**离线验收宿主**，先核对控件树、AutomationId、值读回和失败状态；桌面交互测试优先尝试 Sandbox。产品运行时仍只能经固定 `ToolBroker` 动作和 `InteractionCoordinator`，不能把 CLI 的任意 `ui` 命令直接开放给模型。
-- 当前决定：不安装、不增加 NuGet 依赖，也不启用 Windows Sandbox 系统功能。CLI仍是Public Preview，Sandbox功能是否适合当前Windows版本、硬件和账户策略需要单独检查；未确认隔离前，任何实际输入测试都不得指向用户桌面。UIA pattern 方法也必须逐应用核实是否保持焦点和窗口状态。
-- 引入前检查：锁定正式发布版本与二进制散列，审阅命令Schema及其输入注入/截图/窗口激活副作用，核对依赖许可证和遥测；先在小K自有合成窗口中验证无焦点变化，再考虑Sandbox中的安装版检查。
+- 项目：[microsoft/winappCli](https://github.com/microsoft/WinAppCli)，本次核对公开稳定发布 `v0.7.1`（2026-10-01，提交`e3cd0b94f3e7b776ac51ba0564f4908094e979b5`）；仓库为MIT，但官方仍标记Public Preview。该版本文档固定在[UI Automation v0.7.1](https://github.com/microsoft/winappCli/blob/v0.7.1/docs/ui-automation.md)。不能把可变的`main`文档或未发布功能自动当作此稳定版本能力。
+- 可借鉴处：它把桌面任务按并发冲突分三档：`inspect/search/get-value/wait-for`等只读查询可以并发；`set-value`与UIA滚动不注入物理输入、不取得桌面焦点，但因会改变目标应用状态而在自动化工作流间串行；`invoke`、截图、焦点、键鼠/触控注入等按桌面独占轮次执行。截图可能恢复最小化窗口或把目标拉到前台；Sandbox启动/重连也可能短暂切换焦点。该分类比“是否调用UIA API”更能描述干扰风险。工具还要求唯一/消歧后的控件选择，对模糊选择失败关闭，并在控件变化后重新发现目标。
+- 与小K的关系：小K应借鉴三档交互能力、目标唯一性、过期目标重定位和独立结果核验；ToolBroker仍是唯一动作入口。winapp CLI的桌面仲裁只覆盖共同使用该CLI的进程，文档明确直接调用UI Automation NuGet库不在其仲裁保证内；因此小K若直接用FlaUI或Windows UIA API，必须由小K自己的协调器串行仲裁，不能因“后台UIA”就宣称不会打断用户。后台值写入虽不抢焦点，仍可能和用户同时编辑同一个应用冲突。
+- 当前决定：不安装CLI、不增加NuGet依赖、不启用Windows Sandbox，也未对真实应用发送输入。它是公共预览，官方README提醒`main`与稳定发布行为可能不同；其宽泛工具面和命令协调不直接接入小K。下一步先在小K自有合成窗口建立UIA探针与小K内的交互仲裁：只读查询、目标应用状态写入、物理桌面独占分别设准入；当前前台应用不得被后台改写，无法保证时返回需用户介入。之后再决定是否以锁定版FlaUI用于有限的Host适配器或仅保留为测试依赖。
+- 来源：[v0.7.1 UI Automation 文档](https://github.com/microsoft/winappCli/blob/v0.7.1/docs/ui-automation.md)、[v0.7.1 Release](https://github.com/microsoft/winappCli/releases/tag/v0.7.1)、[MIT许可证](https://github.com/microsoft/winappCli/blob/v0.7.1/LICENSE)、[官方README的Public Preview说明](https://github.com/microsoft/winappCli/blob/main/README.md)。文档中的“不取焦点”属于CLI对其特定命令路径的描述，不代表小K直接调用同类UIA pattern已通过本机无干扰验收。
 
 ## Microsoft Agent Framework：检查点与人工交接思路
 
