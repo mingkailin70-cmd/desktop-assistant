@@ -2,7 +2,7 @@
 
 新增固定后台工具`file.create.xlsx.v1`，固定使用微软Open XML SDK 3.5.1（MIT），只创建一个“数据”工作表并把所有单元格作为无公式内联文本写入；保留前导零。最多32列、500条数据行、16,000字符/64 KiB；拒绝公式、路径、覆盖和非`.xlsx`扩展名。工作簿经OpenXmlValidator验证后，沿用固定Exports目录、临时文件、拒绝覆盖发布、最终文件身份和SHA-256核验。不会启动Excel或桌面输入。此安装版尚未由用户实际输入命令或在Excel打开生成文件。
 
-固定SDK 10.0.401 Release全解决方案构建0警告、0错误；完整Windows安全套件124项通过、0项跳过，其中新增工作簿Open XML结构、值保真、公式拒绝、错误目标、覆盖、取消等用例。自包含签名MSIX `artifacts\msix-validation\6a081a2f84d7450d9eb4ae5993288f18\XiaoK-signed-validation.msix`，141,530,314字节，SHA-256 `AAE27DA548753C10DD5EB47F16F38789EF04270D90630848E1119DEA4A9F08E4`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.109.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与自包含发布版Host DLL SHA-256均为`515271F215FF41591581ABE69896F90BDA858C3F79FAB9D6D041F65F5E05EF25`。安装器未启动Host或模型，安装后进程数均为0。本阶段提交和GitHub Actions记录待推送后补充。
+固定SDK 10.0.401 Release全解决方案构建0警告、0错误；完整Windows安全套件124项通过、0项跳过，其中新增工作簿Open XML结构、值保真、公式拒绝、错误目标、覆盖、取消等用例。自包含签名MSIX `artifacts\msix-validation\6a081a2f84d7450d9eb4ae5993288f18\XiaoK-signed-validation.msix`，141,530,314字节，SHA-256 `AAE27DA548753C10DD5EB47F16F38789EF04270D90630848E1119DEA4A9F08E4`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.109.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与自包含发布版Host DLL SHA-256均为`515271F215FF41591581ABE69896F90BDA858C3F79FAB9D6D041F65F5E05EF25`。安装器未启动Host或模型，安装后进程数均为0。实现提交`aa34b7a`已推送至`origin/main`；GitHub Actions Build #482的Build和Desktop Experience checks均通过（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38175866335)）。
 
 ## v0.1.108.0 CSV记录边界严格校验（2026-10-12）
 
