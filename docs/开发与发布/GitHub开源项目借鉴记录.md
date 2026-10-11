@@ -81,6 +81,20 @@
 - 当前决定：不集成其二进制、完整规则库或扫描命令。小K只需要在代码上下文发送前做本地脱敏，不能把扫描结果或原始匹配内容写入日志；本地规则集远小于Gitleaks，因此只能作为纵深防御，不得宣称能发现所有密钥。规则需按脱敏合成样本和允许的模板占位符持续回归。
 - 来源：[v8.30.1默认规则](https://github.com/gitleaks/gitleaks/blob/v8.30.1/config/gitleaks.toml)、[v8.30.1发布页](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1)、[MIT许可证](https://github.com/gitleaks/gitleaks/blob/v8.30.1/LICENSE)。只参考规则类别，未复制其完整配置或代码。
 
+## 2026-10-12 UFO²、Ghost与VPet Core复核
+
+本次继续从GitHub官方仓库核对桌面Agent与桌宠实现。这里只记录公开文档中的设计线索；没有克隆、安装或运行第三方代码，也没有将其宣传描述视为本机实测。
+
+| 项目 | 可借鉴点 | 与小K的差距及决定 |
+| --- | --- | --- |
+| [Microsoft UFO²/UFO³](https://github.com/microsoft/UFO) | UFO²把Windows主协调与应用专属执行器分层；UIA、Win32/WinCOM和应用接口可按应用选择。UFO³又增加跨设备DAG调度。官方仓库标注MIT。 | 小K仍是单机本地应用，现有`ToolBroker`负责唯一副作用入口；不引入Python多Agent框架或跨设备调度。UFO文档的示例配置涉及云API密钥，工具面还包含截图、文件和应用操作；只参考应用适配器分层及运行状态编排，所有动作继续服从小K权限策略和本地推理要求。 |
+| [NORTHTEKDevs/Ghost](https://github.com/NORTHTEKDevs/ghost) | README提出锁定后台焦点策略、目标窗口锚定、动作后读回验证，并提供本机自检命令。可继续验证“无法后台执行就明确失败”和每步独立核验的设计。仓库标注MIT。 | README还描述shell、浏览器DevTools、剪贴板、全局输入及MCP工具；文中无干扰率和背景操作效果是项目维护者自述，尚非小K或独立实测。宽泛权限面不符合直接集成条件；不接入其服务或代码，只把焦点保持/结果核验纳入本机合成用例候选。 |
+| [LorisYounger/VPet](https://github.com/LorisYounger/VPet) | 官方README说明其`VPet-Simulator.Core`可嵌入WPF，并分出图形核心、动画加载与显示组件；这与当前小K已接入的VPet Core相符。 | 仓库代码标示Apache-2.0，但默认动画和图片有独立授权要求：非商用分发须注明来源并给出仓库链接；商用还涉及首次及可访问页面告知、不可出售动画，且README要求联系作者。小K使用自有猫咪姿态图，不复制默认动画或Zip图库；发版前核验实际包内容及第三方素材清单。 |
+
+**结论：** 当前新增的可执行设计原则是：为每一步声明目标和允许能力，固定并核验目标，再执行并读回结果；任何能力若可能改变前台焦点、全局输入或桌宠素材授权未核清，就不把它标为“后台安全”。未新增依赖或修改权限边界。
+
+来源：[UFO²架构说明](https://github.com/microsoft/UFO/blob/main/documents/docs/ufo2/overview.md)、[UFO官方快速开始](https://github.com/microsoft/UFO/blob/main/documents/docs/getting_started/quick_start_ufo2.md)、[UFO许可证](https://github.com/microsoft/UFO/blob/main/LICENSE)、[Ghost README](https://github.com/NORTHTEKDevs/ghost)、[Ghost许可证](https://github.com/NORTHTEKDevs/ghost/blob/main/LICENSE)、[VPet README及动画授权](https://github.com/LorisYounger/VPet/blob/main/README.md)。页面指向的`main`分支可变；这些条目用于设计参考，若后续考虑引入代码或依赖，需另行固定提交并复核许可证、依赖、网络和本机行为。
+
 本轮只阅读公开仓库页面和官方文档，没有克隆、安装、运行这些候选，也没有读取本机通知正文、聊天窗口或真实项目凭证。可借鉴项限于独立来源适配、通知ID基线/队列、显式白名单、UIA能力分层和凭证格式测试；第三方采集、数据存储、网络转发、MCP运行面和前台自动化均不复用。
 
 ## 后续调研规则
