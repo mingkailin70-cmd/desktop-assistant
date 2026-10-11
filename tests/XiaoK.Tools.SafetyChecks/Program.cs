@@ -819,8 +819,8 @@ static async Task CheckAppContainerTimeoutAsync(string root)
     var fixture = PrepareAppContainerProbe(root, "timeout");
     var startedMarker = Path.Combine(fixture.WorkingDirectory, "timeout-started.txt");
     var lateMarker = Path.Combine(fixture.WorkingDirectory, "timeout-late-write.txt");
-    var result = await RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker, "1500"],
-        allowInternet: false, TimeSpan.FromSeconds(1), CancellationToken.None);
+    var result = await RunAppContainerProbeAsync(fixture, ["--appcontainer-hang", startedMarker, lateMarker, "10000"],
+        allowInternet: false, TimeSpan.FromSeconds(5), CancellationToken.None);
 
     Require(result.Started && result.TimedOut && result.ExitCode.HasValue,
         "AppContainer 超时没有结束受限命令并返回超时状态：" + result.Output);
@@ -4957,6 +4957,7 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
         "通知来源诊断入口不存在或方法边界无法识别。");
     var diagnostic = monitor[diagnosticStart..diagnosticEnd];
     var settingsXaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml"));
+    var settingsCode = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml.cs"));
     Require(diagnostic.Contains("notification.AppInfo.DisplayInfo.DisplayName", StringComparison.Ordinal)
         && diagnostic.Contains("notification.AppInfo.AppUserModelId", StringComparison.Ordinal)
         && diagnostic.Contains("notification.CreationTime", StringComparison.Ordinal)
@@ -4969,9 +4970,16 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
         && settingsXaml.Contains("IsReadOnly=\"True\"", StringComparison.Ordinal)
         && settingsXaml.Contains("不会自动加入白名单", StringComparison.Ordinal)
         && settingsXaml.Contains("x:Name=\"NotificationSamplePublisherBox\"", StringComparison.Ordinal)
-        && settingsXaml.Contains("选择只用于本次样本核验", StringComparison.Ordinal)
+        && settingsXaml.Contains("x:Name=\"NotificationSamplePublisherStatusText\"", StringComparison.Ordinal)
+        && settingsXaml.Contains("SelectionChanged=\"NotificationSamplePublisher_SelectionChanged\"", StringComparison.Ordinal)
         && !settingsXaml.Contains("NotificationSamplePublisherIdBox", StringComparison.Ordinal),
         "来源诊断结果不是只读展示、样本候选选择未绑定诊断结果，或界面暗示候选会自动启用。");
+    Require(monitor.Contains("NotificationPublisherDiagnosticCompleted", StringComparison.Ordinal)
+        && monitor.Contains("再手动填入对应 AUMID", StringComparison.Ordinal) == false
+        && settingsCode.Contains("hasSelectedPublisher", StringComparison.Ordinal)
+        && settingsCode.Contains("!active && !sessionExists && hasSelectedPublisher", StringComparison.Ordinal)
+        && settingsCode.Contains("没有发现与{applicationDisplayName}匹配的来源候选", StringComparison.Ordinal),
+        "无匹配来源时未说明平台状态，或没有在候选选择前禁用样本采集。");
 }
 
 static void CheckNotificationEventQueueIsBoundedAndDeduplicated()

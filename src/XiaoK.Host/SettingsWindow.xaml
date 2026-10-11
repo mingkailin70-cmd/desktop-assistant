@@ -207,9 +207,12 @@
                             </ComboBox>
                             <ComboBox x:Name="NotificationSamplePublisherBox" MinHeight="30" Padding="6,4"
                                       DisplayMemberPath="DisplayText"
+                                      SelectionChanged="NotificationSamplePublisher_SelectionChanged"
                                       ToolTip="只能选择最近一次只读来源检查发现、且显示名与所选平台匹配的候选；不会修改持续监听白名单"/>
                         </DockPanel>
-                        <TextBlock Text="先运行上方只读来源检查，再选择匹配的平台候选。选择只用于本次样本核验，不会自动启用通知监听。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBlock x:Name="NotificationSamplePublisherStatusText"
+                                   Text="请先运行上方只读来源检查，再选择匹配的平台候选。不会手动输入 AUMID，也不会自动启用通知监听。"
+                                   FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                             <Button x:Name="StartNotificationSampleCaptureButton" Content="开始样本核验…" Click="StartNotificationSampleCapture_Click" Margin="0,0,6,0"/>
                             <Button x:Name="StopNotificationSampleCaptureButton" Content="停止采集" Click="StopNotificationSampleCapture_Click" Margin="0,0,6,0"/>

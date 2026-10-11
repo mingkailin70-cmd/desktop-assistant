@@ -30,6 +30,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private HashSet<string> _wechatPublisherIds = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _qqPublisherIds = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, NotificationPublisherCandidate> _lastPublisherCandidates = new(StringComparer.OrdinalIgnoreCase);
+    private bool _publisherDiagnosticCompleted;
     private NotificationFormatSampleCapture? _sampleCapture;
     private CancellationTokenSource? _sessionCancellation;
     private bool _baselineReady;
@@ -49,6 +50,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     public bool NotificationSampleCaptureActive => _sampleCapture?.IsActive == true;
     public bool NotificationSampleCaptureSessionExists => _sampleCapture is not null;
     public string NotificationSampleStatus => _sampleCapture?.Status ?? "尚未启动通知样本核验。";
+    public bool NotificationPublisherDiagnosticCompleted => _publisherDiagnosticCompleted;
 
     public IReadOnlyList<NotificationPublisherCandidate> GetSamplePublisherCandidates(string applicationId) =>
         NotificationPublisherDiagnosticPolicy.FilterForApplication(_lastPublisherCandidates.Values, applicationId);
@@ -161,6 +163,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             return "通知来源诊断必须从小K设置界面发起。";
         if (_disposed) return "小K正在退出。";
         _lastPublisherCandidates.Clear();
+        _publisherDiagnosticCompleted = false;
         if (XiaoKSettings.IsDiagnosticsMode)
             return "诊断模式不访问系统通知。";
         if (!WindowsPackageIdentity.IsPresent)
@@ -185,13 +188,14 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             var candidates = NotificationPublisherDiagnosticPolicy.Project(sources);
             _lastPublisherCandidates = candidates.ToDictionary(candidate => candidate.AppUserModelId,
                 candidate => candidate, StringComparer.OrdinalIgnoreCase);
+            _publisherDiagnosticCompleted = true;
             if (candidates.Count == 0)
                 return "最近的系统 Toast 中没有显示名含“微信 / WeChat / Weixin / QQ”的有效来源标识。只检查了应用显示名、AUMID和创建时间，没有读取正文、保存或启动持续监听。";
 
             var lines = candidates.Select(candidate =>
                 $"{candidate.DisplayName} | {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount} | 最近出现：{candidate.LatestNotificationTimeUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}");
             return "只读来源候选（当前通知快照，最多检查512条）：\n" + string.Join("\n", lines)
-                + "\n最近出现时间仅用于与你看到的通知对照。候选仍未验证稳定身份；不会自动写入白名单。未读正文、未保存结果、未启用持续监听。请结合你明确识别的客户端通知核对后，再手动填入对应 AUMID。";
+                + "\n最近出现时间仅用于与你看到的通知对照。候选仍未验证稳定身份；不会自动写入白名单。未读正文、未保存结果、未启用持续监听。可在下方按平台筛选候选，仅用于你确认后的单次样本核验。";
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {

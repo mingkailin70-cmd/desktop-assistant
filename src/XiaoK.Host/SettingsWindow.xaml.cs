@@ -566,10 +566,19 @@ public partial class SettingsWindow : Window
         RefreshNotificationSamplePublisherCandidates();
     }
 
+    private void NotificationSamplePublisher_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_notificationMonitor is null) return;
+        if (NotificationSamplePublisherBox.SelectedItem is NotificationPublisherCandidateChoice selected)
+            NotificationSamplePublisherStatusText.Text =
+                $"已选中 {selected.DisplayText}。选择仅用于本次核验；开始前仍会再次展示采集范围并等待确认。";
+        UpdateNotificationSampleButtons();
+    }
+
     private void RefreshNotificationSamplePublisherCandidates()
     {
         if (NotificationSamplePublisherBox is null || NotificationSampleAppBox is null
-            || _notificationMonitor is null) return;
+            || NotificationSamplePublisherStatusText is null || _notificationMonitor is null) return;
 
         var applicationId = (NotificationSampleAppBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string;
         var candidates = _notificationMonitor.GetSamplePublisherCandidates(applicationId ?? string.Empty)
@@ -578,6 +587,14 @@ public partial class SettingsWindow : Window
             .ToArray();
         NotificationSamplePublisherBox.ItemsSource = candidates;
         NotificationSamplePublisherBox.SelectedIndex = -1;
+        var applicationDisplayName = applicationId?.Equals("wechat", StringComparison.OrdinalIgnoreCase) == true
+            ? "微信" : applicationId?.Equals("qq", StringComparison.OrdinalIgnoreCase) == true ? "QQ" : "所选平台";
+        NotificationSamplePublisherStatusText.Text = !_notificationMonitor.NotificationPublisherDiagnosticCompleted
+            ? "请先运行上方只读来源检查；若检查失败，请按上方状态处理。不会手动输入 AUMID，也不会自动启用监听。"
+            : candidates.Length == 0
+                ? $"只读检查已完成，但没有发现与{applicationDisplayName}匹配的来源候选。请等待该应用自然显示系统通知后重试；不要手动填写 AUMID。"
+                : $"只读检查发现 {candidates.Length} 个与{applicationDisplayName}名称匹配的来源候选。来源名称不证明联系人或私聊身份；选择仅用于一次性样本核验。";
+        UpdateNotificationSampleButtons();
     }
 
     private void StopNotificationSampleCapture_Click(object sender, RoutedEventArgs e)
@@ -631,12 +648,16 @@ public partial class SettingsWindow : Window
     {
         var active = _notificationMonitor.NotificationSampleCaptureActive;
         var sessionExists = _notificationMonitor.NotificationSampleCaptureSessionExists;
-        StartNotificationSampleCaptureButton.IsEnabled = !active && !sessionExists;
+        var applicationId = (NotificationSampleAppBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string;
+        var selectedPublisher = NotificationSamplePublisherBox.SelectedItem as NotificationPublisherCandidateChoice;
+        var hasSelectedPublisher = selectedPublisher is not null
+            && string.Equals(selectedPublisher.ApplicationId, applicationId, StringComparison.OrdinalIgnoreCase);
+        StartNotificationSampleCaptureButton.IsEnabled = !active && !sessionExists && hasSelectedPublisher;
         StopNotificationSampleCaptureButton.IsEnabled = active;
         ClearNotificationSamplesButton.IsEnabled = sessionExists;
         InspectNotificationPublishersButton.IsEnabled = !active;
         NotificationSampleAppBox.IsEnabled = !active;
-        NotificationSamplePublisherBox.IsEnabled = !active;
+        NotificationSamplePublisherBox.IsEnabled = !active && NotificationSamplePublisherBox.Items.Count > 0;
     }
 
     private static string FormatNotificationSamples(IEnumerable<NotificationFormatSample> samples)
