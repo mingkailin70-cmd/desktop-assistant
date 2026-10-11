@@ -164,3 +164,14 @@
 本次在线查看三个仓库的README、许可元数据和指定默认分支提交；没有克隆、安装、运行或复用代码。研究结果支持继续坚持ToolBroker窄工具和显式失败。UIA/窗口消息可作为单应用隔离实验候选，但除非在用户继续操作另一窗口时有可重复焦点、输入、目标结果和失败路径证据，不把它宣称为普遍后台控制。截图/视觉路径也不能用于读取被禁止持久化的通知或聊天内容。
 
 来源：[open-computer-use快照](https://github.com/opensymph/open-computer-use/tree/5b433b98019c18201a15d11e8c3cb0010879a3d8)、[DesktopAgent快照](https://github.com/alessiobianchini/DesktopAgent/tree/6a721a5c1cc6c5a49b81065b9845de5d87af96c1)、[dsh-computer-use-native快照](https://github.com/dao-awa/dsh-computer-use-native/tree/2005a001f40b47c5f9fd91a4ee827e1007ec7923)。项目信息与README会变化；未进行本机集成验证。
+
+## 2026-10-12 GitHub R0 Windows通知候选复核
+
+| 项目 | 可借鉴内容 | 与小K的差距及决定 |
+| --- | --- | --- |
+| [RavelloH/WinToastRelay](https://github.com/RavelloH/WinToastRelay) | GitHub仓库标注MIT；README介绍使用`UserNotificationListener`和`NotificationChanged`事件、先建立Toast基线、按应用过滤，并通过打包身份在运行时请求通知访问。 | 可参考通知事件、基线和权限状态管理。它的产品用途是把可见通知正文发送到Bark、Telegram或自定义Webhook，并保留投递状态；这与小K的本地处理和原始通知不持久化要求不符。通用Toast转发也没有证明能可靠区分微信/QQ私聊、群聊或稳定联系人身份，故不集成。 |
+| [chengamu/wechat-sdk](https://github.com/chengamu/wechat-sdk) | README展示用Windows UI Automation定位微信控件、按周期扫描界面和版本化选择器。 | README也明确列出模拟键盘、鼠标和剪贴板操作；这些会抢用户输入/焦点或改写剪贴板，且轮询读取界面并不等同于合规Toast读取。仅保留其版本诊断和选择器维护作为研究线索，不运行、不接入。 |
+
+这轮GitHub检索没有找到能在不读客户端数据库/进程、不注入、不抢焦点且可验证稳定会话身份的微信/QQ适配器。小K已经有Windows Toast监听入口；当前闸门卡在自然可见Toast样本、真实来源关联、私聊/群聊分类和会话稳定标识，不能用第三方README声称替代本机证据。监控仍关闭，不发送试探消息。
+
+来源：[WinToastRelay README与许可](https://github.com/RavelloH/WinToastRelay)、[WinToastRelay隐私说明](https://github.com/RavelloH/WinToastRelay/blob/main/PRIVACY.md)、[wechat-sdk README](https://github.com/chengamu/wechat-sdk)。功能与许可信息来自仓库自述，没有作为小K实测或验收结论。
