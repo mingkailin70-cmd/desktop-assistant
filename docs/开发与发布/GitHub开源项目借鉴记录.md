@@ -140,3 +140,15 @@
 本次仅阅读上述GitHub仓库公开README，没有克隆、安装、运行或复制代码；未新增依赖。AutoPi仓库README保留MIT说明；Rynne与Ghost的许可证和依赖不是本次核验范围，不能据此引入其代码。当前任务取消状态是小K自身实现，需经仓库安全检查与界面验收后再记为交付。
 
 来源：[AutoPi README](https://github.com/shoelace66/AutoPi#what-autopi-can-do)、[Rynne README](https://github.com/KremlevLev/Rynne#remember-and-continue)、[Ghost后台模式说明](https://github.com/NORTHTEKDevs/ghost#background-mode-agent-harness--computer-use)。仓库默认分支页面会变化；本次用作设计参考，没有锁定候选提交或验证其产品声明。
+
+## 2026-10-12 Windows无焦点自动化与计划预览复核
+
+| 项目 | 固定快照/公开信息 | 对小K的取舍 |
+| --- | --- | --- |
+| [open-computer-use](https://github.com/opensymph/open-computer-use) | 核对`main`提交`5b433b98019c18201a15d11e8c3cb0010879a3d8`，MIT。README提供UIA/Win32、本地隔离操作和按控件操作；同时提供窗口/桌面输入工具，且Windows全局输入另有环境变量开关。 | 不把MCP整套权限接入ToolBroker。参考其针对窗口的无障碍树操作方向；小K仍按固定工具逐个暴露，禁止隐藏的全局鼠标/键盘回退。其README描述并不构成小K无干扰证明。 |
+| [DesktopAgent](https://github.com/alessiobianchini/DesktopAgent) | 核对`main`提交`6a721a5c1cc6c5a49b81065b9845de5d87af96c1`。README称有应用/窗口白名单、危险动作确认、限速、急停、编辑式计划预览、校验和dry-run；GitHub元数据未给出SPDX许可证，本轮未核实代码或依赖。 | 这些交互与小K的审批、撤销和安全闸门方向一致，但当前小K面向明确用户任务直接执行受限工具；不照搬整套规划UI，不采用未核明许可的源码。未来若增加多步计划，先补可读计划、工具参数校验和只读模拟，再考虑执行。 |
+| [dsh-computer-use-native](https://github.com/dao-awa/dsh-computer-use-native) | 核对`master`提交`2005a001f40b47c5f9fd91a4ee827e1007ec7923`，MIT。README描述以窗口截图建立带帧校验的坐标视口，再用窗口消息`PostMessage`执行后台鼠标/键盘动作；其自测指出Chromium/WinForms部分场景可用，但Windows XAML/WinUI/Notepad忽略消息，文本输入也可能使目标窗口激活。仓库当时显示0 Stars。 | 这是很新的探索项目，项目方测试仅作线索。坐标输入、PostMessage和截图仍无法普遍保证目标安全或不干扰，且为视觉模型插件；小K不接入。可以参考“窗口尺寸变化后拒绝陈旧坐标”的防护思想，但小K目前不暴露坐标点击工具。 |
+
+本次在线查看三个仓库的README、许可元数据和指定默认分支提交；没有克隆、安装、运行或复用代码。研究结果支持继续坚持ToolBroker窄工具和显式失败。UIA/窗口消息可作为单应用隔离实验候选，但除非在用户继续操作另一窗口时有可重复焦点、输入、目标结果和失败路径证据，不把它宣称为普遍后台控制。截图/视觉路径也不能用于读取被禁止持久化的通知或聊天内容。
+
+来源：[open-computer-use快照](https://github.com/opensymph/open-computer-use/tree/5b433b98019c18201a15d11e8c3cb0010879a3d8)、[DesktopAgent快照](https://github.com/alessiobianchini/DesktopAgent/tree/6a721a5c1cc6c5a49b81065b9845de5d87af96c1)、[dsh-computer-use-native快照](https://github.com/dao-awa/dsh-computer-use-native/tree/2005a001f40b47c5f9fd91a4ee827e1007ec7923)。项目信息与README会变化；未进行本机集成验证。
