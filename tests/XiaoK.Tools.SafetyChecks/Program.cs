@@ -37,6 +37,14 @@ try
 if (OperatingSystem.IsWindows())
     TestProcessErrorMode.SuppressWindowsErrorDialogsForProcessTree();
 
+if (args.Length == 1 && args[0] == "--appcontainer-priority-probe")
+{
+    using var currentProcess = Process.GetCurrentProcess();
+    Console.WriteLine(currentProcess.PriorityClass);
+    Environment.ExitCode = currentProcess.PriorityClass == ProcessPriorityClass.BelowNormal ? 0 : 1;
+    return;
+}
+
 if (args.Length == 3 && args[0] == "--appcontainer-probe")
 {
     Environment.ExitCode = RunAppContainerProbe(args[1], args[2]);
@@ -773,6 +781,12 @@ static async Task CheckAppContainerFileBoundaryAsync(string root)
         "AppContainer 没有确认临时授权和身份已回收。");
     Require(result.Output.Contains("测试步骤未授予网络能力", StringComparison.Ordinal),
         "测试步骤没有报告其 AppContainer 网络能力配置。");
+
+    var priority = await RunAppContainerProbeAsync(fixture, ["--appcontainer-priority-probe"],
+        allowInternet: false, TimeSpan.FromSeconds(45), CancellationToken.None);
+    Require(priority.Started && priority.ExitCode == 0 && !priority.TimedOut
+        && priority.Output.Contains("BelowNormal", StringComparison.Ordinal),
+        "AppContainer子进程没有从CreateProcess时开始以BelowNormal优先级运行：" + priority.Output);
 
 }
 

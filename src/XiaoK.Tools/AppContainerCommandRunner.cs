@@ -31,6 +31,7 @@ internal static class AppContainerCommandRunner
     private const uint StartfUseStdHandles = 0x00000100;
     private const uint ExtendedStartupInfoPresent = 0x00080000;
     private const uint CreateSuspended = 0x00000004;
+    private const uint BelowNormalPriorityClass = 0x00004000;
     private const uint CreateNoWindow = 0x08000000;
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint JobObjectExtendedLimitInformationClass = 9;
@@ -354,7 +355,8 @@ internal static class AppContainerCommandRunner
             var commandLine = new StringBuilder(BuildCommandLine(executable, arguments));
             phase = "创建受限进程";
             if (!CreateProcessW(executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
-                    ExtendedStartupInfoPresent | CreateSuspended | CreateNoWindow | CreateUnicodeEnvironment,
+                    ExtendedStartupInfoPresent | CreateSuspended | BelowNormalPriorityClass
+                    | CreateNoWindow | CreateUnicodeEnvironment,
                     environmentBuffer, working, ref startup, out var processInformation))
                 throw LastWin32("Windows 拒绝在 AppContainer 中启动固定验证命令。");
 
