@@ -2,6 +2,26 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 复核 Trope CUA 与 Agent Desktop Harness
+
+- [tropeai/trope-cua](https://github.com/tropeai/trope-cua)（MIT）针对 Windows/macOS 桌面代理。其[安全约定](https://github.com/tropeai/trope-cua/blob/main/SAFETY.md)区分工具成功与后台安全：只有动作回执同时证明 `background_safe=true`、`cursor_moved=false`、`foreground_changed=false`，才把动作视为无打扰；[已知限制](https://github.com/tropeai/trope-cua/blob/main/docs/limits.md)说明部分 UIA 提供器、Chromium、游戏/画布界面仍会激活窗口或只能走隔离会话。可借鉴为小K未来的真实动作回执与“安全路由不可用即停止”准则；源码实现和实机表现未审计，本次未集成。
+- [xuyw1997/agent-desktop-harness](https://github.com/xuyw1997/agent-desktop-harness)（Apache-2.0，仓库自述仍为 Alpha）强调把桌面探索转为可读的 Robot Framework 流程，并在执行前验证脚本、输入和断言；这可作为未来重复流程及失败证据的参考。其安全说明明确 Python 执行环境是完整信任环境，不是沙箱；桌面权限范围也比小K首版宽。本次只审阅README和安全文件，不运行、不集成。
+- 两者都未证明能在微信/QQ登录会话中安全后台发送消息。小K继续遵循自己的精确联系人白名单、发送前逐条确认、结果不确定不重试；同一登录桌面中的后台安全仍须按应用逐项实机验证，不把上游项目自述当成本机证据。
+
+## 2026-10-12 采用微软 Roslyn 语法树
+
+- 上游：[dotnet/roslyn](https://github.com/dotnet/roslyn)，MIT；锁定NuGet包`Microsoft.CodeAnalysis.CSharp 5.9.0`及传递依赖，源提交`35d9211b841e7613c1d2f8f5af6d628ace696c4c`。微软说明语法树按C#语法生成结构节点，声明可从语法类型读取；Roslyn包页面列有精确版本与MIT许可。
+- 小K用法：把已脱敏C#快照解析为本地语法树，只抽取命名空间、类型、方法和局部函数声明名。每文件解析不超过128 Ki字符，每任务累计不超过2 Mi字符；每文件最多5个摘要符号，清单最多12,000字符，模型仍最多选4条精确路径。
+- 不执行或编译源码，不使用Roslyn语义模型，不扩大文件访问、写入或命令权限。整包增加约5.6 MB。没有复制Roslyn实现代码；发布包包含MIT告知，NuGet来源映射和锁文件固定版本及内容散列。
+- 效果仍待用完整40题任务集评估；0.1.113.0 Release构建通过并已签名安装，不代表代码任务质量门槛通过。
+- 来源：[Roslyn C#语法树指南](https://github.com/dotnet/roslyn/blob/35d9211b841e7613c1d2f8f5af6d628ace696c4c/docs/wiki/Getting-Started-C%23-Syntax-Analysis.md)、[NuGet 5.9.0包与依赖](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp/5.9.0)、[固定源码许可证](https://github.com/dotnet/roslyn/blob/35d9211b841e7613c1d2f8f5af6d628ace696c4c/License.txt)。
+
+## 2026-10-12 复核 Ghost 与 Rynne 桌面代理
+
+- [NORTHTEKDevs/ghost](https://github.com/NORTHTEKDevs/ghost)的README声称它默认后台控制，且自己启动的应用可放在隐藏桌面；同时公开了剪贴板、Shell、全局键鼠等广泛工具。README也承认`SendInput`不能在非输入桌面工作，部分Chromium UIA调用会激活窗口，焦点归还只能缩短干扰而不是绝对保证。只把“隔离运行由小K启动的应用实例”作为未来研究方向，不接入Ghost服务器或复制其代码；用户已经打开、带账号状态的客户端不能据此认定可安全后台操控。
+- [KremlevLev/Rynne](https://github.com/KremlevLev/Rynne)的README展示后台计划检查点、进程监控和文件回滚思路，也列出Groq/OpenRouter/Gemini并行代理、终端、MCP与持久化浏览器等能力。本次只读README，未审查其源代码和许可证；不引入项目，也不将其云模型/宽工具架构作为小K方案。其“逐步核验并保存检查点”可继续作为小K任务中心路线参考。
+- 两个项目自述功能均未由小K实测；候选宣传不作本机能力证据。
+
 ## 2026-10-12 GitHub参考：Aider 仓库地图
 
 - 项目：[Aider-AI/aider](https://github.com/Aider-AI/aider)，Apache-2.0。官方仓库地图文档说明，它把仓库文件及关键类、函数和签名压缩到有限上下文，并用依赖图排序挑选适合当前 token 预算的内容。

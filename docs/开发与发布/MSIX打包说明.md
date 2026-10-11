@@ -1,3 +1,11 @@
+## v0.1.113.0 Roslyn C# 声明索引（2026-10-12）
+
+编程代理将正则声明提取改为微软Roslyn 5.9.0 C#语法树。输入只来自已脱敏快照；仅解析`.cs`/`.csx`，单文件最多128 Ki字符、每任务累计最多2 Mi字符，响应取消令牌。只提取命名空间、类型、方法与局部函数名称，不绑定语义、不编译或执行源码。每文件最多5个摘要符号，提示清单仍不超过12,000字符，模型选择仍受最多4条清单路径限制。包版本固定、NuGet依赖散列锁定，安装包附Roslyn MIT告知。
+
+固定.NET SDK 10.0.401全解决方案Release构建0警告、0错误；未运行测试套件或40题编码评测。自包含签名MSIX `artifacts\msix-validation\ebd032be76a04ab69fa1bc8c86358f00\XiaoK-signed-validation.msix`，147,153,646字节，SHA-256 `F795137724E429539951A4496BD9918CFA290C1840EC4E78E8CE1314F4E098A8`。SignTool验签0警告、0错误；签名证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本次未修改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.113.0_neutral__g0ndt6g65c8pe`，状态`Ok`；安装版与发布版Host DLL SHA-256均为`0B1B627DCD3CD7083111D781DAF7943377BF1F59DB653A6D1EAD65B506FB0E8D`。安装未启动Host或模型，Host和llama-server进程均为0。
+
+提交`448beb7`的GitHub Actions Build #494因未声明锁文件中的`win-x64`运行时标识而以NU1004失败；修复提交`3bd5878`已推送，本机锁定还原和Actions同款Release构建通过，GitHub Actions Build #495现已成功（[修复构建](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38181727401)）。未重测40题质量，真实任务、模型通过率及普通界面流程待验收。
+
 ## v0.1.112.0 编码代理 C# 符号摘要（2026-10-12）
 
 本版在CodeTaskAgent的文件选择清单中加入本地C#符号摘要：从已脱敏源码提取命名空间、类型和方法名，按用户任务与文件路径/符号的词项重合度分配摘要预算；每个文件最多5个符号，清单仍限制12,000字符，模型只能输出精确路径并最多选择4个文件。文件写入、差异审阅、用户批准、验证命令和ToolBroker权限均未改变。该实现参考Aider仓库地图思想，没有引入Aider代码、第三方依赖或Tree-sitter。
