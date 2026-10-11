@@ -2,6 +2,18 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 GitHub继续筛选：UIA结果反馈与隔离桌面测试
+
+本轮只阅读公开README、许可证页和微软项目文档，没有克隆、下载、运行或集成候选。
+
+| 项目 | 可借鉴点 | 与小K的差距及决定 |
+| --- | --- | --- |
+| [ricfanin/netwright](https://github.com/ricfanin/netwright) | 仓库标注MIT，面向WPF、WinForms和WinUI；README描述了按控件执行UIA Pattern、等待目标可用/可见并等界面稳定、返回前后变化差异，以及把验证流程导出成回归测试。 | 同一README也说明键盘按键和右键会短暂取得焦点，并公开了窗口、截图、剪贴板、文件、系统等较宽工具面。只参考动作后的可观测结果、等待状态与测试导出；不接入其MCP工具，不对真实第三方窗口调用按键或扩展权限。 |
+| [Guojiz/FastCUA](https://github.com/Guojiz/FastCUA) | 仓库标注MIT；README主张UIA优先、语义不足时用截图/网格回退，并提供本地暂停/审批控制。 | README把项目标为实验性，并说明默认配置是Full access；一个常驻服务共享真实鼠标指针，支持键盘/鼠标输入，且本地操作历史可含截图。和小K“不能抢用户输入、只允许固定目标和最小工具”的要求冲突，不安装或集成；单独暂停入口的想法已由小K托盘控制覆盖。 |
+| [Microsoft winappCli：UI Automation](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md) 与 [Windows Sandbox执行说明](https://github.com/microsoft/winappCli/blob/main/docs/sandbox-execution.md) | 微软文档提供明确的Sandbox执行目标，可将自有测试应用部署到独立来宾环境并执行UIA检查；这可作为以后隔离WPF工具回归的备选环境。 | Sandbox准备/冷连接或重连可能短暂取得焦点；建置、还原和编译仍在宿主机，沙箱内应用也无法替代真实桌面客户端。只考虑用于隔离测试，不作为小K运行时或微信/QQ真实操作证据；启用Windows功能和重启前需单独确认是否符合本机条件。 |
+
+**本轮结论：** 小K后续可在ToolBroker允许的窄动作里统一返回“目标身份、动作结果、发生变化的字段、核验状态”，并在合成WPF窗口验证。UIA无法唯一定位、目标变化或前后状态不明时应停止并说明；不能自动降级为真实鼠标键盘、截图或剪贴板动作。Sandbox若进入开发环境选择，再先核对Windows版本、虚拟化和宿主机工作影响。
+
 ## 2026-10-12 GitHub持续筛选：桌面动作与宠物复用
 
 以下是继续筛查得到的候选；本次只核对公开README、仓库页面和许可证线索，没有克隆、运行或加入依赖。
