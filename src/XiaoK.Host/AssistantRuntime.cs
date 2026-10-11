@@ -117,11 +117,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _dotNetTestRunner, hostSessionId: _hostSessionId);
         var publicWebPageReader = new PlaywrightPublicWebPageReader();
         _browserSessions = new PlaywrightIsolatedBrowserSessionManager();
-        _broker = new ToolBroker(new WindowsDesktopTools(apps, roots,
-                exportRoot: Path.Combine(_settings.DataRoot, "Exports")), _inference, _models, approval,
+        var desktopTools = new WindowsDesktopTools(apps, roots, exportRoot: Path.Combine(_settings.DataRoot, "Exports"));
+        _broker = new ToolBroker(desktopTools, _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
             approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader,
-            _browserSessions);
+            _browserSessions, new InteractionCoordinator(desktopTools));
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }

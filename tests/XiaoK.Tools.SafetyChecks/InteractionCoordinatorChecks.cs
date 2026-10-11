@@ -1,4 +1,5 @@
 using XiaoK.Core;
+using XiaoK.Adapters.Windows;
 
 internal static class InteractionCoordinatorChecks
 {
@@ -38,6 +39,9 @@ internal static class InteractionCoordinatorChecks
         var invalid = await coordinator.AcquireAsync(ToolInteractionOperation.ReadOnlyTarget,
             ToolExecutionAccess.BackgroundOnly, "app/chat", CancellationToken.None);
         Assert(invalid.Denial?.ErrorCode == "INVALID_INTERACTION_TARGET", "不安全目标标识未被拒绝。");
+
+        var unlistedTarget = await new WindowsDesktopTools([], []).GetUsageAsync("unlisted-app", CancellationToken.None);
+        Assert(unlistedTarget == InteractionTargetUsage.Unknown, "不在应用白名单中的目标探针没有返回未知。");
 
         var backgroundDesktop = await coordinator.AcquireAsync(ToolInteractionOperation.DesktopExclusive,
             ToolExecutionAccess.BackgroundOnly, "", CancellationToken.None);
