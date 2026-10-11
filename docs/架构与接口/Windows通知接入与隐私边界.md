@@ -1,6 +1,6 @@
 # Windows 通知接入与隐私边界
 
-更新：2026-10-12。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。当前账户已安装签名MSIX `0.1.113.0`。最新无窗口来源诊断通过该安装包运行：Windows通知访问状态Allowed，枚举35条当前Toast，只发现2条`QQ`/AUMID `QQ`候选（最新通知时间2026-10-10 09:39:23 UTC），没有微信候选。诊断只访问应用显示名、AUMID和创建时间，不读`Notification.Visual`或正文，不请求授权、不订阅事件、不保存结果；结束后Host进程为0。新增的`tools/get_notification_source_candidates.ps1`拒绝在Host已运行时启动，stdout只在内存处理。监听开关和AUMID白名单最近一次核验仍为2026-10-09的关闭/空状态，本次诊断未触碰设置。0.1.97.0已提供逐次确认的一次性通知格式样本入口，但尚未用真实自然通知核验。持续监听的会话解析器仍未接入，0.1.90.0正文读取器二次门控继续失败关闭；真实会话分类、稳定联系人ID和私聊格式仍待验收。
+更新：2026-10-12。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。当前账户已安装签名MSIX `0.1.113.0`。最新无窗口来源诊断通过该安装包运行：Windows通知访问状态Allowed，枚举35条当前Toast，只发现2条`QQ`/AUMID `QQ`候选（最新通知时间2026-10-10 09:39:23 UTC），没有微信候选。诊断只访问应用显示名、AUMID和创建时间，不读`Notification.Visual`或正文，不请求授权、不订阅事件、不保存结果；结束后Host进程为0。新增的`tools/get_notification_source_candidates.ps1`拒绝在Host已运行时启动，stdout只在内存处理；实现提交`47f09cf`已推送，GitHub Actions Build #497成功（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38182451737)）。监听开关和AUMID白名单最近一次核验仍为2026-10-09的关闭/空状态，本次诊断未触碰设置。0.1.97.0已提供逐次确认的一次性通知格式样本入口，但尚未用真实自然通知核验。持续监听的会话解析器仍未接入，0.1.90.0正文读取器二次门控继续失败关闭；真实会话分类、稳定联系人ID和私聊格式仍待验收。
 
 ## 当前实现
 
