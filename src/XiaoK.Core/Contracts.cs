@@ -61,7 +61,8 @@ public enum ToolExpectedOutcome
     TextFileCreatedInConfiguredExport = 27,
     ApplicationStatusObserved = 28,
     ApplicationUiSnapshotReturned = 29,
-    ApplicationUiConditionObserved = 30
+    ApplicationUiConditionObserved = 30,
+    CsvFileCreatedInConfiguredExport = 31
 }
 
 public static class ApprovalAuditCatalog

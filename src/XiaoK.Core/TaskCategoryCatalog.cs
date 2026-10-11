@@ -14,6 +14,7 @@ public static class TaskCategoryCatalog
         ["file-content-search"] = "文件内容查找",
         ["file-summary"] = "本机文件摘要",
         ["file-create-text"] = "新建文本文件",
+        ["file-create-csv"] = "新建CSV表格",
         ["file-copy"] = "文件复制",
         ["file-archive"] = "文件压缩",
         ["file-move"] = "文件移动",

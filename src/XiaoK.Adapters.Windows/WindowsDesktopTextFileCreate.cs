@@ -16,14 +16,16 @@ public sealed partial class WindowsDesktopTools
     {
         if (_exportRoot is null)
             return new(false, "小K导出目录未配置；没有创建文件。", "EXPORT_ROOT_UNAVAILABLE");
-        if (!proposal.Arguments.TryGetValue("file_name", out var fileName)
-            || !LocalTextFileCreatePolicy.IsValidFileName(fileName)
+        var isCsv = proposal.ToolId == LocalCsvCreatePolicy.ToolId;
+        if (proposal.ToolId is not (LocalTextFileCreatePolicy.ToolId or LocalCsvCreatePolicy.ToolId)
+            || !proposal.Arguments.TryGetValue("file_name", out var fileName)
+            || !(isCsv ? LocalTextFileCreatePolicy.IsValidCsvFileName(fileName) : LocalTextFileCreatePolicy.IsValidFileName(fileName))
             || !proposal.Arguments.TryGetValue("content", out var content)
-            || !LocalTextFileCreatePolicy.IsValidContent(content))
-            return new(false, "仅支持新建 .txt 或 .md 文件；文件名不能包含路径，正文上限为64 KiB。", "INVALID_TEXT_FILE_REQUEST");
+            || !(isCsv ? LocalCsvCreatePolicy.IsValidCsvContent(content) : LocalTextFileCreatePolicy.IsValidContent(content)))
+            return new(false, "仅支持在固定导出目录新建合规的 .txt、.md 或 .csv 文件；不会覆盖现有文件。", "INVALID_TEXT_FILE_REQUEST");
 
         byte[] contentBytes;
-        try { contentBytes = new UTF8Encoding(false, true).GetBytes(content); }
+        try { contentBytes = new UTF8Encoding(isCsv, true).GetBytes(content); }
         catch (EncoderFallbackException)
         { return new(false, "正文包含无效的Unicode字符；没有创建文件。", "INVALID_TEXT_ENCODING"); }
         var expectedHash = Convert.ToHexString(SHA256.HashData(contentBytes));
@@ -101,7 +103,8 @@ public sealed partial class WindowsDesktopTools
                     }
                 }
 
-                return new(true, $"已在小K导出目录新建文本文件：{fileName}（{contentBytes.Length:N0} 字节，SHA-256 {expectedHash}）。",
+                var kind = isCsv ? "CSV表格" : "文本文件";
+                return new(true, $"已在小K导出目录新建{kind}：{fileName}（{contentBytes.Length:N0} 字节，SHA-256 {expectedHash}）。",
                     Data: ToDisplayPath(finalPath));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -86,6 +86,7 @@ public sealed class ToolBroker
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
             "file.summarize.text.v1" => await _desktop.ReadTextFileForLocalSummaryAsync(proposal, cancellationToken),
             "file.create.text.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
+            "file.create.csv.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
@@ -162,6 +163,7 @@ public sealed class ToolBroker
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
             "file.summarize.text.v1" => ValidateLocalTextFileSummary(proposal),
             "file.create.text.v1" => ValidateTextFileCreate(proposal),
+            "file.create.csv.v1" => ValidateCsvFileCreate(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
@@ -283,6 +285,16 @@ public sealed class ToolBroker
         && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
             ? null
             : InvalidProposal("新建文本文件仅接受 .txt 或 .md 文件名和受限纯文本正文，并绑定固定小K导出目录；不会接受任意目标路径或覆盖。");
+
+    private static ToolResult? ValidateCsvFileCreate(ToolProposal proposal) =>
+        proposal.Arguments.Count == 2
+        && proposal.Arguments.TryGetValue("file_name", out var fileName)
+        && LocalTextFileCreatePolicy.IsValidCsvFileName(fileName)
+        && proposal.Arguments.TryGetValue("content", out var content)
+        && LocalCsvCreatePolicy.IsValidCsvContent(content)
+        && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
+            ? null
+            : InvalidProposal("CSV只接受固定导出目录内的新建表格；行列数、正文长度和单元格必须通过CSV安全校验，不接受公式、任意路径或覆盖。");
 
     private static ToolResult? ValidateLocalTextFileSummary(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
@@ -612,6 +624,7 @@ public sealed class ToolBroker
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.summarize.text.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.create.text.v1" => ToolPrecondition.ConfiguredFileExportRoot,
+        "file.create.csv.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
@@ -642,6 +655,7 @@ public sealed class ToolBroker
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,
         "file.summarize.text.v1" => ToolExpectedOutcome.LocalDocumentTextExtracted,
         "file.create.text.v1" => ToolExpectedOutcome.TextFileCreatedInConfiguredExport,
+        "file.create.csv.v1" => ToolExpectedOutcome.CsvFileCreatedInConfiguredExport,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,

@@ -57,6 +57,14 @@ public static class LocalTextFileCreatePolicy
             || extension.Equals(".md", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsValidCsvFileName(string? fileName)
+    {
+        if (!LocalFileRenamePolicy.IsValidFileName(fileName)
+            || fileName!.Length > MaximumFileNameLength
+            || !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal)) return false;
+        return Path.GetExtension(fileName).Equals(".csv", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsValidContent(string? content)
     {
         if (content is null || content.Length > MaximumContentCharacters

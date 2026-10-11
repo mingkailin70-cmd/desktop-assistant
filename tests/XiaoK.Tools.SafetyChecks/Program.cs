@@ -151,6 +151,21 @@ if (args.Length == 1 && args[0] == "--only-text-file-create")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-csv-file-create")
+{
+    var csvCreateRoot = Path.Combine(Path.GetTempPath(), "XiaoK-CsvCreateProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(csvCreateRoot);
+    try
+    {
+        await CheckCsvFileCreationAsync(csvCreateRoot);
+        Console.WriteLine("通过：CSV表格只在固定导出目录新建、拒绝公式与覆盖并核验UTF-8内容散列。");
+    }
+    finally
+    {
+        if (Directory.Exists(csvCreateRoot)) Directory.Delete(csvCreateRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-archive")
 {
     var fileArchiveRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileArchiveProbe-" + Guid.NewGuid().ToString("N"));
@@ -423,6 +438,9 @@ try
 
     await CheckTextFileCreationAsync(tempRoot);
     passed.Add("后台文本文件创建仅允许固定导出目录内的新建纯文本，拒绝覆盖并核验最终文件");
+
+    await CheckCsvFileCreationAsync(tempRoot);
+    passed.Add("CSV表格仅创建到固定导出目录，按矩形行列校验并拒绝公式注入、覆盖和路径逃逸");
 
     await CheckFileCopyToExportAsync(tempRoot);
     passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
@@ -7502,6 +7520,89 @@ static async Task CheckTextFileCreationAsync(string root)
     Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.txt"))
         && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
         "预取消的文本创建请求仍写入文件，或留下了部分文件。");
+}
+
+static async Task CheckCsvFileCreationAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "csv-file-create");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+
+    const string request = "创建CSV文件：\"销售,10月.csv\"\n表头：商品|备注|数量\n数据：\n茶|大杯,热|2\n咖啡|加\"糖\"|3";
+    var parsedRequest = LocalCsvCreatePolicy.TryParseRequest(request, out var parsedName, out var parsedContent);
+    Require(parsedRequest
+        && parsedName == "销售,10月.csv"
+        && parsedContent == "商品,备注,数量\r\n茶,\"大杯,热\",2\r\n咖啡,\"加\"\"糖\"\"\",3\r\n",
+        $"CSV命令没有把显式行列正确转换为RFC4180转义内容：parsed={parsedRequest}; name={parsedName}; content={parsedContent}");
+    Require(!LocalCsvCreatePolicy.TryParseRequest("创建CSV文件：unsafe.csv\n表头：名称\n数据：\n=HYPERLINK(\"https://example.invalid\")", out _, out _)
+        && !LocalCsvCreatePolicy.TryParseRequest("创建CSV文件：bad.csv\n表头：A|B\n数据：\n1", out _, out _)
+        && !LocalCsvCreatePolicy.TryParseRequest("创建CSV文件：bad.csv\n表头：A\n数据：\n=1+1", out _, out _),
+        "CSV解析接受了公式单元格或不等宽数据行。");
+    Require(LocalTextFileCreatePolicy.IsValidCsvFileName(parsedName)
+        && !LocalTextFileCreatePolicy.IsValidCsvFileName("..\\escape.csv")
+        && !LocalCsvCreatePolicy.IsValidCsvContent("A\r\n=1+1\r\n")
+        && !LocalCsvCreatePolicy.IsValidCsvContent("A,B\r\n1\r\n")
+        && !LocalCsvCreatePolicy.IsValidCsvContent("A\nx\n")
+        && !LocalCsvCreatePolicy.IsValidCsvContent("A\r\n-1+cmd\r\n"),
+        "CSV最终正文校验未拒绝公式、行宽不一致或无效文件名。");
+
+    var desktop = new WindowsDesktopTools([], [], exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal(LocalCsvCreatePolicy.ToolId,
+        [new("file_name", parsedName), new("content", parsedContent)],
+        LocalTextFileCreatePolicy.ExportTargetId, ToolExpectedOutcome.CsvFileCreatedInConfiguredExport);
+    Require(ToolInteractionPolicy.GetMode(LocalCsvCreatePolicy.ToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check(LocalCsvCreatePolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null
+        && TaskFailureSafetyPolicy.RequiresManualVerification("file-create-csv", routeStarted: true),
+        "CSV创建没有登记为后台操作，或缺少结果不确定保护。");
+
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var finalPath = Path.Combine(exportRoot, parsedName);
+    var payload = new UTF8Encoding(true, true).GetBytes(parsedContent);
+    var expectedHash = Convert.ToHexString(SHA256.HashData(payload));
+    Require(result.Success && result.Data == finalPath && File.Exists(finalPath)
+        && (await File.ReadAllBytesAsync(finalPath)).SequenceEqual(payload)
+        && result.Summary.Contains("CSV表格", StringComparison.Ordinal)
+        && result.Summary.Contains(expectedHash, StringComparison.Ordinal),
+        "CSV没有以带BOM UTF-8写入固定导出目录并核验最终散列。");
+
+    var formulaProposal = proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "A\r\n=1+1\r\n")
+    };
+    var formulaRejected = await broker.ExecuteBackgroundAsync(formulaProposal, CancellationToken.None);
+    var arbitraryTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = fixtureRoot }, CancellationToken.None);
+    var wrongExpectedOutcome = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        ExpectedOutcome = ToolExpectedOutcome.TextFileCreatedInConfiguredExport
+    }, CancellationToken.None);
+    Require(!formulaRejected.Success && formulaRejected.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !arbitraryTarget.Success && arbitraryTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !wrongExpectedOutcome.Success && wrongExpectedOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "CSV工具接受了公式单元格、任意路径或错配预期结果。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "商品\r\n不同\r\n")
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(finalPath)).SequenceEqual(payload),
+        "CSV同名冲突覆盖了既有表格。");
+
+    using var cancelledSource = new CancellationTokenSource();
+    cancelledSource.Cancel();
+    var cancelled = false;
+    try
+    {
+        await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("file_name", "cancelled.csv")
+        }, cancelledSource.Token);
+    }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.csv"))
+        && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
+        "预取消的CSV创建仍写入文件或留下部分文件。");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)
