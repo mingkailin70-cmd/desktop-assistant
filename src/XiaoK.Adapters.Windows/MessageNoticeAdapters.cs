@@ -101,6 +101,31 @@ public static class NotificationPublisherDiagnosticPolicy
             || displayName.Contains("Weixin", StringComparison.OrdinalIgnoreCase)
             || displayName.Contains("QQ", StringComparison.OrdinalIgnoreCase);
     }
+
+    public static IReadOnlyList<NotificationPublisherCandidate> FilterForApplication(
+        IEnumerable<NotificationPublisherCandidate> candidates, string? applicationId)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (!string.Equals(applicationId, "wechat", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(applicationId, "qq", StringComparison.OrdinalIgnoreCase)) return [];
+
+        return candidates.Where(candidate => IsCandidateForApplication(candidate, applicationId))
+            .OrderBy(candidate => candidate.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.AppUserModelId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public static bool IsCandidateForApplication(NotificationPublisherCandidate candidate, string? applicationId)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (string.Equals(applicationId, "qq", StringComparison.OrdinalIgnoreCase))
+            return candidate.DisplayName.Contains("QQ", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(applicationId, "wechat", StringComparison.OrdinalIgnoreCase))
+            return candidate.DisplayName.Contains("微信", StringComparison.OrdinalIgnoreCase)
+                || candidate.DisplayName.Contains("WeChat", StringComparison.OrdinalIgnoreCase)
+                || candidate.DisplayName.Contains("Weixin", StringComparison.OrdinalIgnoreCase);
+        return false;
+    }
 }
 
 public enum NoticeBodyAccessFailure { None, PermissionUnavailable, SessionLocked }

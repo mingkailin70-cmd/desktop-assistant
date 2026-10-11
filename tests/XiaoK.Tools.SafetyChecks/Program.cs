@@ -4941,6 +4941,12 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
 
     Require(!NotificationPublisherDiagnosticPolicy.IsLikelyTargetClientName("Other Messenger"),
         "来源诊断把无关应用显示名识别为微信或QQ。");
+    var wechatCandidates = NotificationPublisherDiagnosticPolicy.FilterForApplication(projected, "wechat");
+    var qqCandidates = NotificationPublisherDiagnosticPolicy.FilterForApplication(projected, "qq");
+    Require(wechatCandidates.Count == 1 && wechatCandidates[0].AppUserModelId == "weixin.desktop!Main"
+        && qqCandidates.Count == 1 && qqCandidates[0].AppUserModelId == "QQ"
+        && NotificationPublisherDiagnosticPolicy.FilterForApplication(projected, "other").Count == 0,
+        "通知样本来源候选未按所选平台精确筛选，或对未知平台开放了候选。");
 
     var repositoryRoot = FindRepositoryRoot();
     var monitor = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "WindowsNotificationMonitor.cs"));
@@ -4961,8 +4967,11 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
         "只读来源诊断读取了通知正文、自动请求权限或启动了持续监听。");
     Require(settingsXaml.Contains("x:Name=\"NotificationPublisherCandidatesBox\"", StringComparison.Ordinal)
         && settingsXaml.Contains("IsReadOnly=\"True\"", StringComparison.Ordinal)
-        && settingsXaml.Contains("不会自动加入白名单", StringComparison.Ordinal),
-        "来源诊断结果不是只读展示，或设置界面暗示候选会自动启用。");
+        && settingsXaml.Contains("不会自动加入白名单", StringComparison.Ordinal)
+        && settingsXaml.Contains("x:Name=\"NotificationSamplePublisherBox\"", StringComparison.Ordinal)
+        && settingsXaml.Contains("选择只用于本次样本核验", StringComparison.Ordinal)
+        && !settingsXaml.Contains("NotificationSamplePublisherIdBox", StringComparison.Ordinal),
+        "来源诊断结果不是只读展示、样本候选选择未绑定诊断结果，或界面暗示候选会自动启用。");
 }
 
 static void CheckNotificationEventQueueIsBoundedAndDeduplicated()

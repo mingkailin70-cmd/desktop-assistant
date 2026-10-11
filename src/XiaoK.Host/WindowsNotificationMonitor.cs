@@ -50,13 +50,16 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     public bool NotificationSampleCaptureSessionExists => _sampleCapture is not null;
     public string NotificationSampleStatus => _sampleCapture?.Status ?? "尚未启动通知样本核验。";
 
+    public IReadOnlyList<NotificationPublisherCandidate> GetSamplePublisherCandidates(string applicationId) =>
+        NotificationPublisherDiagnosticPolicy.FilterForApplication(_lastPublisherCandidates.Values, applicationId);
+
     public bool TryGetSamplePublisherCandidate(string applicationId, string appUserModelId,
         out NotificationPublisherCandidate? candidate)
     {
         candidate = null;
         if (!IsSupportedMessageApplication(applicationId)
             || !_lastPublisherCandidates.TryGetValue(appUserModelId, out var match)
-            || !PublisherNameMatchesApplication(match.DisplayName, applicationId))
+            || !NotificationPublisherDiagnosticPolicy.IsCandidateForApplication(match, applicationId))
             return false;
         candidate = match;
         return true;
@@ -504,13 +507,6 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private static bool IsSupportedMessageApplication(string applicationId) =>
         applicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase)
         || applicationId.Equals("qq", StringComparison.OrdinalIgnoreCase);
-
-    private static bool PublisherNameMatchesApplication(string displayName, string applicationId) =>
-        applicationId.Equals("qq", StringComparison.OrdinalIgnoreCase)
-            ? displayName.Contains("QQ", StringComparison.OrdinalIgnoreCase)
-            : displayName.Contains("微信", StringComparison.OrdinalIgnoreCase)
-              || displayName.Contains("WeChat", StringComparison.OrdinalIgnoreCase)
-              || displayName.Contains("Weixin", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatAccessStatus(UserNotificationListenerAccessStatus access) => access switch
     {

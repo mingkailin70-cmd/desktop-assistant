@@ -5,12 +5,16 @@ using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows;
 using Forms = System.Windows.Forms;
+using XiaoK.Adapters.Windows;
 using XiaoK.Core;
 
 namespace XiaoK.Host;
 
 public partial class SettingsWindow : Window
 {
+    private sealed record NotificationPublisherCandidateChoice(string ApplicationId,
+        NotificationPublisherCandidate Candidate, string DisplayText);
+
     private static readonly HashSet<string> ConfigurableApplicationIds = new(StringComparer.OrdinalIgnoreCase)
         { "vscode", "edge", "wechat", "qq", "explorer" };
     private XiaoKSettings _original;
@@ -94,6 +98,7 @@ public partial class SettingsWindow : Window
         NotificationStatusText.Text = notificationMonitor.Status;
         NotificationSampleStatusText.Text = notificationMonitor.NotificationSampleStatus;
         NotificationSamplesBox.Text = FormatNotificationSamples(notificationMonitor.NotificationSamples);
+        RefreshNotificationSamplePublisherCandidates();
         UpdateNotificationSampleButtons();
         ContactStylesList.ItemsSource = _contactReplyStyles;
         ContactStyleBox.ItemsSource = ContactReplyStyleCatalog.Options;
@@ -501,10 +506,11 @@ public partial class SettingsWindow : Window
         try
         {
             NotificationPublisherCandidatesBox.Text = await _inspectNotificationPublishers();
+            RefreshNotificationSamplePublisherCandidates();
         }
         finally
         {
-            InspectNotificationPublishersButton.IsEnabled = true;
+            UpdateNotificationSampleButtons();
         }
     }
 
@@ -517,12 +523,14 @@ public partial class SettingsWindow : Window
         }
 
         var applicationId = (NotificationSampleAppBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string;
-        var publisherAppUserModelId = NotificationSamplePublisherIdBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(applicationId)
-            || !_notificationMonitor.TryGetSamplePublisherCandidate(applicationId, publisherAppUserModelId, out var candidate)
+        var selectedPublisher = NotificationSamplePublisherBox.SelectedItem as NotificationPublisherCandidateChoice;
+        if (string.IsNullOrWhiteSpace(applicationId) || selectedPublisher is null
+            || !string.Equals(selectedPublisher.ApplicationId, applicationId, StringComparison.OrdinalIgnoreCase)
+            || !_notificationMonitor.TryGetSamplePublisherCandidate(applicationId,
+                selectedPublisher.Candidate.AppUserModelId, out var candidate)
             || candidate is null)
         {
-            NotificationSampleStatusText.Text = "请先运行上方只读来源检查，手动核对一个与所选应用匹配的 AUMID 候选，再输入该完整标识。";
+            NotificationSampleStatusText.Text = "请先运行上方只读来源检查，再从与所选平台匹配的候选列表中选择一项；没有采集通知正文。";
             return;
         }
 
@@ -537,16 +545,39 @@ public partial class SettingsWindow : Window
         if (confirmation != MessageBoxResult.Yes) return;
 
         StartNotificationSampleCaptureButton.IsEnabled = false;
+        InspectNotificationPublishersButton.IsEnabled = false;
+        NotificationSampleAppBox.IsEnabled = false;
+        NotificationSamplePublisherBox.IsEnabled = false;
         NotificationSampleStatusText.Text = "正在建立通知基线；不会处理开始前已有的通知。";
         try
         {
             NotificationSampleStatusText.Text = await _notificationMonitor.StartNotificationSampleCaptureAsync(
-                applicationId, publisherAppUserModelId);
+                applicationId, candidate.AppUserModelId);
         }
         finally
         {
             UpdateNotificationSampleButtons();
         }
+    }
+
+    private void NotificationSampleApp_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_notificationMonitor is null) return;
+        RefreshNotificationSamplePublisherCandidates();
+    }
+
+    private void RefreshNotificationSamplePublisherCandidates()
+    {
+        if (NotificationSamplePublisherBox is null || NotificationSampleAppBox is null
+            || _notificationMonitor is null) return;
+
+        var applicationId = (NotificationSampleAppBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string;
+        var candidates = _notificationMonitor.GetSamplePublisherCandidates(applicationId ?? string.Empty)
+            .Select(candidate => new NotificationPublisherCandidateChoice(applicationId!, candidate,
+                $"{candidate.DisplayName} | AUMID: {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount} | 最近出现：{candidate.LatestNotificationTimeUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}"))
+            .ToArray();
+        NotificationSamplePublisherBox.ItemsSource = candidates;
+        NotificationSamplePublisherBox.SelectedIndex = -1;
     }
 
     private void StopNotificationSampleCapture_Click(object sender, RoutedEventArgs e)
@@ -599,9 +630,13 @@ public partial class SettingsWindow : Window
     private void UpdateNotificationSampleButtons()
     {
         var active = _notificationMonitor.NotificationSampleCaptureActive;
-        StartNotificationSampleCaptureButton.IsEnabled = !active;
+        var sessionExists = _notificationMonitor.NotificationSampleCaptureSessionExists;
+        StartNotificationSampleCaptureButton.IsEnabled = !active && !sessionExists;
         StopNotificationSampleCaptureButton.IsEnabled = active;
-        ClearNotificationSamplesButton.IsEnabled = _notificationMonitor.NotificationSampleCaptureSessionExists;
+        ClearNotificationSamplesButton.IsEnabled = sessionExists;
+        InspectNotificationPublishersButton.IsEnabled = !active;
+        NotificationSampleAppBox.IsEnabled = !active;
+        NotificationSamplePublisherBox.IsEnabled = !active;
     }
 
     private static string FormatNotificationSamples(IEnumerable<NotificationFormatSample> samples)

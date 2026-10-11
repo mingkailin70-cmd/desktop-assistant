@@ -175,3 +175,14 @@
 这轮GitHub检索没有找到能在不读客户端数据库/进程、不注入、不抢焦点且可验证稳定会话身份的微信/QQ适配器。小K已经有Windows Toast监听入口；当前闸门卡在自然可见Toast样本、真实来源关联、私聊/群聊分类和会话稳定标识，不能用第三方README声称替代本机证据。监控仍关闭，不发送试探消息。
 
 来源：[WinToastRelay README与许可](https://github.com/RavelloH/WinToastRelay)、[WinToastRelay隐私说明](https://github.com/RavelloH/WinToastRelay/blob/main/PRIVACY.md)、[wechat-sdk README](https://github.com/chengamu/wechat-sdk)。功能与许可信息来自仓库自述，没有作为小K实测或验收结论。
+
+## 2026-10-12 Aevra 与 Microsoft UI Automation Remote Operations
+
+| 项目 | 可借鉴内容 | 评估与决定 |
+| --- | --- | --- |
+| [the-long-ride/aevra](https://github.com/the-long-ride/aevra) | GitHub页面标注MIT。项目维护者的桌面控制文档区分原生语义UIA动作与前台物理输入，说明不从语义路径静默降级到前台输入；还描述了按窗口租约限制动作、变更后作废旧快照、再次描述目标、聚焦窗口变化时暂停，以及结果不明时禁止重放。 | 借鉴“能力显式声明、快照失效、目标重核、结果不确定不重试”作为未来按应用增加后台操作的设计检查点。页面同时介绍远程MCP网关、管理凭据、广泛桌面/浏览器工具和浏览器扩展；项目所称后台效果是维护者文档，没有由小K或独立实验验证。不开通远程服务、不接入其MCP/代码，不据此启用通用UIA写入。 |
+| [microsoft/Microsoft-UI-UIAutomation](https://github.com/microsoft/Microsoft-UI-UIAutomation) | Microsoft仓库说明Remote Operations用于把多次跨进程UIA访问打包成一次远程操作，以减少调用往返。仓库将平台API标为预览，要求预览Windows版本和对应预览SDK。 | 可跟踪稳定版发布后对只读树遍历性能的收益；Remote Operations只改变调用打包/性能，不能证明应用动作安全、不会改变焦点或适合用户并发使用。当前固定SDK为稳定版，因此不引入预览SDK或依赖。 |
+
+**本轮取舍：** 优先完成小K设置页的候选绑定：采样来源必须选自最近一次只读诊断结果，按微信/QQ平台筛选；候选不能手输成任意AUMID，也不能自动写入监听白名单。真实通知正文仍仅在用户主动开始样本核验后短时留于本机内存。桌面写操作仍逐应用、逐动作验收。
+
+来源：[Aevra桌面控制指南](https://github.com/the-long-ride/aevra/blob/main/docs/user-manual/19-desktop-control.md)、[Aevra许可证](https://github.com/the-long-ride/aevra/blob/main/LICENSE)、[Microsoft UI Automation Remote Operations说明](https://github.com/microsoft/Microsoft-UI-UIAutomation)。仓库页面与`main`分支可变；本次只核对公开文档和许可证线索，没有克隆、构建、安装或运行候选，也没有复用代码。

@@ -200,12 +200,16 @@
                         <TextBlock Text="一次性通知格式样本核验" FontWeight="SemiBold" Margin="0,0,0,4"/>
                         <TextBlock Text="仅在你逐次确认后采集所选 AUMID 的新 Toast，最多30条、最长8小时。当前不能区分私聊/群聊，可能包括所选应用的群聊、服务或其他通知正文；只有你同意检查这类内容时才开始。正文只在本机内存和本页显示，不送模型、不写日志/数据库/文件；停止后仍留在内存，点击清除或退出小K可删除。不会打开微信/QQ、抢焦点或自动分析。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <DockPanel LastChildFill="True" Margin="0,0,0,6">
-                            <ComboBox x:Name="NotificationSampleAppBox" DockPanel.Dock="Left" Width="90" SelectedIndex="1" Margin="0,0,6,0">
+                            <ComboBox x:Name="NotificationSampleAppBox" DockPanel.Dock="Left" Width="90" SelectedIndex="1" Margin="0,0,6,0"
+                                      SelectionChanged="NotificationSampleApp_SelectionChanged">
                                 <ComboBoxItem Content="微信" Tag="wechat"/>
                                 <ComboBoxItem Content="QQ" Tag="qq"/>
                             </ComboBox>
-                            <TextBox x:Name="NotificationSamplePublisherIdBox" MinHeight="30" Padding="6,4" ToolTip="从上方只读来源候选中手动核对并输入一个完整 AUMID"/>
+                            <ComboBox x:Name="NotificationSamplePublisherBox" MinHeight="30" Padding="6,4"
+                                      DisplayMemberPath="DisplayText"
+                                      ToolTip="只能选择最近一次只读来源检查发现、且显示名与所选平台匹配的候选；不会修改持续监听白名单"/>
                         </DockPanel>
+                        <TextBlock Text="先运行上方只读来源检查，再选择匹配的平台候选。选择只用于本次样本核验，不会自动启用通知监听。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                             <Button x:Name="StartNotificationSampleCaptureButton" Content="开始样本核验…" Click="StartNotificationSampleCapture_Click" Margin="0,0,6,0"/>
                             <Button x:Name="StopNotificationSampleCaptureButton" Content="停止采集" Click="StopNotificationSampleCapture_Click" Margin="0,0,6,0"/>

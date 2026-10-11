@@ -1,3 +1,9 @@
+## v0.1.105.0 通知样本候选选择（2026-10-12）
+
+设置页的样本核验来源只能从最近一次只读来源诊断中选择，并按当前微信/QQ平台过滤；不再允许手工输入任意AUMID。选择只对单次样本核验有效，不会写入持续监听名单；真正开始采集仍逐次确认正文采集范围。此次没有开始样本采集、读取真实Toast正文或启动持续监听。
+
+固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows安全套件122项通过、0项跳过。自包含MSIX包artifacts\msix-validation\2edab96fd85845b88d7c58cdd3e51e7f\XiaoK-signed-validation.msix，139,393,769字节，SHA-256 180D93D6F7CD5E5280D66815F49B4339C22A272CFB059E9C4650DE62B0D25690；Authenticode签名有效，SignTool验签0警告、0错误。证书指纹B96A02547ABA84523619E11EB7788AE9850A5C60原已位于LocalMachine\TrustedPeople，本次未更改信任。当前账户安装MingKaiLin.XiaoK_0.1.105.0_neutral__g0ndt6g65c8pe、状态Ok；包内与发布版Host DLL SHA-256均为4ABB9BFCDF5F66E87FBE586DFC5F5BD414157DB39676C42A44316595AA2E772D。安装器未启动Host或模型，安装后两进程均未运行。提交与GitHub Actions状态待本阶段推送后补记。
+
 ## v0.1.104.0 AppContainer后台命令CPU优先级（2026-10-12）
 
 隔离编程命令通过`CreateProcessW`启动时即设`BELOW_NORMAL_PRIORITY_CLASS`，之后才恢复主线程执行。实际Windows AppContainer探针读取到子进程优先级`BelowNormal`。固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows完整安全套件122项通过、0项跳过；代码提交`7966f46`对应[GitHub Actions Build #474](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38166945515)成功。该设置只影响CPU调度，不限制CPU总量、内存或GPU，不保证命令即时完成，也可能延长后台任务时间。
