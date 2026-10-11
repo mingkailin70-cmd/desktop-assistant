@@ -9,6 +9,14 @@
 - 当前决定：不将 FlaUI 放入小K正式运行依赖，也不让产品运行时通过 UIA 注入鼠标/键盘或抢前台。需要实机 UIA 验收时，先对小K自有测试窗口做只读探测；操作真实窗口、读取聊天内容、保存截图都必须另行受控。
 - 引入前检查：核对所选 FlaUI 版本支持的目标框架和许可证；固定 NuGet 版本/散列，并确保验收运行不驱动用户正在使用的应用。
 
+## Microsoft winapp CLI：后台 UIA 与隔离验收候选
+
+- 项目：[microsoft/winappCli](https://github.com/microsoft/WinAppCli)，本次核对的公开稳定发布为 `v0.7.1`，仓库许可证为 MIT；官方项目仍标记为 Public Preview，处于实验与积极开发阶段。
+- 可借鉴处：官方 UI 自动化文档区分 UIA 模式调用和系统级输入。`inspect`、`search`、`get-value`、`wait-for`、`set-value`、`invoke` 等使用 UIA pattern；`send-keys`、鼠标手势等需要交互桌面且目标窗口前台。UIA 只读命令可以并发；会接触物理桌面的命令使用轮次仲裁。官方还展示以 `--on sandbox` 将应用和 UI 操作放进 Windows Sandbox。
+- 与小K的关系：未来可用于**离线验收宿主**，先核对控件树、AutomationId、值读回和失败状态；桌面交互测试优先尝试 Sandbox。产品运行时仍只能经固定 `ToolBroker` 动作和 `InteractionCoordinator`，不能把 CLI 的任意 `ui` 命令直接开放给模型。
+- 当前决定：不安装、不增加 NuGet 依赖，也不启用 Windows Sandbox 系统功能。CLI仍是Public Preview，Sandbox功能是否适合当前Windows版本、硬件和账户策略需要单独检查；未确认隔离前，任何实际输入测试都不得指向用户桌面。UIA pattern 方法也必须逐应用核实是否保持焦点和窗口状态。
+- 引入前检查：锁定正式发布版本与二进制散列，审阅命令Schema及其输入注入/截图/窗口激活副作用，核对依赖许可证和遥测；先在小K自有合成窗口中验证无焦点变化，再考虑Sandbox中的安装版检查。
+
 ## Microsoft Agent Framework：检查点与人工交接思路
 
 - 项目：[microsoft/agent-framework](https://github.com/microsoft/agent-framework)；官方 [.NET 检查点和人工交接示例](https://github.com/microsoft/agent-framework/blob/main/dotnet/samples/03-workflows/Checkpoint/CheckpointWithHumanInTheLoop/Program.cs)演示在工作流步骤边界保存检查点、请求外部输入后再恢复。
