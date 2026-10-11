@@ -8,7 +8,7 @@
 
 ## 当前状态与长期待验收项（截至 2026-10-12）
 
-当前账户已安装签名 MSIX 0.1.102.0，状态`Ok`；包139,391,049字节，SHA-256为`AF2105ACE3E3A04BB1207152FE8CAF33219B7DE9F64E85CAF9F2D36D85DF4F95`。安装版与`artifacts/publish/win-x64`的Host DLL SHA-256均为`D1CFA13AA4DF241BF0B9A1BE88E8B783DD5B8679089168B27F814E773AD96A55`。取消反馈实现提交`627261321716c3e67df671f022e2894ed9a68ae3`已推送，GitHub Actions Build #464成功；随后GitHub研究记录提交`1e4d235e0c691c6137b3d893f55d2857b260dba4`已推送，Build #465成功。当前`main`与`origin/main`同步至`2875d95b0e7001083db43ef7c8c9f000a37e6005`，GitHub Actions Build #469成功；`XiaoK.Host`和`llama-server`进程均为0。提交`2875d95`已加入llama.cpp后台`BelowNormal`、交互`Normal`的Windows CPU调度优先级，但尚未打包或安装，真实模型负载未验收；当前安装仍为0.1.102.0。证书信任未改变，安装后没有启动Host。
+当前账户已安装签名 MSIX 0.1.103.0，状态`Ok`；包139,391,776字节，SHA-256为`EC056FECE51016AA5AC55E80C39A451558760F6EEC4191DFFE77F27C9A130073`。安装版与`artifacts/publish/win-x64`的Host DLL SHA-256均为`6E2E6DD89EC3F5D85577227454D1DF064E6A5D65A8E6D60EAAF966248ABBD54A`。取消反馈实现提交`627261321716c3e67df671f022e2894ed9a68ae3`已推送，GitHub Actions Build #464成功；随后GitHub研究记录提交`1e4d235e0c691c6137b3d893f55d2857b260dba4`已推送，Build #465成功。代码提交`2875d95`对应GitHub Actions Build #469成功，版本提交`cafec70`对应Build #471成功；`XiaoK.Host`和`llama-server`进程均为0。提交`2875d95`加入llama.cpp后台`BelowNormal`、交互`Normal`的Windows CPU调度优先级，并已包含在0.1.103.0安装包；进程优先级API通过短命子进程写入/回读，但真实模型负载和用户任务响应性仍待验收。安装器报告证书原已受信任，没有更改证书信任；本次安装未启动Host。
 
 0.1.102.0在任务中心增加运行中任务的“正在停止”状态：接受取消后显示等待步骤响应的提示，并暂时禁用重复取消；任务终止时清理该瞬时状态。任务正文仍不持久化，工具副作用已提交时仍提示核验，进程重启不自动重放。该功能通过固定SDK Release构建、122项Windows安全检查及91项桌面体验检查；签名MSIX验签0警告、0错误，已安装但本轮未启动Host。检查只覆盖合成策略/绑定，不代表真实模型或第三方应用任务的实时取消与副作用恢复已验收。此前0.1.101.0的只读工具`app.ui.wait-enabled.v1`继续包含在版本中：只在已登记应用的唯一可见窗口内，以低优先级隔离工作进程读取唯一语义控件的`IsEnabled`，最多等待2.5秒；不调用UIA写Pattern、不截图、不输入、不切前台、不读剪贴板。
 

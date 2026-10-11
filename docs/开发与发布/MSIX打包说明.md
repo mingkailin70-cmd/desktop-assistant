@@ -1,3 +1,9 @@
+## v0.1.103.0 后台推理CPU优先级（2026-10-12）
+
+llama.cpp托管模型进程在后台推理租约期间使用Windows `BelowNormal`，交互推理前恢复`Normal`；设置失败时拒绝执行该次推理。它只改变操作系统CPU调度，不释放显存、不减少GPU利用率，也不会抢占当前模型步骤。固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows安全检查程序退出码0；短命子进程验证优先级可写入并读回。没有启动llama-server或模型，真实模型负载时延与用户工作响应性仍待实测。
+
+自包含签名MSIX `artifacts\msix-validation\2c9a0ea654fe480284d2cb7e92cbf7d9\XiaoK-signed-validation.msix`，139,391,776字节，SHA-256 `EC056FECE51016AA5AC55E80C39A451558760F6EEC4191DFFE77F27C9A130073`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信任，本次未改动信任。当前账户已安装`MingKaiLin.XiaoK_0.1.103.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`6E2E6DD89EC3F5D85577227454D1DF064E6A5D65A8E6D60EAAF966248ABBD54A`。安装器未启动Host；安装后检查`XiaoK.Host`和`llama-server`进程数均为0。代码提交`2875d95`对应[GitHub Actions Build #469](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38165474015)成功，版本提交`cafec70`对应[Build #471](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38165858168)成功。该改动尚未通过真实推理压力、显存余量、交互延迟和长期运行验收，不代表P1完成。
+
 ## v0.1.101.0 只读 UIA 控件状态等待（2026-10-12）
 
 增加固定工具`app.ui.wait-enabled.v1`，在唯一已登记应用窗口中等待唯一、安全语义控件的`IsEnabled`变为true；等待上限2.5秒，辅助进程硬超时5秒。它只读取启用状态，不执行Invoke/Value/Toggle、不截图、不注入输入、不切换焦点，也不返回控件名称或正文。离屏WPF合成探针通过延迟启用、禁用超时、重复AutomationId拒绝和前台HWND不变；Windows安全套件122项通过、0项跳过，桌面体验检查91项通过，固定SDK 10.0.401 Release全解决方案构建0警告、0错误。真实第三方UIA Provider、微信/QQ界面以及用户并发操作仍待实机验收。
