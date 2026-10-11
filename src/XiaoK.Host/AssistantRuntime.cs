@@ -935,6 +935,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.CsvFileCreatedInConfiguredExport), token);
         }
 
+        if (category == "file-create-xlsx")
+        {
+            if (!LocalXlsxCreatePolicy.TryParseRequest(request, out var workbookFileName, out var workbookContent))
+                return new(false, "请按“创建Excel文件：文件名.xlsx\n表头：列1|列2\n数据：\n值1|值2”输入。支持最多32列、500行和16,000字符；单元格按纯文本写入，公式单元格会拒绝。文件只在固定导出目录新建，不覆盖现有文件。", "INVALID_XLSX_FILE_REQUEST");
+            var workbookArguments = ImmutableDictionary<string, string>.Empty
+                .Add("file_name", workbookFileName).Add("content", workbookContent);
+            return await ExecuteBackgroundAsync(new ToolProposal(LocalXlsxCreatePolicy.ToolId, workbookArguments,
+                LocalTextFileCreatePolicy.ExportTargetId, ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.XlsxWorkbookCreatedInConfiguredExport), token);
+        }
+
         if (category == "file-create-text")
         {
             if (!LocalTextFileCreatePolicy.TryParseRequest(request, out var fileName, out var content))
@@ -1271,6 +1282,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (LocalDocumentSummaryPolicy.IsUserCommand(request)) return "file-summary";
         if (lower.StartsWith("创建文本文件")) return "file-create-text";
         if (lower.StartsWith("创建csv文件")) return "file-create-csv";
+        if (lower.StartsWith("创建excel文件") || lower.StartsWith("创建excel工作簿") || lower.StartsWith("创建xlsx文件")) return "file-create-xlsx";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";

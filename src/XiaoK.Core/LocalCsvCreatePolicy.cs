@@ -15,17 +15,26 @@ public static class LocalCsvCreatePolicy
 
     public static bool TryParseRequest(string? request, out string fileName, out string csvContent)
     {
+        var parsed = TryParseTabularRequest(request, "创建CSV文件：", LocalTextFileCreatePolicy.IsValidCsvFileName,
+            out fileName, out _, out csvContent);
+        return parsed;
+    }
+
+    internal static bool TryParseTabularRequest(string? request, string prefix, Func<string?, bool> isValidFileName,
+        out string fileName, out IReadOnlyList<IReadOnlyList<string>> rows, out string csvContent)
+    {
         fileName = string.Empty;
+        rows = [];
         csvContent = string.Empty;
-        const string prefix = "创建CSV文件：";
-        if (string.IsNullOrWhiteSpace(request) || !request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.IsNullOrWhiteSpace(request) || string.IsNullOrWhiteSpace(prefix)
+            || !request.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
 
         var lines = request[prefix.Length..].Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         if (lines.Length < 3 || lines.Any(line => line.Contains('\r')) || !lines[1].StartsWith("表头：", StringComparison.Ordinal))
             return false;
 
         fileName = TrimOptionalQuotes(lines[0].Trim());
-        if (!LocalTextFileCreatePolicy.IsValidCsvFileName(fileName)) return false;
+        if (!isValidFileName(fileName)) return false;
 
         var firstDataLine = lines[2] == "数据：" ? 3 : 2;
         var lastLine = lines.Length;
@@ -36,17 +45,19 @@ public static class LocalCsvCreatePolicy
         var header = lines[1]["表头：".Length..].Split('|');
         if (!IsValidHeader(header)) return false;
 
-        var rows = new List<IReadOnlyList<string>>(dataRowCount + 1) { header };
+        var parsedRows = new List<IReadOnlyList<string>>(dataRowCount + 1) { header };
         for (var index = firstDataLine; index < lastLine; index++)
         {
             if (string.IsNullOrWhiteSpace(lines[index])) return false;
             var cells = lines[index].Split('|');
             if (cells.Length != header.Length || cells.Any(cell => !IsValidCell(cell))) return false;
-            rows.Add(cells);
+            parsedRows.Add(cells);
         }
 
-        csvContent = string.Join("\r\n", rows.Select(row => string.Join(",", row.Select(EscapeCsvCell)))) + "\r\n";
-        return IsValidCsvContent(csvContent);
+        csvContent = SerializeRows(parsedRows);
+        if (!IsValidCsvContent(csvContent)) return false;
+        rows = parsedRows;
+        return true;
     }
 
     public static bool IsValidCsvContent(string? csv)
@@ -63,6 +74,17 @@ public static class LocalCsvCreatePolicy
         if (width is < 1 or > MaximumColumns || rows[0].Any(string.IsNullOrWhiteSpace)) return false;
         return rows.All(row => row.Count == width && row.All(IsValidCell));
     }
+
+    public static bool TryParseCsvRows(string? csv, out IReadOnlyList<IReadOnlyList<string>> rows)
+    {
+        rows = [];
+        if (!IsValidCsvContent(csv) || !TryParseCsv(csv!, out var parsed)) return false;
+        rows = parsed.Select(row => (IReadOnlyList<string>)row.ToArray()).ToArray();
+        return true;
+    }
+
+    private static string SerializeRows(IEnumerable<IReadOnlyList<string>> rows) =>
+        string.Join("\r\n", rows.Select(row => string.Join(",", row.Select(EscapeCsvCell)))) + "\r\n";
 
     private static bool IsValidHeader(IReadOnlyList<string> cells) =>
         cells.Count is >= 1 and <= MaximumColumns && cells.All(cell => !string.IsNullOrWhiteSpace(cell) && IsValidCell(cell));

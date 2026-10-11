@@ -13,6 +13,9 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Net.Sockets;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Validation;
 using Microsoft.Win32.SafeHandles;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
@@ -163,6 +166,21 @@ if (args.Length == 1 && args[0] == "--only-csv-file-create")
     finally
     {
         if (Directory.Exists(csvCreateRoot)) Directory.Delete(csvCreateRoot, recursive: true);
+    }
+    return;
+}
+if (args.Length == 1 && args[0] == "--only-xlsx-file-create")
+{
+    var xlsxCreateRoot = Path.Combine(Path.GetTempPath(), "XiaoK-XlsxCreateProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(xlsxCreateRoot);
+    try
+    {
+        await CheckXlsxFileCreationAsync(xlsxCreateRoot);
+        Console.WriteLine("通过：Excel工作簿固定路径后台新建、单元格按文本编码、Open XML校验、拒绝公式/覆盖并核验最终散列。");
+    }
+    finally
+    {
+        if (Directory.Exists(xlsxCreateRoot)) Directory.Delete(xlsxCreateRoot, recursive: true);
     }
     return;
 }
@@ -441,6 +459,9 @@ try
 
     await CheckCsvFileCreationAsync(tempRoot);
     passed.Add("CSV表格仅创建到固定导出目录，按矩形行列校验并拒绝公式注入、覆盖和路径逃逸");
+
+    await CheckXlsxFileCreationAsync(tempRoot);
+    passed.Add("Excel工作簿只在固定导出目录后台新建，所有单元格为无公式纯文本并通过Open XML结构验证");
 
     await CheckFileCopyToExportAsync(tempRoot);
     passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
@@ -7603,6 +7624,102 @@ static async Task CheckCsvFileCreationAsync(string root)
     Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.csv"))
         && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
         "预取消的CSV创建仍写入文件或留下部分文件。");
+}
+
+static async Task CheckXlsxFileCreationAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "xlsx-file-create");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+
+    const string request = "创建Excel文件：\"销售,10月.xlsx\"\n表头：编号|商品|备注\n数据：\n00123|茶|大杯,热\n00007|咖啡|加\"糖\"";
+    var parsedRequest = LocalXlsxCreatePolicy.TryParseRequest(request, out var parsedName, out var serializedRows);
+    Require(parsedRequest && parsedName == "销售,10月.xlsx"
+        && LocalXlsxCreatePolicy.TryGetRows(serializedRows, out var parsedRows)
+        && parsedRows.Count == 3 && parsedRows[1][0] == "00123" && parsedRows[1][2] == "大杯,热"
+        && parsedRows[2][2] == "加\"糖\"",
+        "Excel命令没有保留显式行列、逗号/引号或带前导零的文本值。");
+    Require(!LocalXlsxCreatePolicy.TryParseRequest("创建Excel文件：bad.xlsm\n表头：名称\n数据：\n商品", out _, out _)
+        && !LocalXlsxCreatePolicy.TryParseRequest("创建Excel文件：bad.xlsx\n表头：名称\n数据：\n=HYPERLINK(\"https://example.invalid\")", out _, out _)
+        && !LocalTextFileCreatePolicy.IsValidXlsxFileName("..\\escape.xlsx")
+        && !LocalXlsxCreatePolicy.IsValidContent("A\r\n=1+1\r\n"),
+        "Excel输入接受了宏工作簿、路径穿越或公式单元格。");
+
+    var desktop = new WindowsDesktopTools([], [], exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal(LocalXlsxCreatePolicy.ToolId,
+        [new("file_name", parsedName), new("content", serializedRows)],
+        LocalTextFileCreatePolicy.ExportTargetId, ToolExpectedOutcome.XlsxWorkbookCreatedInConfiguredExport);
+    Require(ToolInteractionPolicy.GetMode(LocalXlsxCreatePolicy.ToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check(LocalXlsxCreatePolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null
+        && TaskFailureSafetyPolicy.RequiresManualVerification("file-create-xlsx", routeStarted: true),
+        "Excel创建没有登记为不打断用户的后台副作用，或缺少不确定结果的人工核对保护。");
+
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var finalPath = Path.Combine(exportRoot, parsedName);
+    Require(result.Success && result.Data == finalPath && File.Exists(finalPath)
+        && result.Summary.Contains("Excel工作簿", StringComparison.Ordinal)
+        && result.Summary.Contains("SHA-256", StringComparison.Ordinal),
+        "ToolBroker未在固定导出目录创建并报告新工作簿。");
+
+    byte[] originalBytes = await File.ReadAllBytesAsync(finalPath);
+    using (var workbook = SpreadsheetDocument.Open(finalPath, false))
+    {
+        Require(!new OpenXmlValidator().Validate(workbook).Any(), "生成的xlsx包未通过Open XML结构校验。");
+        var workbookPart = workbook.WorkbookPart ?? throw new InvalidOperationException("xlsx缺少WorkbookPart。");
+        var workbookXml = workbookPart.Workbook ?? throw new InvalidOperationException("xlsx缺少Workbook内容。");
+        var sheets = workbookXml.Sheets!.Elements<Sheet>().ToArray();
+        Require(sheets.Length == 1 && sheets[0].Name == "数据", "xlsx必须只有固定名称“数据”的工作表。");
+        var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheets[0].Id!);
+        var sheetXml = worksheetPart.Worksheet ?? throw new InvalidOperationException("xlsx缺少Worksheet内容。");
+        var sheetData = sheetXml.GetFirstChild<SheetData>()
+            ?? throw new InvalidOperationException("xlsx工作表缺少SheetData。");
+        var rows = sheetData.Elements<Row>().ToArray();
+        var cells = rows.Select(row => row.Elements<Cell>().ToArray()).ToArray();
+        Require(rows.Length == 3 && cells.All(row => row.Length == 3)
+            && cells.SelectMany(row => row).All(cell => cell.DataType?.Value == CellValues.InlineString && cell.CellFormula is null)
+            && cells[1][0].InlineString!.Text!.Text == "00123"
+            && cells[1][2].InlineString!.Text!.Text == "大杯,热"
+            && cells[2][2].InlineString!.Text!.Text == "加\"糖\"",
+            "xlsx值未保持为无公式内联文本，或行列/原始文本发生变化。");
+    }
+
+    var formulaRejected = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "标题\r\n=1+1\r\n")
+    }, CancellationToken.None);
+    var arbitraryTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = fixtureRoot }, CancellationToken.None);
+    var wrongExpectedOutcome = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        ExpectedOutcome = ToolExpectedOutcome.TextFileCreatedInConfiguredExport
+    }, CancellationToken.None);
+    Require(!formulaRejected.Success && formulaRejected.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !arbitraryTarget.Success && arbitraryTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !wrongExpectedOutcome.Success && wrongExpectedOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "Excel创建接受了公式单元格、任意路径或错配的预期结果。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "编号,商品,备注\r\n999,替换,不应覆盖\r\n")
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(finalPath)).SequenceEqual(originalBytes),
+        "Excel同名冲突覆盖了既有工作簿。");
+
+    using var cancelledSource = new CancellationTokenSource();
+    cancelledSource.Cancel();
+    var cancelled = false;
+    try
+    {
+        await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("file_name", "cancelled.xlsx")
+        }, cancelledSource.Token);
+    }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.xlsx"))
+        && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
+        "预取消的Excel创建仍发布文件或留下部分文件。");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)

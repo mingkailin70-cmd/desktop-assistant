@@ -2,6 +2,13 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 GitHub采用记录：微软 Open XML SDK
+
+- 项目：[dotnet/Open-XML-SDK](https://github.com/dotnet/Open-XML-SDK)，官方最新稳定发行版为 `v3.5.1`，固定上游提交 `3139fdfd27414548a41555f7848d5728f6e71a42`；NuGet 包为 `DocumentFormat.OpenXml 3.5.1`，MIT 许可。
+- 参考方式：采用其强类型 SpreadsheetML 包结构来创建 `WorkbookPart`、`WorksheetPart`、`SheetData` 和工作表，并用SDK校验生成的Open XML。版本、传递依赖和内容散列锁定在Windows适配器的 `packages.lock.json`；发布包包含MIT第三方告知。
+- 小K实现范围：只创建一个名为“数据”的无宏工作表；所有单元格按内联文本写入，保留前导零，不生成公式；最多32列、501行（含表头）、16,000字符/64 KiB。工作簿先在内存生成和验证，再走固定Exports目录、临时文件、不覆盖发布及SHA-256核验流程。不启动Excel，不借用第三方MCP或自动化工具。
+- 来源：[v3.5.1发行页](https://github.com/dotnet/Open-XML-SDK/releases/tag/v3.5.1)、[固定版本许可证](https://github.com/dotnet/Open-XML-SDK/blob/v3.5.1/LICENSE)、[微软创建工作簿文档](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-create-a-spreadsheet-document-by-providing-a-file-name)。SDK生成方式来自微软文档；验收结果只依据小K自己的自动化安全检查，不能据此声称Excel界面已实机打开验收。
+
 ## 2026-10-12 GitHub继续筛选：UIA结果反馈与隔离桌面测试
 
 本轮只阅读公开README、许可证页和微软项目文档，没有克隆、下载、运行或集成候选。
