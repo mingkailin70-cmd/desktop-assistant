@@ -15,8 +15,17 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     private const int MaximumResponseBytes = 32 * 1024;
     private static readonly TimeSpan WorkerTimeout = TimeSpan.FromSeconds(5);
     private readonly WindowsDesktopTools _desktop;
+    private readonly IUiAutomationWorkerProcessStarter _workerProcessStarter;
 
-    public WindowsUiAutomationSnapshotAdapter(WindowsDesktopTools desktop) => _desktop = desktop;
+    public WindowsUiAutomationSnapshotAdapter(WindowsDesktopTools desktop)
+        : this(desktop, new SystemUiAutomationWorkerProcessStarter()) { }
+
+    internal WindowsUiAutomationSnapshotAdapter(WindowsDesktopTools desktop,
+        IUiAutomationWorkerProcessStarter workerProcessStarter)
+    {
+        _desktop = desktop;
+        _workerProcessStarter = workerProcessStarter;
+    }
 
     public async Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken)
     {
@@ -63,8 +72,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         Task? errorTask = null;
         try
         {
-            process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            if (!process.Start()) return new(false, "只读 UIA 工作进程启动失败；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
+            process = _workerProcessStarter.Start(startInfo);
+            if (process is null) return new(false, "只读 UIA 工作进程启动失败；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
             try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
             catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { }
 
@@ -179,6 +188,22 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     public sealed record WorkerRequest(long WindowHandle, int ProcessId, string ExecutablePath);
     public sealed record WorkerResponse(bool Success, string? ErrorCode, UiAutomationSnapshotItem[] Items,
         bool Truncated = false);
+}
+
+internal interface IUiAutomationWorkerProcessStarter
+{
+    Process? Start(ProcessStartInfo startInfo);
+}
+
+internal sealed class SystemUiAutomationWorkerProcessStarter : IUiAutomationWorkerProcessStarter
+{
+    public Process? Start(ProcessStartInfo startInfo)
+    {
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        if (process.Start()) return process;
+        process.Dispose();
+        return null;
+    }
 }
 
 public sealed record UiAutomationSnapshotItem(string AutomationId, string ControlType, string Name,

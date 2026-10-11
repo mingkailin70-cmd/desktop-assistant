@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="XiaoK.Tools.SafetyChecks" />
+    <InternalsVisibleTo Include="XiaoK.DesktopExperience.Checks" />
   </ItemGroup>
 
   <ItemGroup>

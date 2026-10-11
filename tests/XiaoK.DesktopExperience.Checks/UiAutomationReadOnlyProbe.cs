@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -76,6 +77,7 @@ internal static class UiAutomationReadOnlyProbe
                 || !isolated.Data.Contains(AutomationId, StringComparison.Ordinal)
                 || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal))
                 throw new InvalidOperationException($"隔离UIA工作进程未返回合成控件快照：{isolated.ErrorCode ?? isolated.Summary}");
+            await VerifyWorkerCancellationAndTimeoutAsync(desktop);
             if (Volatile.Read(ref activationCount) != 0)
                 throw new InvalidOperationException("只读UIA查询触发了合成控件动作。");
             if (GetForegroundWindow() != foregroundBefore)
@@ -108,6 +110,68 @@ internal static class UiAutomationReadOnlyProbe
     {
         public IDisposable? Start(System.Diagnostics.ProcessStartInfo startInfo) => null;
         public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => [handle];
+    }
+
+    private static async Task VerifyWorkerCancellationAndTimeoutAsync(WindowsDesktopTools desktop)
+    {
+        var cancellationStarter = new BlockingWorkerProcessStarter();
+        var cancellationAdapter = new WindowsUiAutomationSnapshotAdapter(desktop, cancellationStarter);
+        using (var cancellation = new CancellationTokenSource())
+        {
+            var operation = cancellationAdapter.ReadSnapshotAsync("uia-probe", cancellation.Token);
+            await cancellationStarter.Started.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+            var cancelled = false;
+            try { await operation; }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { cancelled = true; }
+            if (!cancelled) throw new InvalidOperationException("用户取消没有中止UIA子进程。");
+            await RequireProcessExitedAsync(cancellationStarter.ProcessId);
+        }
+
+        var timeoutStarter = new BlockingWorkerProcessStarter();
+        var timeoutAdapter = new WindowsUiAutomationSnapshotAdapter(desktop, timeoutStarter);
+        var timedOperation = timeoutAdapter.ReadSnapshotAsync("uia-probe", CancellationToken.None);
+        await timeoutStarter.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        var timed = await timedOperation.WaitAsync(TimeSpan.FromSeconds(8));
+        if (timed.Success || timed.ErrorCode != "UIA_WORKER_TIMEOUT")
+            throw new InvalidOperationException("无响应UIA子进程没有在5秒后被终止。");
+        await RequireProcessExitedAsync(timeoutStarter.ProcessId);
+    }
+
+    private static async Task RequireProcessExitedAsync(int processId)
+    {
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (process.HasExited) return;
+            }
+            catch (ArgumentException) { return; }
+            await Task.Delay(100);
+        }
+        throw new InvalidOperationException("UIA子进程在取消或超时后仍在运行。");
+    }
+
+    private sealed class BlockingWorkerProcessStarter : IUiAutomationWorkerProcessStarter
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Started => _started.Task;
+        public int ProcessId { get; private set; }
+
+        public Process? Start(ProcessStartInfo startInfo)
+        {
+            startInfo.ArgumentList.Add("--test-block");
+            var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+            if (!process.Start())
+            {
+                process.Dispose();
+                return null;
+            }
+            ProcessId = process.Id;
+            _started.TrySetResult();
+            return process;
+        }
     }
 
     [DllImport("user32.dll")]
