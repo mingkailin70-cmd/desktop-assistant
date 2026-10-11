@@ -8,7 +8,7 @@
 
 ## 当前状态与长期待验收项（截至 2026-10-12）
 
-当前账户已安装签名 MSIX 0.1.105.0，状态为 Ok；包139,393,769字节，SHA-256为180D93D6F7CD5E5280D66815F49B4339C22A272CFB059E9C4650DE62B0D25690。安装版与artifacts/publish/win-x64的Host DLL SHA-256均为4ABB9BFCDF5F66E87FBE586DFC5F5BD414157DB39676C42A44316595AA2E772D。本版将一次性通知样本的发布者改为从最近只读诊断中按微信/QQ筛选并选择，不能手输任意AUMID，也不写持续监听白名单。固定SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows安全套件122项通过、0项跳过；MSIX签名有效，SignTool验签0警告、0错误。安装时证书原已受信任，未更改信任；小K与llama-server均未启动。当前代码和发布证据已在本地，阶段提交与推送仍待完成。该入口尚无自然通知正文样本，R0私聊解析与30条/95%门槛仍未通过。GitHub借鉴记录新增Aevra与Microsoft UI Automation Remote Operations评估，只记录设计取舍，未集成第三方代码或预览SDK。
+当前账户已安装签名 MSIX 0.1.105.0，状态为 Ok；包139,393,769字节，SHA-256为180D93D6F7CD5E5280D66815F49B4339C22A272CFB059E9C4650DE62B0D25690。安装版与artifacts/publish/win-x64的Host DLL SHA-256均为4ABB9BFCDF5F66E87FBE586DFC5F5BD414157DB39676C42A44316595AA2E772D。本版将一次性通知样本的发布者改为从最近只读诊断中按微信/QQ筛选并选择，不能手输任意AUMID，也不写持续监听白名单。固定SDK 10.0.401 Release全解决方案构建0警告、0错误；Windows安全套件122项通过、0项跳过；MSIX签名有效，SignTool验签0警告、0错误。安装时证书原已受信任，未更改信任；小K与llama-server均未启动。阶段提交 1acfc7b 已推送至 origin/main；GitHub Actions Build #475 成功（https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38169269365）。该入口尚无自然通知正文样本，R0私聊解析与30条/95%门槛仍未通过。GitHub借鉴记录新增Aevra与Microsoft UI Automation Remote Operations评估，只记录设计取舍，未集成第三方代码或预览SDK。
 
 总体目标仍未完成，R0/P4闸门未通过。消息侧最近一次来源诊断找到QQ/AUMID `QQ`候选、未发现微信通知候选；这只佐证发布者候选，不证明通知所对应的会话、联系人或私聊身份。Windows通知访问权限最近一次读数为Allowed（2026-10-09）；监听开关和AUMID白名单最近一次核验为关闭/空。设置页已提供用户选择平台并确认后启动的一次性通知采样，但该入口尚未使用，未读取真实Toast正文；监控器传入的会话ID、发送者和私聊标记仍为空，故`GateBodyReader`不提供真实正文读取器。每客户端30条/95%通知门槛、稳定联系人身份、真实私聊/群聊分类及微信/QQ外发适配器均未验收。需要用户在设置中主动选择并确认一次性采样，基于自然通知判断可行性；不得发送试探消息或放宽门槛。
 
