@@ -2,7 +2,7 @@
 
 将本地代码上下文凭证过滤改进打包安装。规则类别参考Gitleaks v8.30.1，但没有引入其二进制、完整规则集或运行依赖；该过滤器只覆盖有限格式，应视为纵深防御。源码阶段已用合成凭证通过Windows安全套件121项；打包阶段没有重跑测试。
 
-固定.NET SDK 10.0.401自包含Release发布成功，运行时包含.NET 10.0.12。签名MSIX位于`artifacts\msix-validation\093cb5ce385a42e58b1b34828c15c512\XiaoK-signed-validation.msix`，139,362,702字节，SHA-256 `E4E4997180B878AB77396F1F80283AA49DAD54BDCA6E9C55425524346C6E84C7`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已在`LocalMachine\TrustedPeople`，本次没有修改证书信任。当前账户已安装`0.1.98.0`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`D57875637D7AF7BBE09514F974E164534EA63CD0CB5A60A01574DFC44F335AB1`。安装器未启动Host，未读取聊天/通知或发送消息。
+固定.NET SDK 10.0.401自包含Release发布成功，运行时包含.NET 10.0.12。签名MSIX位于`artifacts\msix-validation\093cb5ce385a42e58b1b34828c15c512\XiaoK-signed-validation.msix`，139,362,702字节，SHA-256 `E4E4997180B878AB77396F1F80283AA49DAD54BDCA6E9C55425524346C6E84C7`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已在`LocalMachine\TrustedPeople`，本次没有修改证书信任。当前账户已安装`0.1.98.0`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`D57875637D7AF7BBE09514F974E164534EA63CD0CB5A60A01574DFC44F335AB1`。安装器未启动Host；安装后另以隔离诊断配置隐藏启动一次，窗口不可见、前台窗口句柄不变，注册关闭消息后退出码0。未读取聊天/通知或发送消息。
 
 本机忽略目录仍保留`0.1.97.0`签名回退包，SHA-256 `0AB4F57F8A3E6F034E8C5119776EE9351714D30F6F7C8CC84CA3607ED68CE48E`。如需回退，可在同一发布者身份下使用`Add-AppxPackage -Path '<该旧包路径>' -ForceUpdateFromAnyVersion`降级；本次未执行回退。
 
