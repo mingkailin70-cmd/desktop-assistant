@@ -2988,10 +2988,20 @@ internal sealed class CodeWorkspaceSnapshot
 {
     private static readonly Regex[] LikelyCredentialPatterns =
     [
-        new(@"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
-        new(@"\bAKIA[0-9A-Z]{16}\b", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
-        new(@"\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|sk-[A-Za-z0-9_-]{24,})\b", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
-        new("""["']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)["']?\s*[:=]\s*["'](?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[^"'\r\n]{12,}["']""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
+        new(@"-----BEGIN (?:(?:RSA|DSA|EC|OPENSSH) )?(?:ENCRYPTED )?PRIVATE KEY-----|-----BEGIN PGP(?:\s+PRIVATE)?\s+KEY BLOCK-----",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new(@"\b(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA|ABIA|ACCA)[A-Z2-7]{16}\b",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new(@"\b(?:ABSK[A-Za-z0-9+/]{109,269}={0,2}|bedrock-api-key-[A-Za-z0-9+/=_-]{16,})\b",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new(@"\b(?:gh[pousr]_[A-Za-z0-9_]{24,}|github_pat_[A-Za-z0-9_]{24,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,48}|sk-[A-Za-z0-9_-]{24,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{35}|npm_[A-Za-z0-9]{36}|(?:doo|dop)_v1_[a-f0-9]{64})\b",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new(@"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new("""\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^/\s:@]+:[^@\s/]+@[^\s/]+""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new("""["']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|aws[_-]?secret[_-]?(?:access[_-]?)?key|password|passwd|secret|token|connection[_-]?string|signing[_-]?key)["']?\s*[:=]\s*["'](?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[^"'\r\n]{12,}["']""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
     ];
     private static readonly HashSet<string> ExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
     {

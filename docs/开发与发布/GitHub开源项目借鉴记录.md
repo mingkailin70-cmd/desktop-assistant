@@ -53,7 +53,14 @@
 - 当前决定：不安装、不接MCP，也不复用其自动化执行实现。仓库包含启动时自动安装Codex技能的逻辑，并提供 `--unrestricted` 运行选项以关闭同意/租约/速率限制；两者都不适合小K的无Codex连接器和固定授权边界。必须独立核对底层UIA调用的焦点、输入和第三方应用副作用，不能仅凭README的“后台”或“安全”描述认定不打扰。
 - 来源：[固定提交仓库](https://github.com/ChrisPulman/UIInspect.MCP/tree/810e67c2f96b44d8857ffea586e4d55b0113a35c)、[该提交的MIT许可证](https://github.com/ChrisPulman/UIInspect.MCP/blob/810e67c2f96b44d8857ffea586e4d55b0113a35c/LICENSE)。以上项目特性来自维护者材料；未由小K独立验证。
 
-本轮只阅读公开仓库页面和官方文档，没有克隆、安装、运行这些候选，也没有读取本机通知正文或聊天窗口。可借鉴项限于独立来源适配、通知ID基线/队列和显式白名单；第三方采集、数据存储、网络转发和前台自动化均不复用。
+## Gitleaks：隔离编程代理凭证识别规则参考
+
+- 项目：[gitleaks/gitleaks](https://github.com/gitleaks/gitleaks)，本次参考固定发布 `v8.30.1`，官方配置包含大量按凭证提供方区分的规则；仓库采用MIT许可证。
+- 可借鉴处：将凭证识别拆成有限时长、可测试的具体格式规则；已吸收少数高辨识度格式（例如AWS访问标识、GitHub/GitLab令牌、Google API Key、JWT和连接字符串）的思路，并对专用私钥块采取整文件拒绝进入模型上下文。
+- 当前决定：不集成其二进制、完整规则库或扫描命令。小K只需要在代码上下文发送前做本地脱敏，不能把扫描结果或原始匹配内容写入日志；本地规则集远小于Gitleaks，因此只能作为纵深防御，不得宣称能发现所有密钥。规则需按脱敏合成样本和允许的模板占位符持续回归。
+- 来源：[v8.30.1默认规则](https://github.com/gitleaks/gitleaks/blob/v8.30.1/config/gitleaks.toml)、[v8.30.1发布页](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1)、[MIT许可证](https://github.com/gitleaks/gitleaks/blob/v8.30.1/LICENSE)。只参考规则类别，未复制其完整配置或代码。
+
+本轮只阅读公开仓库页面和官方文档，没有克隆、安装、运行这些候选，也没有读取本机通知正文、聊天窗口或真实项目凭证。可借鉴项限于独立来源适配、通知ID基线/队列、显式白名单、UIA能力分层和凭证格式测试；第三方采集、数据存储、网络转发、MCP运行面和前台自动化均不复用。
 
 ## 后续调研规则
 

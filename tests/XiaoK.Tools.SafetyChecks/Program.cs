@@ -4589,7 +4589,21 @@ static async Task CheckModelCannotPatchOutsidePathAsync(string root)
 
 static async Task CheckLikelyCredentialIsNotSentAsync(string root)
 {
-    var project = CreateProject(root, "credential", "internal const string api_key = \"sk-12345678901234567890123456789012\";\n");
+    var syntheticCredentials = new[]
+    {
+        "AKIA" + new string('A', 16),
+        "ghp_" + new string('g', 32),
+        "glpat-" + new string('l', 30),
+        "xoxb-" + new string('x', 24),
+        "AIza" + new string('i', 35),
+        "npm_" + new string('n', 36),
+        "sk_live_" + new string('s', 24),
+        "eyJ" + new string('a', 16) + "." + new string('b', 16) + "." + new string('c', 16),
+        "postgres://user:" + new string('p', 24) + "@db.example.invalid/app",
+        "-----BEGIN OPENSSH PRIVATE KEY-----"
+    };
+    var source = "internal const string secrets = \"" + string.Join(";", syntheticCredentials) + "\";\n";
+    var project = CreateProject(root, "credential", source);
     var inference = new ScriptedInference("{\"paths\":[\"Program.cs\"]}");
     var result = await NewAgent(inference).ExecuteAsync(project, Path.Combine(root, "credential-workspaces"), "检查代码", CancellationToken.None);
     Require(!result.Success && result.ErrorCode == "NO_CODE_FILES", "包含已知格式凭证的文件未从模型清单中排除。");
@@ -4598,8 +4612,23 @@ static async Task CheckLikelyCredentialIsNotSentAsync(string root)
 
 static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string root)
 {
-    var secret = "sk-" + new string('7', 32);
-    var original = $"internal class Sample {{\n    private const string Key = \"{secret}\";\n    static void Target() {{ int value = 1; }}\n}}\n";
+    var syntheticCredentials = new[]
+    {
+        "sk-" + new string('7', 32),
+        "AKIA" + new string('A', 16),
+        "ABSK" + new string('B', 110),
+        "github_pat_" + new string('c', 32),
+        "glpat-" + new string('d', 30),
+        "xoxb-" + new string('e', 24),
+        "AIza" + new string('f', 35),
+        "npm_" + new string('g', 36),
+        "sk_live_" + new string('h', 24),
+        "eyJ" + new string('i', 16) + "." + new string('j', 16) + "." + new string('k', 16),
+        "redis://user:" + new string('m', 24) + "@cache.example.invalid/0"
+    };
+    var original = "internal class Sample {\n"
+        + string.Join("\n", syntheticCredentials.Select((secret, index) => $"    private const string Key{index} = \"{secret}\";"))
+        + "\n    private const string Placeholder = \"${API_KEY}\";\n    static void Target() { int value = 1; }\n}\n";
     var project = CreateProject(root, "credential-redaction", original);
     var workspaceRoot = Path.Combine(root, "credential-redaction-workspaces");
     var inference = new ScriptedInference(
@@ -4611,14 +4640,16 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
 
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval && inference.CallCount == 1,
         "含有可脱敏凭证的多行代码没有继续进行安全编辑。" + result.Summary);
-    Require(inference.Prompts.All(prompt => !prompt.Contains(secret, StringComparison.Ordinal)
-        && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)),
+    Require(inference.Prompts.All(prompt => syntheticCredentials.All(secret => !prompt.Contains(secret, StringComparison.Ordinal))
+        && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)
+        && prompt.Contains("${API_KEY}", StringComparison.Ordinal)),
         "原始凭证进入了本地模型提示，或没有显示脱敏占位符。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
         "凭证脱敏期间修改了原项目。");
     var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
     var updated = File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs"));
-    Require(updated.Contains(secret, StringComparison.Ordinal) && updated.Contains("int value = 2;", StringComparison.Ordinal),
+    Require(syntheticCredentials.All(secret => updated.Contains(secret, StringComparison.Ordinal))
+        && updated.Contains("int value = 2;", StringComparison.Ordinal),
         "精确编辑没有保留隔离快照中的原始凭证字节内容。");
 }
 
