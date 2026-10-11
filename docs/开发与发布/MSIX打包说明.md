@@ -1,3 +1,11 @@
+## v0.1.111.0 隔离网页同源链接导航（2026-10-12）
+
+本版新增 `browser.session.follow-link.v1`，只按用户给定的会话、最新快照ID与ARIA可访问名称跟随唯一可见链接。执行前重算ARIA与链接属性指纹；页面结构或目标改变时拒绝执行并要求刷新。只允许同源HTTPS（443、公网DNS）；拒绝下载、新窗口、跨源重定向及非HTTPS目标；不运行页面click处理器，使用已有无Cookie受限读取器请求目标HTML。新功能参考微软Playwright MCP的结构化ARIA快照做法，没有集成MCP或新增依赖。
+
+固定.NET SDK 10.0.401自包含Windows x64发布成功，锁定依赖还原显示无新包需要下载。签名MSIX为 `artifacts\msix-validation\f53459d7813d4eea963568120d7c6591\XiaoK-signed-validation.msix`，141,535,712字节，SHA-256 `CECA01E27C6CB870C8205EE4AD7B7EA8DD7851B69BAD452D1D44237D9C81CD25`。SignTool验签成功，0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，没有更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.111.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与自包含发布版Host DLL SHA-256均为`4F9F409A984B4018C776BB6E64C376582DB52C34756BE96012A7D344B2DF718B`。安装前旧Host未运行，安装器没有启动新版Host；安装后Host与llama-server进程数均为0。
+
+`ae655d4`功能提交的GitHub Actions Build #486成功，`2ce8ef4`快照指纹修复提交的Build #488成功；`ab77706`版本提交的Build #490成功（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38179280186)）。本轮没有运行测试套件；合成浏览器专项、安装版界面交互和真实网站均待验收。
+
 ## v0.1.110.0 后台纯文本Word文档创建（2026-10-12）
 
 新增后台工具`file.create.docx.v1`，沿用锁定的Open XML SDK 3.5.1（MIT）和现有固定Exports安全发布流程。用户逐行正文生成普通Word段落；支持16,000字符/64 KiB，保留空行与空格。只接受`.docx`，不加载用户模板，不包含宏、附件、嵌入部件或外部关系；不会启动Word或操作桌面输入。OpenXmlValidator检查结构；发布前取消会清理临时文件，发布后无法核验则转人工检查、不重试。安装版命令输入和Word实际打开尚未验收。

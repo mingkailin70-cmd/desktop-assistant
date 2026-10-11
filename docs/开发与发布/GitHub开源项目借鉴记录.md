@@ -8,6 +8,7 @@
 - 小K采用的设计思路：继续使用现有锁定的Microsoft.Playwright程序集，以用户明确命令、当前快照令牌、ARIA角色与精确名称绑定单次动作；新增只读解析href、快照后结构指纹校验和受限同源导航，让模型/网页内容仍无权自行发起动作，页面变化时停止而不猜测目标。
 - 小K没有安装或集成Playwright MCP、Node服务或其工具集合；此项目能力面包含更广泛的点击、拖拽、下载和其他浏览器操作，不符合小K固定ToolBroker、匿名网络和逐工具授权边界。小K独立实现的同源检查、重定向阻断、DNS公网验证、无Cookie GET和会话过期策略仍由本项目负责。
 - 来源：[官方仓库与许可证入口](https://github.com/microsoft/playwright-mcp)、[README中的可访问性快照说明及安全边界声明](https://github.com/microsoft/playwright-mcp#playwright-mcp)。只阅读公开资料，没有克隆、运行或复制其代码。
+- 落地状态：R3.3功能提交`ae655d4`及快照指纹修复`2ce8ef4`已推送；GitHub Actions Build #486与#488成功。0.1.111.0签名MSIX已在当前账户安装，实际浏览器专项、安装版交互和真实网站验收仍未完成。
 
 ## 2026-10-12 GitHub采用记录：微软 Open XML SDK
 
