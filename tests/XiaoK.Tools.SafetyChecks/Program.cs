@@ -3785,6 +3785,13 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Queued).Contains("不会执行", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running).Contains("副作用", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.OutcomeUncertain).Contains("不会自动重试", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Queued)
+        && TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Running)
+        && !TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Running, cancellationRequested: true)
+        && !TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Completed)
+        && TaskHistoryDisplayPolicy.CancellationRequestedLabel == "正在停止"
+        && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running, cancellationRequested: true)
+            .Contains("不要重复提交", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.CodeTaskStateLabel("verifying") == "核验中"
         && TaskHistoryDisplayPolicy.NextActionForCodeTask("verifying", interrupted: false)
             .Contains("等待独立核验完成", StringComparison.Ordinal)
@@ -3896,6 +3903,9 @@ static void CheckQueuedTaskCancellationArbitration()
     var shutdownMethod = shutdownStart >= 0 && shutdownEnd > shutdownStart
         ? runtime[shutdownStart..shutdownEnd] : string.Empty;
     Require(runtime.Contains("work.Admission.TryCancelBeforeStart()", StringComparison.Ordinal)
+        && runtime.Contains("_cancellationRequestedUserTasks.TryAdd(taskId, 0)", StringComparison.Ordinal)
+        && runtime.Contains("_cancellationRequestedUserTasks.TryRemove(work.Id, out _)", StringComparison.Ordinal)
+        && runtime.Contains("TaskHistoryDisplayPolicy.CancellationRequestedLabel", StringComparison.Ordinal)
         && runtime.Contains("if (!work.Admission.TryStart())", StringComparison.Ordinal)
         && runtime.Contains("await work.AdmissionPublished.ConfigureAwait(false)", StringComparison.Ordinal)
         && runtime.Contains("ReleasePendingUserTaskCount(work)", StringComparison.Ordinal)

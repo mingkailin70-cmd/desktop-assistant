@@ -381,4 +381,12 @@ VS Code 新窗口核验修正（2026-10-03）：复核后发现旧启动验收�
 
 阶段实现提交`9fa931c`已推送至`origin/main`；GitHub Actions [Build #37881025791](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/37881025791)成功。
 
+## v0.1.102.0 R1任务中心运行中取消反馈（2026-10-12）
+
+任务中心在运行任务收到取消请求后，显示“正在停止”、等待当前步骤响应的说明和副作用核验提示，并禁用重复取消按钮。此状态只保留在Host内存，任务结束清理；不会将用户请求正文写入数据库，也不改变队列开始前取消、Host重启后不自动重放的规则。
+
+固定.NET SDK 10.0.401 Release全解决方案构建0警告/0错误；Windows安全套件122项通过、0项跳过；桌面体验检查91项通过。自包含签名MSIX `artifacts\\msix-validation\\dd52386be8224f39a9f9acfceb3a816c\\XiaoK-signed-validation.msix`，139,391,049字节，SHA-256 `AF2105ACE3E3A04BB1207152FE8CAF33219B7DE9F64E85CAF9F2D36D85DF4F95`，SignTool验证成功、0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已受信任，本阶段没有改动信任。当前账户已安装`MingKaiLin.XiaoK_0.1.102.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`D1CFA13AA4DF241BF0B9A1BE88E8B783DD5B8679089168B27F814E773AD96A55`。安装后未启动Host、模型、麦克风或通知监听。
+
+上述检查验证策略、窗口绑定和打包安装，不是运行中真实任务的响应性/实时副作用验证。普通界面中的真实任务取消、长时间不响应的工具、第三方窗口并发行为和完整P1运行恢复仍待验收。
+
 ## v0.1.79.0 R1待办数量可见性（2026-10-09）

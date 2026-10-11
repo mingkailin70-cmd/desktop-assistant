@@ -41,6 +41,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, string> _transientUserTaskResults = new();
     private readonly ConcurrentDictionary<Guid, string> _transientUserTaskSteps = new();
     private readonly ConcurrentDictionary<Guid, TaskLifecycleState> _transientUserTaskStates = new();
+    private readonly ConcurrentDictionary<Guid, byte> _cancellationRequestedUserTasks = new();
     private readonly object _transientResultLock = new();
     private readonly object _userTaskAdmissionLock = new();
     private readonly Queue<Guid> _transientResultOrder = new();
@@ -328,25 +329,36 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                     ? visible with { Status = transientState, ErrorCode = transientState == TaskLifecycleState.Cancelled ? "CANCELLED" : visible.ErrorCode }
                     : visible;
             });
-        var history = records.Select(record => new TaskHistoryEntry(
-            $"task:{record.Id:N}",
-            record.Id,
-            $"{record.Summary} · {record.Id.ToString("N")[..8]}",
-            TaskStateLabel(record.Status), record.UpdatedAtUtc,
-            _transientUserTaskResults.TryGetValue(record.Id, out var transientResult) ? transientResult
-            : record.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
-                ? "上次关闭时的审批待办不会跨进程恢复；小K没有自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
-            : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
-                ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
-            : TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)
-                ? "工具在取消、超时或异常后未能确认结果；小K不会自动重试。请先检查目标状态，再决定下一步。"
-                : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}",
-            IsCancellableTaskState(record.Status) && _userTaskOperations.ContainsKey(record.Id),
-            _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status),
-            TaskHistoryDisplayPolicy.TargetScope(record.Kind),
-            TaskHistoryDisplayPolicy.ExecutionMode(record.Kind),
-            TaskHistoryDisplayPolicy.NextAction(record.Status)))
-            .ToList();
+        var history = records.Select(record =>
+        {
+            var cancellationRequested = _cancellationRequestedUserTasks.ContainsKey(record.Id)
+                && _userTaskOperations.ContainsKey(record.Id)
+                && TaskHistoryDisplayPolicy.CanCancel(record.Status);
+            var detail = cancellationRequested
+                ? "已向当前步骤发出安全停止请求；等待该步骤响应。若操作已经产生副作用，最终结果仍需核验。"
+                : _transientUserTaskResults.TryGetValue(record.Id, out var transientResult) ? transientResult
+                : record.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
+                    ? "上次关闭时的审批待办不会跨进程恢复；小K没有自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
+                : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
+                    ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
+                : TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)
+                    ? "工具在取消、超时或异常后未能确认结果；小K不会自动重试。请先检查目标状态，再决定下一步。"
+                    : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}";
+            return new TaskHistoryEntry(
+                $"task:{record.Id:N}",
+                record.Id,
+                $"{record.Summary} · {record.Id.ToString("N")[..8]}",
+                cancellationRequested ? TaskHistoryDisplayPolicy.CancellationRequestedLabel : TaskStateLabel(record.Status),
+                record.UpdatedAtUtc,
+                detail,
+                TaskHistoryDisplayPolicy.CanCancel(record.Status, cancellationRequested)
+                    && _userTaskOperations.ContainsKey(record.Id),
+                cancellationRequested ? TaskHistoryDisplayPolicy.CancellationRequestedStep
+                    : _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status),
+                TaskHistoryDisplayPolicy.TargetScope(record.Kind),
+                TaskHistoryDisplayPolicy.ExecutionMode(record.Kind),
+                TaskHistoryDisplayPolicy.NextAction(record.Status, cancellationRequested));
+        }).ToList();
 
         var codeTasks = await Task.Run(() => CodeTaskAgent.ReadRetainedTasks(_settings.CodeWorkspaceRoot), cancellationToken);
         history.AddRange(codeTasks.Select(task =>
@@ -471,10 +483,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             if (!_userTaskOperations.TryGetValue(taskId, out work)) return false;
             cancelledBeforeStart = work.Admission.TryCancelBeforeStart();
-            if (cancelledBeforeStart || work.Admission.State == TaskExecutionAdmissionState.Running)
+            var running = work.Admission.State == TaskExecutionAdmissionState.Running;
+            if (running) _cancellationRequestedUserTasks.TryAdd(taskId, 0);
+            if (cancelledBeforeStart || running)
             {
                 try { work.Lifetime.Cancel(); }
-                catch (ObjectDisposedException) { }
+                catch (ObjectDisposedException)
+                {
+                    if (running) _cancellationRequestedUserTasks.TryRemove(taskId, out _);
+                }
+                if (running && !_userTaskOperations.ContainsKey(taskId))
+                    _cancellationRequestedUserTasks.TryRemove(taskId, out _);
             }
         }
 
@@ -527,6 +546,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 await TrySaveStateAsync(uncertain, CancellationToken.None).ConfigureAwait(false);
                 work.Admission.TryComplete();
                 var operationWasTracked = _userTaskOperations.TryRemove(work.Id, out _);
+                _cancellationRequestedUserTasks.TryRemove(work.Id, out _);
                 _userTaskCompletions.TryRemove(work.Id, out var completion);
                 try { work.Lifetime.Dispose(); }
                 catch (ObjectDisposedException) { }
@@ -646,6 +666,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             timeout?.Dispose();
             work.Admission.TryComplete();
             _userTaskOperations.TryRemove(work.Id, out _);
+            _cancellationRequestedUserTasks.TryRemove(work.Id, out _);
             work.Lifetime.Dispose();
             ReleasePendingUserTaskCount(work);
             SetTransientTaskStep(work.Id, TaskStepForStoredState(finalState));
@@ -705,10 +726,6 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             catch (Exception) { }
         }
     }
-
-    private static bool IsCancellableTaskState(TaskLifecycleState state) => state is
-        TaskLifecycleState.Queued or TaskLifecycleState.Planning or TaskLifecycleState.Running
-        or TaskLifecycleState.Verifying or TaskLifecycleState.AwaitingApproval;
 
     public Task<bool> StopMicrophoneAndDiscardAsync() => _microphone.StopImmediatelyAndDiscardAsync();
 
@@ -806,6 +823,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _transientUserTaskResults.Clear();
             _transientUserTaskSteps.Clear();
             _transientUserTaskStates.Clear();
+            _cancellationRequestedUserTasks.Clear();
             _executionGate.Release();
         }
     }

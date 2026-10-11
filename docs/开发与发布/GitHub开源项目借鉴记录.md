@@ -128,3 +128,15 @@
 ## 后续调研规则
 
 每次补充候选时，记录项目官方仓库、固定版本、许可证、可复用模块、资源成本、隐私/网络路径、与小K现有接口的差异以及验证结果。优先采用可独立替换的小组件或测试工具；只有本机试验通过且没有削弱 `ToolBroker` 权限边界时，才进入正式实现。候选宣传、跑分和演示均不算小K的本机验收证据。
+
+## 2026-10-12 长任务状态与取消体验复核
+
+| 项目 | 本次核对内容 | 对小K的取舍 |
+| --- | --- | --- |
+| [shoelace66/AutoPi](https://github.com/shoelace66/AutoPi) | README列出后台任务ID、进程ID、退出码、时间戳和取消状态；宿主关闭后会显示恢复信息而不自动重跑。其代码执行和日志能力较宽。 | 参考任务中心明确取消/恢复状态；小K继续不持久化用户请求正文、进程输出和聊天内容。 |
+| [KremlevLev/Rynne](https://github.com/KremlevLev/Rynne) | README描述多步后台计划在每个已核验步骤后保存检查点，并在重启后继续时避免重复副作用；这是项目方公开说明，未由小K复现。 | 小K目前把跨进程活动任务标为“结果待核对”，不会自动重放。仅在未来能够证明某类步骤幂等、目标重新核验且不跨越审批边界时，才讨论恢复计划；一般桌面操作保持人工检查。 |
+| [NORTHTEKDevs/Ghost](https://github.com/NORTHTEKDevs/ghost) | README把后台焦点策略锁在操作者设定值，缺少后台路径时显式报错；其无干扰数据和隐藏桌面实现是项目自述，不作为小K效果证明。 | 小K继续由`ToolInteractionPolicy`区分后台/前台，并在后台入口拒绝需要前台的动作。此次任务中心改动进一步把运行任务的取消请求显示成独立的“正在停止”状态，避免按钮重启后仍像未响应一样可重复点击。 |
+
+本次仅阅读上述GitHub仓库公开README，没有克隆、安装、运行或复制代码；未新增依赖。AutoPi仓库README保留MIT说明；Rynne与Ghost的许可证和依赖不是本次核验范围，不能据此引入其代码。当前任务取消状态是小K自身实现，需经仓库安全检查与界面验收后再记为交付。
+
+来源：[AutoPi README](https://github.com/shoelace66/AutoPi#what-autopi-can-do)、[Rynne README](https://github.com/KremlevLev/Rynne#remember-and-continue)、[Ghost后台模式说明](https://github.com/NORTHTEKDevs/ghost#background-mode-agent-harness--computer-use)。仓库默认分支页面会变化；本次用作设计参考，没有锁定候选提交或验证其产品声明。

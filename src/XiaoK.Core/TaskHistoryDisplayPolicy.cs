@@ -3,6 +3,9 @@ namespace XiaoK.Core;
 /// <summary>为任务中心提供不含请求正文的目标范围、执行模式和下一步提示。</summary>
 public static class TaskHistoryDisplayPolicy
 {
+    public const string CancellationRequestedLabel = "正在停止";
+    public const string CancellationRequestedStep = "已请求安全停止；等待当前操作响应。";
+
     public static string ApprovalTabHeader(int pendingCount) => pendingCount <= 0
         ? "待办确认"
         : $"待办确认（{pendingCount}）";
@@ -45,19 +48,32 @@ public static class TaskHistoryDisplayPolicy
         _ => "后台处理：不发送键鼠输入，不改变前台窗口"
     };
 
-    public static string NextAction(TaskLifecycleState state) => state switch
+    public static bool CanCancel(TaskLifecycleState state, bool cancellationRequested = false) =>
+        !cancellationRequested && IsCancellableState(state);
+
+    public static string NextAction(TaskLifecycleState state, bool cancellationRequested = false)
     {
-        TaskLifecycleState.Queued => "可取消；取消先于工作线程启动时，任务不会执行。",
-        TaskLifecycleState.Planning => "可请求取消；工具动作尚未开始。",
-        TaskLifecycleState.AwaitingApproval => "在任务中心待办中批准或拒绝；未批准的动作不会继续。",
-        TaskLifecycleState.Running => "可请求停止；已经提交的系统副作用可能无法撤回。",
-        TaskLifecycleState.Verifying => "等待独立核验完成；请勿重复执行同一任务。",
-        TaskLifecycleState.Completed => "任务已完成；小K不会自动重放。需要重复时请提交新任务。",
-        TaskLifecycleState.Failed => "任务失败；根据错误说明修正条件后可重新提交。",
-        TaskLifecycleState.Cancelled => "任务已取消且不会自动重试；若任务已开始，请核对目标状态。",
-        TaskLifecycleState.OutcomeUncertain => "先检查目标状态，再决定是否重新提交；小K不会自动重试。",
-        _ => "状态未知；先检查目标状态，不要重复执行。"
-    };
+        if (cancellationRequested && IsCancellableState(state))
+            return "已请求安全停止；请等待状态更新，不要重复提交。已经提交的系统副作用可能无法撤回。";
+
+        return state switch
+        {
+            TaskLifecycleState.Queued => "可取消；取消先于工作线程启动时，任务不会执行。",
+            TaskLifecycleState.Planning => "可请求取消；工具动作尚未开始。",
+            TaskLifecycleState.AwaitingApproval => "在任务中心待办中批准或拒绝；未批准的动作不会继续。",
+            TaskLifecycleState.Running => "可请求停止；已经提交的系统副作用可能无法撤回。",
+            TaskLifecycleState.Verifying => "等待独立核验完成；请勿重复执行同一任务。",
+            TaskLifecycleState.Completed => "任务已完成；小K不会自动重放。需要重复时请提交新任务。",
+            TaskLifecycleState.Failed => "任务失败；根据错误说明修正条件后可重新提交。",
+            TaskLifecycleState.Cancelled => "任务已取消且不会自动重试；若任务已开始，请核对目标状态。",
+            TaskLifecycleState.OutcomeUncertain => "先检查目标状态，再决定是否重新提交；小K不会自动重试。",
+            _ => "状态未知；先检查目标状态，不要重复执行。"
+        };
+    }
+
+    private static bool IsCancellableState(TaskLifecycleState state) => state is
+        TaskLifecycleState.Queued or TaskLifecycleState.Planning or TaskLifecycleState.Running
+        or TaskLifecycleState.Verifying or TaskLifecycleState.AwaitingApproval;
 
     public static string CodeTaskStateLabel(string state) => state switch
     {

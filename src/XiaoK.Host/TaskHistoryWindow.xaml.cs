@@ -45,7 +45,7 @@ public partial class TaskHistoryWindow : Window
         RefreshStatus.Text = "正在撤销排队任务或请求运行任务停止…";
         try
         {
-            if (await _cancelTask(taskId)) RefreshStatus.Text = "排队任务已撤销，或已向运行任务请求安全停止。";
+            if (await _cancelTask(taskId)) RefreshStatus.Text = "已接受取消请求；任务中心会显示撤销或停止结果。";
             else RefreshStatus.Text = "该任务已结束或无法取消；状态将在下一次刷新时更新。";
             await RefreshAsync();
         }
