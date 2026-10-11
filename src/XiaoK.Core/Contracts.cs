@@ -63,7 +63,8 @@ public enum ToolExpectedOutcome
     ApplicationUiSnapshotReturned = 29,
     ApplicationUiConditionObserved = 30,
     CsvFileCreatedInConfiguredExport = 31,
-    XlsxWorkbookCreatedInConfiguredExport = 32
+    XlsxWorkbookCreatedInConfiguredExport = 32,
+    DocxDocumentCreatedInConfiguredExport = 33
 }
 
 public static class ApprovalAuditCatalog

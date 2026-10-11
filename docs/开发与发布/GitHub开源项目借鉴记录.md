@@ -9,6 +9,13 @@
 - 小K实现范围：只创建一个名为“数据”的无宏工作表；所有单元格按内联文本写入，保留前导零，不生成公式；最多32列、501行（含表头）、16,000字符/64 KiB。工作簿先在内存生成和验证，再走固定Exports目录、临时文件、不覆盖发布及SHA-256核验流程。不启动Excel，不借用第三方MCP或自动化工具。
 - 来源：[v3.5.1发行页](https://github.com/dotnet/Open-XML-SDK/releases/tag/v3.5.1)、[固定版本许可证](https://github.com/dotnet/Open-XML-SDK/blob/v3.5.1/LICENSE)、[微软创建工作簿文档](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-create-a-spreadsheet-document-by-providing-a-file-name)。SDK生成方式来自微软文档；验收结果只依据小K自己的自动化安全检查，不能据此声称Excel界面已实机打开验收。
 
+### 同一SDK扩展为纯文本Word文档生成
+
+- 项目仍为微软维护的[dotnet/Open-XML-SDK](https://github.com/dotnet/Open-XML-SDK)，沿用已固定的3.5.1 MIT包，不增加依赖。
+- 采用`WordprocessingDocument`与强类型WordprocessingML的Document、Body、Paragraph、Run和Text结构。小K在内存生成最小普通`.docx`，正文按行形成段落，校验包结构，再使用既有安全发布流水线。
+- 不读取模板，不接受`.docm`，不添加宏、图像、外部关系、嵌入包或资源；不启动Word，也不操作桌面输入。
+- 上游参考：[Open-XML-SDK WordprocessingDocument API](https://github.com/dotnet/Open-XML-SDK/blob/v3.5.1/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs)、[OfficeDev创建Word文档并添加正文](https://github.com/OfficeDev/open-xml-docs/blob/main/docs/word/how-to-open-and-add-text-to-a-word-processing-document.md)。检查来源时未克隆或执行第三方项目；具体安全性由小K自身合成检查证明。
+
 ## 2026-10-12 GitHub继续筛选：UIA结果反馈与隔离桌面测试
 
 本轮只阅读公开README、许可证页和微软项目文档，没有克隆、下载、运行或集成候选。

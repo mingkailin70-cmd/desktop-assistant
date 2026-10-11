@@ -28,6 +28,7 @@ using XiaoK.Inference;
 using XiaoK.Storage;
 using XiaoK.Tools;
 using XiaoK.Voice;
+using Word = DocumentFormat.OpenXml.Wordprocessing;
 
 if (args.Length > 0 && string.Equals(args[0], "--pdf-worker", StringComparison.Ordinal))
 {
@@ -181,6 +182,21 @@ if (args.Length == 1 && args[0] == "--only-xlsx-file-create")
     finally
     {
         if (Directory.Exists(xlsxCreateRoot)) Directory.Delete(xlsxCreateRoot, recursive: true);
+    }
+    return;
+}
+if (args.Length == 1 && args[0] == "--only-docx-file-create")
+{
+    var docxCreateRoot = Path.Combine(Path.GetTempPath(), "XiaoK-DocxCreateProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(docxCreateRoot);
+    try
+    {
+        await CheckDocxFileCreationAsync(docxCreateRoot);
+        Console.WriteLine("通过：Word文档只在固定导出目录后台新建，段落文本保真并通过Open XML结构、路径、覆盖和散列校验。");
+    }
+    finally
+    {
+        if (Directory.Exists(docxCreateRoot)) Directory.Delete(docxCreateRoot, recursive: true);
     }
     return;
 }
@@ -462,6 +478,9 @@ try
 
     await CheckXlsxFileCreationAsync(tempRoot);
     passed.Add("Excel工作簿只在固定导出目录后台新建，所有单元格为无公式纯文本并通过Open XML结构验证");
+
+    await CheckDocxFileCreationAsync(tempRoot);
+    passed.Add("Word文档只在固定导出目录后台新建，按纯文本段落写入并通过Open XML结构验证");
 
     await CheckFileCopyToExportAsync(tempRoot);
     passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
@@ -7720,6 +7739,96 @@ static async Task CheckXlsxFileCreationAsync(string root)
     Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.xlsx"))
         && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
         "预取消的Excel创建仍发布文件或留下部分文件。");
+}
+
+static async Task CheckDocxFileCreationAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "docx-file-create");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+
+    const string request = "创建Word文档：\"项目说明.docx\"\n正文：\n  第一段保留空格  \n\n第二段包含 & < XML 中文";
+    var parsedRequest = LocalDocxCreatePolicy.TryParseRequest(request, out var parsedName, out var parsedContent);
+    Require(parsedRequest && parsedName == "项目说明.docx"
+        && parsedContent == "  第一段保留空格  \n\n第二段包含 & < XML 中文",
+        "Word命令没有保留正文、空行或首尾空格。");
+    Require(!LocalDocxCreatePolicy.TryParseRequest("创建Word文档：bad.docm\n正文：\n内容", out _, out _)
+        && !LocalDocxCreatePolicy.TryParseRequest("创建Word文档：..\\escape.docx\n正文：\n内容", out _, out _)
+        && !LocalDocxCreatePolicy.IsValidContent("正文\r包含孤立回车")
+        && !LocalDocxCreatePolicy.IsValidContent("正文\t包含制表符")
+        && !LocalDocxCreatePolicy.IsValidContent(""),
+        "Word命令接受了宏文档扩展名、路径穿越、未支持控制字符或空正文。");
+
+    var desktop = new WindowsDesktopTools([], [], exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal(LocalDocxCreatePolicy.ToolId,
+        [new("file_name", parsedName), new("content", parsedContent)],
+        LocalTextFileCreatePolicy.ExportTargetId, ToolExpectedOutcome.DocxDocumentCreatedInConfiguredExport);
+    Require(ToolInteractionPolicy.GetMode(LocalDocxCreatePolicy.ToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check(LocalDocxCreatePolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null
+        && TaskFailureSafetyPolicy.RequiresManualVerification("file-create-docx", routeStarted: true)
+        && TaskCategoryCatalog.LabelOrConversation("file-create-docx") == "新建Word文档",
+        "Word创建没有登记为后台操作、结果不确定人工核对或固定任务分类。");
+
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var finalPath = Path.Combine(exportRoot, parsedName);
+    Require(result.Success && result.Data == finalPath && File.Exists(finalPath)
+        && result.Summary.Contains("Word文档", StringComparison.Ordinal)
+        && result.Summary.Contains("SHA-256", StringComparison.Ordinal),
+        "ToolBroker没有在固定导出目录创建并核验Word文档。");
+
+    var originalBytes = await File.ReadAllBytesAsync(finalPath);
+    using (var document = WordprocessingDocument.Open(finalPath, false))
+    {
+        Require(!new OpenXmlValidator().Validate(document).Any(), "生成的docx包未通过Open XML结构校验。");
+        Require(document.DocumentType == DocumentFormat.OpenXml.WordprocessingDocumentType.Document,
+            "生成结果不是普通Word文档类型。");
+        var mainPart = document.MainDocumentPart ?? throw new InvalidOperationException("docx缺少MainDocumentPart。");
+        Require(mainPart.Parts.Count() == 0 && mainPart.ExternalRelationships.Count() == 0,
+            "纯文本Word文档不应带有嵌入部件或外部关系。");
+        var paragraphs = mainPart.Document!.Body!.Elements<Word.Paragraph>().ToArray();
+        var text = paragraphs.Select(paragraph => string.Concat(paragraph.Descendants<Word.Text>().Select(run => run.Text))).ToArray();
+        Require(paragraphs.Length == 3 && text[0] == "  第一段保留空格  " && text[1] == ""
+            && text[2] == "第二段包含 & < XML 中文",
+            "Word段落、空行或XML特殊字符未按原样保留。");
+    }
+
+    var arbitraryTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = fixtureRoot }, CancellationToken.None);
+    var wrongExpectedOutcome = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        ExpectedOutcome = ToolExpectedOutcome.TextFileCreatedInConfiguredExport
+    }, CancellationToken.None);
+    var macroName = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("file_name", "unsafe.docm")
+    }, CancellationToken.None);
+    Require(!arbitraryTarget.Success && arbitraryTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !wrongExpectedOutcome.Success && wrongExpectedOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !macroName.Success && macroName.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "Word创建接受了任意路径、错配结果或宏文档扩展名。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "不同正文")
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(finalPath)).SequenceEqual(originalBytes),
+        "Word文档同名冲突覆盖了既有内容。");
+
+    using var cancelledSource = new CancellationTokenSource();
+    cancelledSource.Cancel();
+    var cancelled = false;
+    try
+    {
+        await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("file_name", "cancelled.docx")
+        }, cancelledSource.Token);
+    }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.docx"))
+        && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
+        "预取消的Word创建仍发布文件或留下部分文件。");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)

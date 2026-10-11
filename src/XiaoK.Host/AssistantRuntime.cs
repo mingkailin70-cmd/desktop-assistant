@@ -946,6 +946,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.XlsxWorkbookCreatedInConfiguredExport), token);
         }
 
+        if (category == "file-create-docx")
+        {
+            if (!LocalDocxCreatePolicy.TryParseRequest(request, out var documentFileName, out var documentContent))
+                return new(false, "请按“创建Word文档：文件名.docx\\n正文：\\n正文内容”输入。正文最多16,000字符/64 KiB；每行生成一个段落，不处理宏或外部内容。文件只在固定导出目录新建，不覆盖现有文件。", "INVALID_DOCX_FILE_REQUEST");
+            var documentArguments = ImmutableDictionary<string, string>.Empty
+                .Add("file_name", documentFileName).Add("content", documentContent);
+            return await ExecuteBackgroundAsync(new ToolProposal(LocalDocxCreatePolicy.ToolId, documentArguments,
+                LocalTextFileCreatePolicy.ExportTargetId, ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.DocxDocumentCreatedInConfiguredExport), token);
+        }
+
         if (category == "file-create-text")
         {
             if (!LocalTextFileCreatePolicy.TryParseRequest(request, out var fileName, out var content))
@@ -1283,6 +1294,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("创建文本文件")) return "file-create-text";
         if (lower.StartsWith("创建csv文件")) return "file-create-csv";
         if (lower.StartsWith("创建excel文件") || lower.StartsWith("创建excel工作簿") || lower.StartsWith("创建xlsx文件")) return "file-create-xlsx";
+        if (lower.StartsWith("创建word文档") || lower.StartsWith("创建docx文件")) return "file-create-docx";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";

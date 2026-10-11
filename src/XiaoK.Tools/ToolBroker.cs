@@ -88,6 +88,7 @@ public sealed class ToolBroker
             "file.create.text.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.create.csv.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.create.xlsx.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
+            "file.create.docx.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
@@ -166,6 +167,7 @@ public sealed class ToolBroker
             "file.create.text.v1" => ValidateTextFileCreate(proposal),
             "file.create.csv.v1" => ValidateCsvFileCreate(proposal),
             "file.create.xlsx.v1" => ValidateXlsxFileCreate(proposal),
+            "file.create.docx.v1" => ValidateDocxFileCreate(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
@@ -307,6 +309,16 @@ public sealed class ToolBroker
         && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
             ? null
             : InvalidProposal("Excel工作簿只接受固定导出目录内的新建表格；行列数、正文长度和单元格必须通过安全校验，不接受公式、任意路径或覆盖。");
+
+    private static ToolResult? ValidateDocxFileCreate(ToolProposal proposal) =>
+        proposal.Arguments.Count == 2
+        && proposal.Arguments.TryGetValue("file_name", out var fileName)
+        && LocalDocxCreatePolicy.IsValidFileName(fileName)
+        && proposal.Arguments.TryGetValue("content", out var content)
+        && LocalDocxCreatePolicy.IsValidContent(content)
+        && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
+            ? null
+            : InvalidProposal("Word文档只接受固定导出目录内的新建 .docx 纯文本正文；拒绝任意路径、宏、控制字符和覆盖。");
 
     private static ToolResult? ValidateLocalTextFileSummary(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
@@ -638,6 +650,7 @@ public sealed class ToolBroker
         "file.create.text.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.create.csv.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.create.xlsx.v1" => ToolPrecondition.ConfiguredFileExportRoot,
+        "file.create.docx.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
@@ -670,6 +683,7 @@ public sealed class ToolBroker
         "file.create.text.v1" => ToolExpectedOutcome.TextFileCreatedInConfiguredExport,
         "file.create.csv.v1" => ToolExpectedOutcome.CsvFileCreatedInConfiguredExport,
         "file.create.xlsx.v1" => ToolExpectedOutcome.XlsxWorkbookCreatedInConfiguredExport,
+        "file.create.docx.v1" => ToolExpectedOutcome.DocxDocumentCreatedInConfiguredExport,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,
