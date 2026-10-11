@@ -2,6 +2,7 @@ using System.IO;
 using System.Security;
 using System.Diagnostics;
 using System.Collections.ObjectModel;
+using System.Text;
 using System.Windows;
 using Forms = System.Windows.Forms;
 using XiaoK.Core;
@@ -13,6 +14,7 @@ public partial class SettingsWindow : Window
     private static readonly HashSet<string> ConfigurableApplicationIds = new(StringComparer.OrdinalIgnoreCase)
         { "vscode", "edge", "wechat", "qq", "explorer" };
     private XiaoKSettings _original;
+    private readonly WindowsNotificationMonitor _notificationMonitor;
     private readonly Func<Task<string>> _requestNotificationAccess;
     private readonly Func<Task<string>> _inspectNotificationPublishers;
     private readonly Func<CancellationToken, Task<IReadOnlyList<ContactReplyStylePreference>>> _loadContactReplyStyles;
@@ -44,6 +46,9 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         _original = settings;
+        _notificationMonitor = notificationMonitor;
+        _notificationMonitor.NotificationSampleCaptured += OnNotificationSampleCaptured;
+        _notificationMonitor.NotificationSampleStatusChanged += OnNotificationSampleStatusChanged;
         _contactReplyStyles = [];
         _customApplications = [];
         foreach (var app in settings.Applications.Where(app => app is not null
@@ -87,6 +92,9 @@ public partial class SettingsWindow : Window
         WeChatAppIdsBox.Text = string.Join(Environment.NewLine, settings.WeChatPublisherAppIds);
         QQAppIdsBox.Text = string.Join(Environment.NewLine, settings.QQPublisherAppIds);
         NotificationStatusText.Text = notificationMonitor.Status;
+        NotificationSampleStatusText.Text = notificationMonitor.NotificationSampleStatus;
+        NotificationSamplesBox.Text = FormatNotificationSamples(notificationMonitor.NotificationSamples);
+        UpdateNotificationSampleButtons();
         ContactStylesList.ItemsSource = _contactReplyStyles;
         ContactStyleBox.ItemsSource = ContactReplyStyleCatalog.Options;
         ContactStyleBox.DisplayMemberPath = nameof(ContactReplyStyleOption.DisplayName);
@@ -498,6 +506,129 @@ public partial class SettingsWindow : Window
         {
             InspectNotificationPublishersButton.IsEnabled = true;
         }
+    }
+
+    private async void StartNotificationSampleCapture_Click(object sender, RoutedEventArgs e)
+    {
+        if (MonitorWeChatCheck.IsChecked == true || MonitorQQCheck.IsChecked == true)
+        {
+            NotificationSampleStatusText.Text = "请先取消微信和 QQ 的持续监听勾选并保存设置，再开始独立样本核验。";
+            return;
+        }
+
+        var applicationId = (NotificationSampleAppBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string;
+        var publisherAppUserModelId = NotificationSamplePublisherIdBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(applicationId)
+            || !_notificationMonitor.TryGetSamplePublisherCandidate(applicationId, publisherAppUserModelId, out var candidate)
+            || candidate is null)
+        {
+            NotificationSampleStatusText.Text = "请先运行上方只读来源检查，手动核对一个与所选应用匹配的 AUMID 候选，再输入该完整标识。";
+            return;
+        }
+
+        var applicationDisplayName = applicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase) ? "微信" : "QQ";
+        var confirmation = System.Windows.MessageBox.Show(
+            this,
+            $"即将只对以下来源开始一次性新通知样本核验：\n\n平台：{applicationDisplayName}\nWindows 来源显示名：{candidate.DisplayName}\nAUMID：{candidate.AppUserModelId}\n\n小K会读取该来源之后新到达 Toast 的全部可见文本，并在本机设置页内存中显示，最多30条或8小时。目前无法区分私聊、群聊、服务提醒等类型，因此样本可能包含所选应用的群聊或其他通知正文。文本不会发送到模型/网络，不会写入日志、数据库或文件；停止后会留在内存，直到你点击清除或退出小K。会话锁定、权限撤销或设置变更时会停止。它不会打开微信/QQ或改变鼠标、键盘、剪贴板和前台焦点。\n\n只在你确认可以检查此平台新到达通知的完整可见内容时继续。",
+            "确认开始本地通知样本核验",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmation != MessageBoxResult.Yes) return;
+
+        StartNotificationSampleCaptureButton.IsEnabled = false;
+        NotificationSampleStatusText.Text = "正在建立通知基线；不会处理开始前已有的通知。";
+        try
+        {
+            NotificationSampleStatusText.Text = await _notificationMonitor.StartNotificationSampleCaptureAsync(
+                applicationId, publisherAppUserModelId);
+        }
+        finally
+        {
+            UpdateNotificationSampleButtons();
+        }
+    }
+
+    private void StopNotificationSampleCapture_Click(object sender, RoutedEventArgs e)
+    {
+        _notificationMonitor.StopNotificationSampleCapture();
+        NotificationSampleStatusText.Text = _notificationMonitor.NotificationSampleStatus;
+        UpdateNotificationSampleButtons();
+    }
+
+    private void ClearNotificationSamples_Click(object sender, RoutedEventArgs e)
+    {
+        _notificationMonitor.ClearNotificationSamples();
+        NotificationSamplesBox.Clear();
+        NotificationSampleStatusText.Text = _notificationMonitor.NotificationSampleStatus;
+        UpdateNotificationSampleButtons();
+    }
+
+    private void OnNotificationSampleCaptured(NotificationFormatSample sample)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            try { Dispatcher.BeginInvoke(new Action(() => OnNotificationSampleCaptured(sample))); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+        NotificationSamplesBox.Text = FormatNotificationSamples(_notificationMonitor.NotificationSamples);
+        NotificationSamplesBox.ScrollToEnd();
+        NotificationSampleStatusText.Text = _notificationMonitor.NotificationSampleStatus;
+        UpdateNotificationSampleButtons();
+    }
+
+    private void OnNotificationSampleStatusChanged(string status)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            try { Dispatcher.BeginInvoke(new Action(() => OnNotificationSampleStatusChanged(status))); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+        NotificationSampleStatusText.Text = status;
+        UpdateNotificationSampleButtons();
+    }
+
+    private void SettingsWindow_Closed(object? sender, EventArgs e)
+    {
+        _notificationMonitor.NotificationSampleCaptured -= OnNotificationSampleCaptured;
+        _notificationMonitor.NotificationSampleStatusChanged -= OnNotificationSampleStatusChanged;
+    }
+
+    private void UpdateNotificationSampleButtons()
+    {
+        var active = _notificationMonitor.NotificationSampleCaptureActive;
+        StartNotificationSampleCaptureButton.IsEnabled = !active;
+        StopNotificationSampleCaptureButton.IsEnabled = active;
+        ClearNotificationSamplesButton.IsEnabled = _notificationMonitor.NotificationSampleCaptureSessionExists;
+    }
+
+    private static string FormatNotificationSamples(IEnumerable<NotificationFormatSample> samples)
+    {
+        var entries = samples.ToArray();
+        if (entries.Length == 0) return "尚无样本。样本仅在你主动开始后采集。";
+
+        var output = new StringBuilder();
+        foreach (var sample in entries)
+        {
+            if (output.Length > 0) output.AppendLine().AppendLine();
+            output.Append("样本 #").Append(sample.Sequence).Append(" | ")
+                .Append(sample.ApplicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase) ? "微信" : "QQ")
+                .Append(" | ").Append(sample.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))
+                .AppendLine();
+            output.Append("来源：").Append(sample.PublisherDisplayName)
+                .Append(" | AUMID：").Append(sample.PublisherAppUserModelId).AppendLine();
+            if (sample.TextElements.Count == 0)
+                output.AppendLine("ToastGeneric 没有可见文本元素。");
+            else
+            {
+                for (var index = 0; index < sample.TextElements.Count; index++)
+                    output.Append("文本元素[").Append(index).Append("]：").AppendLine(sample.TextElements[index]);
+            }
+            if (sample.WasTruncated) output.AppendLine("（样本文本达到诊断上限，已截断。）");
+        }
+        return output.ToString();
     }
 
     private async void ClearSamples_Click(object sender, RoutedEventArgs e)

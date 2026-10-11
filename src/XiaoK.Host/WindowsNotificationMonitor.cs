@@ -29,6 +29,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private HashSet<string> _allowedAppIds = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _wechatPublisherIds = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _qqPublisherIds = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, NotificationPublisherCandidate> _lastPublisherCandidates = new(StringComparer.OrdinalIgnoreCase);
+    private NotificationFormatSampleCapture? _sampleCapture;
     private CancellationTokenSource? _sessionCancellation;
     private bool _baselineReady;
     private bool _processingAddedIds;
@@ -40,6 +42,90 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     public string Status { get; private set; } = "通知监听关闭。";
     public event Action<string>? StatusChanged;
     public event Action<MessageNotice, CancellationToken>? PrivateNoticeAccepted;
+    public event Action<NotificationFormatSample>? NotificationSampleCaptured;
+    public event Action<string>? NotificationSampleStatusChanged;
+
+    public IReadOnlyList<NotificationFormatSample> NotificationSamples => _sampleCapture?.Samples ?? [];
+    public bool NotificationSampleCaptureActive => _sampleCapture?.IsActive == true;
+    public bool NotificationSampleCaptureSessionExists => _sampleCapture is not null;
+    public string NotificationSampleStatus => _sampleCapture?.Status ?? "尚未启动通知样本核验。";
+
+    public bool TryGetSamplePublisherCandidate(string applicationId, string appUserModelId,
+        out NotificationPublisherCandidate? candidate)
+    {
+        candidate = null;
+        if (!IsSupportedMessageApplication(applicationId)
+            || !_lastPublisherCandidates.TryGetValue(appUserModelId, out var match)
+            || !PublisherNameMatchesApplication(match.DisplayName, applicationId))
+            return false;
+        candidate = match;
+        return true;
+    }
+
+    public async Task<string> StartNotificationSampleCaptureAsync(string applicationId, string appUserModelId)
+    {
+        if (!_dispatcher.CheckAccess()) return "通知样本诊断必须从小K设置界面发起。";
+        if (_disposed) return "小K正在退出。";
+        if (XiaoKSettings.IsDiagnosticsMode) return "诊断模式不访问通知正文。";
+        if (!IsSupportedMessageApplication(applicationId)) return "只支持微信或 QQ 通知样本核验。";
+        if (!AppUserModelIdPolicy.IsValid(appUserModelId)) return "请填写完整且有效的通知来源 AUMID。";
+        if (!TryGetSamplePublisherCandidate(applicationId, appUserModelId, out var candidate) || candidate is null)
+            return "该 AUMID 不在最近一次只读来源诊断的候选中，或显示名与所选应用不匹配。请先检查来源候选并人工核对。";
+        if (_listener is not null)
+            return "持续通知监听正在运行。为避免重复读取，请先关闭两端监听并应用设置，再开始样本核验。";
+        if (_sampleCapture?.IsActive == true)
+            return "一次性通知样本核验已经运行；可停止后再开始。";
+        if (_sampleCapture is not null)
+            return "上一轮通知样本会话已经结束。请先点击“清除内存样本”，再开始新一轮。";
+        if (!WindowsPackageIdentity.IsPresent)
+            return "通知样本核验需要已安装的 MSIX 身份；没有开始采集。";
+
+        try
+        {
+            var listener = UserNotificationListener.Current;
+            if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+                return "Windows 通知访问权限当前未授予；没有请求权限或开始采集。";
+
+            _sampleCapture = new NotificationFormatSampleCapture(_dispatcher, listener,
+                applicationId, candidate.DisplayName, candidate.AppUserModelId);
+            _sampleCapture.SampleCaptured += OnNotificationSampleCaptured;
+            _sampleCapture.StatusChanged += OnNotificationSampleStatusChanged;
+            var status = await _sampleCapture.StartAsync();
+            if (!_sampleCapture.IsActive)
+            {
+                _sampleCapture.SampleCaptured -= OnNotificationSampleCaptured;
+                _sampleCapture.StatusChanged -= OnNotificationSampleStatusChanged;
+                _sampleCapture.Dispose();
+                _sampleCapture = null;
+            }
+            return status;
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            if (_sampleCapture is not null)
+            {
+                _sampleCapture.SampleCaptured -= OnNotificationSampleCaptured;
+                _sampleCapture.StatusChanged -= OnNotificationSampleStatusChanged;
+                _sampleCapture.Dispose();
+                _sampleCapture = null;
+            }
+            return "无法开始通知样本核验；没有保存通知正文。请检查 MSIX 身份和 Windows 通知权限。";
+        }
+    }
+
+    public void StopNotificationSampleCapture() =>
+        _sampleCapture?.Stop("用户已停止通知样本核验；样本仍只保留在当前进程内存中。", clearSamples: false);
+
+    public void ClearNotificationSamples()
+    {
+        if (_sampleCapture is null) return;
+        _sampleCapture.SampleCaptured -= OnNotificationSampleCaptured;
+        _sampleCapture.StatusChanged -= OnNotificationSampleStatusChanged;
+        _sampleCapture.Clear();
+        _sampleCapture.Dispose();
+        _sampleCapture = null;
+        NotificationSampleStatusChanged?.Invoke("通知样本已从内存中清除。");
+    }
 
     public async Task<string> RequestPermissionAsync()
     {
@@ -71,6 +157,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         if (!_dispatcher.CheckAccess())
             return "通知来源诊断必须从小K设置界面发起。";
         if (_disposed) return "小K正在退出。";
+        _lastPublisherCandidates.Clear();
         if (XiaoKSettings.IsDiagnosticsMode)
             return "诊断模式不访问系统通知。";
         if (!WindowsPackageIdentity.IsPresent)
@@ -93,6 +180,8 @@ internal sealed class WindowsNotificationMonitor : IDisposable
                 .Select(notification => ((string?)notification.AppInfo.DisplayInfo.DisplayName,
                     (string?)notification.AppInfo.AppUserModelId, notification.CreationTime));
             var candidates = NotificationPublisherDiagnosticPolicy.Project(sources);
+            _lastPublisherCandidates = candidates.ToDictionary(candidate => candidate.AppUserModelId,
+                candidate => candidate, StringComparer.OrdinalIgnoreCase);
             if (candidates.Count == 0)
                 return "最近的系统 Toast 中没有显示名含“微信 / WeChat / Weixin / QQ”的有效来源标识。只检查了应用显示名、AUMID和创建时间，没有读取正文、保存或启动持续监听。";
 
@@ -103,6 +192,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            _lastPublisherCandidates.Clear();
             return "无法读取通知来源元数据；没有读取正文或保存结果。请检查 MSIX 身份和 Windows 通知权限。";
         }
     }
@@ -112,6 +202,9 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         if (!_dispatcher.CheckAccess())
             throw new InvalidOperationException("通知监听配置必须在小K界面线程应用。");
         if (_disposed) return SetStatus("通知监听已停止。");
+
+        if (_sampleCapture?.IsActive == true)
+            StopNotificationSampleCapture();
 
         if (XiaoKSettings.IsDiagnosticsMode)
         {
@@ -176,10 +269,12 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ClearNotificationSamples();
         StopListening();
         _allowedAppIds.Clear();
         _wechatPublisherIds.Clear();
         _qqPublisherIds.Clear();
+        _lastPublisherCandidates.Clear();
         Status = "通知监听已停止。";
     }
 
@@ -387,6 +482,35 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         if (_dispatcher.CheckAccess()) StatusChanged?.Invoke(value);
         else _dispatcher.BeginInvoke(new Action(() => StatusChanged?.Invoke(value)));
     }
+
+    private void OnNotificationSampleCaptured(NotificationFormatSample sample)
+    {
+        if (_disposed) return;
+        if (_dispatcher.CheckAccess()) NotificationSampleCaptured?.Invoke(sample);
+        else _dispatcher.BeginInvoke(new Action(() => NotificationSampleCaptured?.Invoke(sample)));
+    }
+
+    private void OnNotificationSampleStatusChanged(string value)
+    {
+        if (_disposed) return;
+        if (_dispatcher.CheckAccess())
+        {
+            NotificationSampleStatusChanged?.Invoke(value);
+            SetStatus(value);
+        }
+        else _dispatcher.BeginInvoke(new Action(() => OnNotificationSampleStatusChanged(value)));
+    }
+
+    private static bool IsSupportedMessageApplication(string applicationId) =>
+        applicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase)
+        || applicationId.Equals("qq", StringComparison.OrdinalIgnoreCase);
+
+    private static bool PublisherNameMatchesApplication(string displayName, string applicationId) =>
+        applicationId.Equals("qq", StringComparison.OrdinalIgnoreCase)
+            ? displayName.Contains("QQ", StringComparison.OrdinalIgnoreCase)
+            : displayName.Contains("微信", StringComparison.OrdinalIgnoreCase)
+              || displayName.Contains("WeChat", StringComparison.OrdinalIgnoreCase)
+              || displayName.Contains("Weixin", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatAccessStatus(UserNotificationListenerAccessStatus access) => access switch
     {

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="小K设置" Width="560" Height="740" MinWidth="520" MinHeight="650"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        Background="#F7F8FC" ShowInTaskbar="False" Loaded="SettingsWindow_Loaded">
+        Background="#F7F8FC" ShowInTaskbar="False" Loaded="SettingsWindow_Loaded" Closed="SettingsWindow_Closed">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -196,6 +196,23 @@
                         <Button x:Name="InspectNotificationPublishersButton" Content="只读检查近期微信 / QQ 通知来源" Click="InspectNotificationPublishers_Click" HorizontalAlignment="Left" Margin="0,0,0,5"/>
                         <TextBlock Text="仅读取当前最多512条 Toast 的应用显示名、AUMID和创建时间；显示最近出现时间供手动对照。不读正文、不保存、不启用持续监听，候选不会自动加入白名单。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,5"/>
                         <TextBox x:Name="NotificationPublisherCandidatesBox" MinHeight="48" MaxHeight="140" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,0,0,9"/>
+                        <Separator Margin="0,2,0,8"/>
+                        <TextBlock Text="一次性通知格式样本核验" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <TextBlock Text="仅在你逐次确认后采集所选 AUMID 的新 Toast，最多30条、最长8小时。当前不能区分私聊/群聊，可能包括所选应用的群聊、服务或其他通知正文；只有你同意检查这类内容时才开始。正文只在本机内存和本页显示，不送模型、不写日志/数据库/文件；停止后仍留在内存，点击清除或退出小K可删除。不会打开微信/QQ、抢焦点或自动分析。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                            <ComboBox x:Name="NotificationSampleAppBox" DockPanel.Dock="Left" Width="90" SelectedIndex="1" Margin="0,0,6,0">
+                                <ComboBoxItem Content="微信" Tag="wechat"/>
+                                <ComboBoxItem Content="QQ" Tag="qq"/>
+                            </ComboBox>
+                            <TextBox x:Name="NotificationSamplePublisherIdBox" MinHeight="30" Padding="6,4" ToolTip="从上方只读来源候选中手动核对并输入一个完整 AUMID"/>
+                        </DockPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                            <Button x:Name="StartNotificationSampleCaptureButton" Content="开始样本核验…" Click="StartNotificationSampleCapture_Click" Margin="0,0,6,0"/>
+                            <Button x:Name="StopNotificationSampleCaptureButton" Content="停止采集" Click="StopNotificationSampleCapture_Click" Margin="0,0,6,0"/>
+                            <Button x:Name="ClearNotificationSamplesButton" Content="清除内存样本" Click="ClearNotificationSamples_Click"/>
+                        </StackPanel>
+                        <TextBlock x:Name="NotificationSampleStatusText" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,5"/>
+                        <TextBox x:Name="NotificationSamplesBox" MinHeight="70" MaxHeight="220" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="10" Margin="0,0,0,10"/>
                         <TextBlock Text="资源读数按需采样；刷新时不会加载模型或启动后台监控。" TextWrapping="Wrap"/>
                         <Button x:Name="RefreshResourcesButton" Content="刷新 CPU / 内存 / NVIDIA 显存" Click="RefreshResources_Click"
                                 HorizontalAlignment="Left" Margin="0,8,0,0"/>
