@@ -12,6 +12,13 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Threading;
 
+if (args.Length == 1 && args[0] == "--only-uia-readonly-probe")
+{
+    await UiAutomationReadOnlyProbe.RunAsync();
+    Console.WriteLine("通过：离屏合成窗口的UIA只读查询没有触发控件、前台窗口或用户输入。");
+    return;
+}
+
 var checks = 0;
 void Require(bool passed, string message)
 {
