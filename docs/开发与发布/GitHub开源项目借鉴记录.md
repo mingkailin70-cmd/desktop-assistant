@@ -5,7 +5,7 @@
 ## 2026-10-12 GitHub参考：Microsoft Playwright MCP
 
 - 项目：[microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp)，微软维护的Playwright浏览器自动化MCP服务；仓库显示Apache-2.0许可证。README说明它用结构化可访问性快照定位网页对象，不依赖截图坐标，并明确提示MCP服务本身不是安全边界。
-- 小K采用的设计思路：继续使用现有锁定的Microsoft.Playwright程序集，以用户明确命令、当前快照令牌、ARIA角色与精确名称绑定单次动作；新增只读解析href和受限同源导航，让模型/网页内容仍无权自行发起动作。
+- 小K采用的设计思路：继续使用现有锁定的Microsoft.Playwright程序集，以用户明确命令、当前快照令牌、ARIA角色与精确名称绑定单次动作；新增只读解析href、快照后结构指纹校验和受限同源导航，让模型/网页内容仍无权自行发起动作，页面变化时停止而不猜测目标。
 - 小K没有安装或集成Playwright MCP、Node服务或其工具集合；此项目能力面包含更广泛的点击、拖拽、下载和其他浏览器操作，不符合小K固定ToolBroker、匿名网络和逐工具授权边界。小K独立实现的同源检查、重定向阻断、DNS公网验证、无Cookie GET和会话过期策略仍由本项目负责。
 - 来源：[官方仓库与许可证入口](https://github.com/microsoft/playwright-mcp)、[README中的可访问性快照说明及安全边界声明](https://github.com/microsoft/playwright-mcp#playwright-mcp)。只阅读公开资料，没有克隆、运行或复制其代码。
 
