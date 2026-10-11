@@ -5,6 +5,9 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.Win32.SafeHandles;
 using XiaoK.Core;
 using XiaoK.Inference;
@@ -3083,15 +3086,6 @@ internal sealed class CodeWorkspaceSnapshot
         new("""["']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|aws[_-]?secret[_-]?(?:access[_-]?)?key|password|passwd|secret|token|connection[_-]?string|signing[_-]?key)["']?\s*[:=]\s*["'](?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[^"'\r\n]{12,}["']""",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
     ];
-    private static readonly Regex CSharpNamespaceSymbolPattern = new(
-        @"(?m)^\s*namespace\s+(?<symbol>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-    private static readonly Regex CSharpTypeSymbolPattern = new(
-        @"(?m)^\s*(?:(?:public|internal|private|protected|static|abstract|sealed|partial|readonly|file)\s+)*(?:class|struct|interface|enum|record)\s+(?<symbol>@?[A-Za-z_][A-Za-z0-9_]*)\b",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-    private static readonly Regex CSharpMethodSymbolPattern = new(
-        @"(?m)^\s*(?:(?:public|internal|private|protected|static|abstract|sealed|partial|virtual|override|async|extern|unsafe|new|readonly|ref)\s+)+[\w.<>,?\[\]]+\s+(?<symbol>@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^;{}]*>)?\s*\(",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
     private static readonly HashSet<string> ExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
         ".git", ".vs", ".idea", "bin", "obj", "node_modules", ".venv", "venv", "__pycache__", "packages", "TestResults", "artifacts"
@@ -3114,6 +3108,8 @@ internal sealed class CodeWorkspaceSnapshot
     private const long MaximumCopiedFileBytes = 16 * 1024 * 1024;
     private const long MaximumCopiedTotalBytes = 512 * 1024 * 1024;
     private const int MaximumReadableFileBytes = 256 * 1024;
+    private const int MaximumCSharpSymbolParseCharactersPerFile = 128 * 1024;
+    private const int MaximumCSharpSymbolParseCharactersPerTask = 2 * 1024 * 1024;
     private const long MaximumTextInventoryBytes = 64 * 1024 * 1024;
     private const int MaximumRetainedTasks = 5;
     private readonly List<string> _relativeFiles;
@@ -3286,6 +3282,7 @@ internal sealed class CodeWorkspaceSnapshot
     {
         var result = new List<CodeTextCandidate>();
         long inventoryBytes = 0;
+        var symbolParseCharacters = 0;
         foreach (var relative in _relativeFiles)
         {
             token.ThrowIfCancellationRequested();
@@ -3298,27 +3295,54 @@ internal sealed class CodeWorkspaceSnapshot
             if (bytes.AsSpan().Contains((byte)0)) continue;
             var text = DecodeText(bytes);
             if (text is not null && TrySanitizeLikelyCredentials(text, out var safeText))
+            {
+                IReadOnlyList<string> symbols = Array.Empty<string>();
+                if (IsCSharpSource(relative)
+                    && safeText.Length <= MaximumCSharpSymbolParseCharactersPerFile
+                    && safeText.Length <= MaximumCSharpSymbolParseCharactersPerTask - symbolParseCharacters)
+                {
+                    symbols = ExtractCSharpSymbols(relative, safeText, token);
+                    symbolParseCharacters += safeText.Length;
+                }
+
                 result.Add(new(relative, safeText.Length, Convert.ToHexString(SHA256.HashData(bytes)),
-                    ExtractCSharpSymbols(relative, safeText)));
+                    symbols));
+            }
         }
         return result;
     }
 
-    private static IReadOnlyList<string> ExtractCSharpSymbols(string relativePath, string text)
+    private static bool IsCSharpSource(string relativePath)
     {
         var extension = Path.GetExtension(relativePath);
-        if (!extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)
-            && !extension.Equals(".csx", StringComparison.OrdinalIgnoreCase)) return Array.Empty<string>();
+        return extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".csx", StringComparison.OrdinalIgnoreCase);
+    }
 
+    private static IReadOnlyList<string> ExtractCSharpSymbols(string relativePath, string text,
+        CancellationToken token)
+    {
+        var sourceKind = Path.GetExtension(relativePath).Equals(".csx", StringComparison.OrdinalIgnoreCase)
+            ? SourceCodeKind.Script
+            : SourceCodeKind.Regular;
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest, kind: sourceKind);
+        var syntaxTree = CSharpSyntaxTree.ParseText(text, parseOptions, cancellationToken: token);
+        var root = syntaxTree.GetRoot(token);
         var declarations = new List<(int Position, string Symbol)>();
-        foreach (var pattern in new[] { CSharpNamespaceSymbolPattern, CSharpTypeSymbolPattern, CSharpMethodSymbolPattern })
+        foreach (var node in root.DescendantNodes(descendIntoTrivia: false))
         {
-            foreach (Match match in pattern.Matches(text))
+            token.ThrowIfCancellationRequested();
+            var symbol = node switch
             {
-                var symbol = match.Groups["symbol"].Value.TrimStart('@');
-                if (!string.IsNullOrWhiteSpace(symbol) && symbol.Length <= 80)
-                    declarations.Add((match.Index, symbol));
-            }
+                BaseNamespaceDeclarationSyntax declaration => declaration.Name.ToString(),
+                BaseTypeDeclarationSyntax declaration => declaration.Identifier.ValueText,
+                DelegateDeclarationSyntax declaration => declaration.Identifier.ValueText,
+                MethodDeclarationSyntax declaration => declaration.Identifier.ValueText,
+                LocalFunctionStatementSyntax declaration => declaration.Identifier.ValueText,
+                _ => null
+            };
+            if (!string.IsNullOrWhiteSpace(symbol) && symbol.Length <= 160)
+                declarations.Add((node.SpanStart, symbol));
         }
 
         return declarations.OrderBy(item => item.Position)
