@@ -2,7 +2,7 @@
 
 在0.1.107.0后台CSV创建基础上，ToolBroker现在严格拒绝使用单独LF作为记录分隔的原始CSV提案；生成命令使用RFC 4180 CRLF，文件仍带UTF-8 BOM。公式注入、矩形行列、固定导出目录、不覆盖及不操作桌面的边界不变。
 
-固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；完整Windows安全套件123项通过、0项跳过，其中CSV回归覆盖CRLF允许与LF-only拒绝。自包含签名MSIX `artifacts\msix-validation\0b7204e1a45d4bddbc8917a3e56fe094\XiaoK-signed-validation.msix`，139,397,622字节，SHA-256 `2086AEAEBBCA83F315E0103D3233249A074E7891930078FDE06F42798D0BA9E5`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信任，本次未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.108.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`2DF46C7B5B85C35FD56D38DDCAA39AF551BBCCC8ED26B661244A436232F0E019`。安装器未启动Host或模型，安装后两进程数均为0。CSV普通安装版输入和Excel打开尚未实操验收；真实文件任务、六场景端到端、R0通知与模型门槛仍未通过。
+固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；完整Windows安全套件123项通过、0项跳过，其中CSV回归覆盖CRLF允许与LF-only拒绝。自包含签名MSIX `artifacts\msix-validation\0b7204e1a45d4bddbc8917a3e56fe094\XiaoK-signed-validation.msix`，139,397,622字节，SHA-256 `2086AEAEBBCA83F315E0103D3233249A074E7891930078FDE06F42798D0BA9E5`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信任，本次未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.108.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`2DF46C7B5B85C35FD56D38DDCAA39AF551BBCCC8ED26B661244A436232F0E019`。安装器未启动Host或模型，安装后两进程数均为0。实现提交`7036e96`已推送至`origin/main`，GitHub Actions Build #480成功（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38173823418)）。CSV普通安装版输入和Excel打开尚未实操验收；真实文件任务、六场景端到端、R0通知与模型门槛仍未通过。
 
 ## v0.1.107.0 后台CSV表格创建（2026-10-12）
 
