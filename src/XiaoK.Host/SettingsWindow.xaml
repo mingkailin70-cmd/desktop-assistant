@@ -96,6 +96,31 @@
                     <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseQQExecutable_Click" Margin="8,0,0,0"/>
                     <TextBox x:Name="QQExecutableBox" MinHeight="32" Padding="7,5"/>
                 </DockPanel>
+                <TextBlock Text="自定义应用白名单" FontSize="13" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,5"/>
+                <TextBlock Text="添加你自己选择的本机 .exe，并为它设置唯一名称。小K只会用固定名称启动程序或切换到唯一匹配的窗口；不传入命令行参数，不运行脚本、命令解释器或网络路径。启动应用可能显示到桌面前台，因此只响应你明确提出的打开/切换请求。最多20个，保存并重启生效。"
+                           FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,7"/>
+                <TextBlock Text="应用名称" FontSize="11"/>
+                <TextBox x:Name="CustomApplicationNameBox" MinHeight="32" Padding="7,5" Margin="0,3,0,6"/>
+                <TextBlock Text="本机程序（.exe）" FontSize="11"/>
+                <DockPanel Margin="0,3,0,6">
+                    <Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseCustomApplicationExecutable_Click" Margin="8,0,0,0"/>
+                    <TextBox x:Name="CustomApplicationExecutableBox" MinHeight="32" Padding="7,5"/>
+                </DockPanel>
+                <Button x:Name="AddCustomApplicationButton" Content="添加到待保存列表" Click="AddCustomApplication_Click"
+                        HorizontalAlignment="Left" Margin="0,0,0,6"/>
+                <ListBox x:Name="CustomApplicationsList" Height="104" SelectionMode="Single">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="2,3">
+                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding Executable}" FontSize="10" Foreground="#68728A" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <Button x:Name="RemoveCustomApplicationButton" Content="移除选中的自定义应用" Click="RemoveCustomApplication_Click"
+                        HorizontalAlignment="Left" Margin="0,5,0,3"/>
+                <TextBlock x:Name="CustomApplicationStatusText" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
                 <Separator Margin="0,0,0,12"/>
                 <TextBlock Text="本地编程代理" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,8"/>

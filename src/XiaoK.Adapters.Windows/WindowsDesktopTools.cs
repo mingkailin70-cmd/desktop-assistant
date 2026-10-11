@@ -82,6 +82,14 @@ public sealed partial class WindowsDesktopTools
             if (configuredApp is null || string.IsNullOrWhiteSpace(configuredApp.Id) || configuredApp.Id.Length > 64)
                 continue;
 
+            if (configuredApp.Id.StartsWith("custom-", StringComparison.Ordinal))
+            {
+                if (!CustomApplicationPolicy.IsValidId(configuredApp.Id)) continue;
+                try { _ = CustomApplicationPolicy.ValidateExecutablePath(configuredApp.Executable); }
+                catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+                { continue; }
+            }
+
             var executable = configuredApp.Id.Equals("explorer", StringComparison.OrdinalIgnoreCase)
                 && string.Equals(configuredApp.Executable, "explorer.exe", StringComparison.OrdinalIgnoreCase)
                 ? Path.Combine(Environment.SystemDirectory, "explorer.exe")

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
@@ -70,6 +71,13 @@ public sealed partial class WindowsDesktopTools
             if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
                 return new(false, string.Empty, "PDF_WORKER_UNAVAILABLE");
 
+            var entryAssemblyPath = Assembly.GetEntryAssembly()?.Location;
+            var needsEntryAssemblyArgument = string.Equals(Path.GetFileNameWithoutExtension(executablePath),
+                "dotnet", StringComparison.OrdinalIgnoreCase);
+            if (needsEntryAssemblyArgument
+                && (string.IsNullOrWhiteSpace(entryAssemblyPath) || !File.Exists(entryAssemblyPath)))
+                return new(false, string.Empty, "PDF_WORKER_UNAVAILABLE");
+
             var startInfo = new ProcessStartInfo(executablePath)
             {
                 UseShellExecute = false,
@@ -79,6 +87,7 @@ public sealed partial class WindowsDesktopTools
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
+            if (needsEntryAssemblyArgument) startInfo.ArgumentList.Add(entryAssemblyPath!);
             startInfo.ArgumentList.Add("--pdf-worker");
             startInfo.ArgumentList.Add(pdfBytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
 

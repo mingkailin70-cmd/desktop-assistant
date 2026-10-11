@@ -4031,6 +4031,7 @@ static void CheckAppResolverRejectsUnknownApplications()
     var fullWidthQq = AppLaunchIntentResolver.Resolve("打开ＱＱ");
     var unknown = AppLaunchIntentResolver.Resolve("打开记事本");
     var unsupportedVariant = AppLaunchIntentResolver.Resolve("打开 QQ音乐");
+    var partialProjectAlias = AppLaunchIntentResolver.Resolve("打开备用小K项目备份");
     Require(project is { AppId: "vscode", WorkspaceId: "xiaok" }
         && codeProject is { AppId: "vscode", WorkspaceId: "xiaok" }
         && wechat is { AppId: "wechat", WorkspaceId: null }
@@ -4040,6 +4041,29 @@ static void CheckAppResolverRejectsUnknownApplications()
         "已支持应用别名没有映射到预期的固定应用 ID。");
     Require(unknown is null && unsupportedVariant is null,
         "未知应用名称被错误映射到了某个已允许的应用。");
+    Require(partialProjectAlias is null, "包含内置别名片段的其他应用名称被错误映射到 VS Code 项目。");
+
+    var customId = CustomApplicationPolicy.CreateId();
+    ConfiguredAppAlias[] configured = [new(customId, "便携记事本")];
+    var customLaunch = AppLaunchIntentResolver.Resolve("打开便携记事本", configured);
+    var customActivation = AppLaunchIntentResolver.ResolveWindowActivation("切换到便携记事本", configured);
+    var suffixedCustomAlias = AppLaunchIntentResolver.Resolve("打开便携记事本应用",
+        [new ConfiguredAppAlias(customId, "便携记事本")]);
+    Require(customLaunch is { AppId: var launchId, WorkspaceId: null } && launchId == customId
+        && customActivation is { AppId: var activationId, WorkspaceId: null } && activationId == customId
+        && suffixedCustomAlias is { AppId: var suffixedId } && suffixedId == customId,
+        "已登记的自定义应用不能通过固定名称启动或切换。");
+    Require(AppLaunchIntentResolver.Resolve("便携记事本", configured) is null,
+        "缺少明确启动前缀的文本被当作应用启动命令。");
+    var fixedQqWithCustomAlias = AppLaunchIntentResolver.Resolve("打开ＱＱ", [new ConfiguredAppAlias(customId, "QQ音乐")]);
+    Require(fixedQqWithCustomAlias is { AppId: "qq" } && fixedQqWithCustomAlias.AppId != customId,
+        "自定义应用别名劫持了固定应用名称。");
+    Require(AppLaunchIntentResolver.Resolve("打开便携记事本", [.. configured, new ConfiguredAppAlias(CustomApplicationPolicy.CreateId(), "便携 记事本")]) is null,
+        "重复归一化名称没有失败关闭。");
+    Require(AppLaunchIntentResolver.Resolve("打开便携记事本", [.. configured, new ConfiguredAppAlias(customId, "便携记事本")]) is null,
+        "重复应用ID没有因别名相同而失败关闭。");
+    Require(AppLaunchIntentResolver.Resolve("打开便携记事本", [new ConfiguredAppAlias("qq", "便携记事本")]) is null,
+        "非自定义白名单ID能通过用户别名被绑定。");
 }
 
 static void CheckInstallGracefulShutdownContract(string repositoryRoot)
@@ -4451,6 +4475,25 @@ static void CheckLocalDesktopAppPathPolicy(string tempRoot)
         "桌面应用配置接受了不存在的可执行文件。");
     Require(Rejected(() => LocalDesktopAppPathPolicy.ValidateExecutablePath(@"\\server\share\Code.exe", "Code.exe", "VS Code")),
         "桌面应用配置接受了 UNC 网络路径。");
+
+    var customPath = Path.Combine(tempRoot, "portable-notepad.exe");
+    File.WriteAllText(customPath, "synthetic executable path marker");
+    Require(CustomApplicationPolicy.ValidateExecutablePath(customPath) == Path.GetFullPath(customPath),
+        "有效的本机自定义 .exe 没有规范化为完整路径。");
+    Require(CustomApplicationPolicy.IsValidId(CustomApplicationPolicy.CreateId())
+        && !CustomApplicationPolicy.IsValidId("custom-qq"), "自定义应用ID格式检查错误。");
+    Require(CustomApplicationPolicy.IsValidDisplayName("便携记事本")
+        && !CustomApplicationPolicy.IsValidDisplayName("打开记事本")
+        && !CustomApplicationPolicy.IsValidDisplayName("QQ"), "自定义应用名没有拒绝操作前缀或固定别名。");
+
+    var interpreterPath = Path.Combine(tempRoot, "powershell.exe");
+    File.WriteAllText(interpreterPath, "synthetic executable path marker");
+    Require(Rejected(() => CustomApplicationPolicy.ValidateExecutablePath(interpreterPath)),
+        "脚本或命令解释器被加入自定义应用白名单。");
+    var batchPath = Path.Combine(tempRoot, "portable-notepad.cmd");
+    File.WriteAllText(batchPath, "synthetic script path marker");
+    Require(Rejected(() => CustomApplicationPolicy.ValidateExecutablePath(batchPath)),
+        "自定义应用白名单接受了批处理脚本。");
     Require(!LocalSearchRootPolicy.IsLocalDrivePath("D:\\invalid\0path"),
         "本机路径策略对包含 NUL 的非法路径抛错或误判为有效路径。");
 }
@@ -4480,6 +4523,41 @@ static async Task CheckAppLaunchCancellationIsTruthfulAsync()
         && result.FinalState == TaskLifecycleState.OutcomeUncertain
         && afterController.StartCount == 1 && afterController.WindowCheckCount == 0,
         "应用启动请求发出后取消被误报为完全取消，或仍继续了窗口轮询。");
+
+    var customRoot = Path.Combine(Path.GetTempPath(), "XiaoK-CustomAppProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(customRoot);
+    try
+    {
+        var customPath = Path.Combine(customRoot, "portable-app.exe");
+        File.WriteAllText(customPath, "synthetic executable path marker");
+        var customId = CustomApplicationPolicy.CreateId();
+        var customApp = new DesktopApp(customId, customPath);
+        var customController = new FakeDesktopAppProcessController(windowVisible: true);
+        var customDesktop = new WindowsDesktopTools([customApp], [], customController);
+        var customProposal = ToolBroker.Proposal("app.launch.v1",
+            [new KeyValuePair<string, string>("app_id", customId)], customId,
+            ToolExpectedOutcome.ApplicationWindowVisible);
+        var customResult = await customDesktop.LaunchAsync(customProposal, CancellationToken.None);
+        Require(customResult.Success && customController.StartCount == 1
+            && customController.LastStartInfo is { ArgumentList.Count: 0 },
+            "已登记的自定义程序没有按固定路径启动，或小K为其追加了命令行参数。");
+
+        var blockedShell = new DesktopApp(CustomApplicationPolicy.CreateId(), Path.Combine(customRoot, "powershell.exe"));
+        File.WriteAllText(blockedShell.Executable, "synthetic script host marker");
+        var blockedController = new FakeDesktopAppProcessController(windowVisible: true);
+        var blockedDesktop = new WindowsDesktopTools([blockedShell], [], blockedController);
+        var blockedProposal = ToolBroker.Proposal("app.launch.v1",
+            [new KeyValuePair<string, string>("app_id", blockedShell.Id)], blockedShell.Id,
+            ToolExpectedOutcome.ApplicationWindowVisible);
+        var blockedResult = await blockedDesktop.LaunchAsync(blockedProposal, CancellationToken.None);
+        Require(!blockedResult.Success && blockedResult.ErrorCode == "APP_NOT_ALLOWLISTED"
+            && blockedController.StartCount == 0,
+            "桌面适配器从手工修改的设置中启动了命令解释器。");
+    }
+    finally
+    {
+        if (Directory.Exists(customRoot)) Directory.Delete(customRoot, recursive: true);
+    }
 }
 
 static async Task CheckModelCannotSelectOutsidePathAsync(string root)
@@ -6516,7 +6594,7 @@ static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, Window
         && pdfRead.Data.Contains("SECOND_PAGE_TEXT", StringComparison.Ordinal)
         && !pdfRead.Summary.Contains(pdfSentinel, StringComparison.Ordinal)
         && !pdfRead.Summary.Contains(pdfPath, StringComparison.Ordinal),
-        "PDF读取没有只提取可选择页面文字，或在摘要字段泄露了正文/路径。");
+        $"PDF读取没有只提取可选择页面文字，或在摘要字段泄露了正文/路径。状态={pdfRead.ErrorCode ?? "成功"}；摘要={pdfRead.Summary}；提取字符数={pdfRead.Data?.Length ?? -1}。");
 
     var blankPdfPath = Path.Combine(Path.GetDirectoryName(summaryPath)!, "scan-only.pdf");
     await File.WriteAllBytesAsync(blankPdfPath, BuildPdf(string.Empty));

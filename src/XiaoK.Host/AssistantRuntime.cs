@@ -852,9 +852,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var lower = request.ToLowerInvariant();
         if (category == "window")
         {
-            var intent = AppLaunchIntentResolver.ResolveWindowActivation(request);
+            var intent = AppLaunchIntentResolver.ResolveWindowActivation(request, GetConfiguredAppAliases());
             if (intent is null)
-                return new(false, "无法确定要切换到哪个受支持的已打开窗口。支持 VS Code 小K项目、Edge、资源管理器、微信和 QQ。", "WINDOW_TARGET_NOT_SUPPORTED");
+                return new(false, "无法确定目标窗口。请使用固定应用名称，或在设置中为自定义应用登记唯一名称；只会切换到唯一匹配的窗口。", "WINDOW_TARGET_NOT_SUPPORTED");
             var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
             return await _broker.ExecuteAsync(new ToolProposal("window.activate.v1", args, intent.AppId,
                 ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
@@ -863,9 +863,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
         if (category == "app")
         {
-            var intent = AppLaunchIntentResolver.Resolve(request);
+            var intent = AppLaunchIntentResolver.Resolve(request, GetConfiguredAppAliases());
             if (intent is null)
-                return new(false, "无法确定要打开哪个受支持的应用。当前支持 VS Code 小K项目、Edge、资源管理器、微信和 QQ。", "APP_NOT_SUPPORTED");
+                return new(false, "无法确定要打开哪个应用。请先在设置中登记本机应用名称和 .exe 路径；小K不会运行命令或使用请求提供的路径。", "APP_NOT_SUPPORTED");
             var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
             if (intent.WorkspaceId is not null) args = args.Add("workspace_id", intent.WorkspaceId);
             return await _broker.ExecuteAsync(new ToolProposal("app.launch.v1", args, intent.AppId,
@@ -1235,6 +1235,21 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     }
 
     private static string CategoryLabel(string category) => TaskCategoryCatalog.LabelOrConversation(category);
+
+    private IReadOnlyList<ConfiguredAppAlias> GetConfiguredAppAliases()
+    {
+        var configured = _settings.Applications
+            .Where(app => app is not null && CustomApplicationPolicy.IsValidId(app.Id)
+                && CustomApplicationPolicy.IsValidDisplayName(app.DisplayName))
+            .ToArray();
+        var uniqueIds = configured.GroupBy(app => app.Id, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return configured.Where(app => uniqueIds.Contains(app.Id))
+            .Select(app => new ConfiguredAppAlias(app.Id, app.DisplayName!))
+            .ToArray();
+    }
 
     private sealed record NoticeAnalysisWork(string ApplicationId, ToolProposal Proposal,
         CancellationTokenSource Lifetime);
@@ -1679,7 +1694,7 @@ internal sealed record XiaoKSettings
     }
 }
 
-internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory);
+internal sealed record AppSetting(string Id, string Executable, string? WorkingDirectory, string? DisplayName = null);
 internal sealed record RootSetting(string Id, string Path);
 internal sealed record TaskHistoryEntry(string EntryKey, Guid? TaskId, string Title, string State, DateTimeOffset UpdatedAtUtc,
     string Detail, bool CanCancel, string CurrentStep, string TargetScope, string ExecutionMode, string NextAction);

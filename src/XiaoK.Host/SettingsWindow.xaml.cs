@@ -28,6 +28,7 @@ public partial class SettingsWindow : Window
     private bool _startupStateLoaded;
     private bool _contactStylesLoaded;
     private readonly ObservableCollection<ContactReplyStylePreference> _contactReplyStyles;
+    private readonly ObservableCollection<AppSetting> _customApplications;
     private TimeSpan _previousCpuTime;
     private long _previousCpuSampleTimestamp;
 
@@ -44,6 +45,11 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         _original = settings;
         _contactReplyStyles = [];
+        _customApplications = [];
+        foreach (var app in settings.Applications.Where(app => app is not null
+                     && CustomApplicationPolicy.IsValidId(app.Id)
+                     && CustomApplicationPolicy.IsValidDisplayName(app.DisplayName)))
+            _customApplications.Add(app);
         _loadContactReplyStyles = loadContactReplyStyles;
         _replaceContactReplyStyles = replaceContactReplyStyles;
         _activeDatabasePath = activeDatabasePath;
@@ -71,6 +77,7 @@ public partial class SettingsWindow : Window
         EdgeExecutableBox.Text = edge?.Executable ?? string.Empty;
         WeChatExecutableBox.Text = wechat?.Executable ?? string.Empty;
         QQExecutableBox.Text = qq?.Executable ?? string.Empty;
+        CustomApplicationsList.ItemsSource = _customApplications;
         CodeProjectRootBox.Text = settings.CodeProjectRoot;
         CodeWorkspaceRootBox.Text = settings.CodeWorkspaceRoot;
         InferenceEndpointBox.Text = settings.InferenceEndpoint;
@@ -351,13 +358,59 @@ public partial class SettingsWindow : Window
     private void BrowseQQExecutable_Click(object sender, RoutedEventArgs e) =>
         BrowseExecutableInto(QQExecutableBox, "选择 QQ 程序", "QQ.exe");
 
+    private void BrowseCustomApplicationExecutable_Click(object sender, RoutedEventArgs e) =>
+        BrowseExecutableInto(CustomApplicationExecutableBox, "选择要加入白名单的本机应用", "*.exe");
+
+    private void AddCustomApplication_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var displayName = CustomApplicationPolicy.ValidateDisplayName(CustomApplicationNameBox.Text);
+            if (_customApplications.Count >= CustomApplicationPolicy.MaximumApplications)
+                throw new ArgumentException($"最多登记 {CustomApplicationPolicy.MaximumApplications} 个自定义应用。");
+            var alias = NormalizeApplicationAlias(displayName);
+            if (_customApplications.Any(app => NormalizeApplicationAlias(app.DisplayName ?? "") == alias))
+                throw new ArgumentException("这个应用名称已经登记。请使用唯一名称。");
+
+            var executable = CustomApplicationPolicy.ValidateExecutablePath(CustomApplicationExecutableBox.Text);
+            if (_original.Applications.Any(app => app is not null
+                    && string.Equals(NormalizeConfiguredApplicationPath(app), executable, StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("这个程序路径已经作为固定应用登记，不能重复添加。");
+            if (_customApplications.Any(app => string.Equals(Path.GetFullPath(app.Executable), executable,
+                    StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("这个程序路径已经登记。");
+
+            _customApplications.Add(new AppSetting(CustomApplicationPolicy.CreateId(), executable, null, displayName));
+            CustomApplicationNameBox.Clear();
+            CustomApplicationExecutableBox.Clear();
+            CustomApplicationsList.SelectedIndex = _customApplications.Count - 1;
+            CustomApplicationStatusText.Text = "已加入待保存列表；保存并重启小K后，可用“打开 <名称>”或“切换到 <名称>”。不会向应用传入启动参数。";
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            CustomApplicationStatusText.Text = exception.Message;
+        }
+    }
+
+    private void RemoveCustomApplication_Click(object sender, RoutedEventArgs e)
+    {
+        if (CustomApplicationsList.SelectedItem is not AppSetting selected)
+        {
+            CustomApplicationStatusText.Text = "请先选择要移除的自定义应用。";
+            return;
+        }
+
+        _customApplications.Remove(selected);
+        CustomApplicationStatusText.Text = "已从待保存列表移除；保存并重启小K后，该应用不再属于启动白名单。";
+    }
+
     private static void BrowseExecutableInto(System.Windows.Controls.TextBox target, string title, string expectedFileName)
     {
         var currentDirectory = Path.GetDirectoryName(target.Text.Trim());
         using var picker = new Forms.OpenFileDialog
         {
             Title = title,
-            Filter = $"{expectedFileName}|{expectedFileName}",
+            Filter = expectedFileName == "*.exe" ? "Windows 应用程序 (*.exe)|*.exe" : $"{expectedFileName}|{expectedFileName}",
             CheckFileExists = true,
             CheckPathExists = true,
             Multiselect = false,
@@ -647,7 +700,8 @@ public partial class SettingsWindow : Window
     private List<AppSetting> BuildDesktopApplications()
     {
         var applications = _original.Applications
-            .Where(app => app is not null && !ConfigurableApplicationIds.Contains(app.Id)).ToList();
+            .Where(app => app is not null && !ConfigurableApplicationIds.Contains(app.Id)
+                && !app.Id.StartsWith("custom-", StringComparison.Ordinal)).ToList();
         applications.Add(new AppSetting("explorer", "explorer.exe", null));
 
         var vscodePath = VscodeExecutableBox.Text.Trim();
@@ -663,8 +717,37 @@ public partial class SettingsWindow : Window
         AddOptionalApplication(applications, EdgeExecutableBox.Text, "msedge.exe", "edge", "Microsoft Edge");
         AddOptionalApplication(applications, WeChatExecutableBox.Text, "Weixin.exe", "wechat", "微信");
         AddOptionalApplication(applications, QQExecutableBox.Text, "QQ.exe", "qq", "QQ");
+
+        if (_customApplications.Count > CustomApplicationPolicy.MaximumApplications)
+            throw new ArgumentException($"最多登记 {CustomApplicationPolicy.MaximumApplications} 个自定义应用。");
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var applicationIds = new HashSet<string>(applications.Select(app => app.Id), StringComparer.OrdinalIgnoreCase);
+        var executablePaths = new HashSet<string>(applications.Select(NormalizeConfiguredApplicationPath), StringComparer.OrdinalIgnoreCase);
+        foreach (var app in _customApplications)
+        {
+            if (!CustomApplicationPolicy.IsValidId(app.Id))
+                throw new ArgumentException("自定义应用标识无效；请移除后重新添加。");
+            if (!applicationIds.Add(app.Id))
+                throw new ArgumentException("检测到重复的自定义应用标识；请移除重复项后重新添加。");
+            var displayName = CustomApplicationPolicy.ValidateDisplayName(app.DisplayName);
+            if (!aliases.Add(NormalizeApplicationAlias(displayName)))
+                throw new ArgumentException($"自定义应用名称“{displayName}”重复；请保留唯一名称。");
+            var executable = CustomApplicationPolicy.ValidateExecutablePath(app.Executable);
+            if (!executablePaths.Add(executable))
+                throw new ArgumentException($"程序路径“{executable}”已经登记；一个程序只能对应一个应用名称。");
+            applications.Add(app with { Executable = executable, WorkingDirectory = null, DisplayName = displayName });
+        }
         return applications;
     }
+
+    private static string NormalizeApplicationAlias(string value) => value.Trim().ToLowerInvariant()
+        .Replace(" ", "", StringComparison.Ordinal).Replace("　", "", StringComparison.Ordinal);
+
+    private static string NormalizeConfiguredApplicationPath(AppSetting app) =>
+        app.Id.Equals("explorer", StringComparison.OrdinalIgnoreCase)
+        && app.Executable.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(Environment.SystemDirectory, "explorer.exe")
+            : Path.GetFullPath(app.Executable);
 
     private static void AddOptionalApplication(List<AppSetting> applications, string configuredPath,
         string expectedFileName, string id, string displayName)
