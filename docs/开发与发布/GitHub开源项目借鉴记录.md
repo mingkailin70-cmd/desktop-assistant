@@ -39,6 +39,15 @@
 - 当前决定：只作为架构参考。小K继续使用本机 `ModelBroker`、确定性 `ToolBroker` 与 SQLite/隔离任务状态；不引入会把小K任务送往云模型的配置，不让通用代理框架覆盖固定权限规则。
 - 引入前检查：确认稳定版和许可证；审查序列化状态中的个人数据、恢复边界、插件/工具调用链和传递依赖，并用本机固定模型验证离线行为。
 
+## 微信与 QQ 通知监听候选：只借鉴来源适配边界
+
+- [BSOD-MEMZ/QQListener](https://github.com/BSOD-MEMZ/QQListener) 标注 MIT，README 描述 WinSDK Toast 与 UIA 两种采集模式。其配置指南要求填写 QQ 号和“聊天信息保存文件夹”，但本次没有审计实现代码，不能据 README 断言它具体如何读取数据。因为这与小K禁止读取客户端数据库/聊天记录的边界存在明显疑点，暂不安装、运行或复用代码；如未来要复核，先逐文件审计通知模式的真实数据路径。
+- [CueBeiXing/wechat-notify](https://github.com/CueBeiXing/wechat-notify) README 描述通过 UI Automation 读取聊天列表的 `ChatSessionCell`、群聊发送者和消息内容，并建议 Qt 微信无控件树时启用系统可访问性设置，某些情形需要管理员改注册表。该路径依赖实时聊天窗口控件，不等同于后台 Toast；也与本机既有 UIA 快照（微信仅8个结构元素、未见 Edit/Document）不吻合。仓库页面仅显示1次提交、0 Star；不安装、不读取真实聊天树、不改系统辅助功能注册表，也不将它作为通知解析证据。
+- [RavelloH/WinToastRelay](https://github.com/RavelloH/WinToastRelay) 标注 MIT，README 使用 `UserNotificationListener`、启动时建立通知基线、按新增通知 ID 处理，并采用应用白名单。这个通用监听生命周期与小K现有实现相符，可作代码审查清单；它面向把通知转发至 webhook/第三方服务，违反小K推理及通知正文留在本机的要求，因此不接入其转发、凭据、持久队列或网络代码，也没有引入该项目依赖。
+- 官方 [Windows 通知监听文档](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/notification-listener)将 `UserNotification`描述为来源应用、时间、ID和通知对象；通用 Toast 文本通过 `ToastGeneric`绑定读取。文档没有定义微信/QQ的会话ID、联系人稳定ID或私聊标记。客户端格式判断仍须以本机自然到达的真实通知为证，不能由第三方项目的功能宣称替代。
+
+本轮只阅读公开仓库页面和官方文档，没有克隆、安装、运行这些候选，也没有读取本机通知正文或聊天窗口。可借鉴项限于独立来源适配、通知ID基线/队列和显式白名单；第三方采集、数据存储、网络转发和前台自动化均不复用。
+
 ## 后续调研规则
 
 每次补充候选时，记录项目官方仓库、固定版本、许可证、可复用模块、资源成本、隐私/网络路径、与小K现有接口的差异以及验证结果。优先采用可独立替换的小组件或测试工具；只有本机试验通过且没有削弱 `ToolBroker` 权限边界时，才进入正式实现。候选宣传、跑分和演示均不算小K的本机验收证据。

@@ -1,6 +1,6 @@
 # Windows 通知接入与隐私边界
 
-更新：2026-10-11。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。当前账户已安装签名MSIX `0.1.93.0`，状态`Ok`；包SHA-256为`D2282615FAD0B02990E6F868FD9C95DED7F3CD3AD6543048BBD9814C14BAECF5`。最近一次无窗口命令行来源诊断在0.1.92.0安装包身份下完成：Windows通知访问状态为Allowed，最多512条快照中检查37条，仅显示4条`QQ`/AUMID `QQ`候选，未发现微信候选；候选与本机开始菜单QQ注册项`AppID=QQ`和运行路径`D:\QQ\QQ.exe`相符。诊断只访问显示名、AUMID、创建时间，不读`Notification.Visual`或正文，不请求授权、不监听、不保存结果，宿主随后退出。0.1.93.0仅更新应用登记功能，本次安装未启动Host，也未再次读取通知或复核开关和白名单。0.1.90.0正文读取器二次门控仍在：会话解析器未接入时，监视器不会把真实读取器交给适配器，因此不会读取正文。没有开始持续监听或发送消息；真实会话分类、稳定联系人ID和私聊格式仍待验收。
+更新：2026-10-11。本文记录小K通过 Windows `UserNotificationListener` 接收系统通知的实现边界，以及进入真实微信/QQ验收前必须保持的安全条件。当前账户已安装签名MSIX `0.1.94.0`，状态`Ok`；包SHA-256为`AF8846447382D8FA4BE7595747FCD5791A7674C1C19176391F760D9DC934D20A`。最近一次无窗口命令行来源诊断在0.1.92.0安装包身份下完成：Windows通知访问状态为Allowed，最多512条快照中检查37条，仅显示4条`QQ`/AUMID `QQ`候选，未发现微信候选；候选与本机开始菜单QQ注册项`AppID=QQ`和运行路径`D:\QQ\QQ.exe`相符。诊断只访问显示名、AUMID、创建时间，不读`Notification.Visual`或正文，不请求授权、不监听、不保存结果，宿主随后退出。0.1.94.0新增应用状态只读查询；安装后未启动Host，也未再次读取通知或复核设置。最新项目状态记录为微信/QQ监听关闭、AUMID白名单为空。0.1.90.0正文读取器二次门控仍在：会话解析器未接入时，监视器不会把真实读取器交给适配器，因此不会读取正文。没有开始持续监听或发送消息；真实会话分类、稳定联系人ID和私聊格式仍待验收。
 
 ## 当前实现
 
@@ -57,7 +57,7 @@ QQ官方机器人开放平台不是个人QQ账号的等价发送通道：官方�
 
 当前`WeChatNoticeAdapter`和`QQNoticeAdapter`仍需上游提供真实样本解析结果；`WindowsNotificationMonitor.ProcessAddedAsync`显式传入空`conversationId`、`sender`和私聊标记，所以不会读取正文。应先以真实微信/QQ后台通知验证是否存在稳定、可区分的可见格式；若没有，则R0消息通知闸门判定不可行，需另行评估官方接口或可验证的非前台UIA路径，不能弱化当前私聊判定或读取客户端数据库、注入客户端。
 
-[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。当前账户签名MSIX为`0.1.92.0`，状态`Ok`；包SHA-256为`86E9AB22CEAC74653D45433552D69460AE274926BBE7B5ECD095AF3557FB3B91`。0.1.92.0无窗口只读诊断实测系统通知访问为Allowed，检查37条现存Toast元数据，发现4条QQ/AUMID `QQ`候选、未发现微信候选；QQ来源与本机开始菜单登记及`D:\QQ\QQ.exe`进程路径相符。设置仍为微信/QQ监控关闭、AUMID白名单为空。诊断不读通知正文、不启用持续监听、不改白名单；Host随后退出。QQ来源发布者已得到本机佐证，但联系人/会话身份、私聊属性和可见正文格式尚未核验；编译、签名、安装或发布者匹配都不能替代这些真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
+[`src/XiaoK.Host/Package.appxmanifest`](../../src/XiaoK.Host/Package.appxmanifest) 声明 `userNotificationListener` 能力，开发发布者固定为 `CN=XiaoK Local Development`。来源诊断所用历史签名MSIX为`0.1.92.0`，状态`Ok`；包SHA-256为`86E9AB22CEAC74653D45433552D69460AE274926BBE7B5ECD095AF3557FB3B91`。0.1.92.0无窗口只读诊断实测系统通知访问为Allowed，检查37条现存Toast元数据，发现4条QQ/AUMID `QQ`候选、未发现微信候选；QQ来源与本机开始菜单登记及`D:\QQ\QQ.exe`进程路径相符。设置仍为微信/QQ监控关闭、AUMID白名单为空。诊断不读通知正文、不启用持续监听、不改白名单；Host随后退出。QQ来源发布者已得到本机佐证，但联系人/会话身份、私聊属性和可见正文格式尚未核验；编译、签名、安装或发布者匹配都不能替代这些真实通知验证。安装和回滚细节见[MSIX打包说明](../开发与发布/MSIX打包说明.md)。
 
 ## 自动分析启用条件
 
