@@ -5518,10 +5518,14 @@ static async Task CheckHistoryRejectsHardLinkedStateAsync(string root)
 
 static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync()
 {
-    var broker = new ModelBroker();
+    var order = new ConcurrentQueue<string>();
+    var runtime = new TrackingModelRuntime
+    {
+        WorkloadPriorityChanged = priority => order.Enqueue("进程优先级:" + priority)
+    };
+    var broker = new ModelBroker(runtime);
     var firstStepStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var releaseFirstStep = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    var order = new ConcurrentQueue<string>();
 
     var firstBackgroundStep = broker.RunBackgroundStepAsync(async token =>
     {
@@ -5550,6 +5554,37 @@ static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAs
     Require(Array.IndexOf(sequence, "后台步骤1结束") < Array.IndexOf(sequence, "交互请求")
         && Array.IndexOf(sequence, "交互请求") < Array.IndexOf(sequence, "后台步骤2"),
         "后台步骤结束后，交互请求没有优先于下一后台步骤执行。");
+    Require(runtime.WorkloadPriorities.SequenceEqual([
+            ModelWorkloadPriority.Background,
+            ModelWorkloadPriority.Interactive,
+            ModelWorkloadPriority.Background])
+        && Array.IndexOf(sequence, "进程优先级:Background") < Array.IndexOf(sequence, "后台步骤1开始")
+        && Array.IndexOf(sequence, "进程优先级:Interactive") < Array.IndexOf(sequence, "交互请求"),
+        "ModelBroker没有在推理前把后台进程降到BelowNormal、或在交互请求前恢复Normal。");
+
+    Require(ModelWorkloadPriorityPolicy.ToProcessPriorityClass(ModelWorkloadPriority.Background)
+            == System.Diagnostics.ProcessPriorityClass.BelowNormal
+        && ModelWorkloadPriorityPolicy.ToProcessPriorityClass(ModelWorkloadPriority.Interactive)
+            == System.Diagnostics.ProcessPriorityClass.Normal,
+        "模型工作类型没有映射到预期的Windows进程优先级。");
+
+    var failedPriorityRuntime = new TrackingModelRuntime
+    {
+        WorkloadPriorityFailure = new InvalidOperationException("priority-update-failed")
+    };
+    var failedPriorityBroker = new ModelBroker(failedPriorityRuntime);
+    var operationRan = false;
+    try
+    {
+        await failedPriorityBroker.RunBackgroundStepAsync(_ =>
+        {
+            operationRan = true;
+            return Task.FromResult(true);
+        }, CancellationToken.None);
+    }
+    catch (InvalidOperationException) { }
+    Require(!operationRan && failedPriorityRuntime.ActiveLeases == 0,
+        "无法降低后台推理进程优先级时，模型操作仍执行或租约泄漏。");
 }
 
 static async Task CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync()
@@ -8556,20 +8591,32 @@ internal sealed class FakeDotNetTestRunner(DotNetTestExecutionResult result, boo
     }
 }
 
-internal sealed class TrackingModelRuntime : IManagedModelRuntime
+internal sealed class TrackingModelRuntime : IWorkloadPriorityModelRuntime
 {
     private int _activeLeases;
+    private readonly List<ModelWorkloadPriority> _workloadPriorities = [];
     public string Status => "测试运行时";
     public int Acquisitions { get; private set; }
     public int UnloadCalls { get; private set; }
     public int ActiveLeases => Volatile.Read(ref _activeLeases);
     public bool FailUnload { get; init; }
+    public Exception? WorkloadPriorityFailure { get; init; }
+    public Action<ModelWorkloadPriority>? WorkloadPriorityChanged { get; init; }
+    public IReadOnlyList<ModelWorkloadPriority> WorkloadPriorities => _workloadPriorities;
     public TaskCompletionSource? UnloadStarted { get; init; }
     public Task? UnloadGate { get; init; }
 
-    public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
+    public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken) =>
+        AcquireAsync(ModelWorkloadPriority.Interactive, cancellationToken);
+
+    public ValueTask<IAsyncDisposable> AcquireAsync(ModelWorkloadPriority priority,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (WorkloadPriorityFailure is not null)
+            return ValueTask.FromException<IAsyncDisposable>(WorkloadPriorityFailure);
+        _workloadPriorities.Add(priority);
+        WorkloadPriorityChanged?.Invoke(priority);
         Acquisitions++;
         Interlocked.Increment(ref _activeLeases);
         return ValueTask.FromResult<IAsyncDisposable>(new Lease(this));

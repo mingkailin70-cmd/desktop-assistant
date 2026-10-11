@@ -16,7 +16,7 @@ namespace XiaoK.Inference;
 /// Starts one pinned llama.cpp server on demand. It accepts no model-provided arguments,
 /// never enables server tools, and keeps read-only handles open on both pinned files.
 /// </summary>
-public sealed class LlamaCppModelRuntime : IManagedModelRuntime
+public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
 {
     private const string ManifestName = "llama-runtime.json";
     private const string RuntimeFileName = "llama-server.exe";
@@ -216,7 +216,11 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
 
     public int ContextTokens => _contextTokens;
 
-    public async ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
+    public ValueTask<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken) =>
+        AcquireAsync(ModelWorkloadPriority.Interactive, cancellationToken);
+
+    public async ValueTask<IAsyncDisposable> AcquireAsync(ModelWorkloadPriority priority,
+        CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -228,8 +232,9 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
                 if (_process is null || _process.HasExited)
                 {
                     await StopCoreAsync().ConfigureAwait(false);
-                    await StartCoreAsync(cancellationToken).ConfigureAwait(false);
+                    await StartCoreAsync(priority, cancellationToken).ConfigureAwait(false);
                 }
+                else ApplyWorkloadPriority(priority);
 
                 cancellationToken.ThrowIfCancellationRequested();
                 if (_leases == 0) _leasesDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -293,7 +298,7 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
         finally { _gate.Release(); }
     }
 
-    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    private async Task StartCoreAsync(ModelWorkloadPriority priority, CancellationToken cancellationToken)
     {
         if (_gpuLayers > 0)
         {
@@ -346,6 +351,7 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
                     throw new Win32Exception(Marshal.GetLastWin32Error(), "无法将本地模型进程置于 Host 崩溃自动回收范围。");
             }
             finally { _ = CloseHandle(processHandle); }
+            ApplyWorkloadPriority(priority);
             _ = DrainAndDiscardAsync(_process.StandardOutput);
             _ = DrainAndDiscardAsync(_process.StandardError);
             await WaitUntilReadyAsync(cancellationToken).ConfigureAwait(false);
@@ -364,6 +370,15 @@ public sealed class LlamaCppModelRuntime : IManagedModelRuntime
             await StopCoreAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    private void ApplyWorkloadPriority(ModelWorkloadPriority priority)
+    {
+        var process = _process;
+        if (process is null || process.HasExited)
+            throw new InvalidOperationException("本地模型进程不可用，未执行推理。");
+
+        process.PriorityClass = ModelWorkloadPriorityPolicy.ToProcessPriorityClass(priority);
     }
 
     private async Task WaitUntilReadyAsync(CancellationToken cancellationToken)

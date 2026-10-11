@@ -2,6 +2,18 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 GitHub持续筛选：桌面动作与宠物复用
+
+以下是继续筛查得到的候选；本次只核对公开README、仓库页面和许可证线索，没有克隆、运行或加入依赖。
+
+| 项目 | 可借鉴内容 | 评估与决定 |
+| --- | --- | --- |
+| [mkusaka/pbw](https://github.com/mkusaka/pbw) | Windows原生.NET桌面自动化，公开命令支持`auto`、`background`和`foreground`派发；仓库标注MIT。 | 支持目标为交互式Windows桌面。后台派发是项目提供的能力选项，不足以证明所有应用/provider不抢焦点或不与用户同时编辑安全；项目当前体量与独立复现证据也有限。仅作为后续测试矩阵和派发契约参考，不直接接入。 |
+| [opensymph/open-computer-use](https://github.com/opensymph/open-computer-use) | 本地MCP服务器；Windows说明采用UI Automation与Win32，公开`background-first`操作路线，并提供显式环境变量门控前台输入/全局指针回退；仓库标注MIT。 | 具有较宽的桌面读写工具面和平台后端。环境变量门控可借鉴为显式能力开关，但第三方宣称的后台行为须逐应用验证；不作为ToolBroker替代、不安装MCP、不启用键鼠/全局指针回退。 |
+| [LorisYounger/VPet](https://github.com/LorisYounger/VPet) | 可将VPet Core嵌入WPF应用，提供桌宠动画和控制接口。 | 小K已有VPet Core集成路线，继续只复用核心能力和小K自有姿态资源。上游README另列动画素材、署名/链接及商业使用限制；不得将上游素材视为可任意再分发资源，打包内容须逐项核对许可。 |
+
+当前实现继续保留小K自己的ToolBroker桌面仲裁、目标校验与验证式工具契约；后台能力必须由小K实测证明，不因候选项目的README表述而自动放宽“不抢鼠标、键盘、焦点或剪贴板”边界。
+
 ## Netwright：.NET UIA动作、稳定定位与结果差异
 
 - 项目：[ricfanin/netwright](https://github.com/ricfanin/netwright)，仓库说明为MIT，面向.NET桌面应用；文档列出WPF、WinForms和WinUI支持，提供MCP与测试库。仓库README称当前为2.0重写版，但本次没有固定发行包或提交SHA，因此不把它当作已审计的产品依赖。

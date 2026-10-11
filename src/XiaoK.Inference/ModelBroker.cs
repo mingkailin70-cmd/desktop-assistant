@@ -71,7 +71,10 @@ public sealed class ModelBroker
                 .ConfigureAwait(false);
             if (operationRuntime is not null)
             {
-                runtimeLease = await operationRuntime.AcquireAsync(cancellationToken).ConfigureAwait(false);
+                runtimeLease = operationRuntime is IWorkloadPriorityModelRuntime priorityRuntime
+                    ? await priorityRuntime.AcquireAsync(interactive ? ModelWorkloadPriority.Interactive
+                        : ModelWorkloadPriority.Background, cancellationToken).ConfigureAwait(false)
+                    : await operationRuntime.AcquireAsync(cancellationToken).ConfigureAwait(false);
                 _lastRuntime = operationRuntime;
             }
             cancellationToken.ThrowIfCancellationRequested();
