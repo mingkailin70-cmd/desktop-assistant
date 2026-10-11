@@ -6,6 +6,13 @@ public enum ToolExecutionAccess { BackgroundOnly, ExplicitUserInteraction }
 /// <summary>按真实适配器能力登记交互模式；模型不能自行声明支持后台。</summary>
 public static class ToolInteractionPolicy
 {
+    public static ToolInteractionOperation GetOperation(string toolId) => GetMode(toolId) switch
+    {
+        ToolInteractionMode.Background => ToolInteractionOperation.NonInteractive,
+        ToolInteractionMode.Foreground => ToolInteractionOperation.DesktopExclusive,
+        _ => ToolInteractionOperation.Unknown
+    };
+
     public static ToolInteractionMode GetMode(string toolId) => toolId switch
     {
         "file.search.v1" or "file.search.content.v1" or "file.summarize.text.v1" or "file.create.text.v1"

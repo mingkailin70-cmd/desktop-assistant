@@ -18,13 +18,15 @@ public sealed class ToolBroker
     private readonly IDynamicPublicWebPageReader? _dynamicPublicWebPageReader;
     private readonly IPublicFileDownloader? _publicFileDownloader;
     private readonly IIsolatedBrowserSessionManager? _isolatedBrowserSessions;
+    private readonly InteractionCoordinator _interactionCoordinator;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
         IApprovalPresenter approval, CodeTaskAgent codeAgent, string codeProjectRoot, string codeWorkspaceRoot,
         IMessageSendPreviewPresenter? messageSendPreview = null, IPublicWebPageReader? publicWebPageReader = null,
         IPublicFileDownloader? publicFileDownloader = null,
         IDynamicPublicWebPageReader? dynamicPublicWebPageReader = null,
-        IIsolatedBrowserSessionManager? isolatedBrowserSessions = null)
+        IIsolatedBrowserSessionManager? isolatedBrowserSessions = null,
+        InteractionCoordinator? interactionCoordinator = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -38,6 +40,7 @@ public sealed class ToolBroker
         _dynamicPublicWebPageReader = dynamicPublicWebPageReader;
         _publicFileDownloader = publicFileDownloader;
         _isolatedBrowserSessions = isolatedBrowserSessions;
+        _interactionCoordinator = interactionCoordinator ?? new InteractionCoordinator();
     }
 
     // 兼容直接由用户发起的交互入口；后台调用必须使用 ExecuteBackgroundAsync。
@@ -55,6 +58,13 @@ public sealed class ToolBroker
         if (invalidProposal is not null) return invalidProposal;
         var interactionDenied = ToolInteractionPolicy.Check(proposal.ToolId, access);
         if (interactionDenied is not null) return interactionDenied;
+
+        var operation = ToolInteractionPolicy.GetOperation(proposal.ToolId);
+        if (!Enum.IsDefined(operation))
+            return new(false, "未知桌面操作类型已拒绝。", "UNKNOWN_INTERACTION_OPERATION");
+        var admission = await _interactionCoordinator.AcquireAsync(operation, access, proposal.Target, cancellationToken);
+        if (admission.Denial is not null) return admission.Denial;
+        await using var interactionLease = admission.Lease;
 
         // Fixed registry: model text never becomes a command, script, arbitrary path, or click target.
         return proposal.ToolId switch

@@ -87,6 +87,12 @@ if (args.Length == 1 && args[0] == "--only-app-status")
     Console.WriteLine("通过：应用状态同时报告白名单进程和可见窗口，并对未知/不可核验目标失败关闭。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-interaction-coordinator")
+{
+    await InteractionCoordinatorChecks.RunAsync();
+    Console.WriteLine("通过：UIA 只读并发、目标状态变更互斥与目标忙碌失败关闭、桌面独占和后台拒绝。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-window-selection")
 {
     CheckWindowMatchSelection();
