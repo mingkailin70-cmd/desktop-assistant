@@ -114,6 +114,14 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         if (!IsValidAccessibleName(accessibleName))
             return new(false, "网页链接名称无效；没有打开链接。", "BROWSER_LINK_NAME_INVALID");
 
+        var currentAria = Normalize(await session.Frame.Locator("body").AriaSnapshotAsync()
+            .WaitAsync(cancellationToken).ConfigureAwait(false));
+        var currentFingerprint = await ComputeActionFingerprintAsync(session, currentAria, cancellationToken)
+            .ConfigureAwait(false);
+        if (!FingerprintsEqual(session.CurrentActionFingerprint, currentFingerprint))
+            return new(false, "网页的可访问性结构或链接属性在快照后发生变化；没有导航。请重新查看会话，再选择链接。",
+                "BROWSER_PAGE_CHANGED_AFTER_SNAPSHOT");
+
         var locator = GetRoleLocator(session, AriaRole.Link, accessibleName);
         if (!await IsUniqueVisibleEnabledAsync(locator, cancellationToken).ConfigureAwait(false))
             return new(false, "当前快照中没有唯一、可见且可用的同名链接；没有打开页面。", "BROWSER_LINK_NOT_UNIQUE");
@@ -545,11 +553,34 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         var aria = await body.AriaSnapshotAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
         bodyText = Normalize(bodyText);
         aria = Normalize(aria);
+        session.CurrentActionFingerprint = await ComputeActionFingerprintAsync(session, aria, cancellationToken)
+            .ConfigureAwait(false);
         if (bodyText.Length > MaximumBodyCharacters) bodyText = bodyText[..MaximumBodyCharacters] + "\n…（正文已截断）";
         if (aria.Length > MaximumAriaCharacters) aria = aria[..MaximumAriaCharacters] + "\n…（ARIA结构已截断）";
         session.CurrentSnapshotId = NewToken();
         session.LastActivityUtc = DateTimeOffset.UtcNow;
         return new(string.IsNullOrWhiteSpace(title) ? "（无标题）" : title.Trim(), bodyText, aria, session.CurrentSnapshotId);
+    }
+
+    private static async Task<string> ComputeActionFingerprintAsync(Session session, string aria,
+        CancellationToken cancellationToken)
+    {
+        var body = session.Frame.Locator("body");
+        var links = await body.EvaluateAsync<string>("""
+            element => JSON.stringify(Array.from(element.querySelectorAll('a')).map(link => [
+                link.getAttribute('aria-label'), link.getAttribute('aria-labelledby'), link.textContent,
+                link.getAttribute('href'), link.getAttribute('target'), link.hasAttribute('download'),
+                link.getAttribute('rel')
+            ]))
+            """).WaitAsync(cancellationToken).ConfigureAwait(false);
+        var material = session.FinalUri.AbsoluteUri + "\0" + aria + "\0" + links;
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
+    }
+
+    private static bool FingerprintsEqual(string expected, string actual)
+    {
+        if (expected.Length != 64 || actual.Length != 64) return false;
+        return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(expected), Convert.FromHexString(actual));
     }
 
     private static ILocator GetRoleLocator(Session session, AriaRole role, string accessibleName) =>
@@ -648,6 +679,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
     {
         public string Id { get; } = id;
         public string CurrentSnapshotId { get; set; } = currentSnapshotId;
+        public string CurrentActionFingerprint { get; set; } = string.Empty;
         public Uri FinalUri { get; set; } = finalUri;
         public IPlaywright Playwright { get; } = playwright;
         public IBrowser Browser { get; } = browser;
