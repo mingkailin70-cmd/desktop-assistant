@@ -2,7 +2,7 @@
 
 新增后台工具`file.create.docx.v1`，沿用锁定的Open XML SDK 3.5.1（MIT）和现有固定Exports安全发布流程。用户逐行正文生成普通Word段落；支持16,000字符/64 KiB，保留空行与空格。只接受`.docx`，不加载用户模板，不包含宏、附件、嵌入部件或外部关系；不会启动Word或操作桌面输入。OpenXmlValidator检查结构；发布前取消会清理临时文件，发布后无法核验则转人工检查、不重试。安装版命令输入和Word实际打开尚未验收。
 
-固定SDK 10.0.401 Release全解决方案构建0警告、0错误；DOCX定向检查通过，Windows安全套件125项通过、0项跳过，桌面体验检查91项通过。自包含签名MSIX `artifacts\msix-validation\eddc9b9fa6ca428fa88872f2b639fbce\XiaoK-signed-validation.msix`，141,532,434字节，SHA-256 `994BC856D00407257AC62DC7BAEAAD5BB75FE497AB6755122640DD956DA99184`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.110.0_neutral__g0ndt6g65c8pe`；安装版与发布版Host DLL SHA-256均为`D6C8913041D20C87F81D03CDE010D38F32FA5E1919C9995070BA6D057403E3AB`。包内包含`ThirdPartyNotices/OpenXmlSdk-MIT.txt`；安装器未启动Host或模型，安装后Host/llama-server进程数均为0。阶段提交和GitHub Actions待记录。
+固定SDK 10.0.401 Release全解决方案构建0警告、0错误；DOCX定向检查通过，Windows安全套件125项通过、0项跳过，桌面体验检查91项通过。自包含签名MSIX `artifacts\msix-validation\eddc9b9fa6ca428fa88872f2b639fbce\XiaoK-signed-validation.msix`，141,532,434字节，SHA-256 `994BC856D00407257AC62DC7BAEAAD5BB75FE497AB6755122640DD956DA99184`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，未更改信任。当前账户已安装`MingKaiLin.XiaoK_0.1.110.0_neutral__g0ndt6g65c8pe`；安装版与发布版Host DLL SHA-256均为`D6C8913041D20C87F81D03CDE010D38F32FA5E1919C9995070BA6D057403E3AB`。包内包含`ThirdPartyNotices/OpenXmlSdk-MIT.txt`；安装器未启动Host或模型，安装后Host/llama-server进程数均为0。实现提交`a5a9e84`已推送至`origin/main`；GitHub Actions Build #484成功（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38177783703)）。
 
 ## v0.1.109.0 后台Excel工作簿创建（2026-10-12）
 
