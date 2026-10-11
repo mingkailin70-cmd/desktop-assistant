@@ -1,3 +1,11 @@
+## v0.1.100.0 重复源码锚点补丁支持（2026-10-12）
+
+隔离编程代理的精确补丁上下文现在提供片段绝对起始行`start_line`，严格JSON Schema允许模型在查找文本重复时给出可选`startLine`。固定解析器继续核验该绝对行与授权片段/基线源码中的唯一匹配；错行不能定位重复文本。对应源码提交`d8cbe1d`与版本提交`6ec2bda`均已推送至`origin/main`。该修复通过合成安全用例，不代表新管线的真实模型评分或代码任务门槛已通过。
+
+固定.NET SDK 10.0.401 win-x64自包含Release发布成功，包内.NET/Windows Desktop运行时为10.0.12。签名MSIX位于`artifacts\msix-validation\54ab9a961b1f4d31a00e314376a10f67\XiaoK-signed-validation.msix`，139,385,369字节，SHA-256 `351CE76AA19B82292F5368B4185FB315FD4A5D982474833171F9583EB927571E`。SignTool验证有效，0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已在`LocalMachine\TrustedPeople`，本阶段未改变证书信任。发布版Host DLL SHA-256为`41D64CCB1B917500C31257C44F17E57B847BDA83DD3DA065774BE02DE37641BC`，与签名包布局内DLL一致。
+
+当前账户已安装`MingKaiLin.XiaoK_0.1.100.0_neutral__g0ndt6g65c8pe`，状态`Ok`；安装器未启动应用。随后以`--diagnostics-profile --background`从安装目录启动PID 3148，窗口保持隐藏，启动前/退出后的前台窗口句柄均为`0x50740`；经应用注册的正常关闭消息退出码0。该隔离检查没有加载常规设置、启动模型或麦克风、读取通知/聊天或发送消息；本机Host当前未运行。代码功能实机任务、多屏/DPI、长期运行、模型门槛、通知/私聊分类与消息发送仍未验收。
+
 ## v0.1.99.0 后台应用状态查询增强（2026-10-11）
 
 `app.status.v1`现在分别返回当前Windows会话内与白名单可执行文件映像完全匹配的进程数和可见顶层窗口数。未登记应用、同名进程映像无法核验或Windows枚举失败时返回`APP_STATUS_UNAVAILABLE`；不读取标题、控件树、窗口内容，不启动/关闭进程，不改变焦点。托盘应用可能显示进程数大于0而窗口数为0。
