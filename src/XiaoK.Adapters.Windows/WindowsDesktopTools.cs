@@ -10,12 +10,17 @@ using XiaoK.Core;
 
 namespace XiaoK.Adapters.Windows;
 
-public sealed record DesktopApp(string Id, string Executable, string? WorkingDirectory = null);
+public sealed record DesktopApp(string Id, string Executable, string? WorkingDirectory = null, string? DisplayName = null);
 
 public interface IDesktopAppProcessController
 {
     IDisposable? Start(ProcessStartInfo startInfo);
     IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app);
+}
+
+public interface IDesktopAppStatusController
+{
+    int GetVisibleWindowCount(DesktopApp app);
 }
 
 public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
@@ -102,7 +107,10 @@ public sealed partial class WindowsDesktopTools
             allowedApps.TryAdd(configuredApp.Id, configuredApp with
             {
                 Executable = executable,
-                WorkingDirectory = workingDirectory
+                WorkingDirectory = workingDirectory,
+                DisplayName = CustomApplicationPolicy.IsValidDisplayName(configuredApp.DisplayName)
+                    ? configuredApp.DisplayName
+                    : null
             });
         }
         _apps = allowedApps;
@@ -188,6 +196,39 @@ public sealed partial class WindowsDesktopTools
         { return new(false, "应用启动失败；请检查本地路径设置。", "APP_LAUNCH_FAILED"); }
         finally { launchHandle?.Dispose(); }
     }
+
+    public Task<ToolResult> GetApplicationStatusAsync(ToolProposal proposal, CancellationToken cancellationToken)
+    {
+        if (!proposal.Arguments.TryGetValue("app_id", out var appId) || !_apps.TryGetValue(appId, out var app))
+            return Task.FromResult(new ToolResult(false, "这个应用未在本机允许列表中。", "APP_NOT_ALLOWLISTED"));
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            // This path counts visible top-level windows by allowlisted executable image only.
+            // It does not read titles or content and cannot change focus or send input.
+            if (_appProcessController is not IDesktopAppStatusController statusController)
+                return Task.FromResult(new ToolResult(false, "当前状态检查器不能安全枚举窗口；没有读取窗口内容。", "APP_STATUS_UNAVAILABLE"));
+            var count = statusController.GetVisibleWindowCount(app);
+            if (count < 0) return Task.FromResult(new ToolResult(false, "无法确认该应用的可见窗口数量。", "APP_STATUS_UNAVAILABLE"));
+            return Task.FromResult(new ToolResult(true, $"{GetDisplayName(app)} 当前可见窗口数：{count}。"));
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UnauthorizedAccessException
+            or SecurityException or NotSupportedException or ArgumentException or IOException)
+        {
+            return Task.FromResult(new ToolResult(false, "无法读取该应用的可见窗口数量；没有切换窗口或发送输入。", "APP_STATUS_UNAVAILABLE"));
+        }
+    }
+
+    private static string GetDisplayName(DesktopApp app) => app.DisplayName ?? app.Id.ToLowerInvariant() switch
+    {
+        "qq" => "QQ",
+        "wechat" => "微信",
+        "edge" => "Edge",
+        "explorer" => "资源管理器",
+        "vscode" => "VS Code",
+        _ => "目标应用"
+    };
 
     private ToolResult ActivateExistingProjectWindow(DesktopApp app)
     {
@@ -1116,10 +1157,47 @@ public sealed partial class WindowsDesktopTools
         return matchingHandles.ToArray();
     }
 
-    private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController
+    private static int CountVisibleWindowsByExecutable(DesktopApp app)
+    {
+        var processName = Path.GetFileNameWithoutExtension(app.Executable);
+        if (string.IsNullOrWhiteSpace(processName)) return -1;
+        var allowedProcessIds = new HashSet<int>();
+        foreach (var process in Process.GetProcessesByName(processName))
+        {
+            try
+            {
+                var imagePath = process.MainModule?.FileName;
+                if (string.IsNullOrWhiteSpace(imagePath)) return -1;
+                if (string.Equals(Path.GetFullPath(imagePath), app.Executable, StringComparison.OrdinalIgnoreCase))
+                    allowedProcessIds.Add(process.Id);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or UnauthorizedAccessException
+                or SecurityException or NotSupportedException or ArgumentException)
+            {
+                // A same-name process with an unreadable image makes the count ambiguous.
+                return -1;
+            }
+            finally { process.Dispose(); }
+        }
+
+        if (allowedProcessIds.Count == 0) return 0;
+        var matchingHandles = new HashSet<IntPtr>();
+        EnumWindowsProc callback = (handle, lParam) =>
+        {
+            if (handle == IntPtr.Zero || !IsWindowVisible(handle)) return true;
+            var threadId = GetWindowThreadProcessId(handle, out var processId);
+            if (threadId != 0 && processId != 0 && allowedProcessIds.Contains(unchecked((int)processId)))
+                matchingHandles.Add(handle);
+            return true;
+        };
+        return EnumWindows(callback, IntPtr.Zero) ? matchingHandles.Count : -1;
+    }
+
+    private sealed class SystemDesktopAppProcessController : IDesktopAppProcessController, IDesktopAppStatusController
     {
         public IDisposable? Start(ProcessStartInfo startInfo) => Process.Start(startInfo);
         public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => FindMatchingWindows(app);
+        public int GetVisibleWindowCount(DesktopApp app) => CountVisibleWindowsByExecutable(app);
     }
 
     private sealed class SystemDesktopWindowController : IDesktopWindowController

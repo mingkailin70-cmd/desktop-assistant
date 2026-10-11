@@ -60,6 +60,7 @@ public sealed class ToolBroker
         return proposal.ToolId switch
         {
             "app.launch.v1" => await _desktop.LaunchAsync(proposal, cancellationToken),
+            "app.status.v1" => await _desktop.GetApplicationStatusAsync(proposal, cancellationToken),
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
@@ -133,6 +134,7 @@ public sealed class ToolBroker
         return proposal.ToolId switch
         {
             "app.launch.v1" => ValidateAppLaunch(proposal),
+            "app.status.v1" => ValidateAppStatus(proposal),
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
@@ -181,6 +183,17 @@ public sealed class ToolBroker
             return InvalidProposal("工作区只能使用已配置的 VS Code 项目别名。");
 
         return null;
+    }
+
+    private static ToolResult? ValidateAppStatus(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var appId = args.GetValueOrDefault("app_id");
+        return args.Count == 1 && args.ContainsKey("app_id")
+            && !string.IsNullOrWhiteSpace(appId) && appId.Length <= 64
+            && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : InvalidProposal("应用状态查询只接受一个已登记 app_id，且目标必须与 app_id 一致。");
     }
 
     private static ToolResult? ValidateWindowActivation(ToolProposal proposal)
@@ -545,6 +558,7 @@ public sealed class ToolBroker
     private static ToolPrecondition GetRequiredPreconditions(string toolId) => toolId switch
     {
         "app.launch.v1" => ToolPrecondition.ApplicationAllowlisted,
+        "app.status.v1" => ToolPrecondition.ApplicationAllowlisted,
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
@@ -572,6 +586,7 @@ public sealed class ToolBroker
     private static ToolExpectedOutcome GetRequiredExpectedOutcome(string toolId) => toolId switch
     {
         "app.launch.v1" => ToolExpectedOutcome.ApplicationWindowVisible,
+        "app.status.v1" => ToolExpectedOutcome.ApplicationStatusObserved,
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,

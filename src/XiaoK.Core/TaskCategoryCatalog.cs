@@ -6,6 +6,7 @@ public static class TaskCategoryCatalog
     private static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["app"] = "应用操作",
+        ["app-status"] = "应用状态查询",
         ["window"] = "窗口切换",
         ["file"] = "文件查找",
         ["file-content-search"] = "文件内容查找",

@@ -384,7 +384,7 @@ public partial class SettingsWindow : Window
             CustomApplicationNameBox.Clear();
             CustomApplicationExecutableBox.Clear();
             CustomApplicationsList.SelectedIndex = _customApplications.Count - 1;
-            CustomApplicationStatusText.Text = "已加入待保存列表；保存并重启小K后，可用“打开 <名称>”或“切换到 <名称>”。不会向应用传入启动参数。";
+            CustomApplicationStatusText.Text = "已加入待保存列表；保存并重启小K后，可用“查询应用状态：<名称>”“打开 <名称>”或“切换到 <名称>”。不会向应用传入启动参数。";
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
         {

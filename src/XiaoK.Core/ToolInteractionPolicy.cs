@@ -16,7 +16,8 @@ public static class ToolInteractionPolicy
             or "browser.session.open.v1" or "browser.session.navigate.v1" or "browser.session.snapshot.v1" or "browser.session.click-button.v1"
             or "browser.session.fill-text.v1" or "browser.session.close.v1"
             or "code.inspect.v1" or "code.task.create.v1" or "message.analyze.v1"
-            or "message.notice.analyze.v1" or "message.draft.v1" or "message.send.v1" => ToolInteractionMode.Background,
+            or "message.notice.analyze.v1" or "message.draft.v1" or "message.send.v1"
+            or "app.status.v1" => ToolInteractionMode.Background,
         // 启动程序和切换窗口会改变用户当前桌面状态，只能由明确用户交互触发。
         "app.launch.v1" or "window.activate.v1" => ToolInteractionMode.Foreground,
         _ => ToolInteractionMode.Unknown

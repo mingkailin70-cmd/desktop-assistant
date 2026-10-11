@@ -107,7 +107,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             _voiceStatus = "诊断模式：语音模型和麦克风均关闭。";
         }
-        var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory));
+        var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory, x.DisplayName));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
         var recoveryRoot = XiaoKSettings.IsDiagnosticsMode
             ? Path.Combine(_settings.DataRoot, "AppContainerRecovery")
@@ -861,6 +861,16 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.TargetWindowInForeground), token);
         }
 
+        if (category == "app-status")
+        {
+            var intent = AppLaunchIntentResolver.ResolveApplicationStatus(request, GetConfiguredAppAliases());
+            if (intent is null)
+                return new(false, "无法确定要查询哪个应用。请使用“查询应用状态：应用名称”，且应用必须在本机白名单中。", "APP_STATUS_TARGET_NOT_SUPPORTED");
+            var args = ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId);
+            return await ExecuteBackgroundAsync(new ToolProposal("app.status.v1", args, intent.AppId,
+                ToolPrecondition.ApplicationAllowlisted, ToolExpectedOutcome.ApplicationStatusObserved), token);
+        }
+
         if (category == "app")
         {
             var intent = AppLaunchIntentResolver.Resolve(request, GetConfiguredAppAliases());
@@ -1203,6 +1213,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (AppLaunchIntentResolver.IsApplicationStatusRequest(request)) return "app-status";
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";
         if (lower.StartsWith("打开隔离网页会话")) return "browser-session-open";
         if (lower.StartsWith("导航隔离网页会话")) return "browser-session-navigate";

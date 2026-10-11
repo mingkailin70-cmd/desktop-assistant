@@ -8,7 +8,8 @@ public static class CustomApplicationPolicy
 
     private static readonly string[] ActionPrefixes =
     [
-        "打开", "启动", "启动应用", "切换到", "切换至", "切到", "聚焦", "显示"
+        "打开", "启动", "启动应用", "切换到", "切换至", "切到", "聚焦", "显示",
+        "查询应用状态", "查看应用状态", "检查应用状态", "应用状态", "检查应用", "查看应用"
     ];
 
     private static readonly HashSet<string> ScriptHosts = new(StringComparer.OrdinalIgnoreCase)

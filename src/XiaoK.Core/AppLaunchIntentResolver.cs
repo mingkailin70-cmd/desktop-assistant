@@ -8,6 +8,36 @@ public static class AppLaunchIntentResolver
 {
     private static readonly string[] WindowActivationPrefixes = ["切换到", "切换至", "切到", "聚焦", "显示"];
     private static readonly string[] LaunchPrefixes = ["启动应用", "打开", "启动"];
+    private static readonly string[] ApplicationStatusPrefixes = ["查询应用状态", "查看应用状态", "检查应用状态", "应用状态", "检查应用", "查看应用"];
+    private static readonly string[] ApplicationStatusSuffixes = ["是否正在运行", "是否运行", "是否打开", "运行状态", "打开状态", "状态"];
+
+    public static bool IsApplicationStatusRequest(string request)
+    {
+        if (string.IsNullOrWhiteSpace(request)) return false;
+        var phrase = Normalize(request);
+        return ApplicationStatusPrefixes.Any(prefix => phrase.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    public static AppLaunchIntent? ResolveApplicationStatus(string request) => ResolveApplicationStatus(request, []);
+
+    public static AppLaunchIntent? ResolveApplicationStatus(string request, IEnumerable<ConfiguredAppAlias> configuredApps)
+    {
+        ArgumentNullException.ThrowIfNull(configuredApps);
+        if (string.IsNullOrWhiteSpace(request)) return null;
+        var phrase = Normalize(request);
+        var matchedPrefix = ApplicationStatusPrefixes.FirstOrDefault(prefix => phrase.StartsWith(prefix, StringComparison.Ordinal));
+        if (matchedPrefix is null) return null;
+        phrase = phrase[matchedPrefix.Length..];
+        foreach (var suffix in ApplicationStatusSuffixes)
+        {
+            if (!phrase.EndsWith(suffix, StringComparison.Ordinal)) continue;
+            phrase = phrase[..^suffix.Length];
+            break;
+        }
+        phrase = phrase.Trim(' ', '：', ':', '“', '”', '"');
+        if (phrase.Length == 0) return null;
+        return ResolveWithPrefixes("打开" + phrase, LaunchPrefixes, configuredApps);
+    }
 
     public static bool IsWindowActivationRequest(string request)
     {
