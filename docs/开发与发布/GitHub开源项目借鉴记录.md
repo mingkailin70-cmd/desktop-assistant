@@ -103,6 +103,28 @@
 
 本轮只阅读公开仓库页面和官方文档，没有克隆、安装、运行这些候选，也没有读取本机通知正文、聊天窗口或真实项目凭证。可借鉴项限于独立来源适配、通知ID基线/队列、显式白名单、UIA能力分层和凭证格式测试；第三方采集、数据存储、网络转发、MCP运行面和前台自动化均不复用。
 
+## 2026-10-12 通知与后台UIA项目复核
+
+### WeChatNotifier：私聊分类路线不符合本项目边界
+
+- 项目：[qixinmin1994/WeChatNotifier](https://github.com/qixinmin1994/WeChatNotifier)，仓库README标注MIT，页面显示项目规模很小；本次只读README与安全说明，未克隆、安装或运行。
+- 可借鉴处：暂停/恢复时重建未读数基线，避免把暂停期间累积的旧消息当成新通知。这个状态处理思路可用于小K自己的Toast队列回归用例。
+- 不采用的原因：README明确说明其从微信本地会话/联系人数据库读取元数据，经`wechatauto-replica`识别私聊、群聊和免打扰群；还注明上游库可能读取微信进程内存以处理加密数据库。它依赖客户端内部数据结构，与小K“不读客户端数据库、不读进程内存”的固定边界冲突；其测试微信版本也早于本机4.1.15.13。其“本地不上传”声明不改变这项来源限制。
+
+### FlaUI-MCP：语义选择器可参考，宽工具面不接入
+
+- 项目：[shanselman/FlaUI-MCP](https://github.com/shanselman/FlaUI-MCP)，本次只读README，未核定固定release或完整传递依赖，未克隆、安装或运行。
+- 可借鉴处：用语义控件引用代替坐标、在目标变化后重新解析控件；测试夹具按独立窗口运行。小K当前只读UIA快照和唯一`AutomationId`等待继续采用有限语义目标。
+- 限制与决定：README列出的工具还包括焦点切换、键盘输入、截图、关闭窗口、批量动作；所谓背景截图在空帧时回退到常规截图，超时只表示MCP请求结束，不保证挂起的UIA Provider已停止。它提供的是通用自动化服务，并不等于不打扰用户的后台保证；不集成MCP服务或其宽权限工具。
+
+### Microsoft winapp CLI：协调器范围不能扩大解释
+
+当前[UI Automation文档](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)说明只读查询可并发；`set-value`、滚动使用UIA Pattern且不抢物理焦点，但会改变应用状态，仍需在自动化工作流中串行；`invoke`与截图等动作还要取得工作流轮次。文档也说明协调器只协调参与`winapp`工作流的调用，不控制用户输入或其他UIA进程。小K的交互仲裁只覆盖自身ToolBroker调用，因此仍不得宣称对用户或其他自动化工具形成全局锁。当前小K只实现只读快照和启用状态等待；针对UIA写入的后台行为要逐应用证明不会覆盖用户正在编辑的内容，再决定是否允许。
+
+**本轮结论：** GitHub上存在可复用的机制，但没有找到同时满足“不读微信客户端数据、不抢用户焦点、不假称后台安全”的微信/QQ通用操作模块。没有新增依赖，也没有修改通知权限策略。下一步仍是：基于自然到达、来源可确认的Toast样本验证私聊字段；后台操作逐应用测试，不能从通用演示推断兼容性。
+
+来源：[WeChatNotifier README与隐私说明](https://github.com/qixinmin1994/WeChatNotifier)、[FlaUI-MCP README](https://github.com/shanselman/FlaUI-MCP/blob/main/README.md)、[Microsoft winapp CLI UIA文档](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)。这些公开页面可能变化；未固定并审核代码提交，因此本次仅作设计研究，不用于复制代码或添加依赖。
+
 ## 后续调研规则
 
 每次补充候选时，记录项目官方仓库、固定版本、许可证、可复用模块、资源成本、隐私/网络路径、与小K现有接口的差异以及验证结果。优先采用可独立替换的小组件或测试工具；只有本机试验通过且没有削弱 `ToolBroker` 权限边界时，才进入正式实现。候选宣传、跑分和演示均不算小K的本机验收证据。
