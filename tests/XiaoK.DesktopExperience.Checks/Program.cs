@@ -4,6 +4,7 @@ using XiaoK.Storage;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -12,9 +13,30 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Threading;
+using XiaoK.Adapters.Windows;
 
 if (args.Length == 2 && args[0] == "--uia-readonly-worker" && args[1] == "--test-block")
 {
+    await Task.Delay(Timeout.Infinite);
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--uia-worker-job-owner-test")
+{
+    var executablePath = Environment.ProcessPath
+        ?? throw new InvalidOperationException("无法定位UIA工作进程测试宿主。");
+    var workerStartInfo = new ProcessStartInfo(executablePath)
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        WindowStyle = ProcessWindowStyle.Hidden
+    };
+    workerStartInfo.ArgumentList.Add("--uia-readonly-worker");
+    workerStartInfo.ArgumentList.Add("--test-block");
+    using var worker = new SystemUiAutomationWorkerProcessStarter().Start(workerStartInfo)
+        ?? throw new InvalidOperationException("无法启动用于Job Object回收探针的辅助进程。");
+    Console.WriteLine(worker.Process.Id);
+    Console.Out.Flush();
     await Task.Delay(Timeout.Infinite);
     return;
 }
@@ -28,7 +50,7 @@ if (args.Length == 1 && args[0] == "--uia-readonly-worker")
 if (args.Length == 1 && args[0] == "--only-uia-readonly-probe")
 {
     await UiAutomationReadOnlyProbe.RunAsync();
-    Console.WriteLine("通过：离屏合成窗口的UIA只读探针未触发控件或前台；取消及5秒超时会终止无响应工作进程。");
+    Console.WriteLine("通过：离屏合成窗口的UIA只读探针未触发控件或前台；取消、5秒超时及所有者进程退出均回收工作进程。");
     return;
 }
 

@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.ComponentModel;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 using XiaoK.Core;
 
 namespace XiaoK.Adapters.Windows;
@@ -67,13 +69,15 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         if (needsEntryAssemblyArgument) startInfo.ArgumentList.Add(entryAssemblyPath!);
         startInfo.ArgumentList.Add("--uia-readonly-worker");
 
+        UiAutomationWorkerProcess? worker = null;
         Process? process = null;
         Task<byte[]>? outputTask = null;
         Task? errorTask = null;
         try
         {
-            process = _workerProcessStarter.Start(startInfo);
-            if (process is null) return new(false, "只读 UIA 工作进程启动失败；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
+            worker = _workerProcessStarter.Start(startInfo);
+            if (worker is null) return new(false, "只读 UIA 工作进程启动失败；没有访问窗口。", "UIA_WORKER_UNAVAILABLE");
+            process = worker.Process;
             try { process.PriorityClass = ProcessPriorityClass.BelowNormal; }
             catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { }
 
@@ -115,7 +119,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
             return new(false, "UIA 查询失败或返回内容超出限制；没有执行控件动作。", "UIA_WORKER_FAILED");
         }
-        finally { process?.Dispose(); }
+        finally { worker?.Dispose(); }
     }
 
     private static async Task<byte[]> ReadBoundedOutputAsync(Stream stream, int maximumBytes, CancellationToken token)
@@ -192,17 +196,136 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
 
 internal interface IUiAutomationWorkerProcessStarter
 {
-    Process? Start(ProcessStartInfo startInfo);
+    UiAutomationWorkerProcess? Start(ProcessStartInfo startInfo);
 }
 
 internal sealed class SystemUiAutomationWorkerProcessStarter : IUiAutomationWorkerProcessStarter
 {
-    public Process? Start(ProcessStartInfo startInfo)
+    private const int JobObjectExtendedLimitInformationClass = 9;
+    private const uint JobObjectLimitProcessMemory = 0x00000100;
+    private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+    private const long MaximumWorkerMemoryBytes = 256L * 1024 * 1024;
+
+    public UiAutomationWorkerProcess? Start(ProcessStartInfo startInfo)
     {
+        var job = CreateWorkerJob();
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        if (process.Start()) return process;
-        process.Dispose();
-        return null;
+        try
+        {
+            if (!process.Start())
+            {
+                process.Dispose();
+                job.Dispose();
+                return null;
+            }
+            if (!AssignProcessToJobObject(job, process.Handle))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            return new UiAutomationWorkerProcess(process, job);
+        }
+        catch
+        {
+            TryKill(process);
+            process.Dispose();
+            job.Dispose();
+            throw;
+        }
+    }
+
+    private static SafeUiAutomationWorkerJobHandle CreateWorkerJob()
+    {
+        var job = CreateJobObjectW(IntPtr.Zero, null);
+        if (job.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var limits = new JobObjectExtendedLimitInformation
+        {
+            BasicLimitInformation = new JobObjectBasicLimitInformation
+            {
+                LimitFlags = JobObjectLimitKillOnJobClose | JobObjectLimitProcessMemory
+            },
+            ProcessMemoryLimit = new UIntPtr(MaximumWorkerMemoryBytes)
+        };
+        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformationClass, ref limits,
+                (uint)Marshal.SizeOf<JobObjectExtendedLimitInformation>()))
+        {
+            var error = Marshal.GetLastWin32Error();
+            job.Dispose();
+            throw new Win32Exception(error);
+        }
+        return job;
+    }
+
+    private static void TryKill(Process process)
+    {
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception
+            or NotSupportedException or ObjectDisposedException) { }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectBasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectExtendedLimitInformation
+    {
+        public JobObjectBasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    private sealed class SafeUiAutomationWorkerJobHandle() : SafeHandleZeroOrMinusOneIsInvalid(true)
+    {
+        protected override bool ReleaseHandle() => CloseHandle(handle);
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateJobObjectW")]
+    private static extern SafeUiAutomationWorkerJobHandle CreateJobObjectW(IntPtr jobAttributes, string? name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(SafeUiAutomationWorkerJobHandle job, int informationClass,
+        ref JobObjectExtendedLimitInformation information, uint informationLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(SafeUiAutomationWorkerJobHandle job, IntPtr process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+}
+
+internal sealed class UiAutomationWorkerProcess(Process process, IDisposable job) : IDisposable
+{
+    public Process Process { get; } = process;
+
+    public void Dispose()
+    {
+        try { Process.Dispose(); }
+        finally { job.Dispose(); }
     }
 }
 

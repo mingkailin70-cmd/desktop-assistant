@@ -136,6 +136,56 @@ internal static class UiAutomationReadOnlyProbe
         if (timed.Success || timed.ErrorCode != "UIA_WORKER_TIMEOUT")
             throw new InvalidOperationException("无响应UIA子进程没有在5秒后被终止。");
         await RequireProcessExitedAsync(timeoutStarter.ProcessId);
+
+        await VerifyWorkerKilledWhenHostExitsAsync();
+    }
+
+    private static async Task VerifyWorkerKilledWhenHostExitsAsync()
+    {
+        var executablePath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("无法定位UIA工作进程测试宿主。");
+        var ownerStartInfo = new ProcessStartInfo(executablePath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        ownerStartInfo.ArgumentList.Add("--uia-worker-job-owner-test");
+        using var owner = Process.Start(ownerStartInfo)
+            ?? throw new InvalidOperationException("无法启动Job Object所有者测试进程。");
+        var workerProcessId = 0;
+        try
+        {
+            var processIdLine = await owner.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(8));
+            if (!int.TryParse(processIdLine, out workerProcessId))
+            {
+                await owner.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                var error = await owner.StandardError.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(2));
+                throw new InvalidOperationException($"Job Object所有者没有启动工作进程：{error}");
+            }
+
+            owner.Kill(entireProcessTree: false);
+            await owner.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await RequireProcessExitedAsync(workerProcessId);
+        }
+        finally
+        {
+            if (!owner.HasExited) owner.Kill(entireProcessTree: true);
+            if (workerProcessId > 0) TryKillProcess(workerProcessId);
+        }
+    }
+
+    private static void TryKillProcess(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or NotSupportedException) { }
     }
 
     private static async Task RequireProcessExitedAsync(int processId)
@@ -159,7 +209,7 @@ internal static class UiAutomationReadOnlyProbe
         public Task Started => _started.Task;
         public int ProcessId { get; private set; }
 
-        public Process? Start(ProcessStartInfo startInfo)
+        public UiAutomationWorkerProcess? Start(ProcessStartInfo startInfo)
         {
             startInfo.ArgumentList.Add("--test-block");
             var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -170,8 +220,14 @@ internal static class UiAutomationReadOnlyProbe
             }
             ProcessId = process.Id;
             _started.TrySetResult();
-            return process;
+            return new UiAutomationWorkerProcess(process, NoopLifetime.Instance);
         }
+    }
+
+    private sealed class NoopLifetime : IDisposable
+    {
+        public static NoopLifetime Instance { get; } = new();
+        public void Dispose() { }
     }
 
     [DllImport("user32.dll")]
