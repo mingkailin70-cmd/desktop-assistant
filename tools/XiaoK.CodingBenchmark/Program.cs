@@ -51,6 +51,17 @@ internal static class Program
                 return 0;
             }
 
+            if (options.ValidateModelOnly)
+            {
+                var validationRepoRoot = RequireLocalDirectory(options.RepositoryRoot, "仓库目录");
+                var validationModel = ResolveModel(validationRepoRoot, options.ModelId);
+                _ = CreateEvaluationManifestJson(validationModel);
+                Console.WriteLine($"模型权重与 llama.cpp b11259 文件散列已核验：{validationModel.Id} @ {validationModel.Revision}");
+                Console.WriteLine($"显存配置：GPU层 {validationModel.GpuLayers}，预计 {validationModel.ExpectedGpuMemoryMiB:N0} MiB，启动保护线 {validationModel.MinimumInitialGpuFreeMiB:N0} MiB（另保留 {MinimumRuntimeGpuFreeMiB:N0} MiB）。");
+                Console.WriteLine("仅核验锁定文件；没有查询/占用GPU、启动模型或写入评测结果。");
+                return 0;
+            }
+
             if (Console.IsInputRedirected)
             {
                 Console.Error.WriteLine("评测需要交互终端进行独立人工评分；检测到标准输入被重定向，未启动模型且未写入结果。");
@@ -267,6 +278,7 @@ internal static class Program
         var modelId = "qwen3.5-4b-q4km";
         var enableThinking = false;
         var showPipelineId = false;
+        var validateModelOnly = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
         for (var index = 0; index < args.Length; index++)
@@ -281,6 +293,11 @@ internal static class Program
             if (option == "--show-pipeline-id")
             {
                 showPipelineId = true;
+                continue;
+            }
+            if (option == "--validate-model-only")
+            {
+                validateModelOnly = true;
                 continue;
             }
 
@@ -301,10 +318,16 @@ internal static class Program
 
         if (showPipelineId)
             return new(repositoryRoot ?? string.Empty, datasetVersion ?? string.Empty, taskId ?? string.Empty,
-                modelId, enableThinking, true);
+                modelId, enableThinking, true, false);
+        if (validateModelOnly)
+        {
+            if (repositoryRoot is null || datasetVersion is not null || taskId is not null || enableThinking)
+                throw new ArgumentException("--validate-model-only 仅接受 --repo 与 --model-id，不加载评测集或运行模型。");
+            return new(repositoryRoot, string.Empty, string.Empty, modelId, false, false, true);
+        }
         if (repositoryRoot is null || datasetVersion is null || taskId is null)
             throw new ArgumentException("缺少必需选项 --repo、--dataset 或 --task。");
-        return new(repositoryRoot, datasetVersion, taskId, modelId, enableThinking, false);
+        return new(repositoryRoot, datasetVersion, taskId, modelId, enableThinking, false, false);
     }
 
     private static string BuildPipelineVersion(bool enableThinking, string category)
@@ -413,8 +436,9 @@ internal static class Program
             "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "gemma-4-e4b-it-qat-q4-0-eval" => new ModelProfile("gemma-4-E4B_q4_0-it.gguf", 24, 4_500, 5_524, true),
             "ornith-1.5-9b-q4km-eval" => new ModelProfile("Ornith-1.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
+            "ornith-1.0-9b-q4km-eval" => new ModelProfile("ornith-1.0-9b-Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "oxcoder-9b-q4km-eval" => new ModelProfile("OxCoder-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
-            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M 或 OxCoder-9B Q4_K_M 模型。", nameof(modelId))
+            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M 模型。", nameof(modelId))
         };
         var model = modelLock.Models.Single(item => item.Id == modelId);
         var runtime = runtimeLock.Runtimes.Single(item => item.Id == "llama.cpp");
@@ -809,7 +833,7 @@ internal static class Program
 
     private sealed record GpuSnapshot(long FreeMiB, long UsedMiB);
     private sealed record BenchmarkOptions(string RepositoryRoot, string DatasetVersion, string TaskId,
-        string ModelId, bool EnableThinking, bool ShowPipelineId);
+        string ModelId, bool EnableThinking, bool ShowPipelineId, bool ValidateModelOnly);
     private sealed record BenchmarkTask(string Id, string Category, string Acceptance, string Grading,
         bool NetworkAllowed, bool ExternalSideEffectsAllowed, IReadOnlyList<string> TargetFiles, string Prompt);
     private sealed record ReviewKey(string Expected, string Evidence);

@@ -10,6 +10,8 @@
 
 来源：[Ornith-1.0-9B模型卡](https://huggingface.co/ornith-ai/Ornith-1.0-9B)、[固定revision的GGUF文件树](https://huggingface.co/ornith-ai/Ornith-1.0-9B-GGUF/tree/d6b5f9b2ef835df5085615e0c405ce0092cc8b53)、[仓库锁定条目](../../model-lock/models.lock.json)。
 
+评测准备更新（2026-10-11）：固定编码任务启动器现已登记该候选和12层GPU配置（预计3,500 MiB，启动保护线4,524 MiB，另留1,024 MiB）。新增只核对模型/运行时锁定散列的预检命令`tools/validate_coding_benchmark_model.ps1 -ModelId ornith-1.0-9b-q4km-eval`。预检在本机通过，权重、运行时版本b11259及文件散列匹配；没有查询或占用GPU、启动模型、运行任务或写入评分。此项只是让后续评测路径可用，不算模型质量/兼容性推理评测。
+
 ## OxCoder-9B Q4_K_M 当前构建R类首筛与早停（2026-10-10）
 
 本轮将OxCoder-9B作为低置信度离线候选：OrionLLM模型卡称其建立在Qwen3.5-9B上并面向Agentic Coding，但GGUF由mradermacher社区量化，公开讨论曾质疑官方仓库Safetensors是否包含训练后的权重。该争议未在本机独立解决；候选身份与作者公布成绩不作为准入证据。
