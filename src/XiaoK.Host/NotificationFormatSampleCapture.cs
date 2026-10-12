@@ -204,6 +204,11 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                 var key = CreateKey(sourceAppId, notification.Id, notification.CreationTime);
                 if (_baselineKeys.Contains(key) || !_seenKeys.Add(key)) continue;
                 if (notification.CreationTime < _startedAtUtc) continue;
+                if (notification.CreationTime > DateTimeOffset.UtcNow)
+                {
+                    RaiseStatus("通知时间戳晚于本机当前时间；该通知未采集，请核对系统时间。已有样本仍只在内存中保留。");
+                    continue;
+                }
 
                 if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
                 {

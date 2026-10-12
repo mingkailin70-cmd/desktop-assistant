@@ -586,8 +586,15 @@ public partial class SettingsWindow : Window
 
         var applicationId = (NotificationSampleAppBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string;
         var candidates = _notificationMonitor.GetSamplePublisherCandidates(applicationId ?? string.Empty)
-            .Select(candidate => new NotificationPublisherCandidateChoice(applicationId!, candidate,
-                $"{candidate.DisplayName} | AUMID: {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount} | 最近出现：{candidate.LatestNotificationTimeUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}"))
+            .Select(candidate =>
+            {
+                var latestUtc = candidate.LatestNotificationTimeUtc.ToUniversalTime();
+                var timeLabel = latestUtc > DateTimeOffset.UtcNow
+                    ? $"时间戳在未来，需核对（UTC {latestUtc:yyyy-MM-dd HH:mm:ss}Z）"
+                    : $"最近出现（UTC {latestUtc:yyyy-MM-dd HH:mm:ss}Z）";
+                return new NotificationPublisherCandidateChoice(applicationId!, candidate,
+                    $"{candidate.DisplayName} | AUMID: {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount} | {timeLabel}");
+            })
             .ToArray();
         NotificationSamplePublisherBox.ItemsSource = candidates;
         NotificationSamplePublisherBox.SelectedIndex = -1;

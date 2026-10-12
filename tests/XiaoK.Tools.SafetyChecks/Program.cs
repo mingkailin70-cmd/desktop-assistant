@@ -851,7 +851,7 @@ try
     passed.Add("无可见正文或正文超限时不触发分析且不保留正文");
 
     CheckStaleOrUnattributedPrivateNoticeDoesNotReadBody();
-    passed.Add("过期通知或缺少会话身份的私聊在读取正文前被拦截");
+    passed.Add("过期/未来时间戳通知或缺少会话身份的私聊在读取正文前被拦截");
 
     CheckNoticeRateLimitRunsBeforeBodyRead();
     passed.Add("会话限速在读取通知正文前生效");
@@ -5275,8 +5275,9 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
         && monitor.Contains("再手动填入对应 AUMID", StringComparison.Ordinal) == false
         && settingsCode.Contains("hasSelectedPublisher", StringComparison.Ordinal)
         && settingsCode.Contains("!active && !sessionExists && hasSelectedPublisher", StringComparison.Ordinal)
+        && settingsCode.Contains("时间戳在未来，需核对", StringComparison.Ordinal)
         && settingsCode.Contains("没有发现与{applicationDisplayName}匹配的来源候选", StringComparison.Ordinal),
-        "无匹配来源时未说明平台状态，或没有在候选选择前禁用样本采集。");
+        "无匹配来源时未说明平台状态、候选时间没有标注异常，或没有在候选选择前禁用样本采集。");
 }
 
 static void CheckNotificationEventQueueIsBoundedAndDeduplicated()
@@ -5388,6 +5389,14 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
         && settingsCode[closeStart..closeEnd].Contains("_notificationMonitor.ClearNotificationSamples();", StringComparison.Ordinal)
         && settingsCode[closeStart..closeEnd].Contains("NotificationSamplesBox.Clear();", StringComparison.Ordinal),
         "关闭设置页时没有清除内存中的通知样本和正文展示。");
+
+    var addedStart = capture.IndexOf("private async Task ProcessAddedAsync(", StringComparison.Ordinal);
+    var addedEnd = addedStart < 0 ? -1 : capture.IndexOf("private static bool IsRecoverable", addedStart, StringComparison.Ordinal);
+    var added = addedStart >= 0 && addedEnd > addedStart ? capture[addedStart..addedEnd] : string.Empty;
+    var futureTimestampCheck = added.IndexOf("notification.CreationTime > DateTimeOffset.UtcNow", StringComparison.Ordinal);
+    var sampleBodyRead = added.IndexOf("ReadVisibleTextElements(notification)", StringComparison.Ordinal);
+    Require(futureTimestampCheck >= 0 && sampleBodyRead > futureTimestampCheck,
+        "时间戳晚于本机时间的通知没有在用户同意的一次性样本正文读取前被跳过。");
 }
 
 static void CheckStartupWindowVisibilityPolicy()
@@ -5545,6 +5554,14 @@ static void CheckStaleOrUnattributedPrivateNoticeDoesNotReadBody()
         () => { staleReads++; return "过期正文"; }, DateTimeOffset.UtcNow.AddHours(-25), "notice-stale", true, true);
     Require(stale.Accepted && !stale.AnalyzeBody && stale.Notice?.Body is null && staleReads == 0,
         "过期通知在显式拒绝正文读取前未被拦截。");
+
+    var futurePolicy = CreateNoticePolicy();
+    var futureReads = 0;
+    var future = futurePolicy.Inspect("qq", "qq.package!Main", "chat-future", "Bob", true,
+        () => { futureReads++; return "未来通知正文"; }, DateTimeOffset.UtcNow.AddHours(4), "notice-future", true, true);
+    Require(future.Accepted && !future.AnalyzeBody && future.Notice?.Body is null && futureReads == 0
+        && future.UserMessage.Contains("时间戳晚于本机当前时间", StringComparison.Ordinal),
+        "未来时间戳通知在读取正文前未失败关闭。");
 
     var unattributedPolicy = CreateNoticePolicy();
     var unattributedReads = 0;

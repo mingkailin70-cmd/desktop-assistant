@@ -64,7 +64,10 @@ public sealed class MessageNoticePolicy
         var safeSender = LimitMetadata(sender, 256);
         var notice = new MessageNotice(appId, sourceAppId!, safeConversationId, safeSender, isPrivateConversation == true,
             null, receivedAtUtc, HashKey($"{appId}\0{deduplicationKey}"));
-        if (receivedAtUtc < DateTimeOffset.UtcNow - MaximumNoticeAge)
+        var timestampCheckUtc = DateTimeOffset.UtcNow;
+        if (receivedAtUtc > timestampCheckUtc)
+            return new(true, false, "通知时间戳晚于本机当前时间，已跳过自动分析；请核对系统时间并手动查看会话。", notice);
+        if (receivedAtUtc < timestampCheckUtc - MaximumNoticeAge)
             return new(true, false, "通知已超过24小时，已跳过自动分析；请手动查看会话。", notice);
         if (isPrivateConversation != true)
             return new(true, false, "无法确定这是私聊，已保留为普通提示，不做自动分析。", notice);
