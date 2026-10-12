@@ -36,11 +36,20 @@ internal static class Program
         public int Other { get; set; }
         public int ClassQueryFailures { get; set; }
         public int CallbackFailures { get; set; }
-        public bool EnumerationFailed { get; set; }
+        public bool CallbackFailed { get; set; }
         public bool Truncated { get; set; }
     }
 
-    private sealed record WindowEnumerationState(HashSet<int> ProcessIds, List<IntPtr> Windows);
+    private sealed record WindowCandidate(IntPtr Handle, bool IsVisible);
+
+    private sealed class WindowEnumerationState(HashSet<int> processIds, List<WindowCandidate> windows, bool includeHidden)
+    {
+        public const int MaximumTopLevelWindows = 32;
+        public HashSet<int> ProcessIds { get; } = processIds;
+        public List<WindowCandidate> Windows { get; } = windows;
+        public bool IncludeHidden { get; } = includeHidden;
+        public bool Truncated { get; set; }
+    }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static Windows.Win32.Foundation.BOOL EnumerateTargetWindow(
@@ -52,8 +61,17 @@ internal static class Program
             var stateHandle = GCHandle.FromIntPtr((IntPtr)lParam);
             if (stateHandle.Target is not WindowEnumerationState state) return false;
             _ = PInvoke.GetWindowThreadProcessId(hwnd, out var windowProcessId);
-            if (windowProcessId <= int.MaxValue && state.ProcessIds.Contains((int)windowProcessId) && PInvoke.IsWindowVisible(hwnd))
-                state.Windows.Add((IntPtr)hwnd);
+            if (windowProcessId <= int.MaxValue && state.ProcessIds.Contains((int)windowProcessId))
+            {
+                var isVisible = PInvoke.IsWindowVisible(hwnd);
+                if (state.IncludeHidden || isVisible)
+                {
+                    if (state.Windows.Count < WindowEnumerationState.MaximumTopLevelWindows)
+                        state.Windows.Add(new WindowCandidate((IntPtr)hwnd, isVisible));
+                    else
+                        state.Truncated = true;
+                }
+            }
         }
         catch
         {
@@ -69,9 +87,13 @@ internal static class Program
         if (args.Length == 2 && args[0] == "--target")
             return RunSyntheticTarget(args[1]);
         if (args.Length == 2 && args[0] == "--inspect-live-app")
-            return RunLiveAppProbe(args[1]);
+            return RunLiveAppProbe(args[1], includeHidden: false);
+        if (args.Length == 2 && args[0] == "--inspect-live-app-including-hidden")
+            return RunLiveAppProbe(args[1], includeHidden: true);
         if (args.Length == 2 && args[0] == "--inspect-live-app-worker")
-            return RunLiveAppProbeWorker(args[1]);
+            return RunLiveAppProbeWorker(args[1], includeHidden: false);
+        if (args.Length == 3 && args[0] == "--inspect-live-app-worker-including-hidden")
+            return RunLiveAppProbeWorker(args[1], bool.TryParse(args[2], out var includeHidden) && includeHidden);
         if (args.Length != 0)
         {
             Console.Error.WriteLine("FAIL: unexpected probe arguments; refusing to start another client.");
@@ -80,7 +102,7 @@ internal static class Program
         return RunProbe();
     }
 
-    private static int RunLiveAppProbe(string app)
+    private static int RunLiveAppProbe(string app, bool includeHidden)
     {
         if (!TryGetTargetApp(app, out var processName, out _))
         {
@@ -98,8 +120,9 @@ internal static class Program
         };
         if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             start.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
-        start.ArgumentList.Add("--inspect-live-app-worker");
+        start.ArgumentList.Add(includeHidden ? "--inspect-live-app-worker-including-hidden" : "--inspect-live-app-worker");
         start.ArgumentList.Add(processName);
+        if (includeHidden) start.ArgumentList.Add(bool.TrueString);
 
         using var child = Process.Start(start) ?? throw new InvalidOperationException("could not start isolated UIA probe");
         var stdoutTask = child.StandardOutput.ReadToEndAsync();
@@ -118,7 +141,7 @@ internal static class Program
         return child.ExitCode;
     }
 
-    private static int RunLiveAppProbeWorker(string processName)
+    private static int RunLiveAppProbeWorker(string processName, bool includeHidden)
     {
         if (!TryGetTargetApp(processName, out var expectedProcessName, out var expectedPath))
         {
@@ -129,7 +152,7 @@ internal static class Program
         try
         {
             var matchingProcessIds = new HashSet<int>();
-            var windows = new List<IntPtr>();
+            var windows = new List<WindowCandidate>();
             foreach (var process in Process.GetProcessesByName(expectedProcessName))
             {
                 using (process)
@@ -154,7 +177,8 @@ internal static class Program
                 return 12;
             }
 
-            var enumerationStateHandle = GCHandle.Alloc(new WindowEnumerationState(matchingProcessIds, windows));
+            var enumerationState = new WindowEnumerationState(matchingProcessIds, windows, includeHidden);
+            var enumerationStateHandle = GCHandle.Alloc(enumerationState);
             bool enumerationSucceeded;
             try
             {
@@ -175,17 +199,22 @@ internal static class Program
                 return 17;
             }
 
+            var visibleWindowCount = windows.Count(window => window.IsVisible);
             if (windows.Count == 0)
             {
-                Console.WriteLine($"status=no_visible_window; matching_process_count={matchingProcessIds.Count}; message_content_read=false");
+                Console.WriteLine($"status={(includeHidden ? "no_top_level_window" : "no_visible_window")}; matching_process_count={matchingProcessIds.Count}; message_content_read=false");
                 return 13;
             }
 
+            var windowsToScan = includeHidden
+                ? windows.Take(WindowEnumerationState.MaximumTopLevelWindows).ToArray()
+                : windows.Where(window => window.IsVisible).Take(4).ToArray();
+
             var foregroundBefore = GetForegroundWindow();
             var nativeChildWindows = new NativeChildWindowSummary();
-            foreach (var hwnd in windows.Take(4))
+            foreach (var window in windowsToScan)
             {
-                CountNativeChildWindowClasses(hwnd, nativeChildWindows);
+                CountNativeChildWindowClasses(window.Handle, nativeChildWindows);
                 if (nativeChildWindows.Truncated) break;
             }
 
@@ -203,15 +232,17 @@ internal static class Program
             var controlCounts = new Dictionary<UIA_CONTROLTYPE_ID, int>();
             var patternCounts = new Dictionary<UIA_PATTERN_ID, int>();
             var valuePatternMetadata = new Dictionary<string, int>(StringComparer.Ordinal);
+            var invokeButtonMetadata = new Dictionary<string, int>(StringComparer.Ordinal);
             var automationIdCount = 0;
             var valuePatternCount = 0;
             var invokePatternCount = 0;
             var scannedNodes = 0;
             var windowsScanned = 0;
-            foreach (var hwnd in windows.Take(4))
+            foreach (var window in windowsToScan)
             {
-                var root = automation.ElementFromHandle(new HWND(hwnd));
-                CountStructureOnly(walker, root, 0, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
+                var root = automation.ElementFromHandle(new HWND(window.Handle));
+                CountStructureOnly(walker, root, 0, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata,
+                    invokeButtonMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
                 windowsScanned++;
                 if (scannedNodes >= 1000) break;
             }
@@ -222,11 +253,17 @@ internal static class Program
             var focusUnchanged = uiAutomation.CompareElements(focusedBefore, focusedAfter).Value != 0;
             Console.WriteLine($"status={(foregroundUnchanged && focusUnchanged ? "READ_ONLY_SCAN_COMPLETE" : "FOCUS_INVARIANT_FAILED")}");
             Console.WriteLine($"target_process_count={matchingProcessIds.Count}");
-            Console.WriteLine($"visible_windows_scanned={windowsScanned}");
+            Console.WriteLine($"top_level_windows_detected={windows.Count}");
+            Console.WriteLine($"visible_top_level_windows_detected={visibleWindowCount}");
+            Console.WriteLine($"hidden_top_level_windows_detected={(includeHidden ? (windows.Count - visibleWindowCount).ToString() : "not_scanned")}");
+            Console.WriteLine($"top_level_window_enumeration_truncated={enumerationState.Truncated}");
+            Console.WriteLine($"windows_scanned={windowsScanned}");
+            Console.WriteLine($"scan_included_hidden_windows={includeHidden}");
             Console.WriteLine($"uia_nodes_scanned={scannedNodes}");
             Console.WriteLine($"control_types={FormatControlCounts(controlCounts)}");
             Console.WriteLine($"supported_uia_patterns={FormatPatternCounts(patternCounts)}");
             Console.WriteLine($"value_pattern_metadata={FormatMetadataCounts(valuePatternMetadata)}");
+            Console.WriteLine($"invoke_button_metadata={FormatMetadataCounts(invokeButtonMetadata)}");
             Console.WriteLine($"nodes_with_automation_id={automationIdCount}");
             Console.WriteLine($"edit_value_patterns_available={valuePatternCount}");
             Console.WriteLine($"button_invoke_patterns_available={invokePatternCount}");
@@ -237,7 +274,7 @@ internal static class Program
             Console.WriteLine($"native_other_child_class_count={nativeChildWindows.Other}");
             Console.WriteLine($"native_child_class_query_failures={nativeChildWindows.ClassQueryFailures}");
             Console.WriteLine($"native_child_callback_failures={nativeChildWindows.CallbackFailures}");
-            Console.WriteLine($"native_child_enumeration_failed={nativeChildWindows.EnumerationFailed}");
+            Console.WriteLine($"native_child_callback_exception_occurred={nativeChildWindows.CallbackFailed}");
             Console.WriteLine($"native_child_enumeration_truncated={nativeChildWindows.Truncated}");
             Console.WriteLine($"foreground_unchanged={foregroundUnchanged}");
             Console.WriteLine($"uia_focus_unchanged={focusUnchanged}");
@@ -258,8 +295,8 @@ internal static class Program
         {
             unsafe
             {
-                var succeeded = EnumChildWindows(parent, &EnumerateNativeChildWindow, GCHandle.ToIntPtr(summaryHandle));
-                if (succeeded == 0 && !summary.Truncated) summary.EnumerationFailed = true;
+                // Win32 documents EnumChildWindows' return value as unused; track only explicit callback failures and truncation.
+                _ = EnumChildWindows(parent, &EnumerateNativeChildWindow, GCHandle.ToIntPtr(summaryHandle));
             }
         }
         finally
@@ -310,7 +347,7 @@ internal static class Program
                 if (GCHandle.FromIntPtr(lParam).Target is NativeChildWindowSummary summary)
                 {
                     summary.CallbackFailures++;
-                    summary.EnumerationFailed = true;
+                    summary.CallbackFailed = true;
                 }
             }
             catch
@@ -329,6 +366,7 @@ internal static class Program
         Dictionary<UIA_CONTROLTYPE_ID, int> controlCounts,
         Dictionary<UIA_PATTERN_ID, int> patternCounts,
         Dictionary<string, int> valuePatternMetadata,
+        Dictionary<string, int> invokeButtonMetadata,
         ref int automationIdCount,
         ref int valuePatternCount,
         ref int invokePatternCount)
@@ -352,7 +390,13 @@ internal static class Program
                     if (patternId == UIA_PATTERN_ID.UIA_ValuePatternId && controlType == UIA_CONTROLTYPE_ID.UIA_EditControlTypeId)
                         valuePatternCount++;
                     if (patternId == UIA_PATTERN_ID.UIA_InvokePatternId && controlType == UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId)
+                    {
                         invokePatternCount++;
+                        var enabled = node.get_CurrentIsEnabled().Value != 0;
+                        var offscreen = node.get_CurrentIsOffscreen().Value != 0;
+                        var key = $"Button:enabled={enabled}:offscreen={offscreen}:automation_id={hasAutomationId}";
+                        invokeButtonMetadata[key] = invokeButtonMetadata.GetValueOrDefault(key) + 1;
+                    }
                     if (patternId == UIA_PATTERN_ID.UIA_ValuePatternId && pattern is IUIAutomationValuePattern valuePattern)
                     {
                         var readOnly = valuePattern.get_CurrentIsReadOnly().Value != 0;
@@ -372,7 +416,8 @@ internal static class Program
         var child = walker.GetFirstChildElement(node);
         while (child is not null && scannedNodes < 1000)
         {
-            CountStructureOnly(walker, child, depth + 1, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
+            CountStructureOnly(walker, child, depth + 1, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata,
+                invokeButtonMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
             child = walker.GetNextSiblingElement(child);
         }
     }
@@ -392,7 +437,11 @@ internal static class Program
             [UIA_CONTROLTYPE_ID.UIA_TextControlTypeId] = "Text",
             [UIA_CONTROLTYPE_ID.UIA_WindowControlTypeId] = "Window"
         };
-        return string.Join(',', counts.OrderBy(pair => (int)pair.Key).Select(pair => $"{names.GetValueOrDefault(pair.Key, "Other")}-{pair.Value}"));
+        return string.Join(',', counts.OrderBy(pair => (int)pair.Key).Select(pair =>
+        {
+            var name = names.TryGetValue(pair.Key, out var knownName) ? knownName : $"UIAControlType{(int)pair.Key}";
+            return $"{name}-{pair.Value}";
+        }));
     }
 
     private static string FormatPatternCounts(Dictionary<UIA_PATTERN_ID, int> counts) =>
