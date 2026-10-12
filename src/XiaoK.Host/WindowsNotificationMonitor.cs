@@ -34,6 +34,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private NotificationFormatSampleCapture? _sampleCapture;
     private CancellationTokenSource? _sessionCancellation;
     private bool _baselineReady;
+    private DateTimeOffset _listeningStartedAtUtc;
     private bool _processingAddedIds;
     private bool _addedQueueOverflowReported;
     private bool _disposed;
@@ -251,6 +252,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             _pendingAddedIds.Clear();
             _seenNotificationKeys.Clear();
             _seenNotificationOrder.Clear();
+            _listeningStartedAtUtc = DateTimeOffset.UtcNow;
             _listener.NotificationChanged += OnNotificationChanged;
 
             // Establish a baseline so notifications already present at startup are not treated as new.
@@ -258,7 +260,12 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             foreach (var notification in current)
             {
                 var sourceAppId = notification.AppInfo.AppUserModelId;
-                if (_allowedAppIds.Contains(sourceAppId)) RememberNotification(sourceAppId, notification.Id);
+                if (!_allowedAppIds.Contains(sourceAppId)) continue;
+                if (NotificationStartupBaselinePolicy.ShouldAddToBaseline(notification.CreationTime,
+                        _listeningStartedAtUtc))
+                    RememberNotification(sourceAppId, notification.Id);
+                else
+                    QueueOrProcessAdded(notification.Id);
             }
             _baselineReady = true;
             StartPendingAddedDrain();

@@ -2,6 +2,7 @@ using System.Windows.Threading;
 using Windows.UI.Notifications;
 using Windows.UI.Notifications.Management;
 using XiaoK.Adapters.Windows;
+using XiaoK.Core;
 
 namespace XiaoK.Host;
 
@@ -30,7 +31,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
     private readonly string _applicationId;
     private readonly string _publisherAppUserModelId;
     private readonly string _publisherDisplayName;
-    private readonly DateTimeOffset _startedAtUtc;
+    private DateTimeOffset _startedAtUtc;
     private readonly HashSet<string> _baselineKeys = new(StringComparer.Ordinal);
     private readonly HashSet<string> _seenKeys = new(StringComparer.Ordinal);
     private readonly BoundedNotificationIdQueue _pendingIds = new(128);
@@ -48,7 +49,6 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         _applicationId = applicationId;
         _publisherDisplayName = publisherDisplayName;
         _publisherAppUserModelId = publisherAppUserModelId;
-        _startedAtUtc = DateTimeOffset.UtcNow;
     }
 
     public bool IsActive { get; private set; }
@@ -66,6 +66,8 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 
         try
         {
+            _startedAtUtc = DateTimeOffset.UtcNow;
+            IsActive = true;
             _listener.NotificationChanged += OnNotificationChanged;
             var existing = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
@@ -77,12 +79,15 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             foreach (var notification in existing)
             {
                 var sourceAppId = notification.AppInfo.AppUserModelId;
-                if (string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase)) continue;
+                if (NotificationStartupBaselinePolicy.ShouldAddToBaseline(notification.CreationTime, _startedAtUtc))
                     _baselineKeys.Add(CreateKey(sourceAppId, notification.Id, notification.CreationTime));
+                else
+                    QueueAdded(notification.Id);
+                if (!IsActive) return Status;
             }
 
             _baselineReady = true;
-            IsActive = true;
             _ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);
             var message = $"已开始{GetApplicationDisplayName()}通知样本核验。最长8小时、最多采集30条新通知；正文只在内存和本机设置页显示，不送模型、不保存文件。关闭或锁定会话时不会读取正文。";
             RaiseStatus(message);
