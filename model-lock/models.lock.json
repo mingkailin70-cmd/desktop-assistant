@@ -609,8 +609,32 @@
       ],
       "license": "apache-2.0",
       "status": "downloaded_and_verified",
-      "notes": "Qwen官方27B基础模型的Unsloth Dynamic 3.0社区量化版。模型卡称其改善编程、长程Agent与视觉语言能力；这些为发布方主张，须以小K固定评测独立验证。当前仅锁定文本GGUF，不含约928 MB的mmproj视觉投影文件。2026-10-12 12:15本机复核可用内存12.75 GiB、RTX 5060独显空闲显存5626 MiB（总计8151 MiB）；Q4权重16,464,440,224字节，当前不运行推理以免内存换页或影响前台工作。先完成下载与散列核验；待资源基线满足后，再用固定b11259做兼容性/资源短测，并与轻模型按同一任务评测。不得据下载或上游跑分切换生产配置。",
+      "notes": "Qwen官方27B基础模型的Unsloth Dynamic 3.0社区量化版。模型卡称其改善编程、长程Agent与视觉语言能力；这些为发布方主张，须以小K固定评测独立验证。当前仅锁定文本GGUF，不含约928 MB的mmproj视觉投影文件。2026-10-12 12:34本机复核可用内存12.40 GiB、RTX 5060独显空闲显存5478 MiB（总计8151 MiB）；Q4权重16,464,440,224字节，当前不运行推理以免内存换页或影响前台工作。下载与散列核验已完成；待资源基线满足后，再用固定b11259做兼容性/资源短测，并与轻模型按同一任务评测。不得据下载或上游跑分切换生产配置。",
       "localDirectory": "llm/qwen3.8-27b-ud-q4km-eval/4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "requiredForP0": false
+    },
+    {
+      "id": "qwen3.8-27b-ud-q3kxl-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "format": "GGUF",
+      "quantization": "UD-Q3_K_XL",
+      "quantizer": "Unsloth Dynamic 3.0 GGUF",
+      "conversionRuntime": "llama.cpp compatible per quantized model card; fixed b11259 compatibility pending local smoke check",
+      "files": [
+        {
+          "name": "Qwen3.8-27B-UD-Q3_K_XL.gguf",
+          "upstreamReportedSizeBytes": 13146393504,
+          "expectedUpstreamSha256": "8c2a45ff85e7674ca185ec8eb6cdeab0e617ed9d8018caed0b64380eb2a67a5e",
+          "localVerifiedSha256": "8c2a45ff85e7674ca185ec8eb6cdeab0e617ed9d8018caed0b64380eb2a67a5e"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "Qwen3.8-27B同一底模与revision的Unsloth Dynamic 3.0 Q3量化版本；相比UD-Q4_K_M约少20%权重，更适合作为本机CPU/GPU混合卸载可行性候选，但更低位宽可能损失任务质量。仅作隔离对照，必须与Q4版本使用相同任务集、运行时和资源测量；不据模型规模或上游成绩切换生产配置。当前未启动推理。",
+      "localDirectory": "llm/qwen3.8-27b-ud-q3kxl-eval/4ca720788d1e01f1bff70c033e0d0028fd02e502",
       "requiredForP0": false
     }
   ]
