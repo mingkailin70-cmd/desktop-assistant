@@ -907,84 +907,84 @@
       "format": "safetensors",
       "quantization": "BF16 checkpoint loaded as float32 for CPU evaluation",
       "quantizer": "chaoliangUNSW full fine-tune of Qwen3.5-0.8B",
-      "conversionRuntime": "Jev-Style v3 Transformers/PyTorch CPU; isolated environment pending",
+      "conversionRuntime": "Jev-Style v3 Transformers 5.17.0 / PyTorch 2.14.0+cpu, isolated Python 3.12 environment at D:\\XiaoK\\JevStyle\\.venv",
       "files": [
         {
           "name": "model.safetensors",
           "upstreamReportedSizeBytes": 1504827608,
           "expectedUpstreamSha256": "0f8c861605dcdfb356a63e056baa2106e81042e8981e8d0d26fe50b34599541e",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "0f8c861605dcdfb356a63e056baa2106e81042e8981e8d0d26fe50b34599541e"
         },
         {
           "name": "jev_style_decision.py",
           "upstreamReportedSizeBytes": 34781,
           "expectedUpstreamSha256": "b93c2345732be8ef5ec4274b77ded564e421ccb91967a207de4f18254438ce42",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "b93c2345732be8ef5ec4274b77ded564e421ccb91967a207de4f18254438ce42"
         },
         {
           "name": "config.json",
           "upstreamReportedSizeBytes": 1790,
           "expectedUpstreamSha256": "3f56b6210db3c52e0bafb50da005eb52b6d340ab4ad980091879b397743675fc",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "3f56b6210db3c52e0bafb50da005eb52b6d340ab4ad980091879b397743675fc"
         },
         {
           "name": "generation_config.json",
           "upstreamReportedSizeBytes": 116,
           "expectedUpstreamSha256": "62153eb6c69f2e1f426beaa8002b7186437e949c7588167085df14e10e9c0a73",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "62153eb6c69f2e1f426beaa8002b7186437e949c7588167085df14e10e9c0a73"
         },
         {
           "name": "readout_config.json",
           "upstreamReportedSizeBytes": 6236,
           "expectedUpstreamSha256": "01de9bcce7effbfd1ae0a3fa13e52d7fa9aa4dd1cd1e47977d6bbdcd5e63054a",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "01de9bcce7effbfd1ae0a3fa13e52d7fa9aa4dd1cd1e47977d6bbdcd5e63054a"
         },
         {
           "name": "release_config.json",
           "upstreamReportedSizeBytes": 8459,
           "expectedUpstreamSha256": "505f8a31754cdd5988e2d41813f2fbfff52520b598a22911066b5c55dab028a3",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "505f8a31754cdd5988e2d41813f2fbfff52520b598a22911066b5c55dab028a3"
         },
         {
           "name": "tokenizer.json",
           "upstreamReportedSizeBytes": 19989325,
           "expectedUpstreamSha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523"
         },
         {
           "name": "tokenizer_config.json",
           "upstreamReportedSizeBytes": 1124,
           "expectedUpstreamSha256": "66e427c470fe580fe8c7b5725d857af23d8417e37fae62667ec698306a19987b",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "66e427c470fe580fe8c7b5725d857af23d8417e37fae62667ec698306a19987b"
         },
         {
           "name": "LICENSE",
           "upstreamReportedSizeBytes": 11544,
           "expectedUpstreamSha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"
         },
         {
           "name": "NOTICE",
           "upstreamReportedSizeBytes": 1966,
           "expectedUpstreamSha256": "3c1bee42827901d754cf64e437cf8837ea94241348f5f4be9e6c4e14fbfc5716",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "3c1bee42827901d754cf64e437cf8837ea94241348f5f4be9e6c4e14fbfc5716"
         },
         {
           "name": "requirements.txt",
           "upstreamReportedSizeBytes": 201,
           "expectedUpstreamSha256": "855306c7cd8db9fcea2f865d61a0c53330c530c9dcf07e955a9250aaae2993f1",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "855306c7cd8db9fcea2f865d61a0c53330c530c9dcf07e955a9250aaae2993f1"
         },
         {
           "name": "manifest.json",
           "upstreamReportedSizeBytes": 6997,
           "expectedUpstreamSha256": "979e6697aea53b5d50d468aefba421ecbf3935fbf158d4a929377c7d264d4835",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "979e6697aea53b5d50d468aefba421ecbf3935fbf158d4a929377c7d264d4835"
         }
       ],
       "license": "apache-2.0",
-      "status": "candidate",
-      "notes": "社区Jev-Style v3有限选项概率决策模型。权重卡标Apache-2.0，但训练数据卡披露DAIR Emotion研究用途、AG News许可不明/非商业和模型生成文本；仅限本机合成评估，不分发、不打包、不作商业部署，直至许可复核。当前固定CPU Transformers运行候选，尚未下载/运行；模型跑分不代表小K中文效果。",
+      "status": "downloaded_and_verified",
+      "notes": "社区Jev-Style v3有限选项概率决策模型。12个锁定文件及权重散列均已验证。2026-10-12在独立CPU环境完成单条合成中文意图选择冒烟：返回billing，概率0.9713，加载约10.0秒、单题推理1.36秒；仅1条合成题，不代表中文准确率/校准或生产质量。权重卡标Apache-2.0，但训练数据卡披露DAIR Emotion研究用途、AG News许可不明/非商业和模型生成文本；仅限本机合成评估，不分发、不打包、不作商业部署，直至许可复核。不得参与身份核验、权限或外发决定。",
       "localDirectory": "llm/jev-style-v3-0.8b-decision-cpu-eval/b023d1f9c7858fbf01504577a3bfc349ea5c7385",
       "requiredForP0": false
     }
