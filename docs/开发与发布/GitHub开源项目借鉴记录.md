@@ -39,6 +39,15 @@
 - 小K接入方式：只把PTQ1_0列为隔离候选；不启用视觉投影或 speculative/drafter 组件。下一步在每次启动前确认RAM≥12 GiB、显存空闲≥5 GiB，再与现行4B、Qwen3.8 Q3/Q4和Pi候选使用相同`coding-zh-v4`任务集评估，并把Prism运行时身份/散列作为独立管线标记，不与b11259历史分数拼接。模型动作输出仍只能进入ToolBroker提案，不获得权限或外发能力。
 - 来源：[模型卡和体积/许可证](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)、[Bonsai运行仓库](https://github.com/PrismML-Eng/Bonsai-demo)、[固定后端能力说明](https://github.com/PrismML-Eng/Bonsai-demo/blob/main/BACKEND-SUPPORT.md)、[定制llama.cpp分支](https://github.com/PrismML-Eng/llama.cpp)、[GitHub社区镜像与Release](https://github.com/leo-kreisman/Ternary-Bonsai-2-27B-mlx-2bit/releases/tag/gguf-v1)、[上游兼容性讨论](https://github.com/ggml-org/llama.cpp/issues/29058)。
 
+## 2026-10-12 社区 q27 推理引擎、Pi 编码微调与 8 GB Bonsai 打包
+
+- 项目：[signalnine/q27](https://github.com/signalnine/q27)，MIT。除Qwen3.8-27B外，README明确列出社区Pi编码微调支持；作者报告Pi在其12个Claude Code SWE-bench样本中与基础模型命中相同补丁，且输出token更少。这是小样本、项目自报结果，不是小K任务集成绩，也不能证明适配小K的中文提示、ToolBroker动作契约或安全拒绝行为。
+- 对本机显存有吸引力的是Bonsai的T3 slim打包：作者称约6.06 GB，并报告在RTX 3060 Ti上约42 token/s及36.9K上下文；同项目文档也列出Bonsai相对Qwen3.8基线的困惑度和HumanEval差距。打包体积和速度应与能力损失同时看，不能把Bonsai包装成“无损Qwen3.8”。这是转换/推理路径，不是额外的微调权重。
+- 兼容性闸门：README当前列出的预编译件是Linux x86_64；源码说明需要CUDA 12.8+与GCC，包含`sm_120`目标，但没有可直接采用的Windows RTX 5060 Laptop包。即使相同计算能力，也仍需验证Windows构建、显存占用和笔记本功耗下表现。小K当前资源快照为可用RAM 12.37 GiB、独显空闲5,475 MiB，低于T3约6.06 GB权重本身，当前不启动。
+- 隐私与接入：q27可选前缀缓存会将内容以明文持久化；小K若研究必须关闭。自定义`.q27`容器与其专用引擎也不是现有GGUF `LlamaCppModelRuntime`的直接替换件，须先做单独的隔离适配和格式/权重校验。没有克隆、下载、构建或运行该项目。
+- 结论：保留为后续研究，不进入当前模型锁、生产路由或推理队列。近期优先用已部署的Prism运行时评估社区Bonsai，并在内存保护线达到后对现有Pi GGUF做固定任务集筛查。任何模型输出仍只作为ToolBroker输入，不改变权限裁决。
+- 来源：[q27项目、硬件与版本支持范围](https://github.com/signalnine/q27)、[Bonsai T3 slim方法和小卡实测](https://github.com/signalnine/q27#ternary-bonsai-2-27b-2026-09-18)、[MIT许可证](https://github.com/signalnine/q27/blob/master/LICENSE)。
+
 ## 2026-10-12 微软 UFO² Windows 桌面代理架构
 
 - 项目：[microsoft/UFO](https://github.com/microsoft/UFO)，本次检查固定在`main`提交`a795552d976c4c019d7c2f778a0effb5cef7de6b`；仓库许可证为MIT。仓库当前README将UFO²称为稳定的单Windows设备路线，并介绍UIA、Win32、WinCOM、本机应用API和GUI动作混合方案，以及HostAgent协调器、按应用隔离的AppAgent、状态机和MCP动作服务器。
