@@ -987,6 +987,30 @@
       "notes": "社区Jev-Style v3有限选项概率决策模型。12个锁定文件及权重散列均已验证。2026-10-12最终固定评测器在独立CPU环境对20条合成中文意图题运行：20/20正确、macro-F1 1.00、multiclass Brier 0.0093、5-bin top-probability ECE 0.0562；加载8.376秒，推理中位1.620秒、p95 1.865秒。题目短且类别清晰，仅为小规模试筛，不能代表真实中文通知效果、难例能力或生产准入。权重卡标Apache-2.0，但训练数据卡披露DAIR Emotion研究用途、AG News许可不明/非商业和模型生成文本；仅限本机合成评估，不分发、不打包、不作商业部署，直至许可复核。不得参与身份核验、权限或外发决定。",
       "localDirectory": "llm/jev-style-v3-0.8b-decision-cpu-eval/b023d1f9c7858fbf01504577a3bfc349ea5c7385",
       "requiredForP0": false
+    },
+    {
+      "id": "qwen3.8-27b-gsq-rco-iq2-xs-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": "d562806dbafae37109975e970aae91b43e73b440",
+      "format": "GGUF",
+      "quantization": "GSQ-RCO IQ2_XS",
+      "quantizer": "ISTA-DASLab GSQ + RCO community research quantization",
+      "conversionRuntime": "Standard GGUF per model card; validate fixed llama.cpp b11259 locally before evaluation",
+      "files": [
+        {
+          "name": "Qwen3.8-27B-GSQ-RCO-IQ2_XS.gguf",
+          "upstreamReportedSizeBytes": 8422841472,
+          "expectedUpstreamSha256": "f0ae5006da0ce6225935339e4e989369f94de95d2263cf969519f8420c9ae02c",
+          "localVerifiedSha256": "f0ae5006da0ce6225935339e4e989369f94de95d2263cf969519f8420c9ae02c"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "GitHub IST-DASLab/GSQ量化代码与ISTA-DASLab发布的固定GGUF权重构成可追溯社区候选；上游声明权重继承Qwen3.8-27B Apache-2.0。模型卡报告IQ2_XS约8.42GB，并报告其在若干通用基准优于同体积Unsloth UD-IQ2_S；这些是上游结果，不代表小K代码/工具任务表现。权重高于本机时点可用独显显存，若后续资源门槛允许，只能按核定的CPU/GPU混合卸载评测；未通过b11259兼容、资源和同任务集门槛前不得运行或进入生产路由。",
+      "localDirectory": "llm/qwen3.8-27b-gsq-rco-iq2-xs-eval/d562806dbafae37109975e970aae91b43e73b440",
+      "requiredForP0": false
     }
   ]
 }
