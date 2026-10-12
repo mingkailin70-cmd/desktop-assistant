@@ -755,6 +755,30 @@
       "requiredForP0": false
     },
     {
+      "id": "qwen3.8-27b-pi-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/bytkim/Qwen3.8-27B-pi-GGUF",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": "97caacb971d9246520fa8db5282a06bd36b103df",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "bytkim 社区 Pi 微调的 GGUF 导出",
+      "conversionRuntime": "llama.cpp GGUF；固定 b11259 兼容性待本机验证",
+      "files": [
+        {
+          "name": "Qwen3.8-27B-pi-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 16547400704,
+          "expectedUpstreamSha256": "ddda633d1ecafccb6e77ff55de2d5f78d90a53ab4fed87ca67bc161de75af9f9",
+          "localVerifiedSha256": "ddda633d1ecafccb6e77ff55de2d5f78d90a53ab4fed87ca67bc161de75af9f9"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "社区 Qwen3.8-27B-pi 编程代理微调候选：上游说明采用 Pi agent 成功轨迹 SFT 与 GRPO 推理效率奖励，GGUF主权重适用于 llama.cpp。上游小样本/特定硬件结果仅供筛选，不能代表小K质量；本机须用固定 coding-zh-v4 与现行工具/安全评测比较。首轮只下载文本 Q4_K_M 主权重，不下载视觉投影或 MTP draft，以免把多模态和推测解码混入质量/资源对照。27B Q4 权重约15.41 GiB；本机 RAM 需先达到已有18 GiB可用保护线并保留至少1 GiB独显余量，未达标不启动推理。候选不得改变生产模型。",
+      "localDirectory": "llm/qwen3.8-27b-pi-q4km-eval/97caacb971d9246520fa8db5282a06bd36b103df",
+      "requiredForP0": false
+    },
+    {
       "id": "qwen3.8-27b-ud-q4km-eval",
       "role": "p0-code-evaluation-candidate",
       "source": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
