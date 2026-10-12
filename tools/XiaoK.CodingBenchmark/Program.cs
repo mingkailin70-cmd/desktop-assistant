@@ -433,12 +433,14 @@ internal static class Program
             "qwen3.5-4b-q4km" => new ModelProfile("Qwen3.5-4B-Q4_K_M.gguf", 99, 5_000, 6_024, false),
             "mimo-v2.6-distill-qwen-9b-gguf-q8-0" => new ModelProfile("MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf", 8, 3_500, 4_524, true),
             "qwen3.5-9b-q4km-eval" => new ModelProfile("Qwen3.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
+            "qwen3.8-27b-ud-q4km-eval" => new ModelProfile("Qwen3.8-27B-UD-Q4_K_M.gguf", 8, 4_000, 5_024, true),
+            "qwen3.8-27b-ud-q3kxl-eval" => new ModelProfile("Qwen3.8-27B-UD-Q3_K_XL.gguf", 8, 3_500, 4_524, true),
             "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "gemma-4-e4b-it-qat-q4-0-eval" => new ModelProfile("gemma-4-E4B_q4_0-it.gguf", 24, 4_500, 5_524, true),
             "ornith-1.5-9b-q4km-eval" => new ModelProfile("Ornith-1.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "ornith-1.0-9b-q4km-eval" => new ModelProfile("ornith-1.0-9b-Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "oxcoder-9b-q4km-eval" => new ModelProfile("OxCoder-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
-            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M 模型。", nameof(modelId))
+            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、Qwen3.8-27B UD-Q4_K_M/UD-Q3_K_XL、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M 模型。", nameof(modelId))
         };
         var model = modelLock.Models.Single(item => item.Id == modelId);
         var runtime = runtimeLock.Runtimes.Single(item => item.Id == "llama.cpp");

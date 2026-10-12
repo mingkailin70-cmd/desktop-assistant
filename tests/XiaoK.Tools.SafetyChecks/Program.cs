@@ -125,6 +125,21 @@ if (args.Length == 1 && args[0] == "--only-queued-task-cancel")
     Console.WriteLine("通过：排队撤销与执行抢占原子仲裁；撤销胜出后工作线程不能启动任务。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-evaluation-runtime")
+{
+    var evaluationRuntimeRoot = Path.Combine(Path.GetTempPath(), "XiaoK-EvaluationRuntimeProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(evaluationRuntimeRoot);
+    try
+    {
+        await CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(evaluationRuntimeRoot);
+        Console.WriteLine("通过：锁定评测模型可由隔离入口加载，生产默认入口拒绝评测模型；未启动模型。");
+    }
+    finally
+    {
+        if (Directory.Exists(evaluationRuntimeRoot)) Directory.Delete(evaluationRuntimeRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-copy")
 {
     var fileCopyRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileCopyProbe-" + Guid.NewGuid().ToString("N"));
@@ -6322,6 +6337,56 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
     {
         _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
         throw new InvalidOperationException("生产默认运行时入口接受了 Qwen3.5-9B 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.8-27b-ud-q3kxl-eval",
+          "modelSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contextTokens": 6144,
+          "gpuLayers": 8,
+          "expectedGpuMemoryMiB": 3500
+        }
+        """);
+    var qwen38Q3Candidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "qwen3.8-27b-ud-q3kxl-eval", contextTokensOverride: 6144);
+    if (qwen38Q3Candidate is null || qwen38Q3Candidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 Qwen3.8-27B Q3_K_XL 评测清单未能通过专用候选入口加载。");
+    await qwen38Q3Candidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 Qwen3.8-27B Q3_K_XL 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "qwen3.8-27b-ud-q4km-eval",
+          "modelSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "contextTokens": 6144,
+          "gpuLayers": 8,
+          "expectedGpuMemoryMiB": 4000
+        }
+        """);
+    var qwen38Q4Candidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "qwen3.8-27b-ud-q4km-eval", contextTokensOverride: 6144);
+    if (qwen38Q4Candidate is null || qwen38Q4Candidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 Qwen3.8-27B Q4_K_M 评测清单未能通过专用候选入口加载。");
+    await qwen38Q4Candidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 Qwen3.8-27B Q4_K_M 评测清单。");
     }
     catch (InvalidDataException) { }
 

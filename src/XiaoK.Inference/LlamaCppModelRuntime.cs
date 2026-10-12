@@ -28,6 +28,10 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     private const string MiMoEvaluationModelFileName = "MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf";
     private const string Qwen9BEvaluationModelId = "qwen3.5-9b-q4km-eval";
     private const string Qwen9BEvaluationModelFileName = "Qwen3.5-9B-Q4_K_M.gguf";
+    private const string Qwen38Q4EvaluationModelId = "qwen3.8-27b-ud-q4km-eval";
+    private const string Qwen38Q4EvaluationModelFileName = "Qwen3.8-27B-UD-Q4_K_M.gguf";
+    private const string Qwen38Q3EvaluationModelId = "qwen3.8-27b-ud-q3kxl-eval";
+    private const string Qwen38Q3EvaluationModelFileName = "Qwen3.8-27B-UD-Q3_K_XL.gguf";
     private const string Jev9BEvaluationModelId = "autotrust-jev-9b-q4km-eval";
     private const string Jev9BEvaluationModelFileName = "JEV-9B.Q4_K_M.gguf";
     private const string Gemma4E4BEvaluationModelId = "gemma-4-e4b-it-qat-q4-0-eval";
@@ -139,12 +143,14 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         {
             MiMoEvaluationModelId => (MiMoEvaluationModelId, MiMoEvaluationModelFileName),
             Qwen9BEvaluationModelId => (Qwen9BEvaluationModelId, Qwen9BEvaluationModelFileName),
+            Qwen38Q4EvaluationModelId => (Qwen38Q4EvaluationModelId, Qwen38Q4EvaluationModelFileName),
+            Qwen38Q3EvaluationModelId => (Qwen38Q3EvaluationModelId, Qwen38Q3EvaluationModelFileName),
             Jev9BEvaluationModelId => (Jev9BEvaluationModelId, Jev9BEvaluationModelFileName),
             Gemma4E4BEvaluationModelId => (Gemma4E4BEvaluationModelId, Gemma4E4BEvaluationModelFileName),
             OrnithEvaluationModelId => (OrnithEvaluationModelId, OrnithEvaluationModelFileName),
             Ornith10EvaluationModelId => (Ornith10EvaluationModelId, Ornith10EvaluationModelFileName),
             OxCoderEvaluationModelId => (OxCoderEvaluationModelId, OxCoderEvaluationModelFileName),
-            _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0、Qwen3.5-9B Q4、JEV-9B Q4、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M候选模型。")
+            _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0、Qwen3.5-9B Q4、Qwen3.8-27B UD-Q4_K_M/UD-Q3_K_XL、JEV-9B Q4、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M候选模型。")
         };
         return TryLoadCore(modelRoot, runtimeDirectory, endpoint, candidate.Item1,
             candidate.Item2, gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
