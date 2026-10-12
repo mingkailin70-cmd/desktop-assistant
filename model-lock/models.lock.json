@@ -1098,9 +1098,63 @@
       ],
       "license": "apache-2.0",
       "status": "downloaded_and_verified",
-      "notes": "H2O-Lightning-4B是Qwen3.5-4B上的typed-decision微调；权重页为Apache-2.0。发布方称Q8_0约4.48 GB并通过其冻结文本标签门槛，Q4_K_M/Q5_K_M失败；作者的JevBench文字集成绩与硬件不代表小K中文任务。模型卡称其评估以英语为主。原生/v1/systemone路径需要H2O decision类型的llama.cpp分支；通用GGUF需要配套shim与精确Tokenizer/NFC预处理。2026-10-13按固定revision下载，文件大小与SHA-256复核通过；尚未编译运行时、加载推理或接入Host。8 GB RTX 5060的实测快照约5.4 GiB空闲；后续优先CPU或受限混合卸载并由资源监视器保证至少1 GiB显存余量。模型输出始终只是ToolBroker提案，不能授权动作或消息发送。",
+      "notes": "H2O-Lightning-4B是Qwen3.5-4B上的typed-decision微调；权重页为Apache-2.0。发布方称Q8_0约4.48 GB并通过其冻结文本标签门槛，Q4_K_M/Q5_K_M失败；作者的JevBench文字集成绩与硬件不代表小K中文任务。模型卡称其评估以英语为主。原生/v1/systemone路径需要H2O decision类型的llama.cpp分支；通用GGUF需要配套shim与精确Tokenizer/NFC预处理。2026-10-13按固定revision下载并核对大小/SHA-256；社区运行时提交6245df86208e383bd12ffeee374c52b0c0f94a3a构建并成功加载，在synthetic-zh-xiaok-routing-v1合成60题取得53/60（88.33%，macro-F1 0.8801），追问9/12、确认11/12、敏感升级12/12；CPU四线程中位延迟11.527秒，评测期间工作集约4.43 GiB、观察到最低可用RAM约5.77 GiB，GPU层数为0。仅为小样本候选筛查，不接Host，不作为生产准入；MSBuild有MSB8027同名源文件警告，修正后版本信息已锁定，仍需解决告警再考虑分发运行时。模型输出始终只是ToolBroker提案，不能授权动作或消息发送。",
       "localDirectory": "llm/h2o-lightning-4b-native-q8-decision-eval/9d61a75a111b0b64874f2d58224820dd0f6eeb70",
-      "requiredForP0": false
+      "requiredForP0": false,
+      "evaluationRuntime": {
+        "status": "local-candidate-screened-not-production",
+        "source": "https://github.com/pseudotensor/llama.cpp/tree/6245df86208e383bd12ffeee374c52b0c0f94a3a",
+        "sourceRevision": "6245df86208e383bd12ffeee374c52b0c0f94a3a",
+        "sourceArchiveSha256": "67f0b6c63b74b81a56d770a60b997e86a6773dcc5446f6dfccc624582664372f",
+        "sourceArchivePath": ".tools/downloads/h2o-decision-source.zip.partial",
+        "sourceDirectory": ".tools/runtimes/h2o-decision-6245df8-src/llama.cpp-h2o-lightning-decision",
+        "license": "MIT",
+        "localDirectory": ".tools/runtimes/h2o-decision-6245df8-build/bin/Release",
+        "version": "0.6.0-dev build 0 commit 6245df86208e383bd12ffeee374c52b0c0f94a3a",
+        "toolchain": "CMake 3.31.6; MSVC 19.44.35227.0 x64; Visual Studio 17 2022 generator",
+        "buildOptions": [
+          "GGML_CUDA=OFF",
+          "GGML_OPENMP=ON",
+          "GGML_OPENMP_FETCH=OFF",
+          "GGML_NATIVE=ON",
+          "LLAMA_CURL=OFF",
+          "LLAMA_BUILD_SERVER=ON",
+          "LLAMA_BUILD_TOOLS=ON",
+          "LLAMA_BUILD_TESTS=OFF",
+          "LLAMA_BUILD_EXAMPLES=OFF",
+          "LLAMA_BUILD_APP=OFF",
+          "LLAMA_BUILD_UI=OFF",
+          "LLAMA_USE_PREBUILT_UI=OFF",
+          "LLAMA_BUILD_NUMBER=0"
+        ],
+        "screeningLaunchArguments": [
+          "--model <locked-model.gguf>",
+          "--host 127.0.0.1",
+          "--port 9931",
+          "--ctx-size 2048",
+          "--n-gpu-layers 0",
+          "--threads 4",
+          "--threads-batch 4",
+          "--parallel 1",
+          "--no-webui"
+        ],
+        "screeningPriority": "BelowNormal",
+        "screeningSecurity": "Temporary loopback-only process; no API key, and the server reported permissive CORS. No natural/user data was submitted. The process was stopped immediately after evaluation; require authenticated access and restrictive CORS before persistent use.",
+        "screeningReport": "docs/验收与评测/小K决策路由候选60题合成筛查.md",
+        "sha256ByFile": {
+          "llama-server.exe": "76f9268d943a43598edeaaee7efc287da82420b81066c638a371c1cf1c07dc8b",
+          "llama-server-impl.dll": "0b4680c6b83f32c30ce81041ccebc707fb852943439214ef3da39811ab8993a4",
+          "llama-common.dll": "eebd7df5a3ab9c10981ac892096b49637292746b924331d8776148b8af93220a",
+          "llama.dll": "8416abd894bc846e12bc4fc8d8cb13ae061ab339a28640daf359a06ad65a1154",
+          "ggml.dll": "4506c4991eb5809e3e7c2aa4614ede0fd535615db1f582bb67c39159dc9d654a",
+          "ggml-base.dll": "718f62f44604791cd92ed65d2724ed0e047a3e2327685ce9297a97eac65abb1b",
+          "ggml-cpu.dll": "b654abd1d9c1c80d9d4cae3b55e68f67eb9c027b0f4f585c44823602ed9f7e92",
+          "mtmd.dll": "e7e3de948e0e21e3df6a27126c1c6174b43dbdfd0ed782f4c0fa039ea3e3f02d"
+        },
+        "buildWarnings": [
+          "Visual Studio build reports MSB8027 for source files with the same basename; the candidate runtime is not cleared for distribution until this warning is resolved."
+        ]
+      }
     }
   ]
 }
