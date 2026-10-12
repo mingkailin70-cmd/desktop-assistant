@@ -1008,7 +1008,7 @@
       ],
       "license": "apache-2.0",
       "status": "downloaded_and_verified",
-      "notes": "GitHub IST-DASLab/GSQ量化代码与ISTA-DASLab发布的固定GGUF权重构成可追溯社区候选；上游声明权重继承Qwen3.8-27B Apache-2.0。模型卡报告IQ2_XS约8.42GB，并报告其在若干通用基准优于同体积Unsloth UD-IQ2_S；这些是上游结果，不代表小K代码/工具任务表现。权重高于本机时点可用独显显存，若后续资源门槛允许，只能按核定的CPU/GPU混合卸载评测；未通过b11259兼容、资源和同任务集门槛前不得运行或进入生产路由。",
+      "notes": "GitHub IST-DASLab/GSQ量化代码与ISTA-DASLab发布的固定GGUF权重构成可追溯社区候选；上游声明权重继承Qwen3.8-27B Apache-2.0。模型卡报告IQ2_XS约8.42GB，并报告其在若干通用基准优于同体积Unsloth UD-IQ2_S；这些是上游结果，不代表小K代码/工具任务表现。隔离评测profile为8个GPU层、3,500 MiB预算、启动前至少4,524 MiB独显空闲和15,360 MiB可用RAM，并在运行中保留至少1 GiB显存和4 GiB系统内存。当前资源低于系统内存准入线；未通过b11259兼容、资源和同任务集门槛前不得运行或进入生产路由。",
       "localDirectory": "llm/qwen3.8-27b-gsq-rco-iq2-xs-eval/d562806dbafae37109975e970aae91b43e73b440",
       "requiredForP0": false
     }
