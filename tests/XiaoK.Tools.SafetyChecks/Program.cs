@@ -140,6 +140,12 @@ if (args.Length == 1 && args[0] == "--only-evaluation-runtime")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-background-cpu-quota")
+{
+    CheckBackgroundCpuQuotaJobRoundTrip();
+    Console.WriteLine("通过：Windows Job Object 后台 CPU 硬上限可设置、回读，并能在交互租约解除后重新启用。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-copy")
 {
     var fileCopyRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileCopyProbe-" + Guid.NewGuid().ToString("N"));
@@ -728,6 +734,9 @@ try
 
     await CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync();
     passed.Add("交互推理在编程代理的后台步骤边界优先执行");
+
+    CheckBackgroundCpuQuotaJobRoundTrip();
+    passed.Add("Windows Job Object 后台 CPU 硬上限可设置、回读，并能在交互租约解除后重新启用");
 
     await CheckCompetingModelBrokerYieldsPrimaryRuntimeAsync();
     passed.Add("ASR/TTS等竞争模型共用交互优先队列，主模型在竞争运行前卸载");
@@ -5685,6 +5694,27 @@ static async Task CheckHistoryRejectsHardLinkedStateAsync(string root)
     var history = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
     Require(history.Count == 0, "任务历史读取了工作区之外的硬链接状态文件。");
     Require(File.Exists(externalState), "拒绝硬链接任务状态时删除了外部状态文件。");
+}
+
+static void CheckBackgroundCpuQuotaJobRoundTrip()
+{
+    if (!OperatingSystem.IsWindows())
+        throw new PlatformNotSupportedException("后台 CPU 配额核验需要 Windows Job Object。");
+
+    var runtimeType = typeof(LlamaCppModelRuntime);
+    var createJob = runtimeType.GetMethod("CreateKillOnCloseJob",
+        BindingFlags.Static | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("找不到模型运行时的 Job Object 创建入口。");
+    var configureCpuLimit = runtimeType.GetMethod("ConfigureJobCpuLimit",
+        BindingFlags.Static | BindingFlags.NonPublic)
+        ?? throw new InvalidOperationException("找不到模型运行时的 CPU 配额设置入口。");
+
+    using var job = (System.Runtime.InteropServices.SafeHandle)(createJob.Invoke(null,
+        [ModelWorkloadPriority.Background])
+        ?? throw new InvalidOperationException("模型运行时没有创建后台 Job Object。"));
+
+    configureCpuLimit.Invoke(null, [job, ModelWorkloadPriority.Interactive]);
+    configureCpuLimit.Invoke(null, [job, ModelWorkloadPriority.Background]);
 }
 
 static async Task CheckInteractiveInferenceTakesPriorityBetweenBackgroundStepsAsync()

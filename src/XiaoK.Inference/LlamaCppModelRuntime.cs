@@ -679,6 +679,19 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
                 ref limit, (uint)Marshal.SizeOf<JobObjectCpuRateControlInformation>()))
             throw new Win32Exception(Marshal.GetLastWin32Error(),
                 "无法应用模型进程 CPU 配额；为避免后台推理争抢处理器，已拒绝启动或继续推理。");
+
+        var applied = new JobObjectCpuRateControlInformation();
+        if (!QueryInformationJobObject(job, JobObjectCpuRateControlInformationClass,
+                ref applied, (uint)Marshal.SizeOf<JobObjectCpuRateControlInformation>(), out _))
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                "无法读取回本地模型进程 CPU 配额；为避免后台推理争抢处理器，已拒绝启动或继续推理。");
+
+        var requiredFlags = priority == ModelWorkloadPriority.Background
+            ? JobCpuRateControlEnable | JobCpuRateControlHardCap
+            : 0;
+        if ((applied.ControlFlags & (JobCpuRateControlEnable | JobCpuRateControlHardCap)) != requiredFlags
+            || (priority == ModelWorkloadPriority.Background && applied.CpuRate != BackgroundCpuRateLimit))
+            throw new InvalidOperationException("Windows 回读的模型 CPU 配额与请求的工作优先级不一致；已拒绝启动或继续推理。");
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -741,6 +754,11 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetInformationJobObject(SafeJobHandle job, int informationClass,
         ref JobObjectCpuRateControlInformation information, uint informationLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryInformationJobObject(SafeJobHandle job, int informationClass,
+        ref JobObjectCpuRateControlInformation information, uint informationLength, out uint returnLength);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
