@@ -21,6 +21,14 @@
 - 结论：把Jeff作为“小型专用决策模型”技术路线观察，把Terse-Coder列为27B编码时延实验候选；全部保持在隔离候选层。社区榜单、作者自报分数或仓库星数只能帮助筛选，不能作为小K验收证据。本轮只读GitHub/Hugging Face公开代码、模型卡和文件页，未克隆、下载权重、改运行配置或增加依赖。
 - 来源：[Jeff GitHub项目](https://github.com/firelex/jeff)、[Jeff-Code训练与数据许可说明](https://huggingface.co/mstrasser/jeff-adapter-code)、[Terse-Coder LoRA模型卡](https://huggingface.co/Shockem/Qwen3.8-27b-Terse-Coder-LoRA)、[Fable Coding-Distilled模型卡](https://huggingface.co/khazarai/Qwen3.8-27B-Fable-5-Coding-Distilled-GGUF)。
 
+## 2026-10-12 n4ze3m/hmm 社区 System 1 决策模型
+
+- 项目：[n4ze3m/hmm](https://github.com/n4ze3m/hmm)，MIT代码仓库；模型为Qwen3.5-4B上的社区微调，Apache-2.0 GGUF版本约2.71 GB，固定模型revision与SHA-256登记在`model-lock/models.lock.json`。它遵循JEV式有限选项分类接口，但作者明确说明并非JEV、质量明显低于JEV。
+- 可研究之处：模型直接对候选选项打概率，不生成任意文本；可作为小K中文任务上意图/追问/拒绝分类的离线速度与校准对照。它不适合独立做权限或风险决定。
+- 上游限制：训练集与提示主要为英语、训练提示长度最多768 token；合成样本由托管DeepSeek模型生成且未人工逐条审查。作者公开记录过隐藏在Base64内的危险shell操作被错误放行，因此禁止把它用于安全检测、工具批准或消息发送判断。
+- 当前处理：仅将其作为本机隔离候选；固定revision下载后核验散列，再在无副作用合成样本上检查加载与资源。生产模型、ToolBroker权限规则和任务执行链路均不因此改变。
+- 来源：[GitHub实现](https://github.com/n4ze3m/hmm)、[模型卡与风险说明](https://huggingface.co/n4ze3m/Qwen3.5-4B-Hmm)、[合成决策数据集卡](https://huggingface.co/datasets/n4ze3m/typed-decisions-synth)。
+
 ## 2026-10-12 微软 UFO² Windows 桌面代理架构
 
 - 项目：[microsoft/UFO](https://github.com/microsoft/UFO)，本次检查固定在`main`提交`a795552d976c4c019d7c2f778a0effb5cef7de6b`；仓库许可证为MIT。仓库当前README将UFO²称为稳定的单Windows设备路线，并介绍UIA、Win32、WinCOM、本机应用API和GUI动作混合方案，以及HostAgent协调器、按应用隔离的AppAgent、状态机和MCP动作服务器。

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "p0-required-model-assets-downloaded-and-verified",
-  "lastSourceReviewDate": "2026-10-10",
+  "lastSourceReviewDate": "2026-10-12",
   "models": [
     {
       "id": "qwen3.5-4b-q4km",
@@ -776,6 +776,30 @@
       "status": "downloaded_and_verified",
       "notes": "社区 Qwen3.8-27B-pi 编程代理微调候选：上游说明采用 Pi agent 成功轨迹 SFT 与 GRPO 推理效率奖励，GGUF主权重适用于 llama.cpp。上游小样本/特定硬件结果仅供筛选，不能代表小K质量；本机须用固定 coding-zh-v4 与现行工具/安全评测比较。首轮只下载文本 Q4_K_M 主权重，不下载视觉投影或 MTP draft，以免把多模态和推测解码混入质量/资源对照。27B Q4 权重约15.41 GiB；本机 RAM 需先达到已有18 GiB可用保护线并保留至少1 GiB独显余量，未达标不启动推理。候选不得改变生产模型。",
       "localDirectory": "llm/qwen3.8-27b-pi-q4km-eval/97caacb971d9246520fa8db5282a06bd36b103df",
+      "requiredForP0": false
+    },
+    {
+      "id": "qwen3.5-4b-hmm-q4km-eval",
+      "role": "decision-candidate",
+      "source": "https://huggingface.co/n4ze3m/Qwen3.5-4B-Hmm",
+      "baseModel": "Qwen/Qwen3.5-4B",
+      "revision": "adcef8b4701704a37c33053a8a262a7bd076a511",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "n4ze3m community export",
+      "conversionRuntime": "llama.cpp b11259; CPU-only model load and single-token smoke passed; GPU offload and Host integration unverified",
+      "files": [
+        {
+          "name": "Qwen3.5-4B-Hmm-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 2708803968,
+          "expectedUpstreamSha256": "5e03cb057049c56b421bd3c506d77fd8e0a77996bb8464148a02cfc3caac5229",
+          "localVerifiedSha256": "5e03cb057049c56b421bd3c506d77fd8e0a77996bb8464148a02cfc3caac5229"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "社区JEV式有限选项分类/选择模型，GitHub代码为MIT、模型卡标注Apache-2.0。模型卡说明其不生成自由文本、训练/提示以英语为主且最长训练提示768 tokens；作者明确称其准确率低于JEV，并记录过会把base64隐藏的危险shell命令判为可行。只在没有副作用的固定决策题上隔离评估；不得用于安全审核、动作授权或实际工具选择，不得绕过ToolBroker。合成训练数据由托管DeepSeek模型生成，推理仍可完全本地；上游数据/小样本结果不代表中文小K任务质量。Q4文件2,708,803,968字节，固定SHA-256已下载核验；llama.cpp b11259 CPU-only单token合成选择冒烟已通过。中文任务准确率/校准、GPU卸载资源和Host集成均未验证，候选不接入生产路由。",
+      "localDirectory": "llm/qwen3.5-4b-hmm-q4km-eval/adcef8b4701704a37c33053a8a262a7bd076a511",
       "requiredForP0": false
     },
     {
