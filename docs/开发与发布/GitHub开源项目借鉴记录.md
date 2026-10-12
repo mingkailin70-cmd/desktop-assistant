@@ -11,6 +11,15 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 Jev-Style v3 社区System 1候选
+
+- 项目：[lawrence3699/jev-style](https://github.com/lawrence3699/jev-style)提供System-One兼容的本地服务和评测工具；对应0.8B权重由社区作者发布在[Hugging Face模型卡](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3)。模型对固定候选项输出概率，不生成自由文本，不会自行执行动作；这使它适合RSI/System 1影子筛查，但不替代ToolBroker。
+- 当前隔离候选固定模型仓库revision b023d1f9c7858fbf01504577a3bfc349ea5c7385。主safetensors为1,504,827,608字节，SHA-256 0f8c861605dcdfb356a63e056baa2106e81042e8981e8d0d26fe50b34599541e；自带运行脚本SHA-256 b93c2345732be8ef5ec4274b77ded564e421ccb91967a207de4f18254438ce42。运行脚本静态检查只发现本地模型/JSONL文件读写和PyTorch/Transformers调用，没有网络、shell或子进程调用。模型锁清单状态按权重实际下载与核验结果维护；模型权重不进入Git。
+- 模型卡把模型权重标为Apache-2.0，但同时披露训练数据含DAIR Emotion研究用途数据、许可不明/非商业AG News以及GPT/Claude生成文本。由于数据条款仍不够清楚，候选仅用于本机合成题实验，不再分发、不进安装包，也不作商业部署候选；许可结论不可仅由模型卡的权重许可证替代。
+- 0.8B safetensors经Transformers/PyTorch运行，适合独立CPU可行性测量；0.8B GGUF只有通过附带jev-score按专用verdict位置读取logit才保留其决策语义，普通llama.cpp生成输出不等价。上游说明该评分器测试于llama.cpp commit 441df11f65ea0b6d0c72965aaf70c8241070ddcb或更新版本，与小K固定b11259不是同一运行时；本轮优先验证隔离Python CPU路线，不替换生产模型服务。
+- 评测只用人工编写的合成中文标签集，记录准确率、macro-F1、Brier/ECE、abstain与升级率、CPU/RAM和p50/p95时延。模型置信度不能用于通知正文读取许可、联系人身份核验、发送授权或任何权限决定。
+- 来源：[GitHub仓库](https://github.com/lawrence3699/jev-style)、[0.8B v3模型卡及训练数据声明](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3)、[固定GGUF文件与专用评分器](https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF)。
+
 ## 2026-10-12 Jeff 小型决策模型与社区权重路线
 
 - 项目：[firelex/jeff](https://github.com/firelex/jeff)，GitHub页面标注MIT。项目提供约0.8B的选择型/System 1模型、可切换LoRA适配器，以及PyTorch/llama.cpp路线；模型负责在显式给出的有限选项中选择并给出校准概率，不负责自由文本规划或执行动作。
