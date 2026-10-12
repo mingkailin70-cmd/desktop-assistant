@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-13 Qwen3.5-4B-Prime个人微调核查
+
+- 候选`Jadson/Qwen3.5-4B-Prime-GGUF`是个人作者公开的Emacs代码代理微调，权重页标Apache-2.0；IQ4_NL约2.68 GB。权重卡写明其从Qwen3.5-4B经蒸馏模型再微调而来，数据集卡标MIT并描述2,246条有效agent轨迹；模型为纯文本，不含视觉塔。[模型卡与量化说明](https://huggingface.co/Jadson/Qwen3.5-4B-Prime-GGUF)、[轨迹数据集](https://huggingface.co/datasets/Jadson/ox-alpha-pi-traces-emacs-bridge)
+- 适配范围很窄：轨迹将文件读写转成Emacs `python-bridge`/MCP调用，模型要求随附专用System Prompt；但转换后的工具模式仍保留Bash，不能直接暴露给小K。数据样例主要为英文编程任务。该候选固定模型revision/权重SHA-256、中文效果和仓库锁定llama.cpp b11259兼容性未核实；先列低优先级隔离研究，不下载、不运行、不接入。将来若做适配，必须只开放小K白名单工具并由ToolBroker逐项验证，禁止桥接、Bash、任意写入和云端回退。
+- 此次只读核对GitHub/Hugging Face公开模型页、数据卡及桥接项目说明，没有下载权重或启动推理。结果已同步至[实施计划与模型选型](../产品与进度/实施计划与模型选型.md)。
+
 ## 2026-10-13 社区决策模型权重来源扩展
 
 - **H2O-Lightning-4B native Q8_0：社区决策权重与专用推理分支已打通。** 权重由H2O发布在Hugging Face、Apache-2.0、底模Qwen3.5-4B；原生有限选项接口由社区`pseudotensor/llama.cpp`提交`6245df86208e383bd12ffeee374c52b0c0f94a3a`提供，不能拿普通llama.cpp b11259直接代替。使用同一60题复测得53/60（88.33%，macro-F1 0.8801）；受保护Ninja运行时CPU中位/p95为11.559/11.957秒。随机API key、固定回环CORS、未认证模型API拒绝、动态临时回环端口和资源启动线均经本机验证，MSB8027在Ninja构建中消失；可选UI资源缺失警告不影响强制`--no-webui`。留出集和独立标签复核尚未完成，不能接生产路由；模型输出永远不能授权动作。[H2O权重与决策格式](https://huggingface.co/h2oai/h2o-lightning-4b-native-gguf)、[社区llama.cpp固定提交](https://github.com/pseudotensor/llama.cpp/tree/6245df86208e383bd12ffeee374c52b0c0f94a3a)、[本机60题结果](../验收与评测/小K决策路由候选60题合成筛查.md)
@@ -16,7 +22,8 @@
 - 发布方65条英语样本评测报告JSON和参数语法有效率均为100%，但首个工具类型与教师答案匹配率为65.6%；测试集标签来自教师模型，样本量有限。模型工具表包含Bash、Write、Edit和Task，并比教师更常选Bash。若进入本机试评，只允许通过适配层映射到小K既有的固定只读搜索/读取工具；Shell、写入、任意点击和子代理动作一律不暴露给它。中文效果、训练数据逐项来源/许可、固定权重revision与SHA-256、b11259加载兼容性均待核实；目前不下载、不加入模型锁、不接生产流程。
 - **Qwen3.5-4B APIGen-MT-5k：适合作为工具调用回归案例，不是当前优先候选。** 独立作者公开了F16 GGUF与Safetensors权重，权重页标注继承Qwen3.5-4B许可，APIGen-MT-5k数据另有自己的条款；GitHub账号页介绍该项目关注小模型工具使用和量化影响。[作者GitHub研究简介](https://github.com/CFitzsimons)、[权重、文件和基准](https://huggingface.co/CFitzsimons/Qwen3.5-4B-APIGen-MT-5k-F16-GGUF)
 - 作者在其英文BFCL v4对照中报告总分只提高0.39个百分点；parallel子项提高9.5个百分点，但irrelevance下降4.17个百分点、parallel_multiple下降7个百分点、多轮子项下降6.5个百分点。F16 GGUF约8.67 GB，当前没有同仓Q4权重。它说明专门微调可能改善某个动作维度、同时损害“不该调用时不调用”和多轮状态保持，不能按单一总分或宣传结论切换模型。本轮只登记评测线索，不下载或量化。
-- **结论：** 社区权重可以进入小K候选池，但先核验基座/训练数据/权重许可和可复现文件，再用小K的中文、后台无干扰、取消/失败及安全拒绝任务集复测。LocoOperator仅可能承担只读代码探索；APIGen权重暴露了工具微调的回归风险。两者都不能改变ToolBroker权限，且社区仓库附带的OpenRouter/cloud fallback、Bash或宽泛桌面能力均不复用。
+- **Qwen3.5-4B-Prime：个人作者的Emacs编程代理微调，暂列低优先级隔离候选。** 作者发布的GGUF页标Apache-2.0，IQ4_NL文件约2.68 GB，模型卡提供从Qwen3.5底模、蒸馏中间模型到最终微调的来源链；模型是纯文本版，没有视觉塔。训练轨迹来自Emacs/python-bridge/MCP编程流程，数据集卡标MIT并列出2,246条有效轨迹；模型要求专用System Prompt才能优先走Emacs桥接，但其工具轨迹仍保留Bash调用。该候选有可读的来源和量化说明，却高度依赖特定编辑器、工具协议和英语代码轨迹，不能据文件小就当作通用中文桌面代理。[模型卡、量化细节与许可](https://huggingface.co/Jadson/Qwen3.5-4B-Prime-GGUF)、[训练轨迹数据集](https://huggingface.co/datasets/Jadson/ox-alpha-pi-traces-emacs-bridge)、[python-bridge项目](https://github.com/manateelazycat/python-bridge)。当前不下载、不接入、不运行；如未来研究，只能先把工具调用映射到ToolBroker既有白名单并彻底屏蔽Bash/写入，再用中文固定任务集评估。固定b11259运行时兼容性也未核实。
+- **结论：** 社区权重可以进入小K候选池，但先核验基座/训练数据/权重许可和可复现文件，再用小K的中文、后台无干扰、取消/失败及安全拒绝任务集复测。LocoOperator仅可能承担只读代码探索；APIGen和Prime都说明工具微调会依赖特定动作协议，并可能损害不该调用工具时的判断。任何候选都不能改变ToolBroker权限；社区仓库附带的OpenRouter/cloud fallback、Bash或宽泛桌面能力均不复用。
 
 ## 2026-10-13 R0微信/QQ后台发送方案复核
 
