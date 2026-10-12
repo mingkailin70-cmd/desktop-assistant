@@ -3,6 +3,9 @@ using System.Net;
 using System.Text.Json;
 using XiaoK.Inference;
 
+if (args.Length == 1 && args[0] == "--browser-public-smoke")
+    return await BrowserPublicPageCheck.RunAsync();
+
 if (args.Length == 4 && args[0] == "--voice-host-roundtrip")
     return await VoiceHostRoundTrip.RunAsync(args[1], args[2], args[3]);
 
@@ -27,6 +30,7 @@ if (args.Length != 4 || args[0] != "--managed-qwen")
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --voice-installed-batch-roundtrip <已安装包目录> <模型目录> <语音环境目录> <仓库外报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --installed-content-search <小K已安装包目录>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --notification-baseline-policy");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --browser-public-smoke");
     return 2;
 }
 
