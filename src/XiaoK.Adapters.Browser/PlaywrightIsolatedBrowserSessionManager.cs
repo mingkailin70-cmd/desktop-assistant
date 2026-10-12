@@ -495,6 +495,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         IBrowser? browser = null;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
             {
                 Channel = "msedge",
@@ -504,14 +505,16 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
                 Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
                     "--no-default-browser-check", "--disable-component-update"]
             }).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 JavaScriptEnabled = true,
                 ServiceWorkers = ServiceWorkerPolicy.Block,
                 AcceptDownloads = false
-            }).ConfigureAwait(false);
-            await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient")).ConfigureAwait(false);
-            var page = await context.NewPageAsync().ConfigureAwait(false);
+            }).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient"))
+                .WaitAsync(cancellationToken).ConfigureAwait(false);
+            var page = await context.NewPageAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             context.Page += (_, popup) => { if (!ReferenceEquals(page, popup)) _ = popup.CloseAsync(); };
             page.Dialog += (_, dialog) => _ = dialog.DismissAsync();
             await page.SetContentAsync("<!doctype html><html><body><iframe id=\"xiaok-page\" title=\"隔离网页\" sandbox=\"allow-scripts\"></iframe></body></html>",

@@ -7571,6 +7571,8 @@ static async Task CheckStaticBrowserRenderingAsync()
 
 static async Task CheckIsolatedBrowserSessionAsync()
 {
+    await CheckIsolatedBrowserInitializationCancellationAsync();
+
     await using var manager = new PlaywrightIsolatedBrowserSessionManager();
     const string html = """
         <!doctype html><html><head><title>会话合成测试</title></head><body>
@@ -8899,6 +8901,35 @@ static string CreateProject(string root, string name, string content)
     Directory.CreateDirectory(path);
     File.WriteAllText(Path.Combine(path, name == "credential" ? "Program.cs" : "Sample.cs"), content, new UTF8Encoding(false));
     return path;
+}
+
+static async Task CheckIsolatedBrowserInitializationCancellationAsync()
+{
+    await using var manager = new PlaywrightIsolatedBrowserSessionManager();
+    using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+    var cancelled = false;
+    try
+    {
+        _ = await manager.OpenHtmlForTestingAsync(
+            "<!doctype html><html><head><title>取消测试</title></head><body>取消测试</body></html>",
+            cancellation.Token);
+    }
+    catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+    {
+        cancelled = true;
+    }
+
+    Require(cancelled, "隔离网页初始化期间的取消没有及时传播。");
+    using var recoveryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+    var reopened = await manager.OpenHtmlForTestingAsync(
+        "<!doctype html><html><head><title>取消后恢复</title></head><body>隔离浏览器恢复正常</body></html>",
+        recoveryTimeout.Token);
+    Require(reopened.Success && reopened.Data?.Contains("隔离浏览器恢复正常", StringComparison.Ordinal) == true,
+        "取消初始化后，隔离浏览器没有清理并恢复后续会话。");
+    var sessionId = ExtractSessionToken(reopened.Data!, "会话ID：");
+    var closed = await manager.CloseAsync(sessionId, CancellationToken.None);
+    Require(closed.Success, "取消恢复测试的隔离网页会话未能关闭。");
+    Console.WriteLine("通过：隔离浏览器初始化途中取消后会清理，并可重新建立与关闭会话。");
 }
 
 static void Require(bool condition, string message)
