@@ -50,11 +50,30 @@ try {
     }
 
     $candidates = @($report.Candidates | ForEach-Object {
+        $latest = $_.LatestNotificationTimeUtc
+        if ($latest -is [System.DateTimeOffset]) {
+            $latestUtc = $latest.ToUniversalTime()
+        }
+        elseif ($latest -is [System.DateTime]) {
+            $latestUtc = [System.DateTimeOffset]::new($latest.ToUniversalTime())
+        }
+        elseif ($null -ne $latest) {
+            $latestUtc = [System.DateTimeOffset]::Parse(
+                [string]$latest,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::AssumeUniversal).ToUniversalTime()
+        }
+        else {
+            $latestUtc = $null
+        }
+
         [pscustomobject]@{
             DisplayName = $_.DisplayName
             AppUserModelId = $_.AppUserModelId
             NotificationCount = $_.NotificationCount
-            LatestNotificationTimeUtc = $_.LatestNotificationTimeUtc
+            LatestNotificationTimeUtc = if ($null -eq $latestUtc) { $null } else {
+                $latestUtc.ToString('O', [System.Globalization.CultureInfo]::InvariantCulture)
+            }
         }
     })
 
