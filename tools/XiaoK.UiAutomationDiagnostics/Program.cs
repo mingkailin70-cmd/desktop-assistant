@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Accessibility;
+using XiaoK.UiAutomation;
 
 internal static class Program
 {
@@ -632,8 +633,14 @@ internal static class Program
                 writer.WriteLine("exit");
                 return 5;
             }
-            fixed (char* syntheticTextPointer = SyntheticText)
-                valuePattern.SetValue(new BSTR(syntheticTextPointer));
+            var writeResult = SafeUiAutomationTextWriter.SetValue(
+                (IntPtr)targetHwnd, child.Id, AutomationId, SyntheticText, priorForeground);
+            if (!writeResult.Success)
+            {
+                Console.WriteLine($"FAIL: production UIA writer returned {writeResult.ErrorCode}; uncertain={writeResult.OutcomeUncertain}.");
+                writer.WriteLine("exit");
+                return 6;
+            }
             var afterValue = valuePattern.get_CurrentValue().ToString();
             var foregroundAfterWrite = GetForegroundWindow();
             var focusedAfter = uiAutomation.GetFocusedElement();

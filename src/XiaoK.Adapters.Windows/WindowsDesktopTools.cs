@@ -28,7 +28,8 @@ public readonly record struct DesktopAppStatus(int RunningProcessCount, int Visi
     public static DesktopAppStatus Unavailable => new(-1, -1);
 }
 
-public sealed record DesktopUiAutomationTarget(long WindowHandle, int ProcessId, string ExecutablePath);
+public sealed record DesktopUiAutomationTarget(long WindowHandle, int ProcessId, string ExecutablePath,
+    string? DisplayName = null);
 
 public enum WindowActivationOutcome { Activated, NotFound, Ambiguous, ActivationDenied }
 
@@ -181,7 +182,7 @@ public sealed partial class WindowsDesktopTools
                 || !string.Equals(Path.GetFullPath(imagePath), app.Executable, StringComparison.OrdinalIgnoreCase))
                 return false;
 
-            target = new DesktopUiAutomationTarget(handle.ToInt64(), (int)rawProcessId, app.Executable);
+            target = new DesktopUiAutomationTarget(handle.ToInt64(), (int)rawProcessId, app.Executable, app.DisplayName);
             errorCode = string.Empty;
             return true;
         }
@@ -190,6 +191,10 @@ public sealed partial class WindowsDesktopTools
             or IOException)
         { return false; }
     }
+
+    public bool IsUiAutomationTextTargetAllowed(string appId) =>
+        !string.IsNullOrWhiteSpace(appId) && _apps.TryGetValue(appId, out var app)
+        && !ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(app.Id, app.DisplayName, app.Executable);
 
     public async Task<ToolResult> LaunchAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {

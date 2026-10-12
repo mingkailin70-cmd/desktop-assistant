@@ -212,6 +212,12 @@
           "XiaoK.Inference": "[1.0.0, )"
         }
       },
+      "xiaok.uiautomation": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
+      },
       "xiaok.voice": {
         "type": "Project",
         "dependencies": {

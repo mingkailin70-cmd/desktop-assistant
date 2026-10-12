@@ -65,7 +65,8 @@ public enum ToolExpectedOutcome
     CsvFileCreatedInConfiguredExport = 31,
     XlsxWorkbookCreatedInConfiguredExport = 32,
     DocxDocumentCreatedInConfiguredExport = 33,
-    PptxPresentationCreatedInConfiguredExport = 34
+    PptxPresentationCreatedInConfiguredExport = 34,
+    ApplicationUiValueSet = 35
 }
 
 public static class ApprovalAuditCatalog
@@ -74,6 +75,7 @@ public static class ApprovalAuditCatalog
     public const string CodeTaskAction = "code.task.create.v1";
     public const string CodePatchApplyAction = "code.patch.apply.v1";
     public const string FileRecycleAction = "file.delete.recycle-bin.v1";
+    public const string ApplicationUiTextSetAction = "app.ui.set-text.v1";
     public const string Confirmed = "confirmed";
     public const string Declined = "declined";
     public const string RunDotNetTests = "run_dotnet_tests";
@@ -106,6 +108,13 @@ public interface IReadOnlyUiAutomationSnapshotReader
 {
     Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken);
     Task<ToolResult> WaitForEnabledControlAsync(string applicationId, string automationId,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Writes an explicitly confirmed value to one unique non-password edit control without activating its window.</summary>
+public interface IBackgroundUiAutomationTextSetter
+{
+    Task<ToolResult> SetTextAsync(string applicationId, string automationId, string value,
         CancellationToken cancellationToken);
 }
 

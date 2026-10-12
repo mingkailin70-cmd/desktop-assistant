@@ -30,6 +30,15 @@
         "dependencies": {
           "Microsoft.Windows.SDK.Win32Metadata": "63.0.31-preview"
         }
+      },
+      "xiaok.core": {
+        "type": "Project"
+      },
+      "xiaok.uiautomation": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
       }
     }
   }

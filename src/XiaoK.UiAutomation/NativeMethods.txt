@@ -1,0 +1,11 @@
+CUIAutomation8
+IUIAutomation
+IUIAutomation2
+IUIAutomationElement
+IUIAutomationTreeWalker
+IUIAutomationValuePattern
+UIA_PATTERN_ID
+UIA_CONTROLTYPE_ID
+GetForegroundWindow
+IsWindow
+IsWindowVisible

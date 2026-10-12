@@ -10,10 +10,10 @@ using XiaoK.Core;
 
 namespace XiaoK.Adapters.Windows;
 
-/// <summary>Runs bounded, read-only UIA inspection in a disposable helper process.</summary>
-public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSnapshotReader
+/// <summary>Runs bounded UIA operations in a disposable helper process.</summary>
+public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSnapshotReader, IBackgroundUiAutomationTextSetter
 {
-    private const int MaximumRequestBytes = 8 * 1024;
+    private const int MaximumRequestBytes = 16 * 1024;
     private const int MaximumResponseBytes = 32 * 1024;
     private static readonly TimeSpan WorkerTimeout = TimeSpan.FromSeconds(5);
     private const int ControlWaitMilliseconds = 2_500;
@@ -63,11 +63,46 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             Data: "控件可用");
     }
 
+    public async Task<ToolResult> SetTextAsync(string applicationId, string automationId, string value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_desktop.IsUiAutomationTextTargetAllowed(applicationId))
+            return new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用界面填写工具；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED");
+        if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || ApplicationUiAutomationPolicy.IsSensitiveTextEntryField(automationId)
+            || !ApplicationUiAutomationPolicy.IsAllowedText(value))
+            return new(false, "控件标识或文本不符合固定限制；没有访问应用界面。", "UIA_INVALID_TEXT_REQUEST");
+
+        var (response, failure) = await RunWorkerAsync(applicationId,
+            new WorkerCommand("set_text", automationId, 0, value), cancellationToken).ConfigureAwait(false);
+        if (failure is not null) return failure;
+        if (response is null || !response.Success)
+        {
+            var error = response?.ErrorCode ?? "UIA_TEXT_SET_FAILED";
+            var uncertain = response?.OutcomeUncertain == true
+                || error is "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_CHANGED_AFTER_SET";
+            return new(false, uncertain
+                ? "文本框写入后无法确认最终状态；请先人工检查目标应用，不要自动重试。"
+                : error == "UIA_TARGET_IN_USE"
+                    ? "目标应用正处于前台；为避免覆盖你正在编辑的内容，没有修改文本框。"
+                    : error == "UIA_FOREGROUND_CHANGED_BEFORE_SET"
+                        ? "写入前检测到前台窗口发生变化；没有修改文本框。"
+                        : "没有找到唯一、启用且可写的普通文本框；没有修改应用界面。",
+                error, FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null);
+        }
+        return new(true, "已向唯一目标普通文本框写入并核对文本；没有点击、模拟按键、读取剪贴板或切换窗口。",
+            Data: "目标文本框已更新");
+    }
+
     private async Task<(WorkerResponse? Response, ToolResult? Failure)> RunWorkerAsync(string applicationId,
         WorkerCommand command, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
             return (null, new(false, "当前平台不支持 Windows UI Automation。", "UIA_UNAVAILABLE"));
+        if (command.Mode == "set_text" && !_desktop.IsUiAutomationTextTargetAllowed(applicationId))
+            return (null, new(false, "目标应用不允许使用通用后台文本填写工具；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
         if (!_desktop.TryResolveUiAutomationTarget(applicationId, out var target, out var targetError))
             return (null, targetError switch
             {
@@ -76,6 +111,10 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
                 "APP_WINDOW_AMBIGUOUS" => new(false, "该应用有多个可见窗口，无法安全确定目标；没有访问窗口。", targetError),
                 _ => new(false, "无法核验该应用窗口的进程身份；没有访问窗口。", targetError)
             });
+
+        if (command.Mode == "set_text" && ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(
+            applicationId, target!.DisplayName, target.ExecutablePath))
+            return (null, new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用界面填写工具；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
 
         var executablePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
@@ -87,9 +126,11 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         if (needsEntryAssemblyArgument && (string.IsNullOrWhiteSpace(entryAssemblyPath) || !File.Exists(entryAssemblyPath)))
             return (null, new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
 
+        var resolvedTarget = target!;
         var request = JsonSerializer.SerializeToUtf8Bytes(new WorkerRequest(
-            target!.WindowHandle, target.ProcessId, target.ExecutablePath,
-            command.Mode, command.AutomationId, command.WaitMilliseconds));
+            resolvedTarget.WindowHandle, resolvedTarget.ProcessId, resolvedTarget.ExecutablePath,
+            command.Mode, command.AutomationId, command.WaitMilliseconds, command.Value,
+            ApplicationId: applicationId, DisplayName: resolvedTarget.DisplayName));
         if (request.Length > MaximumRequestBytes)
             return (null, new(false, "目标信息超出固定上限；没有访问窗口。", "UIA_REQUEST_TOO_LARGE"));
 
@@ -103,12 +144,13 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             RedirectStandardError = true
         };
         if (needsEntryAssemblyArgument) startInfo.ArgumentList.Add(entryAssemblyPath!);
-        startInfo.ArgumentList.Add("--uia-readonly-worker");
+        startInfo.ArgumentList.Add("--uia-worker");
 
         UiAutomationWorkerProcess? worker = null;
         Process? process = null;
         Task<byte[]>? outputTask = null;
         Task? errorTask = null;
+        var mutationMayHaveStarted = false;
         try
         {
             worker = _workerProcessStarter.Start(startInfo);
@@ -122,6 +164,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             outputTask = ReadBoundedOutputAsync(process.StandardOutput.BaseStream, MaximumResponseBytes, linked.Token);
             errorTask = DrainErrorAsync(process.StandardError.BaseStream);
+            mutationMayHaveStarted = command.Mode == "set_text";
             await process.StandardInput.BaseStream.WriteAsync(request, linked.Token).ConfigureAwait(false);
             await process.StandardInput.BaseStream.FlushAsync(linked.Token).ConfigureAwait(false);
             process.StandardInput.Close();
@@ -137,12 +180,16 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         {
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
+            if (mutationMayHaveStarted)
+                return (new WorkerResponse(false, "UIA_VALUE_VERIFY_FAILED", [], OutcomeUncertain: true), null);
             throw;
         }
         catch (OperationCanceledException)
         {
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
+            if (mutationMayHaveStarted)
+                return (new WorkerResponse(false, "UIA_VALUE_VERIFY_FAILED", [], OutcomeUncertain: true), null);
             return (null, new(false, "UIA 查询超过 5 秒，已终止隔离工作进程；没有执行控件动作。", "UIA_WORKER_TIMEOUT"));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException
@@ -151,12 +198,14 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         {
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
+            if (mutationMayHaveStarted)
+                return (new WorkerResponse(false, "UIA_VALUE_VERIFY_FAILED", [], OutcomeUncertain: true), null);
             return (null, new(false, "UIA 查询失败或返回内容超出限制；没有执行控件动作。", "UIA_WORKER_FAILED"));
         }
         finally { worker?.Dispose(); }
     }
 
-    private sealed record WorkerCommand(string Mode, string? AutomationId, int WaitMilliseconds);
+    private sealed record WorkerCommand(string Mode, string? AutomationId, int WaitMilliseconds, string? Value = null);
 
     private static async Task<byte[]> ReadBoundedOutputAsync(Stream stream, int maximumBytes, CancellationToken token)
     {
@@ -226,9 +275,10 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     }
 
     public sealed record WorkerRequest(long WindowHandle, int ProcessId, string ExecutablePath,
-        string Mode = "snapshot", string? AutomationId = null, int WaitMilliseconds = 0);
+        string Mode = "snapshot", string? AutomationId = null, int WaitMilliseconds = 0, string? Value = null,
+        string? ApplicationId = null, string? DisplayName = null);
     public sealed record WorkerResponse(bool Success, string? ErrorCode, UiAutomationSnapshotItem[] Items,
-        bool Truncated = false, bool? ConditionMet = null);
+        bool Truncated = false, bool? ConditionMet = null, bool? OutcomeUncertain = null);
 }
 
 internal interface IUiAutomationWorkerProcessStarter

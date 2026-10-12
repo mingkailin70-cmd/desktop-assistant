@@ -6,13 +6,15 @@ using System.Security;
 using System.Text.Json;
 using System.Windows.Automation;
 using XiaoK.Adapters.Windows;
+using XiaoK.Core;
+using XiaoK.UiAutomation;
 
 namespace XiaoK.Host;
 
 /// <summary>Single-request UIA worker. The parent enforces a hard timeout and kills this process on cancellation.</summary>
 public static class WindowsUiAutomationWorkerEntryPoint
 {
-    private const int MaximumRequestBytes = 8 * 1024;
+    private const int MaximumRequestBytes = 16 * 1024;
     private const int MaximumElements = 64;
     private const int MaximumVisitedNodes = 256;
     private const int MaximumDepth = 4;
@@ -38,8 +40,9 @@ public static class WindowsUiAutomationWorkerEntryPoint
             if (request is not null)
                 response = request.Mode switch
                 {
-                    "snapshot" when request.AutomationId is null && request.WaitMilliseconds == 0 => ReadSnapshot(request),
-                    "wait_enabled" => WaitForEnabledControl(request),
+                    "snapshot" when request.AutomationId is null && request.WaitMilliseconds == 0 && request.Value is null => ReadSnapshot(request),
+                    "wait_enabled" when request.Value is null => WaitForEnabledControl(request),
+                    "set_text" => SetTextValue(request),
                     _ => new(false, "UIA_INVALID_REQUEST", [])
                 };
         }
@@ -144,6 +147,34 @@ public static class WindowsUiAutomationWorkerEntryPoint
 
         if (!IsWindow(handle) || !IsWindowVisible(handle)) return new(false, "UIA_TARGET_CHANGED", []);
         return new(true, null, [], ConditionMet: false);
+    }
+
+    private static WindowsUiAutomationSnapshotAdapter.WorkerResponse SetTextValue(
+        WindowsUiAutomationSnapshotAdapter.WorkerRequest request)
+    {
+        var automationId = request.AutomationId;
+        var value = request.Value;
+        if (automationId is null || automationId.Length is 0 or > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || !ApplicationUiAutomationPolicy.IsAllowedText(value)
+            || request.WaitMilliseconds != 0)
+            return new(false, "UIA_INVALID_TEXT_REQUEST", []);
+        if (ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(request.ApplicationId, request.DisplayName,
+            request.ExecutablePath))
+            return new(false, "UIA_PROTECTED_APP_BLOCKED", []);
+
+        var handle = new IntPtr(request.WindowHandle);
+        var foregroundBefore = GetForegroundWindow();
+        if (foregroundBefore == handle || GetWindowThreadProcessId(foregroundBefore, out var foregroundPid) != 0
+            && foregroundPid == (uint)request.ProcessId)
+            return new(false, "UIA_TARGET_IN_USE", []);
+        if (!TryResolveRoot(request, out _, out var error)) return new(false, error, []);
+
+        var writeResult = SafeUiAutomationTextWriter.SetValue(
+            handle, request.ProcessId, automationId, value!, foregroundBefore);
+        return writeResult.Success
+            ? new(true, null, [])
+            : new(false, writeResult.ErrorCode, [], OutcomeUncertain: writeResult.OutcomeUncertain);
     }
 
     private static bool TryResolveRoot(WindowsUiAutomationSnapshotAdapter.WorkerRequest request,
@@ -261,6 +292,9 @@ public static class WindowsUiAutomationWorkerEntryPoint
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr windowHandle);

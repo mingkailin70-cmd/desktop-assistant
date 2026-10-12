@@ -89,6 +89,12 @@ if (args.Length == 1 && args[0] == "--only-tool-proposal-preconditions")
     Console.WriteLine("通过：ToolBroker 拒绝缺失或错配的固定前置条件与预期结果。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-ui-text-write-policy")
+{
+    await CheckUiTextWritePolicyAsync();
+    Console.WriteLine("通过：UIA文本写入要求精确目标、后台目标空闲和逐条确认；拒绝聊天/浏览器应用并尊重取消。 ");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-window-activation")
 {
     await CheckWindowActivationOutcomesAsync();
@@ -4307,6 +4313,115 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
         inspection with { ExpectedOutcome = ToolExpectedOutcome.ReviewablePatchCreated }, CancellationToken.None);
     Require(!wrongInspectionOutcome.Success && wrongInspectionOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL",
         "只读代码检索提案未绑定固定的说明返回结果。");
+}
+
+static async Task CheckUiTextWritePolicyAsync()
+{
+    var notepadId = CustomApplicationPolicy.CreateId();
+    var walletId = CustomApplicationPolicy.CreateId();
+    var apps = new[]
+    {
+        new ConfiguredAppAlias(notepadId, "记事本"),
+        new ConfiguredAppAlias(walletId, "加密货币钱包"),
+        new ConfiguredAppAlias("wechat", "微信"),
+        new ConfiguredAppAlias("qq", "QQ"),
+        new ConfiguredAppAlias("edge", "Edge"),
+        new ConfiguredAppAlias("explorer", "资源管理器")
+    };
+    const string value = "第一行|仍是同一个文本值\n第二行";
+    var proposal = ApplicationUiAutomationPolicy.CreateSetTextToolProposal(
+        "设置界面文本：记事本|Editor.Compose|" + value, apps);
+    Require(proposal is not null && proposal.ToolId == "app.ui.set-text.v1"
+        && proposal.Target == notepadId && proposal.Arguments["automation_id"] == "Editor.Compose"
+        && proposal.Arguments["value"] == value,
+        "UIA文本填写语法没有精确保留文本中的分隔符和换行。 ");
+    Require(ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：微信|MessageEdit|你好", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：QQ|MessageEdit|你好", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：Edge|Address|example.com", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：资源管理器|Address|D:\\", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：加密货币钱包|SendTo|地址", apps) is null,
+        "通用UIA文本工具没有封锁消息客户端、浏览器、资源管理器或钱包。 ");
+    Require(ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|bad id|你好", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|Editor.Compose|", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|PasswordBox|secret", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|VerificationCode|123456", apps) is null
+        && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|Editor.Compose|a\0b", apps) is null,
+        "UIA文本工具接受了无效标识、空值、密码/验证码字段或NUL字符。 ");
+    Require(ToolInteractionPolicy.GetMode("app.ui.set-text.v1") == ToolInteractionMode.Background
+        && ToolInteractionPolicy.GetOperation("app.ui.set-text.v1") == ToolInteractionOperation.TargetStateChange,
+        "UIA文本填写没有使用后台目标状态变更门控。 ");
+
+    var writer = new RecordingBackgroundUiAutomationTextSetter();
+    var approval = new RecordingApprovalPresenter(true);
+    var broker = CreateBroker(approval, writer, InteractionTargetUsage.NotInUse);
+    var result = await broker.ExecuteBackgroundAsync(proposal!, CancellationToken.None, Guid.NewGuid());
+    Require(result.Success && writer.CallCount == 1 && writer.ApplicationId == notepadId
+        && writer.AutomationId == "Editor.Compose" && writer.Value == value
+        && approval.CallCount == 1 && approval.LastActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction
+        && approval.LastDetails?.Contains(value, StringComparison.Ordinal) == true,
+        "UIA文本写入没有在确认最终文本后调用唯一的后台文本写入适配器。 ");
+
+    var declinedWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var declinedApproval = new RecordingApprovalPresenter(false);
+    var declined = await CreateBroker(declinedApproval, declinedWriter, InteractionTargetUsage.NotInUse)
+        .ExecuteBackgroundAsync(proposal!, CancellationToken.None);
+    Require(!declined.Success && declined.ErrorCode == "UIA_TEXT_SET_DECLINED"
+        && declinedWriter.CallCount == 0,
+        "拒绝确认后仍调用了UIA文本写入适配器。 ");
+
+    var busyWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var busyApproval = new RecordingApprovalPresenter(true);
+    var busy = await CreateBroker(busyApproval, busyWriter, InteractionTargetUsage.InUse)
+        .ExecuteBackgroundAsync(proposal!, CancellationToken.None);
+    Require(!busy.Success && busy.ErrorCode == "TARGET_IN_USE"
+        && busyApproval.CallCount == 0 && busyWriter.CallCount == 0,
+        "目标应用正处于前台时，UIA文本写入仍进入确认或调用适配器。 ");
+
+    using var cancellation = new CancellationTokenSource();
+    var cancelWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var cancelAfterApproval = new CancelAfterApprovalPresenter(cancellation);
+    var canceled = await CreateBroker(cancelAfterApproval, cancelWriter, InteractionTargetUsage.NotInUse)
+        .ExecuteBackgroundAsync(proposal!, cancellation.Token);
+    Require(!canceled.Success && canceled.FinalState == TaskLifecycleState.Cancelled
+        && cancelWriter.CallCount == 0,
+        "确认后取消没有阻止UIA文本写入。 ");
+
+    var protectedProposal = proposal! with
+    {
+        Arguments = proposal.Arguments.SetItem("app_id", "qq"),
+        Target = "qq"
+    };
+    var protectedApproval = new RecordingApprovalPresenter(true);
+    var protectedWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var protectedResult = await CreateBroker(protectedApproval, protectedWriter, InteractionTargetUsage.NotInUse)
+        .ExecuteBackgroundAsync(protectedProposal, CancellationToken.None);
+    Require(!protectedResult.Success && protectedResult.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && protectedApproval.CallCount == 0 && protectedWriter.CallCount == 0,
+        "伪造提案绕过了ToolBroker对QQ目标的硬性拒绝。 ");
+
+    var walletProposal = proposal! with
+    {
+        Arguments = proposal.Arguments.SetItem("app_id", walletId),
+        Target = walletId
+    };
+    var walletDesktop = CreateDesktop(walletId, "加密货币钱包");
+    var walletApproval = new RecordingApprovalPresenter(true);
+    var walletWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var walletResult = await CreateBroker(walletApproval, walletWriter, InteractionTargetUsage.NotInUse, walletDesktop)
+        .ExecuteBackgroundAsync(walletProposal, CancellationToken.None);
+    Require(!walletResult.Success && walletResult.ErrorCode == "UIA_PROTECTED_APP_BLOCKED"
+        && walletApproval.CallCount == 0 && walletWriter.CallCount == 0,
+        "伪造提案绕过了ToolBroker对钱包/金融敏感应用的拒绝。");
+
+    ToolBroker CreateBroker(IApprovalPresenter presenter, IBackgroundUiAutomationTextSetter textWriter,
+        InteractionTargetUsage usage, WindowsDesktopTools? desktop = null) => new(desktop ?? CreateDesktop(notepadId, "记事本"),
+        null!, new ModelBroker(), presenter,
+        null!, "", "", interactionCoordinator: new InteractionCoordinator(new FixedTargetUsageProbe(usage)),
+        uiAutomationTextSetter: textWriter);
+
+    static WindowsDesktopTools CreateDesktop(string appId, string displayName) => new(
+        [new DesktopApp(appId, Environment.ProcessPath ?? throw new InvalidOperationException("测试可执行路径不可用。"),
+            DisplayName: displayName)], []);
 }
 
 static void CheckWindowMatchSelection()
@@ -9231,6 +9346,34 @@ internal sealed class RecordingApprovalPresenter(bool confirmed) : IApprovalPres
         LastDetails = details;
         LastTaskId = taskId;
         return Task.FromResult(confirmed);
+    }
+}
+
+internal sealed class RecordingBackgroundUiAutomationTextSetter : IBackgroundUiAutomationTextSetter
+{
+    public int CallCount { get; private set; }
+    public string? ApplicationId { get; private set; }
+    public string? AutomationId { get; private set; }
+    public string? Value { get; private set; }
+
+    public Task<ToolResult> SetTextAsync(string applicationId, string automationId, string value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        ApplicationId = applicationId;
+        AutomationId = automationId;
+        Value = value;
+        return Task.FromResult(new ToolResult(true, "合成文本框已更新。", Data: "目标文本框已更新"));
+    }
+}
+
+internal sealed class FixedTargetUsageProbe(InteractionTargetUsage usage) : IInteractionTargetUsageProbe
+{
+    public ValueTask<InteractionTargetUsage> GetUsageAsync(string targetId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(usage);
     }
 }
 

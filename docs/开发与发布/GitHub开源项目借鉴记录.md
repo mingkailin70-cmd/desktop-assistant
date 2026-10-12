@@ -372,3 +372,14 @@ GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现�
 **仓库许可待决：** 小K仓库当前根目录没有`LICENSE`/`COPYING`文件；在用户确定本项目发布许可证前，不从无许可证仓库复制代码，也不把GPL候选作为小K的二进制依赖。开源仓库可用于理解公开方案，但README描述不当作本机性能或交互验收证据。
 
 来源：[deskpet3d README](https://github.com/woooooooooolf/deskpet3d/blob/main/README_EN.md)、[deskpet3d许可证](https://github.com/woooooooooolf/deskpet3d/blob/main/LICENSE)、[SixOfFive/DesktopPet README](https://github.com/SixOfFive/DesktopPet)、[Godot Desktop Pet README](https://github.com/kirbycope/godot-desktop-pet)。仓库信息按2026-10-12公开页面核查；本轮只读，没有克隆、构建、运行或下载候选。
+
+## 2026-10-12 UIA文本写入实现更新
+
+本节更新前文“生产UI工具仍只读、尚未接入写入”的历史状态；此前证据只涵盖隔离诊断工具，不包含本次新增的正式Host写入路径。
+
+- 新增`src/XiaoK.UiAutomation`独立Windows类库，固定`Microsoft.Windows.CsWin32` 0.3.333为私有构建依赖。Host保持原有运行时封送设置；只有小型UIA组件使用COM源生成接口，并通过`LibraryImport`调用一个不读取last-error的Win32进程ID函数。
+- `SafeUiAutomationTextWriter`由正式工作进程和合成诊断共同调用：同一`IUIAutomation2`对象先关闭并核对`AutoSetFocus=false`，再查找唯一AutomationId、验证目标PID/控件种类/可见性/启用/非密码/可写状态，最后写入并精确回读。执行前后对比全局前台HWND与UIA焦点；写入可能开始后无法核验时只返回不确定，不重试。
+- ToolBroker只有用户直接提出精确目标/文本后才显示完整审批；未确认不写入。另以目标写租约串行化小K内部工作进程。QQ/微信、Edge/Chrome、Explorer以及可从登记应用名/程序名识别的钱包、金融、凭证类应用均阻断；AutomationId包含敏感字段常见标记时也阻断。未标记的敏感应用或控件仍需要逐应用准入，不可把通用规则当成完备数据分类器。
+- 本机固定SDK 10.0.401 Release全解决方案构建0警告/0错误；生产共享写入组件在隔离跨进程WinForms合成窗中实测通过，确认写值准确、AutoSetFocus仍为0、前台和焦点不变。未对真实应用做写入，未重新签名/安装MSIX；真实UIA Provider、目标应用并发状态、取消与锁屏还需分别验收。
+
+**当前决定：** 限定的普通UIA Edit写入已作为有审批的Host工具实现，但安装版与真实应用尚未验收。它不改变消息适配器要求：QQ/微信发送仍须逐条展示平台、稳定收件人、完整正文和附件并再次明确确认；当前没有真实发送适配器。参考微软[AutoSetFocus](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)与[ValuePattern.SetValue](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)文档。

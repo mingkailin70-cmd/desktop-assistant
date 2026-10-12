@@ -120,10 +120,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var publicWebPageReader = new PlaywrightPublicWebPageReader();
         _browserSessions = new PlaywrightIsolatedBrowserSessionManager();
         var desktopTools = new WindowsDesktopTools(apps, roots, exportRoot: Path.Combine(_settings.DataRoot, "Exports"));
+        var uiAutomation = new WindowsUiAutomationSnapshotAdapter(desktopTools);
         _broker = new ToolBroker(desktopTools, _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
             approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader,
-            _browserSessions, new InteractionCoordinator(desktopTools), new WindowsUiAutomationSnapshotAdapter(desktopTools));
+            _browserSessions, new InteractionCoordinator(desktopTools), uiAutomation, uiAutomation);
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -1026,6 +1027,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId);
 
         var lower = request.ToLowerInvariant();
+        if (category == "app-ui-set-text")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateSetTextToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“设置界面文本：应用名|唯一AutomationId|完整文本”输入。只允许已登记普通应用的唯一可写文本框；消息客户端、浏览器、系统文件管理器、可识别的钱包/金融/凭证应用及密码/验证码/密钥字段会被拒绝，正处于前台的目标也不会写入；写入前需确认最终文本。", "UIA_TEXT_TARGET_NOT_SUPPORTED");
+            return await ExecuteBackgroundAsync(proposal, token);
+        }
+
         if (category == "app-ui-wait-enabled")
         {
             var proposal = ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(request, GetConfiguredAppAliases());
@@ -1462,6 +1471,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (ApplicationUiAutomationPolicy.IsSetTextUserRequest(request)) return "app-ui-set-text";
         if (ApplicationUiAutomationPolicy.IsWaitForEnabledUserRequest(request)) return "app-ui-wait-enabled";
         if (ApplicationUiAutomationPolicy.IsUserRequest(request)) return "app-ui-snapshot";
         if (AppLaunchIntentResolver.IsApplicationStatusRequest(request)) return "app-status";

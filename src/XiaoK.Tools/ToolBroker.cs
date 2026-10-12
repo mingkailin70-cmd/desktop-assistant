@@ -19,6 +19,7 @@ public sealed class ToolBroker
     private readonly IPublicFileDownloader? _publicFileDownloader;
     private readonly IIsolatedBrowserSessionManager? _isolatedBrowserSessions;
     private readonly IReadOnlyUiAutomationSnapshotReader? _uiAutomationSnapshots;
+    private readonly IBackgroundUiAutomationTextSetter? _uiAutomationTextSetter;
     private readonly InteractionCoordinator _interactionCoordinator;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
@@ -28,7 +29,8 @@ public sealed class ToolBroker
         IDynamicPublicWebPageReader? dynamicPublicWebPageReader = null,
         IIsolatedBrowserSessionManager? isolatedBrowserSessions = null,
         InteractionCoordinator? interactionCoordinator = null,
-        IReadOnlyUiAutomationSnapshotReader? uiAutomationSnapshots = null)
+        IReadOnlyUiAutomationSnapshotReader? uiAutomationSnapshots = null,
+        IBackgroundUiAutomationTextSetter? uiAutomationTextSetter = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -43,6 +45,7 @@ public sealed class ToolBroker
         _publicFileDownloader = publicFileDownloader;
         _isolatedBrowserSessions = isolatedBrowserSessions;
         _uiAutomationSnapshots = uiAutomationSnapshots;
+        _uiAutomationTextSetter = uiAutomationTextSetter;
         _interactionCoordinator = interactionCoordinator ?? new InteractionCoordinator();
     }
 
@@ -81,6 +84,7 @@ public sealed class ToolBroker
                 ? new(false, "只读界面检查器未配置；没有访问应用界面。", "UIA_SNAPSHOT_UNAVAILABLE")
                 : await _uiAutomationSnapshots.WaitForEnabledControlAsync(proposal.Arguments["app_id"],
                     proposal.Arguments["automation_id"], cancellationToken),
+            "app.ui.set-text.v1" => await SetApplicationUiTextAsync(proposal, cancellationToken, taskId),
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
@@ -165,6 +169,7 @@ public sealed class ToolBroker
             "app.status.v1" => ValidateAppStatus(proposal),
             "app.ui.snapshot.v1" => ValidateApplicationUiSnapshot(proposal),
             "app.ui.wait-enabled.v1" => ValidateApplicationUiWaitEnabled(proposal),
+            "app.ui.set-text.v1" => ValidateApplicationUiSetText(proposal),
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
@@ -253,6 +258,58 @@ public sealed class ToolBroker
             && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
                 ? null
                 : InvalidProposal("界面状态等待只接受已登记应用及固定字符集的 AutomationId；不会执行控件动作。");
+    }
+
+    private static ToolResult? ValidateApplicationUiSetText(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var appId = args.GetValueOrDefault("app_id");
+        var automationId = args.GetValueOrDefault("automation_id");
+        var value = args.GetValueOrDefault("value");
+        return args.Count == 3 && args.ContainsKey("app_id") && args.ContainsKey("automation_id")
+            && args.ContainsKey("value") && !string.IsNullOrWhiteSpace(appId) && appId.Length <= 64
+            && !ApplicationUiAutomationPolicy.IsTextEntryBlockedApplication(appId)
+            && !string.IsNullOrWhiteSpace(automationId) && automationId.Length <= 96
+            && automationId.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-')
+            && !ApplicationUiAutomationPolicy.IsSensitiveTextEntryField(automationId)
+            && ApplicationUiAutomationPolicy.IsAllowedText(value)
+            && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : InvalidProposal("后台填写只接受已登记的普通应用；消息客户端、浏览器、系统文件管理器、金融/凭证敏感应用和非唯一控件均拒绝。");
+    }
+
+    private async Task<ToolResult> SetApplicationUiTextAsync(ToolProposal proposal,
+        CancellationToken cancellationToken, Guid? taskId)
+    {
+        if (_uiAutomationTextSetter is null)
+            return new(false, "后台文本填写器未配置；没有访问或修改应用界面。", "UIA_TEXT_SETTER_UNAVAILABLE");
+        var appId = proposal.Arguments["app_id"];
+        var automationId = proposal.Arguments["automation_id"];
+        var value = proposal.Arguments["value"];
+        if (!_desktop.IsUiAutomationTextTargetAllowed(appId))
+            return new(false, "该应用属于消息客户端、浏览器、系统文件管理器或金融/凭证敏感应用；通用后台文本填写已拒绝。", "UIA_PROTECTED_APP_BLOCKED");
+        var details = $"目标应用：{appId}{Environment.NewLine}控件 AutomationId：{automationId}"
+            + $"{Environment.NewLine}{Environment.NewLine}将把以下完整文本写入唯一匹配的普通文本框："
+            + $"{Environment.NewLine}{Environment.NewLine}{value}"
+            + $"{Environment.NewLine}{Environment.NewLine}不会点击、按键、读取剪贴板或切换前台窗口。微信、QQ、浏览器、钱包/金融和凭证管理应用不能使用此工具；"
+            + "如果目标窗口正处于前台、控件不唯一/不是普通可编辑文本框，或无法核验写入结果，小K会停止。请选择批准或拒绝。";
+        bool confirmed;
+        try
+        {
+            confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.ApplicationUiTextSetAction,
+                "确认后台填写文本", details, cancellationToken, taskId).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(false, "等待后台填写确认时任务已取消；文本框未修改。", "UIA_TEXT_SET_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        }
+        if (!confirmed) return new(false, "已拒绝后台填写；文本框未修改。", "UIA_TEXT_SET_DECLINED");
+        if (cancellationToken.IsCancellationRequested)
+            return new(false, "确认后、写入前任务已取消；文本框未修改。", "UIA_TEXT_SET_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        return await _uiAutomationTextSetter.SetTextAsync(appId, automationId, value, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static ToolResult? ValidateWindowActivation(ToolProposal proposal)
@@ -661,6 +718,7 @@ public sealed class ToolBroker
         "app.status.v1" => ToolPrecondition.ApplicationAllowlisted,
         "app.ui.snapshot.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.wait-enabled.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+        "app.ui.set-text.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
@@ -695,6 +753,7 @@ public sealed class ToolBroker
         "app.status.v1" => ToolExpectedOutcome.ApplicationStatusObserved,
         "app.ui.snapshot.v1" => ToolExpectedOutcome.ApplicationUiSnapshotReturned,
         "app.ui.wait-enabled.v1" => ToolExpectedOutcome.ApplicationUiConditionObserved,
+        "app.ui.set-text.v1" => ToolExpectedOutcome.ApplicationUiValueSet,
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,
