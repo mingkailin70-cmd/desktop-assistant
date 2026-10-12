@@ -957,6 +957,17 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ToolExpectedOutcome.DocxDocumentCreatedInConfiguredExport), token);
         }
 
+        if (category == "file-create-pptx")
+        {
+            if (!LocalPptxCreatePolicy.TryParseRequest(request, out var presentationFileName, out var presentationContent))
+                return new(false, "请按“创建PowerPoint：文件名.pptx\\n标题：演示标题\\n幻灯片：\\n页标题|要点1|要点2”输入。最多20页，每页1–8条要点；只生成纯文本幻灯片到固定导出目录，不覆盖文件。", "INVALID_PPTX_FILE_REQUEST");
+            var presentationArguments = ImmutableDictionary<string, string>.Empty
+                .Add("file_name", presentationFileName).Add("content", presentationContent);
+            return await ExecuteBackgroundAsync(new ToolProposal(LocalPptxCreatePolicy.ToolId, presentationArguments,
+                LocalTextFileCreatePolicy.ExportTargetId, ToolPrecondition.ConfiguredFileExportRoot,
+                ToolExpectedOutcome.PptxPresentationCreatedInConfiguredExport), token);
+        }
+
         if (category == "file-create-text")
         {
             if (!LocalTextFileCreatePolicy.TryParseRequest(request, out var fileName, out var content))
@@ -1308,6 +1319,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (lower.StartsWith("创建csv文件")) return "file-create-csv";
         if (lower.StartsWith("创建excel文件") || lower.StartsWith("创建excel工作簿") || lower.StartsWith("创建xlsx文件")) return "file-create-xlsx";
         if (lower.StartsWith("创建word文档") || lower.StartsWith("创建docx文件")) return "file-create-docx";
+        if (lower.StartsWith("创建powerpoint") || lower.StartsWith("创建pptx文件") || lower.StartsWith("创建演示文稿")) return "file-create-pptx";
         if (LocalFileContentSearchPolicy.IsUserCommand(request)) return "file-content-search";
         if (lower.StartsWith("移入回收站")) return "file-delete";
         if (lower.StartsWith("压缩文件")) return "file-archive";

@@ -81,6 +81,14 @@ public static class LocalTextFileCreatePolicy
         return Path.GetExtension(fileName).Equals(".docx", StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool IsValidPptxFileName(string? fileName)
+    {
+        if (!LocalFileRenamePolicy.IsValidFileName(fileName)
+            || fileName!.Length > MaximumFileNameLength
+            || !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal)) return false;
+        return Path.GetExtension(fileName).Equals(".pptx", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsValidContent(string? content)
     {
         if (content is null || content.Length > MaximumContentCharacters

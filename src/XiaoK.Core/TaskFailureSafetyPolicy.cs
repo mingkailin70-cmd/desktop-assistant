@@ -10,7 +10,7 @@ public static class TaskFailureSafetyPolicy
     // Send is deliberately absent while the message tool only displays a preview; add it before wiring a sender.
     private static readonly HashSet<string> SideEffectCategories = new(StringComparer.Ordinal)
     {
-        "app", "window", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download", "code"
+        "app", "window", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-create-pptx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download", "code"
     };
 
     public static bool RequiresManualVerification(string? taskCategory, bool routeStarted) =>

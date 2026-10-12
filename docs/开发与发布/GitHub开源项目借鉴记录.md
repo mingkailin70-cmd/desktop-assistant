@@ -76,6 +76,13 @@
 - 不读取模板，不接受`.docm`，不添加宏、图像、外部关系、嵌入包或资源；不启动Word，也不操作桌面输入。
 - 上游参考：[Open-XML-SDK WordprocessingDocument API](https://github.com/dotnet/Open-XML-SDK/blob/v3.5.1/src/DocumentFormat.OpenXml/Packaging/WordprocessingDocument.cs)、[OfficeDev创建Word文档并添加正文](https://github.com/OfficeDev/open-xml-docs/blob/main/docs/word/how-to-open-and-add-text-to-a-word-processing-document.md)。检查来源时未克隆或执行第三方项目；具体安全性由小K自身合成检查证明。
 
+### 同一SDK扩展为纯文本PowerPoint生成
+
+- 沿用已经锁定并用于XLSX/DOCX的`DocumentFormat.OpenXml 3.5.1`（MIT），没有新增依赖或复制第三方代码。
+- 采用PresentationML的演示文稿部件、母版、空白版式、主题和幻灯片结构，使用固定形状写入标题及要点；整份文档先在内存生成并由`OpenXmlValidator`验证，再走小K既有的固定导出目录安全发布与散列核验流程。
+- 小K只接受用户明确给出的纯文本内容，不加载模板，不生成图片/图表/宏/附件/嵌入内容或外部关系；不启动PowerPoint、不操作桌面输入。
+- 上游参考：[微软创建演示文稿文档说明](https://learn.microsoft.com/en-us/office/open-xml/presentation/how-to-create-a-presentation-document-by-providing-a-file-name)、[Open-XML-SDK PowerPoint示例](https://github.com/dotnet/Open-XML-SDK/blob/v3.5.1/samples/common/PowerPointUtils.cs)。上游资料用于核对Open XML部件组织；功能安全和结构验收由小K自身检查负责，不能据此声称PowerPoint界面已实际打开验收。
+
 ## 2026-10-12 GitHub继续筛选：UIA结果反馈与隔离桌面测试
 
 本轮只阅读公开README、许可证页和微软项目文档，没有克隆、下载、运行或集成候选。

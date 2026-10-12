@@ -19,18 +19,23 @@ public sealed partial class WindowsDesktopTools
         var isCsv = proposal.ToolId == LocalCsvCreatePolicy.ToolId;
         var isXlsx = proposal.ToolId == LocalXlsxCreatePolicy.ToolId;
         var isDocx = proposal.ToolId == LocalDocxCreatePolicy.ToolId;
-        if (proposal.ToolId is not (LocalTextFileCreatePolicy.ToolId or LocalCsvCreatePolicy.ToolId or LocalXlsxCreatePolicy.ToolId or LocalDocxCreatePolicy.ToolId)
+        var isPptx = proposal.ToolId == LocalPptxCreatePolicy.ToolId;
+        var fileType = isXlsx ? "XLSX" : isDocx ? "DOCX" : isPptx ? "PPTX" : isCsv ? "CSV" : "TEXT_FILE";
+        var fileErrorPrefix = isCsv ? "TEXT_FILE" : fileType;
+        if (proposal.ToolId is not (LocalTextFileCreatePolicy.ToolId or LocalCsvCreatePolicy.ToolId or LocalXlsxCreatePolicy.ToolId or LocalDocxCreatePolicy.ToolId or LocalPptxCreatePolicy.ToolId)
             || !proposal.Arguments.TryGetValue("file_name", out var fileName)
             || !(isCsv ? LocalTextFileCreatePolicy.IsValidCsvFileName(fileName)
                 : isXlsx ? LocalTextFileCreatePolicy.IsValidXlsxFileName(fileName)
                 : isDocx ? LocalDocxCreatePolicy.IsValidFileName(fileName)
+                : isPptx ? LocalPptxCreatePolicy.IsValidFileName(fileName)
                 : LocalTextFileCreatePolicy.IsValidFileName(fileName))
             || !proposal.Arguments.TryGetValue("content", out var content)
             || !(isCsv ? LocalCsvCreatePolicy.IsValidCsvContent(content)
                 : isXlsx ? LocalXlsxCreatePolicy.IsValidContent(content)
                 : isDocx ? LocalDocxCreatePolicy.IsValidContent(content)
+                : isPptx ? LocalPptxCreatePolicy.IsValidContent(content)
                 : LocalTextFileCreatePolicy.IsValidContent(content)))
-            return new(false, "仅支持在固定导出目录新建合规的 .txt、.md、.csv、.xlsx 或 .docx 文件；不会覆盖现有文件。", "INVALID_TEXT_FILE_REQUEST");
+            return new(false, "仅支持在固定导出目录新建合规的 .txt、.md、.csv、.xlsx、.docx 或 .pptx 文件；不会覆盖现有文件。", "INVALID_TEXT_FILE_REQUEST");
 
         byte[] contentBytes;
         try
@@ -46,6 +51,12 @@ public sealed partial class WindowsDesktopTools
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!OpenXmlWordDocumentGenerator.TryCreate(content, cancellationToken, out contentBytes))
                     return new(false, "Word文档内容或Open XML结构未通过校验；没有创建文件。", "INVALID_DOCX_DOCUMENT");
+            }
+            else if (isPptx)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!OpenXmlPresentationGenerator.TryCreate(content, cancellationToken, out contentBytes))
+                    return new(false, "PowerPoint内容或Open XML结构未通过校验；没有创建文件。", "INVALID_PPTX_PRESENTATION");
             }
             else contentBytes = new UTF8Encoding(isCsv, true).GetBytes(content);
         }
@@ -82,14 +93,14 @@ public sealed partial class WindowsDesktopTools
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!TryOpenOrdinaryFileForRead(temporaryPath, out var tempHandle, out var tempCanonicalPath,
                         out var tempIdentity, out var tempLength, out _))
-                    return new(false, "临时导出文件无法独立核验；没有发布到导出目录。", isXlsx ? "XLSX_TEMP_UNVERIFIABLE" : isDocx ? "DOCX_TEMP_UNVERIFIABLE" : "TEXT_FILE_TEMP_UNVERIFIABLE");
+                    return new(false, "临时导出文件无法独立核验；没有发布到导出目录。", fileErrorPrefix + "_TEMP_UNVERIFIABLE");
                 using (tempHandle)
                 {
                     if (!ToDisplayPath(tempCanonicalPath).Equals(ToDisplayPath(temporaryPath), StringComparison.OrdinalIgnoreCase)
                         || tempLength != contentBytes.Length
                         || !TryComputeSha256(tempHandle, out var tempHash)
                         || !string.Equals(expectedHash, tempHash, StringComparison.Ordinal))
-                        return new(false, "临时导出文件的路径、长度或散列核验失败；没有发布。", isXlsx ? "XLSX_TEMP_UNVERIFIABLE" : isDocx ? "DOCX_TEMP_UNVERIFIABLE" : "TEXT_FILE_TEMP_UNVERIFIABLE");
+                        return new(false, "临时导出文件的路径、长度或散列核验失败；没有发布。", fileErrorPrefix + "_TEMP_UNVERIFIABLE");
 
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!IsCurrentDirectoryPath(_exportRoot, canonicalExportRoot, exportIdentity))
@@ -104,7 +115,7 @@ public sealed partial class WindowsDesktopTools
                         if (!File.Exists(temporaryPath) && destinationExists)
                         {
                             published = true;
-                            return FileCreateOutcomeUncertain(fileName, isXlsx, isDocx);
+                            return FileCreateOutcomeUncertain(fileName, fileType);
                         }
                         if (destinationExists)
                             return new(false, "导出目录中出现同名文件；为避免覆盖，没有创建文件。", "EXPORT_NAME_CONFLICT");
@@ -114,7 +125,7 @@ public sealed partial class WindowsDesktopTools
 
                     if (!TryOpenOrdinaryFileForRead(finalPath, out var finalHandle, out var finalCanonicalPath,
                             out var finalIdentity, out var finalLength, out _))
-                        return FileCreateOutcomeUncertain(fileName, isXlsx, isDocx);
+                        return FileCreateOutcomeUncertain(fileName, fileType);
                     using (finalHandle)
                     {
                         if (!ToDisplayPath(finalCanonicalPath).Equals(ToDisplayPath(finalPath), StringComparison.OrdinalIgnoreCase)
@@ -122,18 +133,18 @@ public sealed partial class WindowsDesktopTools
                             || !TryComputeSha256(finalHandle, out var finalHash)
                             || !string.Equals(expectedHash, finalHash, StringComparison.Ordinal)
                             || !IsCurrentDirectoryPath(_exportRoot, canonicalExportRoot, exportIdentity))
-                            return FileCreateOutcomeUncertain(fileName, isXlsx, isDocx);
+                            return FileCreateOutcomeUncertain(fileName, fileType);
                     }
                 }
 
-                var kind = isXlsx ? "Excel工作簿" : isDocx ? "Word文档" : isCsv ? "CSV表格" : "文本文件";
+                var kind = isXlsx ? "Excel工作簿" : isDocx ? "Word文档" : isPptx ? "PowerPoint演示文稿" : isCsv ? "CSV表格" : "文本文件";
                 return new(true, $"已在小K导出目录新建{kind}：{fileName}（{contentBytes.Length:N0} 字节，SHA-256 {expectedHash}）。",
                     Data: ToDisplayPath(finalPath));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return published
-                    ? FileCreateOutcomeUncertain(fileName, isXlsx, isDocx)
+                    ? FileCreateOutcomeUncertain(fileName, fileType)
                     : new(false, "创建文本文件前任务已取消；没有发布文件。", "TEXT_FILE_CREATE_CANCELLED",
                         FinalState: TaskLifecycleState.Cancelled);
             }
@@ -141,7 +152,7 @@ public sealed partial class WindowsDesktopTools
                 or ArgumentException or NotSupportedException or Win32Exception)
             {
                 return published
-                    ? FileCreateOutcomeUncertain(fileName, isXlsx, isDocx)
+                    ? FileCreateOutcomeUncertain(fileName, fileType)
                     : new(false, "创建文本文件失败；没有覆盖任何现有文件。", "TEXT_FILE_CREATE_FAILED");
             }
             finally
@@ -163,11 +174,17 @@ public sealed partial class WindowsDesktopTools
         new(false, $"文本文件“{fileName}”可能已写入，但独立核验未完成；请人工检查导出目录，不会自动重试。",
             "TEXT_FILE_CREATE_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain);
 
-    private static ToolResult FileCreateOutcomeUncertain(string fileName, bool isXlsx, bool isDocx) => isXlsx
-        ? new(false, $"Excel工作簿“{fileName}”可能已写入，但独立核验未完成；请人工检查导出目录，不会自动重试。",
-            "XLSX_CREATE_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain)
-        : isDocx
-            ? new(false, $"Word文档“{fileName}”可能已写入，但独立核验未完成；请人工检查导出目录，不会自动重试。",
-                "DOCX_CREATE_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain)
-            : TextFileCreateOutcomeUncertain(fileName);
+    private static ToolResult FileCreateOutcomeUncertain(string fileName, string fileType)
+    {
+        if (fileType is "CSV" or "TEXT_FILE") return TextFileCreateOutcomeUncertain(fileName);
+        var displayName = fileType switch
+        {
+            "XLSX" => "Excel工作簿",
+            "DOCX" => "Word文档",
+            "PPTX" => "PowerPoint演示文稿",
+            _ => "文本文件"
+        };
+        return new(false, $"{displayName}“{fileName}”可能已写入，但独立核验未完成；请人工检查导出目录，不会自动重试。",
+            fileType + "_CREATE_OUTCOME_UNCERTAIN", fileName, TaskLifecycleState.OutcomeUncertain);
+    }
 }

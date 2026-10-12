@@ -89,6 +89,7 @@ public sealed class ToolBroker
             "file.create.csv.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.create.xlsx.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.create.docx.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
+            "file.create.pptx.v1" => await _desktop.CreateTextFileInExportAsync(proposal, cancellationToken),
             "file.copy.v1" => await _desktop.CopyFileToExportAsync(proposal, cancellationToken),
             "file.rename.v1" => await _desktop.RenameFileAsync(proposal, cancellationToken),
             "file.move.v1" => await _desktop.MoveFileWithinSearchRootsAsync(proposal, cancellationToken),
@@ -172,6 +173,7 @@ public sealed class ToolBroker
             "file.create.csv.v1" => ValidateCsvFileCreate(proposal),
             "file.create.xlsx.v1" => ValidateXlsxFileCreate(proposal),
             "file.create.docx.v1" => ValidateDocxFileCreate(proposal),
+            "file.create.pptx.v1" => ValidatePptxFileCreate(proposal),
             "file.copy.v1" => ValidateFileCopy(proposal),
             "file.rename.v1" => ValidateFileRename(proposal),
             "file.move.v1" => ValidateFileMove(proposal),
@@ -324,6 +326,16 @@ public sealed class ToolBroker
         && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
             ? null
             : InvalidProposal("Word文档只接受固定导出目录内的新建 .docx 纯文本正文；拒绝任意路径、宏、控制字符和覆盖。");
+
+    private static ToolResult? ValidatePptxFileCreate(ToolProposal proposal) =>
+        proposal.Arguments.Count == 2
+        && proposal.Arguments.TryGetValue("file_name", out var fileName)
+        && LocalPptxCreatePolicy.IsValidFileName(fileName)
+        && proposal.Arguments.TryGetValue("content", out var content)
+        && LocalPptxCreatePolicy.IsValidContent(content)
+        && proposal.Target == LocalTextFileCreatePolicy.ExportTargetId
+            ? null
+            : InvalidProposal("PowerPoint只接受固定导出目录内的新建纯文本幻灯片；拒绝任意路径、宏、附件、控制字符和覆盖。");
 
     private static ToolResult? ValidateLocalTextFileSummary(ToolProposal proposal) =>
         proposal.Arguments.Count == 1
@@ -656,6 +668,7 @@ public sealed class ToolBroker
         "file.create.csv.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.create.xlsx.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.create.docx.v1" => ToolPrecondition.ConfiguredFileExportRoot,
+        "file.create.pptx.v1" => ToolPrecondition.ConfiguredFileExportRoot,
         "file.copy.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredFileExportRoot,
         "file.rename.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.move.v1" => ToolPrecondition.ConfiguredSearchRoot | ToolPrecondition.ConfiguredMoveDestination,
@@ -689,6 +702,7 @@ public sealed class ToolBroker
         "file.create.csv.v1" => ToolExpectedOutcome.CsvFileCreatedInConfiguredExport,
         "file.create.xlsx.v1" => ToolExpectedOutcome.XlsxWorkbookCreatedInConfiguredExport,
         "file.create.docx.v1" => ToolExpectedOutcome.DocxDocumentCreatedInConfiguredExport,
+        "file.create.pptx.v1" => ToolExpectedOutcome.PptxPresentationCreatedInConfiguredExport,
         "file.copy.v1" => ToolExpectedOutcome.FileCopiedToConfiguredExport,
         "file.rename.v1" => ToolExpectedOutcome.FileRenamedInConfiguredSearchRoot,
         "file.move.v1" => ToolExpectedOutcome.FileMovedWithinConfiguredSearchRoots,

@@ -29,6 +29,8 @@ using XiaoK.Storage;
 using XiaoK.Tools;
 using XiaoK.Voice;
 using Word = DocumentFormat.OpenXml.Wordprocessing;
+using Drawing = DocumentFormat.OpenXml.Drawing;
+using Presentation = DocumentFormat.OpenXml.Presentation;
 
 if (args.Length > 0 && string.Equals(args[0], "--pdf-worker", StringComparison.Ordinal))
 {
@@ -197,6 +199,21 @@ if (args.Length == 1 && args[0] == "--only-docx-file-create")
     finally
     {
         if (Directory.Exists(docxCreateRoot)) Directory.Delete(docxCreateRoot, recursive: true);
+    }
+    return;
+}
+if (args.Length == 1 && args[0] == "--only-pptx-file-create")
+{
+    var pptxCreateRoot = Path.Combine(Path.GetTempPath(), "XiaoK-PptxCreateProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(pptxCreateRoot);
+    try
+    {
+        await CheckPptxFileCreationAsync(pptxCreateRoot);
+        Console.WriteLine("通过：PowerPoint只在固定导出目录后台新建纯文本幻灯片，Open XML结构、拒绝覆盖和取消清理均已核验。");
+    }
+    finally
+    {
+        if (Directory.Exists(pptxCreateRoot)) Directory.Delete(pptxCreateRoot, recursive: true);
     }
     return;
 }
@@ -481,6 +498,9 @@ try
 
     await CheckDocxFileCreationAsync(tempRoot);
     passed.Add("Word文档只在固定导出目录后台新建，按纯文本段落写入并通过Open XML结构验证");
+
+    await CheckPptxFileCreationAsync(tempRoot);
+    passed.Add("PowerPoint只在固定导出目录后台新建受限纯文本幻灯片并通过Open XML结构验证");
 
     await CheckFileCopyToExportAsync(tempRoot);
     passed.Add("后台文件复制仅允许搜索范围内的普通单文件，写入专用导出目录、不覆盖同名文件并核验SHA-256");
@@ -7829,6 +7849,103 @@ static async Task CheckDocxFileCreationAsync(string root)
     Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.docx"))
         && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
         "预取消的Word创建仍发布文件或留下部分文件。");
+}
+
+static async Task CheckPptxFileCreationAsync(string root)
+{
+    var fixtureRoot = Path.Combine(root, "pptx-file-create");
+    var exportRoot = Path.Combine(fixtureRoot, "data", "Exports");
+    Directory.CreateDirectory(Path.GetDirectoryName(exportRoot)!);
+
+    const string request = "创建PowerPoint：\"项目,10月.pptx\"\n标题：项目阶段汇报\n幻灯片：\n目标与进展|任务中心已接入|桌宠支持自定义缩放\n风险与后续|真实通知样本仍待采集";
+    var parsedRequest = LocalPptxCreatePolicy.TryParseRequest(request, out var parsedName, out var serializedContent);
+    Require(parsedRequest && parsedName == "项目,10月.pptx"
+        && LocalPptxCreatePolicy.TryParseContent(serializedContent, out var title, out var parsedSlides)
+        && title == "项目阶段汇报" && parsedSlides.Count == 2
+        && parsedSlides[0].Title == "目标与进展" && parsedSlides[0].Bullets.SequenceEqual(["任务中心已接入", "桌宠支持自定义缩放"])
+        && parsedSlides[1].Bullets.SequenceEqual(["真实通知样本仍待采集"]),
+        "PowerPoint输入没有按显式页标题和要点保留内容。");
+    Require(!LocalPptxCreatePolicy.TryParseRequest("创建PowerPoint：unsafe.pptm\n标题：标题\n幻灯片：\n页|要点", out _, out _)
+        && !LocalPptxCreatePolicy.TryParseRequest("创建PowerPoint：..\\escape.pptx\n标题：标题\n幻灯片：\n页|要点", out _, out _)
+        && !LocalPptxCreatePolicy.TryParseRequest("创建PowerPoint：empty.pptx\n标题：标题\n幻灯片：", out _, out _)
+        && !LocalPptxCreatePolicy.TryParseRequest("创建PowerPoint：bad.pptx\n标题：标题\n幻灯片：\n页|要点|\n", out _, out _),
+        "PowerPoint输入接受了宏格式、路径穿越、空幻灯片或空要点。");
+
+    var desktop = new WindowsDesktopTools([], [], exportRoot: exportRoot);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
+    var proposal = ToolBroker.Proposal(LocalPptxCreatePolicy.ToolId,
+        [new("file_name", parsedName), new("content", serializedContent)],
+        LocalTextFileCreatePolicy.ExportTargetId, ToolExpectedOutcome.PptxPresentationCreatedInConfiguredExport);
+    Require(ToolInteractionPolicy.GetMode(LocalPptxCreatePolicy.ToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.Check(LocalPptxCreatePolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null
+        && TaskFailureSafetyPolicy.RequiresManualVerification("file-create-pptx", routeStarted: true)
+        && TaskCategoryCatalog.LabelOrConversation("file-create-pptx") == "新建PowerPoint演示文稿",
+        "PowerPoint创建没有登记为后台副作用或缺少结果不确定保护。");
+
+    var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+    var finalPath = Path.Combine(exportRoot, parsedName);
+    Require(result.Success && result.Data == finalPath && File.Exists(finalPath)
+        && result.Summary.Contains("PowerPoint演示文稿", StringComparison.Ordinal)
+        && result.Summary.Contains("SHA-256", StringComparison.Ordinal),
+        $"ToolBroker未在固定导出目录创建并核验PowerPoint文件：{result.ErrorCode ?? "NONE"} / {result.Summary}。");
+
+    var originalBytes = await File.ReadAllBytesAsync(finalPath);
+    using (var document = PresentationDocument.Open(finalPath, false))
+    {
+        Require(!new OpenXmlValidator().Validate(document).Any(), "生成的pptx包未通过Open XML结构校验。");
+        Require(document.DocumentType == DocumentFormat.OpenXml.PresentationDocumentType.Presentation,
+            "生成结果不是普通PowerPoint演示文稿类型。");
+        var presentationPart = document.PresentationPart ?? throw new InvalidOperationException("pptx缺少PresentationPart。");
+        Require(presentationPart.ExternalRelationships.Count() == 0 && presentationPart.Parts.Count() > 0,
+            "纯文本PowerPoint包含外部关系或缺少内部Open XML部件。");
+        var slideIds = presentationPart.Presentation!.SlideIdList!.Elements<Presentation.SlideId>().ToArray();
+        var slideParts = slideIds.Select(slideId => (SlidePart)presentationPart.GetPartById(slideId.RelationshipId!)).ToArray();
+        Require(slideParts.Length == 2, "PowerPoint幻灯片数量与用户输入不一致。");
+        var slideText = slideParts.Select(slide => string.Concat(slide.Slide!.Descendants<Drawing.Text>().Select(text => text.Text))).ToArray();
+        Require(slideText[0].Contains("目标与进展", StringComparison.Ordinal)
+            && slideText[0].Contains("• 任务中心已接入", StringComparison.Ordinal)
+            && slideText[0].Contains("• 桌宠支持自定义缩放", StringComparison.Ordinal)
+            && slideText[1].Contains("风险与后续", StringComparison.Ordinal)
+            && slideText[1].Contains("• 真实通知样本仍待采集", StringComparison.Ordinal),
+            "PowerPoint页标题或要点没有写入幻灯片文本。");
+    }
+
+    var arbitraryTarget = await broker.ExecuteBackgroundAsync(proposal with { Target = fixtureRoot }, CancellationToken.None);
+    var wrongExpectedOutcome = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        ExpectedOutcome = ToolExpectedOutcome.DocxDocumentCreatedInConfiguredExport
+    }, CancellationToken.None);
+    var macroName = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("file_name", "unsafe.pptm")
+    }, CancellationToken.None);
+    Require(!arbitraryTarget.Success && arbitraryTarget.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !wrongExpectedOutcome.Success && wrongExpectedOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL"
+        && !macroName.Success && macroName.ErrorCode == "INVALID_TOOL_PROPOSAL",
+        "PowerPoint创建接受了任意路径、错配结果或宏格式扩展名。");
+
+    var conflict = await broker.ExecuteBackgroundAsync(proposal with
+    {
+        Arguments = proposal.Arguments.SetItem("content", "项目阶段汇报\n其他页\n1\n替换内容")
+    }, CancellationToken.None);
+    Require(!conflict.Success && conflict.ErrorCode == "EXPORT_NAME_CONFLICT"
+        && (await File.ReadAllBytesAsync(finalPath)).SequenceEqual(originalBytes),
+        "PowerPoint同名冲突覆盖了已有文件。");
+
+    using var cancelledSource = new CancellationTokenSource();
+    cancelledSource.Cancel();
+    var cancelled = false;
+    try
+    {
+        await broker.ExecuteBackgroundAsync(proposal with
+        {
+            Arguments = proposal.Arguments.SetItem("file_name", "cancelled.pptx")
+        }, cancelledSource.Token);
+    }
+    catch (OperationCanceledException) { cancelled = true; }
+    Require(cancelled && !File.Exists(Path.Combine(exportRoot, "cancelled.pptx"))
+        && Directory.EnumerateFiles(exportRoot).All(path => !path.EndsWith(".partial", StringComparison.Ordinal)),
+        "预取消的PowerPoint创建仍发布文件或留下部分文件。");
 }
 
 static async Task CheckFileCopyToExportAsync(string root)

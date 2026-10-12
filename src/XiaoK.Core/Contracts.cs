@@ -64,7 +64,8 @@ public enum ToolExpectedOutcome
     ApplicationUiConditionObserved = 30,
     CsvFileCreatedInConfiguredExport = 31,
     XlsxWorkbookCreatedInConfiguredExport = 32,
-    DocxDocumentCreatedInConfiguredExport = 33
+    DocxDocumentCreatedInConfiguredExport = 33,
+    PptxPresentationCreatedInConfiguredExport = 34
 }
 
 public static class ApprovalAuditCatalog

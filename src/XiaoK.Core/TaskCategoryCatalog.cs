@@ -17,6 +17,7 @@ public static class TaskCategoryCatalog
         ["file-create-csv"] = "新建CSV表格",
         ["file-create-xlsx"] = "新建Excel工作簿",
         ["file-create-docx"] = "新建Word文档",
+        ["file-create-pptx"] = "新建PowerPoint演示文稿",
         ["file-copy"] = "文件复制",
         ["file-archive"] = "文件压缩",
         ["file-move"] = "文件移动",
