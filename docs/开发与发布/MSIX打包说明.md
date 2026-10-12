@@ -1,3 +1,15 @@
+## v0.1.122.0 R1任务历史恢复提示（2026-10-13）
+
+将R1源码中的不确定结果分类与恢复说明更新到当前账户安装版。固定仓库SDK `10.0.401` 使用锁定依赖完成 `win-x64` 自包含发布；MSIX清单版本为`0.1.122.0`。签名包`artifacts\msix-validation\03d96841eb854e3fad8f7fd7bbad2b27\XiaoK-signed-validation.msix`，155,778,931字节，SHA-256 `A600D66B94EEF075B5535CE616B47A57B9E885DA48C34780D1789F609F84D467`。SignTool验签有效、0警告、0错误；使用此前已受信的证书`B96A02547ABA84523619E11EB7788AE9850A5C60`，证书信任未改。
+
+当前账户安装`MingKaiLin.XiaoK_0.1.122.0_neutral__g0ndt6g65c8pe`、状态`Ok`。安装版与自包含发布版`XiaoK.Host.dll` SHA-256均为`EE6538B1B2CE0F7C27C69185FA5229DF8F5754B160703D5887412AB7E2FE73DA`。安装器没有启动Host；安装后微信/QQ监控均为`false`、发布者列表均为空、唤醒词为`false`；Host与llama-server进程均为0。没有打开任务中心界面，因此恢复文案与跨重启行为仍待实机验收。
+
+本版本回滚包为已签名`0.1.121.0`：`artifacts\msix-validation\3c41a487887d40b6a2f91744f70aaf84\XiaoK-signed-validation.msix`，155,777,954字节，SHA-256 `50906F89A623D14A4FE6585BCB29AC80B5BF91E062975BF3871A6CD43030F1E0`。先运行`tools\uninstall_xiaok_msix.ps1`移除当前账户注册，再执行：
+
+```powershell
+.\tools\install_xiaok_msix.ps1 -PackagePath 'D:\Desktop\learn\siri\artifacts\msix-validation\3c41a487887d40b6a2f91744f70aaf84\XiaoK-signed-validation.msix' -Install
+```
+
 ## v0.1.121.0 R1任务中心恢复说明（2026-10-13）
 
 此版把固定任务错误码转成隐私安全的中文恢复提示：未执行/未排队、窗口未找到、资源不足、本地模型不可用和发送适配器缺失等情况提供下一步；未知错误不回显任意错误字段。不会在历史中写请求正文、模型输出或本机路径。
