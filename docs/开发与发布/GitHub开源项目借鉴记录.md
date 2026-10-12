@@ -312,3 +312,17 @@ GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现�
 **决定：** 继续参考FlaUI的Pattern抽象与稳定语义选择器，但暂不引入FlaUI或其CLI为生产依赖，也不启用键鼠回退。下一项有价值的实机工作是由用户正常使用目标客户端时，针对一个无副作用输入框验证前台窗口、键盘焦点、剪贴板和用户输入均不受影响；未通过时该客户端仍只开放只读能力。
 
 来源：[FlaUI固定提交的ValuePattern源码](https://github.com/FlaUI/FlaUI/blob/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16/src/FlaUI.UIA3/Patterns/ValuePattern.cs)、[FlaUI仓库与UIA2/UIA3说明](https://github.com/FlaUI/FlaUI)、[FlaUI.Cli README](https://github.com/kodroi/FlaUI.Cli)。仓库默认分支与README可能变化；CLI结论来自维护者文档，本轮没有克隆、构建或运行候选。
+
+## 2026-10-12 真实3D桌宠候选复核
+
+| 项目 | 仓库公开信息 | 对小K的评估 |
+| --- | --- | --- |
+| [woooooooooolf/deskpet3d](https://github.com/woooooooooolf/deskpet3d) | C99、raylib 6.0和Win32的独立Windows桌宠，支持GLB/glTF动画、透明置顶窗口、托盘及JSON配置；仓库标注GPL-3.0，创建于2026-07-18，最近推送为2026-07-22。 | 目前最贴近“可换真实3D模型”的候选，可以参考渲染窗口、GLB载入和模型配置分离。它是较新的独立应用，不是可直接嵌入WPF的成熟组件；GPL-3.0与本项目未来发布许可的兼容性未核对，也未运行其代码，所以不引入代码或二进制。 |
+| [SixOfFive/DesktopPet](https://github.com/SixOfFive/DesktopPet) | C# WinForms桌宠，用Silk.NET/OpenGL离屏渲染、SharpGLTF载入模型，再绘制到点击穿透的分层窗口；仓库自述含托盘和尺寸菜单。最近推送为2026-06-15。 | 技术栈与.NET Host较近，适合参考分层窗口、透明合成和模型动画边界。不过GitHub仓库没有声明代码许可证，不能复制或打包其代码；其README把可保存尺寸子菜单列为后续路线，也不能据此认定40%–160%缩放已经完成。 |
+| [kirbycope/godot-desktop-pet](https://github.com/kirbycope/godot-desktop-pet) | Godot 4的3D桌宠样例，带本地语音/模型、屏幕读取与记忆；仓库创建于2026-10-08，最近推送为2026-10-10。 | 项目很新，GitHub未显示仓库级许可证，且把屏幕读取和AI运行时与宠物渲染绑在一起；可观察其3D场景与透明窗口做法，暂不复制、运行或作为小K依赖。 |
+
+**当前决定：** 保留已接入的小K Host与VPet Core，不把新找到的独立宠物程序直接替换进正式运行链路。真正的3D路线先做隔离渲染原型：只接收小K的待机、聆听、思考、执行四种状态，不提供模型、联网、屏幕读取或系统控制能力；验收40%–160%缩放并保存、透明背景和空白处点击穿透、不抢前台/键盘焦点、拖动不妨碍工作、退出与Host断开后的回收，以及空闲/动画期间CPU与显存。候选模型和代码的许可证须逐项确认。只有原型达到这些条件并与现有桌宠体验比较后，才决定是否替换VPet Core显示层。
+
+**仓库许可待决：** 小K仓库当前根目录没有`LICENSE`/`COPYING`文件；在用户确定本项目发布许可证前，不从无许可证仓库复制代码，也不把GPL候选作为小K的二进制依赖。开源仓库可用于理解公开方案，但README描述不当作本机性能或交互验收证据。
+
+来源：[deskpet3d README](https://github.com/woooooooooolf/deskpet3d/blob/main/README_EN.md)、[deskpet3d许可证](https://github.com/woooooooooolf/deskpet3d/blob/main/LICENSE)、[SixOfFive/DesktopPet README](https://github.com/SixOfFive/DesktopPet)、[Godot Desktop Pet README](https://github.com/kirbycope/godot-desktop-pet)。仓库信息按2026-10-12公开页面核查；本轮只读，没有克隆、构建、运行或下载候选。
