@@ -281,7 +281,11 @@ if (bindingFailure is not null)
 foreach (var result in bindingResults)
     Require(result.Passed, result.Message);
 
-Console.WriteLine($"桌宠缩放/保存/后台交互策略/任务中心独立显示/WPF取消按钮绑定：{checks} 项通过。");
+foreach (var failure in XiaoK.DesktopExperience.Checks.TaskHistoryWindowUiProbe.Run())
+    Require(false, failure);
+Require(true, "任务中心离屏WPF检查通过。");
+
+Console.WriteLine($"桌宠缩放/保存/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {
