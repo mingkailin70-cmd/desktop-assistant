@@ -20,6 +20,26 @@ internal static class Program
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(IntPtr hwnd, int command);
 
+    [DllImport("user32.dll")]
+    private static extern unsafe int EnumChildWindows(IntPtr parent, delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int> callback, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern unsafe int GetClassName(IntPtr hwnd, char* className, int maximumCount);
+
+    private sealed class NativeChildWindowSummary
+    {
+        public const int MaximumWindows = 5_000;
+        public int Total { get; set; }
+        public int StandardEdit { get; set; }
+        public int RichEdit { get; set; }
+        public int Button { get; set; }
+        public int Other { get; set; }
+        public int ClassQueryFailures { get; set; }
+        public int CallbackFailures { get; set; }
+        public bool EnumerationFailed { get; set; }
+        public bool Truncated { get; set; }
+    }
+
     private sealed record WindowEnumerationState(HashSet<int> ProcessIds, List<IntPtr> Windows);
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
@@ -162,6 +182,13 @@ internal static class Program
             }
 
             var foregroundBefore = GetForegroundWindow();
+            var nativeChildWindows = new NativeChildWindowSummary();
+            foreach (var hwnd in windows.Take(4))
+            {
+                CountNativeChildWindowClasses(hwnd, nativeChildWindows);
+                if (nativeChildWindows.Truncated) break;
+            }
+
             var automation = CUIAutomation8.CreateInstance<IUIAutomation2>();
             automation.put_AutoSetFocus(new BOOL(false));
             if (automation.get_AutoSetFocus().Value != 0)
@@ -203,15 +230,94 @@ internal static class Program
             Console.WriteLine($"nodes_with_automation_id={automationIdCount}");
             Console.WriteLine($"edit_value_patterns_available={valuePatternCount}");
             Console.WriteLine($"button_invoke_patterns_available={invokePatternCount}");
+            Console.WriteLine($"native_child_windows_scanned={nativeChildWindows.Total}");
+            Console.WriteLine($"native_standard_edit_class_count={nativeChildWindows.StandardEdit}");
+            Console.WriteLine($"native_rich_edit_class_count={nativeChildWindows.RichEdit}");
+            Console.WriteLine($"native_button_class_count={nativeChildWindows.Button}");
+            Console.WriteLine($"native_other_child_class_count={nativeChildWindows.Other}");
+            Console.WriteLine($"native_child_class_query_failures={nativeChildWindows.ClassQueryFailures}");
+            Console.WriteLine($"native_child_callback_failures={nativeChildWindows.CallbackFailures}");
+            Console.WriteLine($"native_child_enumeration_failed={nativeChildWindows.EnumerationFailed}");
+            Console.WriteLine($"native_child_enumeration_truncated={nativeChildWindows.Truncated}");
             Console.WriteLine($"foreground_unchanged={foregroundUnchanged}");
             Console.WriteLine($"uia_focus_unchanged={focusUnchanged}");
-            Console.WriteLine("window_titles_read=false; control_names_read=false; text_values_read=false; screenshots_taken=false; input_sent=false; message_content_read=false");
+            Console.WriteLine("window_titles_read=false; control_names_read=false; text_values_read=false; native_child_class_names_read_in_memory=true; exact_native_child_class_names_output=false; native_child_class_names_persisted=false; screenshots_taken=false; input_sent=false; message_content_read=false");
             return foregroundUnchanged && focusUnchanged ? 0 : 15;
         }
         catch (COMException)
         {
             Console.WriteLine("status=uia_provider_error; message_content_read=false");
             return 16;
+        }
+    }
+
+    private static void CountNativeChildWindowClasses(IntPtr parent, NativeChildWindowSummary summary)
+    {
+        var summaryHandle = GCHandle.Alloc(summary);
+        try
+        {
+            unsafe
+            {
+                var succeeded = EnumChildWindows(parent, &EnumerateNativeChildWindow, GCHandle.ToIntPtr(summaryHandle));
+                if (succeeded == 0 && !summary.Truncated) summary.EnumerationFailed = true;
+            }
+        }
+        finally
+        {
+            summaryHandle.Free();
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
+    private static unsafe int EnumerateNativeChildWindow(IntPtr hwnd, IntPtr lParam)
+    {
+        try
+        {
+            var handle = GCHandle.FromIntPtr(lParam);
+            if (handle.Target is not NativeChildWindowSummary summary) return 0;
+            if (summary.Total >= NativeChildWindowSummary.MaximumWindows)
+            {
+                summary.Truncated = true;
+                return 0;
+            }
+
+            summary.Total++;
+            var classBuffer = stackalloc char[256];
+            var length = GetClassName(hwnd, classBuffer, 256);
+            if (length <= 0)
+            {
+                summary.ClassQueryFailures++;
+                return 1;
+            }
+
+            var className = new string(classBuffer, 0, length);
+            if (className.Equals("Edit", StringComparison.OrdinalIgnoreCase))
+                summary.StandardEdit++;
+            else if (className.StartsWith("RichEdit", StringComparison.OrdinalIgnoreCase))
+                summary.RichEdit++;
+            else if (className.Equals("Button", StringComparison.OrdinalIgnoreCase))
+                summary.Button++;
+            else
+                summary.Other++;
+
+            return 1;
+        }
+        catch
+        {
+            // Never allow a managed exception to cross the unmanaged callback boundary.
+            try
+            {
+                if (GCHandle.FromIntPtr(lParam).Target is NativeChildWindowSummary summary)
+                {
+                    summary.CallbackFailures++;
+                    summary.EnumerationFailed = true;
+                }
+            }
+            catch
+            {
+                // The callback must still fail closed if the state handle is invalid.
+            }
+            return 0;
         }
     }
 
