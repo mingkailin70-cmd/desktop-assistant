@@ -300,3 +300,5 @@
 本机结论严格限于此WinForms Provider和空文本框；微信/QQ、Chromium/WebView2、其它UIA Provider、用户并发编辑、取消和发送都未验证。生产UI工具仍只读，真实消息仍无发送适配器。任何目标应用都必须单独测试；目标身份不唯一、窗口成为前台或焦点/结果变化时必须停止并反馈，结果不确定不能重试。
 
 来源：[Microsoft winapp CLI v0.7.1固定源码](https://github.com/microsoft/winappCli/tree/e3cd0b94f3e7b776ac51ba0564f4908094e979b5)、[pywinauto固定提交源码](https://github.com/pywinauto/pywinauto/tree/90eebe493a85bf4063fcba05b70481c91309980f)、[FlaUI ValuePattern固定提交源码](https://github.com/FlaUI/FlaUI/blob/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16/src/FlaUI.Core/Patterns/ValuePattern.cs)、[Microsoft SetValue API](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)、[Microsoft AutoSetFocus API](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)。
+
+GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现此工具的`PackageSourceMapping`未包含Windows SDK引用包，构建未开始。只在诊断工具NuGet.Config中补充`Microsoft.Windows.SDK.NET.Ref`到nuget.org映射（提交`3537fc8`）；新提交Build #510的构建与桌面体验检查均成功。此修复不改产品依赖或模型锁。
