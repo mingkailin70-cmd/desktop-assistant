@@ -302,3 +302,13 @@
 来源：[Microsoft winapp CLI v0.7.1固定源码](https://github.com/microsoft/winappCli/tree/e3cd0b94f3e7b776ac51ba0564f4908094e979b5)、[pywinauto固定提交源码](https://github.com/pywinauto/pywinauto/tree/90eebe493a85bf4063fcba05b70481c91309980f)、[FlaUI ValuePattern固定提交源码](https://github.com/FlaUI/FlaUI/blob/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16/src/FlaUI.Core/Patterns/ValuePattern.cs)、[Microsoft SetValue API](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)、[Microsoft AutoSetFocus API](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)。
 
 GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现此工具的`PackageSourceMapping`未包含Windows SDK引用包，构建未开始。只在诊断工具NuGet.Config中补充`Microsoft.Windows.SDK.NET.Ref`到nuget.org映射（提交`3537fc8`）；新提交Build #510的构建与桌面体验检查均成功。此修复不改产品依赖或模型锁。
+
+## 2026-10-12 FlaUI与CLI写控件路径复核
+
+- 核对[FlaUI固定提交](https://github.com/FlaUI/FlaUI/tree/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16)中的UIA3 `ValuePattern.SetValue`实现：封装最终直接调用底层`IUIAutomationValuePattern.SetValue`。这适合作为语义控件调用的代码参考，但该方法本身没有建立小K所需的目标身份核验、`AutoSetFocus=false`设置、并发协调、写后读回和失败关闭策略；FlaUI README也说明UIA2/UIA3各有Provider兼容差异。项目许可证标注MIT，但本轮没有添加依赖或复制代码。
+- 复核[kodroi/FlaUI.Cli](https://github.com/kodroi/FlaUI.Cli)：README中的`set-value`使用Value Pattern，但`clear`在Pattern不可用时会回退到键盘删除；同一CLI还提供点击、键盘、菜单、滚动、截图和关闭应用等宽工具面。它适合了解命令接口与结构化返回，不适合作为小K可直接委托的安全边界。仓库标注MIT；未固定提交、安装或运行。
+- 两个项目都不能替代对目标窗口的身份核验和应用Provider实测。小K保留独立COM诊断工具所证明的有限结论：只对一个合成WinForms输入框验证过同一`IUIAutomation2`对象的无焦点写入；生产Host仍没有UIA写入工具，微信、QQ和WebView2仍待分别验证。
+
+**决定：** 继续参考FlaUI的Pattern抽象与稳定语义选择器，但暂不引入FlaUI或其CLI为生产依赖，也不启用键鼠回退。下一项有价值的实机工作是由用户正常使用目标客户端时，针对一个无副作用输入框验证前台窗口、键盘焦点、剪贴板和用户输入均不受影响；未通过时该客户端仍只开放只读能力。
+
+来源：[FlaUI固定提交的ValuePattern源码](https://github.com/FlaUI/FlaUI/blob/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16/src/FlaUI.UIA3/Patterns/ValuePattern.cs)、[FlaUI仓库与UIA2/UIA3说明](https://github.com/FlaUI/FlaUI)、[FlaUI.Cli README](https://github.com/kodroi/FlaUI.Cli)。仓库默认分支与README可能变化；CLI结论来自维护者文档，本轮没有克隆、构建或运行候选。
