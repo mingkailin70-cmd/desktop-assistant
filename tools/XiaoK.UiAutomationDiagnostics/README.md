@@ -9,7 +9,7 @@
 - 写入前比对目标进程ID、唯一 AutomationId、Edit 控件类型、启用状态、密码标记和空值前置条件。
 - 写入前后核对前台 HWND，并比较 UIA 当前焦点元素。任何显示阶段已经改变前台的情况都会在写值前失败关闭。
 - 不打开其他应用，不读取截图、通知或聊天内容，不注入进程，不调用鼠标、键盘、剪贴板或发送动作。退出时只关闭它自己启动的测试子进程。
-- `--inspect-live-app wechat|qq` 只匹配已知可执行文件路径，再通过 `EnumWindows` 与窗口进程ID枚举可见顶层窗口；不调用 `Process.MainWindowHandle`，避免依赖其内部主窗口选择逻辑。UIA只查询控件类型、AutomationId是否存在以及Edit/ValuePattern和Button/InvokePattern是否可用，并输出汇总数量。不会读取窗口标题、控件名称、文本值、消息正文或截图，不调用任何模式，不写入目标应用；探针进程最多运行20秒，超时只结束探针自身。
+- `--inspect-live-app wechat|qq` 只匹配已知可执行文件路径，再通过 `EnumWindows` 与窗口进程ID枚举该进程的可见顶层窗口；不调用 `Process.MainWindowHandle`。UIA查询控件类型、AutomationId是否存在和全部SDK定义的Pattern可用性，并只输出计数；若存在ValuePattern，只查询IsReadOnly、IsEnabled和IsOffscreen元数据。不会读取窗口标题、控件名称、文本值、聊天正文或截图，不调用SetValue/Invoke等会改动目标的Pattern操作，也不写入目标应用；探针进程最多运行20秒，超时只结束探针自身。
 - 实际应用结构探针只用于回答“该窗口暴露了哪些结构化控件能力”。即便发现Edit/ValuePattern或Button/InvokePattern，也不证明它是联系人/消息框或发送按钮，不证明后台写入安全、私聊身份可靠或发送结果可核验。
 
 ## 运行

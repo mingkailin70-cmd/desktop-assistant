@@ -8,9 +8,11 @@
 
 ## 当前状态与长期待验收项（截至 2026-10-12）
 
+2026-10-12 14:48再次只读复核：35条Toast中仍只有QQ/AUMID `QQ`的一条旧通知，没有微信候选；微信/QQ监控继续关闭、AUMID名单为空，Host和llama-server均未运行。可用RAM 12.65 GiB、RTX 5060空闲5,547 MiB/8,151 MiB（2%利用率），低于Qwen3.8 Q3/Q4启动线15/18 GiB；没有启动模型。
+
 当前账户已安装签名MSIX `0.1.114.0`，包147,162,666字节、SHA-256 `1F3B37DA66EFF6AF72F7907BF5186BD5BDE685B14C78522E95D4706F1E37E1FD`；安装版与发布版Host DLL SHA-256均为`432D0508D8795A8E1A986A59AE7567A990110A63DBD6C9E1A1C1721918C928AE`。新增纯文本PowerPoint后台创建，沿用固定Open XML SDK 3.5.1，不启动Office或操作前台。自包含发布、签名及当前账户安装成功，SignTool验签0警告/0错误；证书信任未改，Host和llama-server进程均为0。固定SDK全解决方案Release构建0警告/0错误；Windows完整安全套件126项通过、0项跳过，PPTX专项通过。阶段提交`cf951fa`已推送，GitHub Actions Build #505成功（https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38190807057）。安装版命令和PowerPoint实际打开仍待用户路径验收。当前评测组装下Qwen3.5-4B复筛15题通过6题、JEV-9B复筛17题通过8题、Gemma 4 E4B复筛13题通过4题；都在理论最高31/40时按早停规则停止，没有完成40题或进入生产。R0通知和编码准入、桌宠语音、六场景及长期运行验收仍未完成。
 
-2026-10-12 R0实机只读UIA探针：工具按精确进程路径核验目标，再用Win32 `EnumWindows`、窗口PID和可见状态枚举顶层窗口；不依赖`Process.MainWindowHandle`，不读窗口标题、控件名称、值、截图、通知或聊天正文，不发输入。14:27复扫微信5个进程中当前有1个可见顶层窗口（3个UIA节点），QQ 8个进程中1个可见顶层窗口（9个节点）；当前窗口均无Edit/ValuePattern与Button/InvokePattern，前台和焦点不变。之前14:14结果由旧窗口选择路径取得，现以显式PID枚举结果为准。该探针不改变生产Host行为，也不证明其他窗口/API不可行；真实消息读写和发送仍未验收。
+2026-10-12 R0实机只读UIA探针：工具按精确程序路径核验客户端PID，再用Win32 `EnumWindows`和PID枚举可见顶层窗，不读标题。14:45对全部35种SDK UIA Pattern做只读可用性盘点；微信当前4个节点、QQ 10个节点。两端各有1个ValuePattern，但仅属于offscreen的`UIA_TitleBarControlTypeId`，IsReadOnly=false且IsEnabled=true；不是消息编辑控件。当前均无Edit/ValuePattern或Button/Invoke组合。只查询ValuePattern可写状态、元素可见状态和AutomationId存在性，不读取值、控件名称、标题、通知、截图或聊天正文，不调用SetValue/Invoke。前台与焦点不变；客户端进程树也只有各自主程序有可见顶层窗口。该探针不改变生产Host行为，不证明客户端其他API/运行状态不可行；真实消息读写和发送仍未验收。
 
 2026-10-12 14:34再查Windows Toast来源元数据：访问状态Allowed，枚举35条Toast，仍只有QQ/AUMID `QQ`一条（创建时间仍为2026-10-10 17:39:23 UTC），没有微信候选。`%LOCALAPPDATA%\XiaoK\settings.json`中两端监听均关闭且AUMID名单为空；Host和llama-server进程均为0。只读显示名、AUMID和创建时间，没有正文、事件订阅或设置变更；R0仍等待微信自然通知及人工来源核对。
 

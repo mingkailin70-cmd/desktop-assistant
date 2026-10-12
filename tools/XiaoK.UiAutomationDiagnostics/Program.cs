@@ -174,6 +174,8 @@ internal static class Program
             var focusedBefore = uiAutomation.GetFocusedElement();
             var walker = uiAutomation.get_ControlViewWalker();
             var controlCounts = new Dictionary<UIA_CONTROLTYPE_ID, int>();
+            var patternCounts = new Dictionary<UIA_PATTERN_ID, int>();
+            var valuePatternMetadata = new Dictionary<string, int>(StringComparer.Ordinal);
             var automationIdCount = 0;
             var valuePatternCount = 0;
             var invokePatternCount = 0;
@@ -182,7 +184,7 @@ internal static class Program
             foreach (var hwnd in windows.Take(4))
             {
                 var root = automation.ElementFromHandle(new HWND(hwnd));
-                CountStructureOnly(walker, root, 0, ref scannedNodes, controlCounts, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
+                CountStructureOnly(walker, root, 0, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
                 windowsScanned++;
                 if (scannedNodes >= 1000) break;
             }
@@ -196,6 +198,8 @@ internal static class Program
             Console.WriteLine($"visible_windows_scanned={windowsScanned}");
             Console.WriteLine($"uia_nodes_scanned={scannedNodes}");
             Console.WriteLine($"control_types={FormatControlCounts(controlCounts)}");
+            Console.WriteLine($"supported_uia_patterns={FormatPatternCounts(patternCounts)}");
+            Console.WriteLine($"value_pattern_metadata={FormatMetadataCounts(valuePatternMetadata)}");
             Console.WriteLine($"nodes_with_automation_id={automationIdCount}");
             Console.WriteLine($"edit_value_patterns_available={valuePatternCount}");
             Console.WriteLine($"button_invoke_patterns_available={invokePatternCount}");
@@ -217,6 +221,8 @@ internal static class Program
         int depth,
         ref int scannedNodes,
         Dictionary<UIA_CONTROLTYPE_ID, int> controlCounts,
+        Dictionary<UIA_PATTERN_ID, int> patternCounts,
+        Dictionary<string, int> valuePatternMetadata,
         ref int automationIdCount,
         ref int valuePatternCount,
         ref int invokePatternCount)
@@ -226,30 +232,42 @@ internal static class Program
 
         var controlType = node.get_CurrentControlType();
         controlCounts[controlType] = controlCounts.GetValueOrDefault(controlType) + 1;
-        if (!string.IsNullOrEmpty(node.get_CurrentAutomationId().ToString())) automationIdCount++;
+        var hasAutomationId = !string.IsNullOrEmpty(node.get_CurrentAutomationId().ToString());
+        if (hasAutomationId) automationIdCount++;
 
-        if (controlType == UIA_CONTROLTYPE_ID.UIA_EditControlTypeId)
-            TryCountPattern(node, UIA_PATTERN_ID.UIA_ValuePatternId, ref valuePatternCount);
-        if (controlType == UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId)
-            TryCountPattern(node, UIA_PATTERN_ID.UIA_InvokePatternId, ref invokePatternCount);
+        foreach (var patternId in Enum.GetValues<UIA_PATTERN_ID>())
+        {
+            try
+            {
+                var pattern = node.GetCurrentPattern(patternId);
+                if (pattern is not null)
+                {
+                    patternCounts[patternId] = patternCounts.GetValueOrDefault(patternId) + 1;
+                    if (patternId == UIA_PATTERN_ID.UIA_ValuePatternId && controlType == UIA_CONTROLTYPE_ID.UIA_EditControlTypeId)
+                        valuePatternCount++;
+                    if (patternId == UIA_PATTERN_ID.UIA_InvokePatternId && controlType == UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId)
+                        invokePatternCount++;
+                    if (patternId == UIA_PATTERN_ID.UIA_ValuePatternId && pattern is IUIAutomationValuePattern valuePattern)
+                    {
+                        var readOnly = valuePattern.get_CurrentIsReadOnly().Value != 0;
+                        var enabled = node.get_CurrentIsEnabled().Value != 0;
+                        var offscreen = node.get_CurrentIsOffscreen().Value != 0;
+                        var key = $"{controlType}:read_only={readOnly}:enabled={enabled}:offscreen={offscreen}:automation_id={hasAutomationId}";
+                        valuePatternMetadata[key] = valuePatternMetadata.GetValueOrDefault(key) + 1;
+                    }
+                }
+            }
+            catch (COMException)
+            {
+                // Pattern operations are never invoked; only read-only availability/state metadata is queried.
+            }
+        }
 
         var child = walker.GetFirstChildElement(node);
         while (child is not null && scannedNodes < 1000)
         {
-            CountStructureOnly(walker, child, depth + 1, ref scannedNodes, controlCounts, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
+            CountStructureOnly(walker, child, depth + 1, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
             child = walker.GetNextSiblingElement(child);
-        }
-    }
-
-    private static void TryCountPattern(IUIAutomationElement element, UIA_PATTERN_ID patternId, ref int count)
-    {
-        try
-        {
-            if (element.GetCurrentPattern(patternId) is not null) count++;
-        }
-        catch (COMException)
-        {
-            // Pattern support is only queried, never invoked.
         }
     }
 
@@ -270,6 +288,16 @@ internal static class Program
         };
         return string.Join(',', counts.OrderBy(pair => (int)pair.Key).Select(pair => $"{names.GetValueOrDefault(pair.Key, "Other")}-{pair.Value}"));
     }
+
+    private static string FormatPatternCounts(Dictionary<UIA_PATTERN_ID, int> counts) =>
+        counts.Count == 0
+            ? "none"
+            : string.Join(',', counts.OrderBy(pair => (int)pair.Key).Select(pair => $"{pair.Key}={pair.Value}"));
+
+    private static string FormatMetadataCounts(Dictionary<string, int> counts) =>
+        counts.Count == 0
+            ? "none"
+            : string.Join(',', counts.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}"));
 
     private static bool TryGetTargetApp(string value, out string processName, out string executablePath)
     {
