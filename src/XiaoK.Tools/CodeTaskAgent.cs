@@ -403,12 +403,14 @@ public sealed class CodeTaskAgent
             if (chosenPaths.Count == 0)
                 return await FailAsync(snapshot, "本地模型没有从项目清单中选择有效文件；原项目未修改。", "NO_VALID_FILES_SELECTED");
 
+            chosenPaths = EnsureCodeTaskToolContractSourceSelected(chosenPaths, candidates, instruction);
+
             var sourceFiles = snapshot.ReadSelectedTextFiles(chosenPaths, candidates, cancellationToken).ToArray();
             phase = "整理受限源代码上下文";
             var requiredTopics = ExtractExplanationTopics(instruction);
             var context = await CreateModelContextAsync(sourceFiles, instruction, cancellationToken);
             context = IncludeMessageSendSourceEvidence(context, sourceFiles, requiredTopics);
-            context = IncludeCodeAgentPolicyEvidence(context, sourceFiles, requiredTopics);
+            context = IncludeCodeAgentPolicyEvidence(context, sourceFiles, instruction, requiredTopics);
             context = IncludeModelBrokerPolicyEvidence(context, sourceFiles, requiredTopics);
 
             await snapshot.WriteStateAsync("running", CancellationToken.None);
@@ -439,16 +441,23 @@ public sealed class CodeTaskAgent
             }
             var preCallGuards = ExtractOrderedPreCallGuards(context, instruction);
             requiredTopics = ExpandPreCallTopics(requiredTopics, preCallGuards);
-            var codeAgentFacts = ExtractCodeAgentPolicyFacts(context, requiredTopics);
-            var codeAgentTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(topic.Label)).ToArray();
+            var codeAgentFacts = ExtractCodeAgentPolicyFacts(context, sourceFiles, instruction, requiredTopics);
+            var codeAgentTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(instruction, topic.Label)).ToArray();
+            var needsToolBrokerSource = codeAgentTopics.Any(topic => IsCodeTaskToolContractTopic(instruction, topic.Label)
+                || IsCodeTaskToolCatalogTopic(instruction, topic.Label));
+            var needsCodeTaskSource = codeAgentTopics.Any(topic => !IsCodeTaskToolContractTopic(instruction, topic.Label)
+                && !IsCodeTaskToolCatalogTopic(instruction, topic.Label));
+            var missingCodeAgentEvidence = needsCodeTaskSource
+                && !context.Any(excerpt => Path.GetFileName(excerpt.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase));
+            var missingToolBrokerEvidence = needsToolBrokerSource
+                && !context.Any(excerpt => Path.GetFileName(excerpt.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase));
             if (codeAgentTopics.Length > 0
-                && context.Any(excerpt => Path.GetFileName(excerpt.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase))
-                && codeAgentFacts.Count != codeAgentTopics.Length)
+                && (missingCodeAgentEvidence || missingToolBrokerEvidence || codeAgentFacts.Count != codeAgentTopics.Length))
             {
                 var missingTopics = codeAgentTopics.Where(topic => !codeAgentFacts.Any(fact =>
                     fact.Topic.Equals(topic.Label, StringComparison.Ordinal))).Select(topic => topic.Label);
                 return await FailAsync(snapshot,
-                    $"无法从已提供的编程代理源码中完整提取主题“{string.Join("、", missingTopics)}”的文件/字符上限或命令/原项目边界事实；为避免猜测已停止说明。",
+                    $"无法从已提供的编程代理与工具注册源码中完整提取主题“{string.Join("、", missingTopics)}”的固定参数、目标或执行边界事实；为避免猜测已停止说明。",
                     "CODE_INSPECTION_FAILED");
             }
             var modelBrokerFacts = ExtractModelBrokerPolicyFacts(context, requiredTopics);
@@ -537,7 +546,7 @@ public sealed class CodeTaskAgent
                     ? "发送预览、拒绝和结果处理说明由本地程序依据源码生成；每条必须引用清单列出的全部相关源码行。"
                     : string.Empty)
                 + (codeAgentFacts.Count > 0
-                    ? "编程代理的文件/字符上限及命令/原项目写入边界由本地程序依据目标源码生成；必须引用清单列出的全部相关源码行。"
+                    ? "编程代理及其固定工具注册ID、目标、参数、文件/字符上限和命令/原项目写入边界事实由本地程序依据目标源码生成；必须引用清单列出的全部相关源码行。"
                     : string.Empty)
                 + (modelBrokerFacts.Count > 0
                     ? "ModelBroker 交互/后台队列、租约让位和抢占语义由本地程序依据源码生成；必须引用清单列出的全部相关源码行，不得调换交互与后台角色。"
@@ -908,19 +917,92 @@ public sealed class CodeTaskAgent
         || label.Contains("字符", StringComparison.Ordinal)
         || label.Contains("上限", StringComparison.Ordinal);
 
-    private static bool IsCodeAgentPolicyTopic(string label) =>
-        IsCodeAgentLimitTopic(label)
-        || label.Contains("命令", StringComparison.Ordinal)
-        || label.Contains("项目", StringComparison.Ordinal);
+    private static bool IsCodeTaskToolContractTopic(string instruction, string label)
+    {
+        if (IsCodeTaskToolCatalogTopic(instruction, label)) return false;
+        var asksAboutCodeTask = instruction.Contains("code.task.create.v1", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("CodeTask", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("编程任务", StringComparison.Ordinal)
+            || instruction.Contains("代码任务", StringComparison.Ordinal);
+        var asksAboutContract = label.Contains("参数", StringComparison.Ordinal)
+            || label.Contains("目标", StringComparison.Ordinal)
+            || label.Contains("工具", StringComparison.Ordinal)
+            || label.Contains("接口", StringComparison.Ordinal)
+            || label.Contains("调用", StringComparison.Ordinal);
+        return asksAboutCodeTask && asksAboutContract;
+    }
+
+    private static bool IsCodeTaskToolCatalogTopic(string instruction, string label)
+    {
+        var asksAboutCodeTask = instruction.Contains("code.task.create.v1", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("CodeTask", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("编程任务", StringComparison.Ordinal)
+            || instruction.Contains("代码任务", StringComparison.Ordinal);
+        var asksForToolIds = label.Contains("工具", StringComparison.Ordinal)
+            && (label.Contains("ID", StringComparison.OrdinalIgnoreCase)
+                || label.Contains("标识", StringComparison.Ordinal)
+                || label.Contains("清单", StringComparison.Ordinal)
+                || label.Contains("列表", StringComparison.Ordinal)
+                || label.Contains("集合", StringComparison.Ordinal));
+        return asksAboutCodeTask && asksForToolIds;
+    }
+
+    private static bool IsCodeAgentPolicyTopic(string instruction, string label)
+    {
+        var asksAboutCodeAgent = instruction.Contains("CodeTaskAgent", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("CodeTask", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("编程代理", StringComparison.Ordinal)
+            || instruction.Contains("编程任务", StringComparison.Ordinal)
+            || instruction.Contains("代码任务", StringComparison.Ordinal);
+        return asksAboutCodeAgent
+            && (IsCodeAgentLimitTopic(label)
+                || label.Contains("命令", StringComparison.Ordinal)
+                || label.Contains("项目", StringComparison.Ordinal)
+                || IsCodeTaskToolContractTopic(instruction, label)
+                || IsCodeTaskToolCatalogTopic(instruction, label));
+    }
+
+    private static List<string> EnsureCodeTaskToolContractSourceSelected(IReadOnlyList<string> chosenPaths,
+        IReadOnlyList<CodeTextCandidate> candidates, string instruction)
+    {
+        if (!RequiresCodeTaskToolContractSource(instruction)) return chosenPaths.ToList();
+
+        var toolBroker = candidates.FirstOrDefault(candidate =>
+            Path.GetFileName(candidate.RelativePath).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase));
+        if (toolBroker is null) return chosenPaths.ToList();
+
+        var selected = chosenPaths.ToList();
+        if (selected.Any(path => path.Equals(toolBroker.RelativePath, StringComparison.OrdinalIgnoreCase)))
+            return selected;
+        if (selected.Count >= MaximumSelectedFiles) selected.RemoveAt(selected.Count - 1);
+        selected.Add(toolBroker.RelativePath);
+        return selected;
+    }
+
+    private static bool RequiresCodeTaskToolContractSource(string instruction) =>
+        (instruction.Contains("code.task.create.v1", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("CodeTask", StringComparison.OrdinalIgnoreCase)
+            || instruction.Contains("编程任务", StringComparison.Ordinal)
+            || instruction.Contains("代码任务", StringComparison.Ordinal))
+        && (instruction.Contains("参数", StringComparison.Ordinal)
+            || instruction.Contains("目标", StringComparison.Ordinal)
+            || instruction.Contains("工具", StringComparison.Ordinal)
+            || instruction.Contains("接口", StringComparison.Ordinal)
+            || instruction.Contains("调用", StringComparison.Ordinal));
 
     private static List<SourceCodeAgentFact> ExtractCodeAgentPolicyFacts(
-        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+        IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<CodeFileContent> sourceFiles, string instruction,
+        IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
     {
-        var requestedTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(topic.Label)).ToArray();
+        var requestedTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(instruction, topic.Label)).ToArray();
         if (requestedTopics.Length == 0) return [];
 
         var sourceExcerpts = context.Where(excerpt =>
             Path.GetFileName(excerpt.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var toolBrokerExcerpts = context.Where(excerpt =>
+            Path.GetFileName(excerpt.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var toolBrokerFiles = sourceFiles.Where(file =>
+            Path.GetFileName(file.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
         SourceTextMatch? MatchSource(string pattern)
         {
             foreach (var excerpt in sourceExcerpts)
@@ -930,6 +1012,20 @@ public sealed class CodeTaskAgent
                 if (match.Success)
                     return new(match, excerpt.Path,
                         excerpt.StartLine + excerpt.Content[..match.Index].Count(character => character == '\n'));
+            }
+            return null;
+        }
+
+        SourceTextMatch? MatchToolBroker(string pattern)
+        {
+            foreach (var excerpt in toolBrokerExcerpts)
+            {
+                foreach (Match match in Regex.Matches(excerpt.Content, pattern,
+                    RegexOptions.CultureInvariant | RegexOptions.Singleline))
+                {
+                    return new(match, excerpt.Path,
+                        excerpt.StartLine + excerpt.Content[..match.Index].Count(character => character == '\n'));
+                }
             }
             return null;
         }
@@ -969,7 +1065,42 @@ public sealed class CodeTaskAgent
         var facts = new List<SourceCodeAgentFact>();
         foreach (var topic in requestedTopics)
         {
-            if (IsCodeAgentLimitTopic(topic.Label)
+            if (IsCodeTaskToolCatalogTopic(instruction, topic.Label))
+            {
+                foreach (var source in toolBrokerFiles)
+                {
+                    var catalog = ExtractToolIdDispatchCatalog(source, topic.Label);
+                    if (catalog is not null)
+                    {
+                        facts.Add(catalog);
+                        break;
+                    }
+                }
+            }
+            else if (IsCodeTaskToolContractTopic(instruction, topic.Label))
+            {
+                var dispatch = MatchToolBroker(
+                    @"""code\.task\.create\.v1""\s*=>\s*await\s*_codeAgent\.ExecuteAsync\([\s\S]{0,300}?proposal\.Arguments\[""instruction""\]");
+                var validationPattern = @"(?:""code\.inspect\.v1""\s+or\s+)?""code\.task\.create\.v1""\s*=>\s*proposal\.Arguments\.Count\s*==\s*1"
+                    + @"\s*&&\s*proposal\.Arguments\.TryGetValue\(""instruction"",\s*out\s+var\s+(?<name>[A-Za-z_]\w*)\)"
+                    + @"\s*&&\s*!\s*string\.IsNullOrWhiteSpace\(\k<name>\)"
+                    + @"\s*&&\s*\k<name>\.Length\s*<=\s*4_000"
+                    + @"\s*&&\s*proposal\.Target\s*==\s*""configured-project""";
+                var validation = MatchToolBroker(validationPattern);
+                if (dispatch is not null && validation is not null
+                    && dispatch.SourcePath.Equals(validation.SourcePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var dispatchLines = Enumerable.Range(0, dispatch.Match.Value.Count(character => character == '\n') + 1)
+                        .Select(offset => dispatch.Line + offset);
+                    var validationLines = Enumerable.Range(0, validation.Match.Value.Count(character => character == '\n') + 1)
+                        .Select(offset => validation.Line + offset);
+                    var lines = dispatchLines.Concat(validationLines).Distinct().Order().ToArray();
+                    facts.Add(new(topic.Label,
+                        "code.task.create.v1 固定调用本地编程代理；动作目标只能是 configured-project。参数必须恰好只有一个 instruction 字符串，且非空、最多 4,000 个字符；该 instruction 会传给代理作为任务说明。",
+                        validation.SourcePath, lines));
+                }
+            }
+            else if (IsCodeAgentLimitTopic(topic.Label)
                 && allLimitMatches.All(match => match is not null)
                 && allLimitMatches.Select(match => match!.SourcePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
             {
@@ -1023,16 +1154,66 @@ public sealed class CodeTaskAgent
         return facts;
     }
 
+    private static SourceCodeAgentFact? ExtractToolIdDispatchCatalog(CodeFileContent source, string topic)
+    {
+        var dispatch = Regex.Match(source.Content,
+            @"return\s+proposal\.ToolId\s+switch\s*\{(?<body>[\s\S]{0,25000}?)^\s*\};",
+            RegexOptions.CultureInvariant | RegexOptions.Multiline);
+        if (!dispatch.Success) return null;
+
+        var ids = new List<string>();
+        var lines = new List<int>();
+        var body = dispatch.Groups["body"];
+        var firstBodyLine = source.Content[..body.Index].Count(character => character == '\n') + 1;
+        var selectorLines = body.Value.Split('\n');
+        for (var offset = 0; offset < selectorLines.Length; offset++)
+        {
+            var line = selectorLines[offset].TrimEnd('\r');
+            var arrow = line.IndexOf("=>", StringComparison.Ordinal);
+            if (arrow < 0) continue;
+
+            var selector = line[..arrow];
+            var matches = Regex.Matches(selector, @"""(?<id>[A-Za-z0-9_.-]+\.v1)""");
+            if (matches.Count == 0) continue;
+            var remainder = Regex.Replace(selector, @"""[A-Za-z0-9_.-]+\.v1""", string.Empty,
+                RegexOptions.CultureInvariant);
+            remainder = Regex.Replace(remainder, @"\bor\b", string.Empty, RegexOptions.CultureInvariant).Trim();
+            if (remainder.Length != 0) continue;
+
+            var addedOnLine = false;
+            foreach (Match match in matches)
+            {
+                var id = match.Groups["id"].Value;
+                if (ids.Contains(id, StringComparer.Ordinal)) continue;
+                ids.Add(id);
+                addedOnLine = true;
+            }
+            if (addedOnLine) lines.Add(firstBodyLine + offset);
+        }
+
+        if (ids.Count is < 1 or > 40 || lines.Count is < 1 or > 40) return null;
+        var text = "ToolBroker 的固定注册动作ID为：" + string.Join("、", ids) + "。";
+        if (text.Length > MaximumFormattedExplanationCharacters) return null;
+        return new(topic, text, source.Path, lines.Distinct().Order().ToArray());
+    }
+
     private static IReadOnlyList<CodeContextExcerpt> IncludeCodeAgentPolicyEvidence(
         IReadOnlyList<CodeContextExcerpt> context, IReadOnlyList<CodeFileContent> sourceFiles,
-        IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
+        string instruction, IReadOnlyList<ExplanationTopicRequirement> requiredTopics)
     {
-        var requestedTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(topic.Label)).ToArray();
+        var requestedTopics = requiredTopics.Where(topic => IsCodeAgentPolicyTopic(instruction, topic.Label)).ToArray();
         if (requestedTopics.Length == 0) return context;
 
         var agentSources = sourceFiles.Where(file =>
             Path.GetFileName(file.Path).Equals("CodeTaskAgent.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (agentSources.Length == 0) return context;
+        var toolBrokerSources = sourceFiles.Where(file =>
+            Path.GetFileName(file.Path).Equals("ToolBroker.cs", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var hasAgentTopics = requestedTopics.Any(topic => !IsCodeTaskToolContractTopic(instruction, topic.Label)
+            && !IsCodeTaskToolCatalogTopic(instruction, topic.Label));
+        var hasToolBrokerTopics = requestedTopics.Any(topic => IsCodeTaskToolContractTopic(instruction, topic.Label)
+            || IsCodeTaskToolCatalogTopic(instruction, topic.Label));
+        if ((hasAgentTopics && agentSources.Length == 0) || (hasToolBrokerTopics && toolBrokerSources.Length == 0))
+            return context;
 
         var patterns = new List<string>();
         if (requestedTopics.Any(topic => IsCodeAgentLimitTopic(topic.Label)))
@@ -1076,6 +1257,53 @@ public sealed class CodeTaskAgent
             var startLine = source.Content[..start].Count(character => character == '\n') + 1;
             var evidence = source.Content[start..end].TrimEnd('\r');
             if (evidence.Length > 0) added.Add(new(source.Path, startLine, evidence));
+        }
+
+        if (hasToolBrokerTopics)
+        {
+            string[] toolPatterns =
+            [
+                @"""code\.task\.create\.v1""\s*=>\s*await\s*_codeAgent\.ExecuteAsync\([\s\S]{0,300}?proposal\.Arguments\[""instruction""\]",
+                @"(?:""code\.inspect\.v1""\s+or\s+)?""code\.task\.create\.v1""\s*=>\s*proposal\.Arguments\.Count\s*==\s*1[\s\S]{0,700}?proposal\.Target\s*==\s*""configured-project"""
+            ];
+            foreach (var source in toolBrokerSources)
+            foreach (var pattern in toolPatterns)
+            {
+                var match = Regex.Match(source.Content, pattern,
+                    RegexOptions.CultureInvariant | RegexOptions.Singleline);
+                if (!match.Success) continue;
+                var start = source.Content.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
+                var afterMatch = match.Index + match.Length;
+                var end = source.Content.IndexOf('\n', afterMatch);
+                if (end < 0) end = source.Content.Length;
+                var startLine = source.Content[..start].Count(character => character == '\n') + 1;
+                var evidence = source.Content[start..end].TrimEnd('\r');
+                if (evidence.Length > 0) added.Add(new(source.Path, startLine, evidence));
+            }
+
+            if (requestedTopics.Any(topic => IsCodeTaskToolCatalogTopic(instruction, topic.Label)))
+            foreach (var source in toolBrokerSources)
+            {
+                var catalog = ExtractToolIdDispatchCatalog(source, "tool-catalog");
+                if (catalog is null) continue;
+                foreach (var line in catalog.SourceLines)
+                {
+                    var contentLines = source.Content.Split('\n');
+                    if (line < 1 || line > contentLines.Length) continue;
+                    added.Add(new(source.Path, line, contentLines[line - 1].TrimEnd('\r')));
+                }
+
+                var dispatchHeader = Regex.Match(source.Content, @"return\s+proposal\.ToolId\s+switch\s*\{",
+                    RegexOptions.CultureInvariant);
+                if (dispatchHeader.Success)
+                {
+                    var start = source.Content.LastIndexOf('\n', Math.Max(0, dispatchHeader.Index - 1)) + 1;
+                    var end = source.Content.IndexOf('\n', dispatchHeader.Index + dispatchHeader.Length);
+                    if (end < 0) end = source.Content.Length;
+                    var lineNumber = source.Content[..start].Count(character => character == '\n') + 1;
+                    added.Add(new(source.Path, lineNumber, source.Content[start..end].TrimEnd('\r')));
+                }
+            }
         }
 
         if (added.Count == 0) return context;
@@ -1825,7 +2053,7 @@ public sealed class CodeTaskAgent
                             return new(false, null, "编程代理事实说明仍须符合path与正整数line的结构；程序会从源码生成最终引用。");
                     }
 
-                    if (sourceCodeAgentFact.SourceLines.Count is < 1 or > 8
+                    if (sourceCodeAgentFact.SourceLines.Count is < 1 or > 40
                         || totalCitations + sourceCodeAgentFact.SourceLines.Count > 40)
                         return new(false, null, "从编程代理源码生成的引用数量超过单次说明上限。");
                     totalCitations += sourceCodeAgentFact.SourceLines.Count;
