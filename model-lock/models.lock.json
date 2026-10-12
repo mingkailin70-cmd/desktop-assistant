@@ -873,6 +873,30 @@
       "notes": "社区Ternary Bonsai 2由Qwen3.8-27B派生，PTQ1_0使用三值权重与Hadamard变换，权重文件5,946,648,928字节，锁定版本已下载并核验。GitHub社区镜像README列出的整文件SHA-256与主仓散列相同；本机仅从固定主仓revision下载。模型卡基准是发布方H100结果，不代表小K任务成绩。GGUF必须使用固定PrismML llama.cpp分支，不得交给官方b11259推理。GGUF元数据检查确认qwen35架构和851个张量；首次1-token截断探测退出码1，随后单轮、reasoning-off、32-token上限的合成探测准确返回OK并以退出码0结束，速度采样约2.9 token/s；此项只证明运行链路，不替代任务质量评估。仅作隔离候选，不接生产路由。",
       "localDirectory": "llm/ternary-bonsai-2-27b-ptq1-eval/b072e1d3b35a0a630cece372c2127528e0994386",
       "requiredForP0": false
+    },
+    {
+      "id": "ternary-bonsai-8b-q2g64-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/prism-ml/Ternary-Bonsai-8B-gguf",
+      "baseModel": "Qwen/Qwen3-8B",
+      "revision": "c2aefbeb4b24469cd11579c3384b990404c17a30",
+      "format": "GGUF",
+      "quantization": "Q2_0_g64",
+      "quantizer": "Prism ML community ternary training and GGUF conversion",
+      "conversionRuntime": "Q2_0_g64 mainline-compatible per GitHub guide; local compatibility pending",
+      "files": [
+        {
+          "name": "Ternary-Bonsai-8B-Q2_0_g64.gguf",
+          "upstreamReportedSizeBytes": 2310125920,
+          "expectedUpstreamSha256": "e17b298d84ee78797916ae5c2ecc8211469cc65cccfe3080cd9a9bb503fbc55e",
+          "localVerifiedSha256": ""
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "partially_downloaded",
+      "notes": "第三方三值Qwen3-8B候选。GitHub项目指南称Q2_0_g64格式已进入主线llama.cpp，但模型卡仍保留需Prism分支的旧说明；须以本机实际加载为准。公开基准是模型发布方结果，不代表小K中文代码任务成绩。仅供隔离评测；下载完整文件并匹配上游SHA-256前不得推理或路由。",
+      "localDirectory": "llm/ternary-bonsai-8b-q2g64/c2aefbeb4b24469cd11579c3384b990404c17a30",
+      "requiredForP0": false
     }
   ]
 }
