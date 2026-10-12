@@ -4,6 +4,7 @@ IUIAutomation2
 IUIAutomationElement
 IUIAutomationTreeWalker
 IUIAutomationValuePattern
+IUIAutomationLegacyIAccessiblePattern
 UIA_PATTERN_ID
 UIA_PROPERTY_ID
 UIA_CONTROLTYPE_ID

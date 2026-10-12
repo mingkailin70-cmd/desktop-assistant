@@ -9,7 +9,7 @@
 - 写入前比对目标进程ID、唯一 AutomationId、Edit 控件类型、启用状态、密码标记和空值前置条件。
 - 写入前后核对前台 HWND，并比较 UIA 当前焦点元素。任何显示阶段已经改变前台的情况都会在写值前失败关闭。
 - 不打开其他应用，不读取截图、通知或聊天内容，不注入进程，不调用鼠标、键盘、剪贴板或发送动作。退出时只关闭它自己启动的测试子进程。
-- `--inspect-live-app wechat|qq` 只匹配已知可执行文件路径，再通过 `EnumWindows` 与窗口进程ID枚举该进程的可见顶层窗口；不调用 `Process.MainWindowHandle`。遇到客户端处于托盘/隐藏等状态时，可另行显式运行 `--inspect-live-app-including-hidden wechat|qq`，在最多32个顶层窗口和1,000个UIA节点的上限内扫描同一目标进程的可见/隐藏窗口。两个模式都只查询UIA控件类型、AutomationId是否存在和全部SDK定义的Pattern可用性，并只输出聚合计数；若存在ValuePattern，只查询IsReadOnly、IsEnabled和IsOffscreen元数据；若发现Button/Invoke，只查询IsEnabled、IsOffscreen和AutomationId是否存在。另以 `EnumChildWindows` / `GetClassName` 只统计标准Edit、RichEdit、Button及其它子窗口类别；类别字符串仅在内存中判定，stdout只输出分类数量，不输出精确类名。不会读取窗口标题、控件名称、文本值、聊天正文或截图，不调用SetValue/Invoke/Win32窗口消息等会改动目标的操作，也不写入目标应用；探针进程最多运行20秒，超时只结束探针自身。
+- `--inspect-live-app wechat|qq` 只匹配已知可执行文件路径，再通过 `EnumWindows` 与窗口进程ID枚举该进程的可见顶层窗口；不调用 `Process.MainWindowHandle`。遇到客户端处于托盘/隐藏等状态时，可另行显式运行 `--inspect-live-app-including-hidden wechat|qq`，在最多32个顶层窗口和1,000个UIA节点的上限内扫描同一目标进程的可见/隐藏窗口。两个模式都只查询UIA控件类型、AutomationId是否存在和全部SDK定义的Pattern可用性，并只输出聚合计数；AutomationId仅在内存中与固定功能词匹配，输出`send_action`、`compose_surface`或`message_related`类别计数，不回显原值。若存在ValuePattern，只查询IsReadOnly、IsEnabled和IsOffscreen元数据；若发现Button/Invoke，只查询IsEnabled、IsOffscreen和AutomationId是否存在；若发现LegacyIAccessible，只查询Role编号并映射为固定角色名，不读取Name、Value或DefaultAction。另以 `EnumChildWindows` / `GetClassName` 只统计标准Edit、RichEdit、Button及其它子窗口类别；类别字符串仅在内存中判定，stdout只输出分类数量，不输出精确类名。不会读取窗口标题、控件名称、文本值、聊天正文或截图，不调用SetValue/Invoke/Win32窗口消息等会改动目标的操作，也不写入目标应用；探针进程最多运行20秒，超时只结束探针自身。
 - 实际应用结构探针只用于回答“该窗口暴露了哪些结构化控件能力”。即便发现Edit/ValuePattern或Button/InvokePattern，也不证明它是联系人/消息框或发送按钮，不证明后台写入安全、私聊身份可靠或发送结果可核验。
 
 ## 运行

@@ -233,6 +233,8 @@ internal static class Program
             var patternCounts = new Dictionary<UIA_PATTERN_ID, int>();
             var valuePatternMetadata = new Dictionary<string, int>(StringComparer.Ordinal);
             var invokeButtonMetadata = new Dictionary<string, int>(StringComparer.Ordinal);
+            var automationIdSemanticCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            var legacyRoleCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             var automationIdCount = 0;
             var valuePatternCount = 0;
             var invokePatternCount = 0;
@@ -242,7 +244,8 @@ internal static class Program
             {
                 var root = automation.ElementFromHandle(new HWND(window.Handle));
                 CountStructureOnly(walker, root, 0, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata,
-                    invokeButtonMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
+                    invokeButtonMetadata, automationIdSemanticCounts, legacyRoleCounts,
+                    ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
                 windowsScanned++;
                 if (scannedNodes >= 1000) break;
             }
@@ -264,6 +267,8 @@ internal static class Program
             Console.WriteLine($"supported_uia_patterns={FormatPatternCounts(patternCounts)}");
             Console.WriteLine($"value_pattern_metadata={FormatMetadataCounts(valuePatternMetadata)}");
             Console.WriteLine($"invoke_button_metadata={FormatMetadataCounts(invokeButtonMetadata)}");
+            Console.WriteLine($"automation_id_semantic_matches={FormatMetadataCounts(automationIdSemanticCounts)}");
+            Console.WriteLine($"legacy_accessible_role_ids={FormatMetadataCounts(legacyRoleCounts)}");
             Console.WriteLine($"nodes_with_automation_id={automationIdCount}");
             Console.WriteLine($"edit_value_patterns_available={valuePatternCount}");
             Console.WriteLine($"button_invoke_patterns_available={invokePatternCount}");
@@ -367,6 +372,8 @@ internal static class Program
         Dictionary<UIA_PATTERN_ID, int> patternCounts,
         Dictionary<string, int> valuePatternMetadata,
         Dictionary<string, int> invokeButtonMetadata,
+        Dictionary<string, int> automationIdSemanticCounts,
+        Dictionary<string, int> legacyRoleCounts,
         ref int automationIdCount,
         ref int valuePatternCount,
         ref int invokePatternCount)
@@ -376,8 +383,15 @@ internal static class Program
 
         var controlType = node.get_CurrentControlType();
         controlCounts[controlType] = controlCounts.GetValueOrDefault(controlType) + 1;
-        var hasAutomationId = !string.IsNullOrEmpty(node.get_CurrentAutomationId().ToString());
-        if (hasAutomationId) automationIdCount++;
+        var automationId = node.get_CurrentAutomationId().ToString();
+        var hasAutomationId = !string.IsNullOrEmpty(automationId);
+        if (hasAutomationId)
+        {
+            automationIdCount++;
+            var category = ClassifyAutomationId(automationId!);
+            if (category is not null)
+                automationIdSemanticCounts[category] = automationIdSemanticCounts.GetValueOrDefault(category) + 1;
+        }
 
         foreach (var patternId in Enum.GetValues<UIA_PATTERN_ID>())
         {
@@ -405,6 +419,13 @@ internal static class Program
                         var key = $"{controlType}:read_only={readOnly}:enabled={enabled}:offscreen={offscreen}:automation_id={hasAutomationId}";
                         valuePatternMetadata[key] = valuePatternMetadata.GetValueOrDefault(key) + 1;
                     }
+                    if (patternId == UIA_PATTERN_ID.UIA_LegacyIAccessiblePatternId
+                        && pattern is IUIAutomationLegacyIAccessiblePattern legacyPattern)
+                    {
+                        var roleId = legacyPattern.get_CurrentRole();
+                        var key = FormatLegacyRoleId(roleId);
+                        legacyRoleCounts[key] = legacyRoleCounts.GetValueOrDefault(key) + 1;
+                    }
                 }
             }
             catch (COMException)
@@ -417,10 +438,41 @@ internal static class Program
         while (child is not null && scannedNodes < 1000)
         {
             CountStructureOnly(walker, child, depth + 1, ref scannedNodes, controlCounts, patternCounts, valuePatternMetadata,
-                invokeButtonMetadata, ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
+                invokeButtonMetadata, automationIdSemanticCounts, legacyRoleCounts,
+                ref automationIdCount, ref valuePatternCount, ref invokePatternCount);
             child = walker.GetNextSiblingElement(child);
         }
     }
+
+    private static string? ClassifyAutomationId(string automationId)
+    {
+        var value = automationId.ToLowerInvariant();
+        if (value.Contains("send", StringComparison.Ordinal) || value.Contains("submit", StringComparison.Ordinal)
+            || value.Contains("发送", StringComparison.Ordinal) || value.Contains("提交", StringComparison.Ordinal))
+            return "send_action";
+        if (value.Contains("compose", StringComparison.Ordinal) || value.Contains("input", StringComparison.Ordinal)
+            || value.Contains("editor", StringComparison.Ordinal) || value.Contains("textinput", StringComparison.Ordinal)
+            || value.Contains("输入", StringComparison.Ordinal) || value.Contains("编辑", StringComparison.Ordinal))
+            return "compose_surface";
+        if (value.Contains("message", StringComparison.Ordinal) || value.Contains("msg", StringComparison.Ordinal)
+            || value.Contains("消息", StringComparison.Ordinal) || value.Contains("会话", StringComparison.Ordinal))
+            return "message_related";
+        return null;
+    }
+
+    private static string FormatLegacyRoleId(uint roleId) => roleId switch
+    {
+        0x0001 => "TITLEBAR",
+        0x0002 => "MENUBAR",
+        0x000A => "CLIENT",
+        0x000C => "MENUITEM",
+        0x0010 => "PANE",
+        0x0021 => "LIST",
+        0x0022 => "LISTITEM",
+        0x002A => "TEXT",
+        0x002B => "PUSHBUTTON",
+        _ => $"ROLE_0x{roleId:X4}"
+    };
 
     private static string FormatControlCounts(Dictionary<UIA_CONTROLTYPE_ID, int> counts)
     {
