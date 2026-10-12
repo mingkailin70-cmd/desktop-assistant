@@ -11,6 +11,16 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 Jeff 小型决策模型与社区权重路线
+
+- 项目：[firelex/jeff](https://github.com/firelex/jeff)，GitHub页面标注MIT。项目提供约0.8B的选择型/System 1模型、可切换LoRA适配器，以及PyTorch/llama.cpp路线；模型负责在显式给出的有限选项中选择并给出校准概率，不负责自由文本规划或执行动作。
+- 与小K的结合点：可以研究为ToolBroker上游的低成本提案排序器，例如在“只读查找/询问用户/交给主模型/拒绝”这类固定候选间做分类；ToolBroker仍重新核验目标、权限与副作用。它不能修改策略、扩展动作清单或批准发送。
+- 社区`Jeff-Code`适配器把Jeff用于Qwen3.8编码代理的只读信息收集和思考路由。公开评估自述62.4%对62.8% pass rate、平均任务用时0.68倍；但测在Apple M4 Max和外部编码基准，不是小K的本机结果。该整套编码代理是Pi/bash路线，不直接兼容小K的C#后台ToolBroker。
+- 许可与权重：Jeff代码仓库许可为MIT；`mstrasser/jeff-adapter-code`卡片将适配器标为Apache-2.0并提供对应GGUF仓库。但它同时注明若干会话/基准训练数据许可证仍待确认，因此编码适配器先列研究、不下载、不分发；若以后审查完整，仍需固定revision、文件SHA-256、GGUF/LoRA兼容性并在小K固定任务集重测。
+- 其他社区权重中，`Shockem/Qwen3.8-27b-Terse-Coder-LoRA`卡片标注Apache-2.0，称通过DPO压缩编码推理长度，适配器约228 MB；但需要Qwen3.8-27B底模，运行时和中文代码任务效果未证实。`khazarai/Qwen3.8-27B-Fable-5-Coding-Distilled-GGUF`卡片仍将数据组成/来源与许可证继承标为待核实，暂不纳入可下载评测集。
+- 结论：把Jeff作为“小型专用决策模型”技术路线观察，把Terse-Coder列为27B编码时延实验候选；全部保持在隔离候选层。社区榜单、作者自报分数或仓库星数只能帮助筛选，不能作为小K验收证据。本轮只读GitHub/Hugging Face公开代码、模型卡和文件页，未克隆、下载权重、改运行配置或增加依赖。
+- 来源：[Jeff GitHub项目](https://github.com/firelex/jeff)、[Jeff-Code训练与数据许可说明](https://huggingface.co/mstrasser/jeff-adapter-code)、[Terse-Coder LoRA模型卡](https://huggingface.co/Shockem/Qwen3.8-27b-Terse-Coder-LoRA)、[Fable Coding-Distilled模型卡](https://huggingface.co/khazarai/Qwen3.8-27B-Fable-5-Coding-Distilled-GGUF)。
+
 ## 2026-10-12 微软 UFO² Windows 桌面代理架构
 
 - 项目：[microsoft/UFO](https://github.com/microsoft/UFO)，本次检查固定在`main`提交`a795552d976c4c019d7c2f778a0effb5cef7de6b`；仓库许可证为MIT。仓库当前README将UFO²称为稳定的单Windows设备路线，并介绍UIA、Win32、WinCOM、本机应用API和GUI动作混合方案，以及HostAgent协调器、按应用隔离的AppAgent、状态机和MCP动作服务器。
