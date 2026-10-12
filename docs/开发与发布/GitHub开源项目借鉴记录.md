@@ -422,6 +422,13 @@ GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现�
 
 来源：[deskpet3d README](https://github.com/woooooooooolf/deskpet3d/blob/main/README_EN.md)、[deskpet3d许可证](https://github.com/woooooooooolf/deskpet3d/blob/main/LICENSE)、[SixOfFive/DesktopPet README](https://github.com/SixOfFive/DesktopPet)、[Godot Desktop Pet README](https://github.com/kirbycope/godot-desktop-pet)。仓库信息按2026-10-12公开页面核查；本轮只读，没有克隆、构建、运行或下载候选。
 
+## 2026-10-13 社区GUI视觉模型：GELab-Zero
+
+- GitHub仓库`stepfun-ai/gelab-zero`标注MIT，并自述包含本地推理工程和4B GUI Agent；关联的`GELab-Zero-4B-preview`模型卡标Apache-2.0、约4B参数、BF16，底模为`Qwen/Qwen3-VL-4B-Instruct`，标记支持中文/英语。项目报告AndroidDaily静态动作准确率73.4%、AndroidWorld成功率75.86%，均为项目方结果，不代表Windows或小K实测。[GitHub中文说明](https://github.com/stepfun-ai/gelab-zero/blob/main/README_CN.md)、[模型权重与许可](https://huggingface.co/stepfun-ai/GELab-Zero-4B-preview)
+- 它的执行链路依赖Android设备与ADB，动作表含点击、唤醒、输入、滑动等，演示与评测也是手机App；因此不直接接入小K的Windows操作链路，也不把“视觉GUI Agent”推断成后台执行、不抢前台焦点。与小K有关的研究仅限后续将其量化视觉模型作为本地屏幕理解候选，在资源允许时用合成或脱敏画面测控件识别/状态总结；必须禁用坐标/键鼠动作和自动化循环，由ToolBroker独立产生并核验动作。
+- 当前不下载、不运行、不加入模型锁。BF16体积与桌面截图质量/延迟尚未在本机测量，量化GGUF虽有社区转换选项但会有精度损失，固定revision/散列与llama.cpp b11259兼容性待核。活跃GPU/系统余量不足以证明安全运行窗口；下载与运行都等候独立资源评估。模型权重仓库在Hugging Face，GitHub主要提供实现与适配链路；这符合“可以从GitHub找社区项目”的研究方向，但GitHub源码不等同权重托管位置。
+- **决策：** 作为视觉理解研究线，不进入编程主模型候选排序、不替代UIA/API、不驱动副作用。它若不能在量化、Windows窗口观察和空闲资源条件下给出可靠结果，就淘汰。
+
 ## 2026-10-12 UIA文本写入实现更新
 
 本节更新前文“生产UI工具仍只读、尚未接入写入”的历史状态；此前证据只涵盖隔离诊断工具，不包含本次新增的正式Host写入路径。
