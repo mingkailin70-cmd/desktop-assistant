@@ -38,12 +38,28 @@ internal static class TaskHistoryWindowUiProbe
         var dispatcher = Dispatcher.CurrentDispatcher;
         var sample = new TaskHistoryEntry(
             "task:offscreen-probe", Guid.NewGuid(), "合成任务 · 1234abcd", "结果待核对",
-            DateTimeOffset.UtcNow, "合成恢复说明：请核对目标状态；不会自动重试。", false,
+            DateTimeOffset.UtcNow, "合成恢复说明：请核对目标状态；不会自动重试。", true,
             "合成当前步骤", "合成目标范围", "合成后台模式", "合成下一步");
+        var currentSample = sample;
+        var cancelCalls = 0;
+        Guid? cancelledTaskId = null;
         Task<IReadOnlyList<TaskHistoryEntry>> LoadHistory(CancellationToken _) =>
-            Task.FromResult<IReadOnlyList<TaskHistoryEntry>>([sample]);
+            Task.FromResult<IReadOnlyList<TaskHistoryEntry>>([currentSample]);
         IReadOnlyList<ApprovalInboxEntry> LoadApprovals() => [];
-        var window = new TaskHistoryWindow(LoadHistory, _ => Task.FromResult(false),
+        Task<bool> CancelTask(Guid taskId)
+        {
+            cancelCalls++;
+            cancelledTaskId = taskId;
+            currentSample = currentSample with
+            {
+                State = "取消请求中",
+                CanCancel = false,
+                CurrentStep = "正在安全停止"
+            };
+            return Task.FromResult(true);
+        }
+
+        var window = new TaskHistoryWindow(LoadHistory, CancelTask,
             LoadApprovals, (_, _) => false)
         {
             ShowActivated = false,
@@ -104,6 +120,21 @@ internal static class TaskHistoryWindowUiProbe
                 })
                     if (!texts.Any(text => text.Contains(value, StringComparison.Ordinal)))
                         failures.Add($"任务项没有显示合成字段：{value}");
+
+                var cancelButton = Descendants(item).OfType<Button>()
+                    .FirstOrDefault(button => string.Equals(button.Content as string, "取消", StringComparison.Ordinal));
+                if (cancelButton is null || !cancelButton.IsEnabled)
+                {
+                    failures.Add("可取消任务没有显示已启用的取消按钮。");
+                    return;
+                }
+                cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cancelButton));
+                if (cancelCalls != 1 || cancelledTaskId != sample.TaskId)
+                    failures.Add("取消按钮没有把正确任务ID交给取消入口。");
+                if (historyList.ItemsSource is not IEnumerable<TaskHistoryEntry> refreshed
+                    || refreshed.SingleOrDefault()?.State != "取消请求中"
+                    || refreshed.SingleOrDefault()?.CanCancel != false)
+                    failures.Add("取消回调后任务列表没有刷新到当前取消状态。");
 
                 if (GetForegroundWindow() != foregroundBefore)
                     failures.Add("打开离屏任务中心改变了前台窗口。");
