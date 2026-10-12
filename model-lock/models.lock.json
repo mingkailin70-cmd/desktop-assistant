@@ -889,11 +889,11 @@
           "name": "Ternary-Bonsai-8B-Q2_0_g64.gguf",
           "upstreamReportedSizeBytes": 2310125920,
           "expectedUpstreamSha256": "e17b298d84ee78797916ae5c2ecc8211469cc65cccfe3080cd9a9bb503fbc55e",
-          "localVerifiedSha256": ""
+          "localVerifiedSha256": "e17b298d84ee78797916ae5c2ecc8211469cc65cccfe3080cd9a9bb503fbc55e"
         }
       ],
       "license": "apache-2.0",
-      "status": "partially_downloaded",
+      "status": "downloaded_and_verified",
       "notes": "第三方三值Qwen3-8B候选。GitHub项目指南称Q2_0_g64格式已进入主线llama.cpp，但模型卡仍保留需Prism分支的旧说明；须以本机实际加载为准。公开基准是模型发布方结果，不代表小K中文代码任务成绩。仅供隔离评测；下载完整文件并匹配上游SHA-256前不得推理或路由。",
       "localDirectory": "llm/ternary-bonsai-8b-q2g64/c2aefbeb4b24469cd11579c3384b990404c17a30",
       "requiredForP0": false
