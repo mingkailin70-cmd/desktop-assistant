@@ -18,6 +18,11 @@ namespace XiaoK.Inference;
 /// </summary>
 public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
 {
+    private const int JobObjectCpuRateControlInformationClass = 15;
+    private const uint JobCpuRateControlEnable = 0x00000001;
+    private const uint JobCpuRateControlHardCap = 0x00000004;
+    // Windows expresses the hard cap as percentage * 100; background inference gets at most 25% of host CPU.
+    private const uint BackgroundCpuRateLimit = 2_500;
     private const string ManifestName = "llama-runtime.json";
     private const string RuntimeFileName = "llama-server.exe";
     private const string RuntimeVersion = "b11259";
@@ -374,7 +379,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             startInfo.ArgumentList.Add(_gpuLayers.ToString(System.Globalization.CultureInfo.InvariantCulture));
             ConfigureEnvironment(startInfo, Path.GetDirectoryName(_runtimePath)!);
 
-            _job = CreateKillOnCloseJob();
+            _job = CreateKillOnCloseJob(priority);
             _process = Process.Start(startInfo) ?? throw new HttpRequestException("无法启动本地模型运行时。");
             var processHandle = OpenProcess(0x0001 | 0x0100, false, (uint)_process.Id);
             if (processHandle == IntPtr.Zero)
@@ -415,6 +420,11 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         if (process is null || process.HasExited)
             throw new InvalidOperationException("本地模型进程不可用，未执行推理。");
 
+        var job = _job;
+        if (job is null || job.IsInvalid || job.IsClosed)
+            throw new InvalidOperationException("本地模型作业对象不可用，未执行推理。");
+
+        ConfigureJobCpuLimit(job, priority);
         process.PriorityClass = ModelWorkloadPriorityPolicy.ToProcessPriorityClass(priority);
     }
 
@@ -630,7 +640,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         string ModelId, string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB,
         long MinimumAvailableSystemMemoryMiB = 0);
 
-    private static SafeJobHandle CreateKillOnCloseJob()
+    private static SafeJobHandle CreateKillOnCloseJob(ModelWorkloadPriority priority)
     {
         var job = CreateJobObjectW(IntPtr.Zero, null);
         if (job.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "无法创建模型进程回收作业。");
@@ -644,7 +654,38 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             job.Dispose();
             throw new Win32Exception(error, "无法配置 Host 退出时回收模型进程。");
         }
+
+        try { ConfigureJobCpuLimit(job, priority); }
+        catch
+        {
+            job.Dispose();
+            throw;
+        }
+
         return job;
+    }
+
+    private static void ConfigureJobCpuLimit(SafeJobHandle job, ModelWorkloadPriority priority)
+    {
+        var limit = priority == ModelWorkloadPriority.Background
+            ? new JobObjectCpuRateControlInformation
+            {
+                ControlFlags = JobCpuRateControlEnable | JobCpuRateControlHardCap,
+                CpuRate = BackgroundCpuRateLimit
+            }
+            : new JobObjectCpuRateControlInformation();
+
+        if (!SetInformationJobObject(job, JobObjectCpuRateControlInformationClass,
+                ref limit, (uint)Marshal.SizeOf<JobObjectCpuRateControlInformation>()))
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                "无法应用模型进程 CPU 配额；为避免后台推理争抢处理器，已拒绝启动或继续推理。");
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JobObjectCpuRateControlInformation
+    {
+        public uint ControlFlags;
+        public uint CpuRate;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -695,6 +736,11 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetInformationJobObject(SafeJobHandle job, int informationClass,
         ref JobObjectExtendedLimitInformation information, uint informationLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(SafeJobHandle job, int informationClass,
+        ref JobObjectCpuRateControlInformation information, uint informationLength);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

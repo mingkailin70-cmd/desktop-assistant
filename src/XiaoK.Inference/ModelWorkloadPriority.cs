@@ -9,7 +9,7 @@ public enum ModelWorkloadPriority
     Background
 }
 
-/// <summary>将后台模型进程降为低于普通优先级，交互请求恢复普通优先级。</summary>
+/// <summary>标记模型租约的前台优先级；运行时还需给后台进程施加 CPU 硬上限。</summary>
 public static class ModelWorkloadPriorityPolicy
 {
     public static ProcessPriorityClass ToProcessPriorityClass(ModelWorkloadPriority priority) => priority switch
