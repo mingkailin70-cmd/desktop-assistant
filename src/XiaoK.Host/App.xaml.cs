@@ -63,6 +63,15 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        var browserPublicSmokeRequested = e.Args.Contains("--browser-public-smoke", StringComparer.OrdinalIgnoreCase);
+        if (browserPublicSmokeRequested
+            && !BrowserSessionDiagnosticPolicy.CanRunPublicSmoke(e.Args, WindowsPackageIdentity.IsPresent))
+        {
+            Environment.ExitCode = 2;
+            Shutdown();
+            return;
+        }
+
         RestoreMessageId = RegisterWindowMessage(RestoreMessageName);
         ShutdownMessageId = RegisterWindowMessage(ShutdownMessageName);
 
@@ -83,7 +92,7 @@ public partial class App : System.Windows.Application
             e.Args, IsStartupTaskActivation());
         if (!_ownsMutex)
         {
-            if (browserSessionSmokeRequested) Environment.ExitCode = 3;
+            if (browserSessionSmokeRequested || browserPublicSmokeRequested) Environment.ExitCode = 3;
             else if (!startInTray) RestoreExistingInstance();
             Shutdown();
             return;
@@ -130,6 +139,33 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (browserPublicSmokeRequested)
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(65));
+                await using var runtime = new AssistantRuntime(new DiagnosticsApprovalPresenter());
+                Environment.ExitCode = await runtime.RunPublicBrowserBackgroundSmokeAsync(timeout.Token);
+                Console.Out.WriteLine($"browserPublicSmokeExit={Environment.ExitCode}");
+                Console.Out.Flush();
+            }
+            catch (OperationCanceledException)
+            {
+                Environment.ExitCode = 20;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException
+                or UnauthorizedAccessException or TimeoutException or System.ComponentModel.Win32Exception
+                or System.Net.Http.HttpRequestException or InvalidDataException or ArgumentException)
+            {
+                Environment.ExitCode = 21;
+            }
+            finally
+            {
+                Shutdown();
+            }
+            return;
+        }
+
         MainWindow = new MainWindow();
         // 桌宠首次出现或登录启动时不抢用户正在使用的窗口。
         MainWindow.ShowActivated = false;
@@ -140,6 +176,12 @@ public partial class App : System.Windows.Application
             MainWindow.Hide();
             MainWindow.Opacity = 1;
         }
+    }
+
+    private sealed class DiagnosticsApprovalPresenter : IApprovalPresenter
+    {
+        public Task<bool> ConfirmAsync(string actionId, string title, string details,
+            CancellationToken cancellationToken, Guid? taskId = null) => Task.FromResult(false);
     }
 
     protected override void OnExit(ExitEventArgs e)

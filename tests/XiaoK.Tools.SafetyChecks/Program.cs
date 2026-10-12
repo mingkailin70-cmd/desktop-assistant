@@ -5181,6 +5181,18 @@ static void CheckStartupWindowVisibilityPolicy()
     Require(!BrowserSessionDiagnosticPolicy.CanRunSyntheticSmoke(
             ["--background", "--browser-session-smoke"], hasPackageIdentity: true),
         "缺少隔离诊断配置时仍允许网页会话诊断。");
+    Require(BrowserSessionDiagnosticPolicy.CanRunPublicSmoke(
+            ["--diagnostics-profile", "--background", "--browser-public-smoke"], hasPackageIdentity: true),
+        "安装包身份、隔离配置和后台参数齐全时，公网网页诊断未放行。");
+    Require(!BrowserSessionDiagnosticPolicy.CanRunPublicSmoke(
+            ["--diagnostics-profile", "--background", "--browser-public-smoke"], hasPackageIdentity: false),
+        "包外启动错误获得了公网网页诊断能力。");
+    Require(!BrowserSessionDiagnosticPolicy.CanRunPublicSmoke(
+            ["--diagnostics-profile", "--browser-public-smoke"], hasPackageIdentity: true),
+        "缺少后台参数时仍允许公网网页诊断。");
+    Require(!BrowserSessionDiagnosticPolicy.CanRunPublicSmoke(
+            ["--background", "--browser-public-smoke"], hasPackageIdentity: true),
+        "缺少隔离诊断配置时仍允许公网网页诊断。");
 }
 
 static void CheckPackagedAndDesktopAppUserModelIds()

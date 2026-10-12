@@ -153,6 +153,113 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     public event Action? MicrophoneStoppedForSessionLock;
     public event Action<Guid, TaskLifecycleState>? UserTaskStateChanged;
 
+    internal async Task<int> RunPublicBrowserBackgroundSmokeAsync(CancellationToken cancellationToken)
+    {
+        const string target = "isolated-public-web-session";
+        const string firstUrl = "https://example.com/";
+        const string secondUrl = "https://example.org/";
+        string? sessionId = null;
+
+        try
+        {
+            var opened = await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                "browser.session.open.v1",
+                [new KeyValuePair<string, string>("url", firstUrl)], target,
+                ToolExpectedOutcome.BrowserSessionOpened), cancellationToken).ConfigureAwait(false);
+            if (!opened.Success || opened.Data is null) return ReportBrowserDiagnosticFailure("open", opened, 30);
+
+            sessionId = ExtractDiagnosticBrowserToken(opened.Data, "会话ID：");
+            var initialSnapshotId = ExtractDiagnosticBrowserToken(opened.Data, "快照ID：");
+            if (sessionId is null || initialSnapshotId is null)
+                return ReportBrowserDiagnosticFailure("open-token", new(false, "", "BROWSER_DIAGNOSTIC_TOKEN_MISSING"), 31);
+
+            var navigated = await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                "browser.session.navigate.v1",
+                [new KeyValuePair<string, string>("session_id", sessionId),
+                    new KeyValuePair<string, string>("snapshot_id", initialSnapshotId),
+                    new KeyValuePair<string, string>("url", secondUrl)], target,
+                ToolExpectedOutcome.BrowserSessionNavigated), cancellationToken).ConfigureAwait(false);
+            if (!navigated.Success || navigated.Data is null) return ReportBrowserDiagnosticFailure("navigate", navigated, 32);
+
+            var currentSnapshotId = ExtractDiagnosticBrowserToken(navigated.Data, "快照ID：");
+            if (currentSnapshotId is null || string.Equals(currentSnapshotId, initialSnapshotId, StringComparison.Ordinal))
+                return ReportBrowserDiagnosticFailure("navigate-token", new(false, "", "BROWSER_DIAGNOSTIC_TOKEN_INVALID"), 33);
+
+            var staleReplay = await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                "browser.session.navigate.v1",
+                [new KeyValuePair<string, string>("session_id", sessionId),
+                    new KeyValuePair<string, string>("snapshot_id", initialSnapshotId),
+                    new KeyValuePair<string, string>("url", firstUrl)], target,
+                ToolExpectedOutcome.BrowserSessionNavigated), cancellationToken).ConfigureAwait(false);
+            if (staleReplay.Success || staleReplay.ErrorCode != "BROWSER_STALE_SNAPSHOT")
+                return ReportBrowserDiagnosticFailure("stale-replay", staleReplay, 34);
+
+            var current = await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                "browser.session.snapshot.v1",
+                [new KeyValuePair<string, string>("session_id", sessionId)], target,
+                ToolExpectedOutcome.BrowserSessionSnapshotReturned), cancellationToken).ConfigureAwait(false);
+            if (!current.Success || current.Data is null
+                || !current.Data.Contains("网址：https://example.org/", StringComparison.Ordinal))
+                return ReportBrowserDiagnosticFailure("snapshot", current, 35);
+
+            var closedSessionId = sessionId;
+            var closed = await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                "browser.session.close.v1",
+                [new KeyValuePair<string, string>("session_id", closedSessionId)], target,
+                ToolExpectedOutcome.BrowserSessionClosed), cancellationToken).ConfigureAwait(false);
+            if (!closed.Success) return ReportBrowserDiagnosticFailure("close", closed, 36);
+            sessionId = null;
+
+            var afterClose = await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                "browser.session.snapshot.v1",
+                [new KeyValuePair<string, string>("session_id", closedSessionId)], target,
+                ToolExpectedOutcome.BrowserSessionSnapshotReturned), cancellationToken).ConfigureAwait(false);
+            return !afterClose.Success && afterClose.ErrorCode == "BROWSER_SESSION_NOT_FOUND"
+                ? 0
+                : ReportBrowserDiagnosticFailure("after-close", afterClose, 37);
+        }
+        finally
+        {
+            if (sessionId is not null)
+            {
+                try
+                {
+                    await _broker.ExecuteBackgroundAsync(ToolBroker.Proposal(
+                        "browser.session.close.v1",
+                        [new KeyValuePair<string, string>("session_id", sessionId)], target,
+                        ToolExpectedOutcome.BrowserSessionClosed), CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or IOException
+                    or UnauthorizedAccessException or TimeoutException or System.ComponentModel.Win32Exception)
+                {
+                    // Diagnostics return the original failure; the runtime disposes the session manager next.
+                }
+            }
+        }
+    }
+
+    private static string? ExtractDiagnosticBrowserToken(string data, string label)
+    {
+        var start = data.IndexOf(label, StringComparison.Ordinal);
+        if (start < 0) return null;
+        start += label.Length;
+        var end = data.IndexOfAny(['\r', '\n'], start);
+        var token = (end < 0 ? data[start..] : data[start..end]).Trim();
+        return IsBrowserSessionTokenShape(token) ? token : null;
+    }
+
+    private static int ReportBrowserDiagnosticFailure(string phase, ToolResult result, int exitCode)
+    {
+        var errorCode = result.ErrorCode;
+        if (string.IsNullOrWhiteSpace(errorCode)
+            || errorCode.Length > 64
+            || errorCode.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
+            errorCode = "UNKNOWN";
+        Console.Out.WriteLine($"browserPublicSmokeFailure=phase:{phase};error:{errorCode}");
+        Console.Out.Flush();
+        return exitCode;
+    }
+
     public Task StartMicrophoneAsync(CancellationToken cancellationToken)
     {
         if (_voiceInference is null) throw new InvalidOperationException(_voiceStatus);
