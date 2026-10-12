@@ -1,3 +1,19 @@
+## v0.1.120.0 R1任务检查点与R0通知时间戳保护（2026-10-13）
+
+此版本将SQLite v7脱敏任务检查点和通知未来时间戳失败关闭打包安装。固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；`XiaoK.Tools.SafetyChecks` 131项通过、0项跳过；`XiaoK.DesktopExperience.Checks` 91项通过。发布使用固定锁文件依赖和仓库自包含`win-x64`发布配置。
+
+签名MSIX为`artifacts\msix-validation\71c23317b9084504bb4c03409e0e32ff\XiaoK-signed-validation.msix`，大小155,776,675字节，SHA-256 `33C23E4D5FF584D1130CD7403F3405011CB0F2E4735382B1EAB1450BF87D3AD7`。SignTool验签0警告、0错误；签名证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已在`LocalMachine\TrustedPeople`，本次未改变信任。证书公钥SHA-256为`0479DC6F13369AEF6E76BD4BA20A2CD80DBAEED667F50E9409DBA8E05C1EDF75`。当前账户安装`MingKaiLin.XiaoK_0.1.120.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版和自包含发布版Host DLL SHA-256均为`838EDBCF1D6A051D38B87579B0F09329075EA7DD5610EC4C8E944DEDAA52B174`。
+
+安装前核对当前Host未运行以及目标签名包/现有证书；`install_xiaok_msix.ps1 -Install`验签后只安装当前账户包，不改证书信任，也不启动应用。安装后设置文件中的微信/QQ监控均为`false`，两个发布者AUMID名单为空，唤醒词为`false`；`XiaoK.Host`与`llama-server`进程均为0。安装后可用RAM约9.61 GiB、RTX 5060 Laptop空闲5,537/8,151 MiB、利用率1%。这些只是安装和资源快照证据，不是小K真实通知、模型推理或任务场景验收。
+
+回滚包为已签名`0.1.119.0`：`artifacts\msix-validation\8f2107645951455db8dddb6e1e5e128f\XiaoK-signed-validation.msix`，155,771,278字节，SHA-256 `7828D37DA8C1E6953A28C77766CC6937D216EAD594BEA83C76E1A890E19F3F02`。如需回滚，先运行`tools\uninstall_xiaok_msix.ps1`移除当前账户注册，再执行：
+
+```powershell
+.\tools\install_xiaok_msix.ps1 -PackagePath 'D:\Desktop\learn\siri\artifacts\msix-validation\8f2107645951455db8dddb6e1e5e128f\XiaoK-signed-validation.msix' -Install
+```
+
+用户数据库、模型和设置位于包外；本次安装器未启动Host，因此本阶段没有验证0.1.120.0界面行为或登录启动恢复。微信自然通知/正文与私聊归属、编码门槛及R0/R1端到端验收仍未完成。
+
 ## v0.1.119.0 通知样本锁屏与授权撤销清理（2026-10-13）
 
 一次性通知样本保留时限为15分钟。Host在UI线程每2秒核对Windows通知访问状态及桌面解锁状态；无法确认授权状态、授权撤销或锁屏时停止采集并清空正文样本。关闭设置页、手动清除和Host退出会更早清理。停止采集但保留样本供本地查看时，最长时限仍持续计时，不能因停止操作取消过期保护。原始样本不进入模型、日志、数据库或文件。该轮未实际读取真实Toast正文；本机锁屏/权限切换及完整15分钟计时仍待用户会话实机验收。
