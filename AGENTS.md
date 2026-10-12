@@ -8,11 +8,11 @@
 
 模型候选来源不限于官方基础权重：可纳入GitHub个人/社区发布的微调、量化和适配器；每项必须核验实际权重位置、底模与固定版本、文件散列、许可证、数据来源及本机兼容性。更大模型的量化版作为隔离候选，必须经过本机资源准入和固定任务集评估后才能讨论切换；Qwen3.8-27B已纳入候选，但仍服从RAM/显存门槛。推理保持本地，不用社区项目的云端回退替代。
 
-## 当前状态与长期待验收项（截至 2026-10-13 06:37 中国标准时间）
+## 当前状态与长期待验收项（截至 2026-10-13 06:51 中国标准时间）
 
 当前账户已安装签名MSIX`0.1.121.0`，状态`Ok`；包大小`155,777,954`字节，SHA-256为`50906F89A623D14A4FE6585BCB29AC80B5BF91E062975BF3871A6CD43030F1E0`，安装版Host DLL SHA-256为`019C971AE4F848E821CEB24895DBC6D733B94A7D7EE757596B54BFEDC7398ECC`。本版包含R1常见任务错误码的隐私安全恢复说明。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已受信，本次未改变证书信任。安装器未启动小K；回滚包`0.1.120.0`保存在`artifacts/msix-validation/71c23317b9084504bb4c03409e0e32ff/XiaoK-signed-validation.msix`，SHA-256为`33C23E4D5FF584D1130CD7403F3405011CB0F2E4735382B1EAB1450BF87D3AD7`。
 
-06:37安装版原始JSON来源诊断访问`Allowed`，枚举43条Toast，仅有QQ/AUMID `QQ`候选3条，没有微信候选；原始UTC时间为`2026-10-12T16:45:11.0548243+00:00`，相对本机UTC `2026-10-12T22:37:36Z`已是旧通知。此前PowerShell帮助脚本把UTC日期反序列化为本地时间后再序列化，导致本地`00:45`被错误贴上`Z`并误报“未来时间戳”；现已修正为输出规范UTC字符串，脚本输出与安装版原始输出一致。诊断只读取来源显示名、AUMID和创建时间，没有读取标题/正文、启动持续监听或保存结果。已安装包设置位于`%LOCALAPPDATA%\Packages\MingKaiLin.XiaoK_g0ndt6g65c8pe\LocalCache\Local\XiaoK\settings.json`；06:31实读为微信/QQ监听关闭、两个AUMID名单为空、唤醒词关闭。安装后Host进程数为0；可用RAM`9.55 GiB`，RTX 5060 Laptop空闲`5,537/8,151 MiB`、利用率`1%`。Qwen3.8大模型候选低于15 GiB RAM准入线，没有加载模型。
+06:51只读来源刷新仍为通知访问`Allowed`、43条Toast、QQ/AUMID `QQ`候选3条、没有微信候选；原始UTC创建时间`2026-10-12T16:45:11.0548243+00:00`是旧通知。PowerShell帮助脚本的时区转换误报已修正。随后对已运行的微信和QQ进程执行只读UIA结构扫描，扫描可见与隐藏顶层窗口且关闭AutoSetFocus：微信可见1窗/3节点、含隐藏窗口17窗/29节点；QQ可见1窗/9节点、含隐藏窗口29窗/159节点。两款客户端扫描均未发现`Edit/ValuePattern`消息输入面或可识别的发送/编辑语义；隐藏窗口存在的通用Button/Invoke模式不能证明其为消息控件。扫描前后前台窗口和UIA焦点不变；没有读取窗口标题、控件名称/值或消息正文，没有截图、输入、保存或启动Host。当前未找到安全的无焦点UIA消息发送路径；这不排除未来受支持的应用API，但发送适配器仍不得接入。通知来源诊断没有读取标题/正文、启动持续监听或保存结果。已安装包设置位于`%LOCALAPPDATA%\Packages\MingKaiLin.XiaoK_g0ndt6g65c8pe\LocalCache\Local\XiaoK\settings.json`；06:31实读为微信/QQ监听关闭、两个AUMID名单为空、唤醒词关闭。Host进程数为0；最近资源快照06:46为可用RAM`11.29 GiB`、RTX 5060 Laptop空闲`5,534/8,151 MiB`、利用率`1%`，低于Qwen3.8候选15 GiB准入线，没有加载模型。GitHub Actions run `38318535340`（提交`b9b3c3e`）Build与Desktop experience checks成功。
 
 06:15阶段包核验：固定SDK 10.0.401 Release全解决方案构建0警告、0错误；`XiaoK.Tools.SafetyChecks` 131项通过、0跳过，`XiaoK.DesktopExperience.Checks` 91项通过。0.1.120.0安装后Host与llama-server仍未运行；微信/QQ监听、白名单和唤醒词设置保持关闭/为空。检查只证明锁定合成回归与安装文件身份一致，不证明微信/QQ真实通知验收。
 
