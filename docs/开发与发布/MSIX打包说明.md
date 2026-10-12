@@ -2,7 +2,7 @@
 
 新增确定性命令“创建PowerPoint：文件名.pptx”，随后提供演示文稿标题、`幻灯片：`标记及逐页 `页标题|要点1|要点2` 内容。最多20页、每页1–8条要点、字段最多280字符，全文最多16,000字符/64 KiB。只创建无宏的纯文本 `.pptx`，不含图片、图表、附件、嵌入部件、外部关系或用户模板。使用已锁定的Open XML SDK 3.5.1在内存生成并验证，再写入固定Exports目录；不覆盖已有文件，不启动PowerPoint，也不操作桌面输入。预发布取消会清理临时文件；发布后核验不确定时要求人工检查并禁止自动重试。
 
-固定.NET SDK 10.0.401全解决方案Release构建0警告、0错误；PowerPoint专项检查通过，Windows完整安全套件126项通过、0项跳过。锁定win-x64自包含发布成功，包内含固定SDK的现有依赖，没有添加新包。签名MSIX `artifacts\msix-validation\8f535b3ae7a5431c9fc5a8bf244845f9\XiaoK-signed-validation.msix`，147,162,666字节，SHA-256 `1F3B37DA66EFF6AF72F7907BF5186BD5BDE685B14C78522E95D4706F1E37E1FD`。SignTool验签0警告、0错误；签名证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本轮未更改证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.114.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与自包含发布版Host DLL SHA-256均为`432D0508D8795A8E1A986A59AE7567A990110A63DBD6C9E1A1C1721918C928AE`。安装未启动Host或llama-server，也未在PowerPoint应用中打开输出文件。安装版普通用户命令及Office实际打开仍待验收；R0通知和模型准入、六场景端到端、长期运行状态不变。
+固定.NET SDK 10.0.401全解决方案Release构建0警告、0错误；PowerPoint专项检查通过，Windows完整安全套件126项通过、0项跳过。锁定win-x64自包含发布成功，包内含固定SDK的现有依赖，没有添加新包。签名MSIX `artifacts\msix-validation\8f535b3ae7a5431c9fc5a8bf244845f9\XiaoK-signed-validation.msix`，147,162,666字节，SHA-256 `1F3B37DA66EFF6AF72F7907BF5186BD5BDE685B14C78522E95D4706F1E37E1FD`。SignTool验签0警告、0错误；签名证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本轮未更改证书信任。当前账户已安装`MingKaiLin.XiaoK_0.1.114.0_neutral__g0ndt6g65c8pe`、状态`Ok`；安装版与自包含发布版Host DLL SHA-256均为`432D0508D8795A8E1A986A59AE7567A990110A63DBD6C9E1A1C1721918C928AE`。安装未启动Host或llama-server，也未在PowerPoint应用中打开输出文件。阶段提交`cf951fa`对应GitHub Actions Build #505成功（[运行记录](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38190807057)）。安装版普通用户命令及Office实际打开仍待验收；R0通知和模型准入、六场景端到端、长期运行状态不变。
 
 ## v0.1.113.0 Roslyn C# 声明索引（2026-10-12）
 

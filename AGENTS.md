@@ -8,7 +8,7 @@
 
 ## 当前状态与长期待验收项（截至 2026-10-12）
 
-当前账户已安装签名MSIX `0.1.114.0`，包147,162,666字节、SHA-256 `1F3B37DA66EFF6AF72F7907BF5186BD5BDE685B14C78522E95D4706F1E37E1FD`；安装版与发布版Host DLL SHA-256均为`432D0508D8795A8E1A986A59AE7567A990110A63DBD6C9E1A1C1721918C928AE`。新增纯文本PowerPoint后台创建，沿用固定Open XML SDK 3.5.1，不启动Office或操作前台。自包含发布、签名及当前账户安装成功，SignTool验签0警告/0错误；证书信任未改，Host和llama-server进程均为0。固定SDK全解决方案Release构建0警告/0错误；Windows完整安全套件126项通过、0项跳过，PPTX专项通过。安装版命令和PowerPoint实际打开仍待用户路径验收。当前评测组装下Qwen3.5-4B复筛15题通过6题、JEV-9B复筛17题通过8题、Gemma 4 E4B复筛13题通过4题；都在理论最高31/40时按早停规则停止，没有完成40题或进入生产。R0通知和编码准入、桌宠语音、六场景及长期运行验收仍未完成。
+当前账户已安装签名MSIX `0.1.114.0`，包147,162,666字节、SHA-256 `1F3B37DA66EFF6AF72F7907BF5186BD5BDE685B14C78522E95D4706F1E37E1FD`；安装版与发布版Host DLL SHA-256均为`432D0508D8795A8E1A986A59AE7567A990110A63DBD6C9E1A1C1721918C928AE`。新增纯文本PowerPoint后台创建，沿用固定Open XML SDK 3.5.1，不启动Office或操作前台。自包含发布、签名及当前账户安装成功，SignTool验签0警告/0错误；证书信任未改，Host和llama-server进程均为0。固定SDK全解决方案Release构建0警告/0错误；Windows完整安全套件126项通过、0项跳过，PPTX专项通过。阶段提交`cf951fa`已推送，GitHub Actions Build #505成功（https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38190807057）。安装版命令和PowerPoint实际打开仍待用户路径验收。当前评测组装下Qwen3.5-4B复筛15题通过6题、JEV-9B复筛17题通过8题、Gemma 4 E4B复筛13题通过4题；都在理论最高31/40时按早停规则停止，没有完成40题或进入生产。R0通知和编码准入、桌宠语音、六场景及长期运行验收仍未完成。
 
 当前源码的编程代理文件选择使用Roslyn语法树，从已脱敏C#源码提取命名空间、类型和方法声明；每文件最多5个符号，清单总长不超过12,000字符。Roslyn解析每文件不超过128 Ki字符、单任务累计不超过2 Mi字符。模型仍只能输出清单中的最多4条精确路径。此变化不扩大工具权限；完整40题评估尚未运行，不能据此声称代码任务通过率提高。GitHub参考筛选含Aider、Roslyn、Ghost与Rynne；不接入其MCP或宽权限工具面，具体判断见GitHub开源项目借鉴记录。
 
