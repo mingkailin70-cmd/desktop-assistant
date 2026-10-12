@@ -5,8 +5,20 @@ namespace XiaoK.Core;
 
 public enum TaskLifecycleState { Queued, Planning, AwaitingApproval, Running, Verifying, Completed, Failed, Cancelled, OutcomeUncertain }
 
+/// <summary>粗粒度的持久任务检查点；只记录固定阶段，不记录请求、目标路径或模型文本。</summary>
+public enum TaskCheckpointStage
+{
+    None = 0,
+    Accepted = 1,
+    Planning = 2,
+    ActionStarted = 3,
+    ApprovalPending = 4,
+    Terminal = 5
+}
+
 public sealed record TaskRecord(Guid Id, string Kind, string Summary, TaskLifecycleState Status, DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null, Guid? HostSessionId = null);
+    DateTimeOffset UpdatedAtUtc, string? Result = null, string? ErrorCode = null, Guid? HostSessionId = null,
+    TaskCheckpointStage CheckpointStage = TaskCheckpointStage.None);
 public sealed record ApprovalAuditRecord(Guid Id, string ActionId, string Outcome, DateTimeOffset CreatedAtUtc);
 
 [Flags]

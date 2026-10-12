@@ -4,6 +4,7 @@ namespace XiaoK.Core;
 public static class TaskHistoryRecoveryPolicy
 {
     public const string HostRestartedErrorCode = "HOST_RESTARTED";
+    public const string HostRestartedBeforeActionErrorCode = "HOST_RESTARTED_BEFORE_ACTION";
     public const string ApprovalNotRestoredErrorCode = "APPROVAL_NOT_RESTORED";
 
     public static TaskRecord ForDisplay(TaskRecord task, Guid currentHostSessionId)
@@ -26,11 +27,24 @@ public static class TaskHistoryRecoveryPolicy
 
         if (!IsInFlight(task.Status)) return task;
 
+        if (task.HostSessionId is not null
+            && (task.CheckpointStage is TaskCheckpointStage.Accepted or TaskCheckpointStage.Planning))
+        {
+            return task with
+            {
+                Status = TaskLifecycleState.Failed,
+                Result = null,
+                ErrorCode = HostRestartedBeforeActionErrorCode,
+                CheckpointStage = TaskCheckpointStage.Terminal
+            };
+        }
+
         return task with
         {
             Status = TaskLifecycleState.OutcomeUncertain,
             Result = null,
-            ErrorCode = HostRestartedErrorCode
+            ErrorCode = HostRestartedErrorCode,
+            CheckpointStage = TaskCheckpointStage.Terminal
         };
     }
 

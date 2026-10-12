@@ -697,13 +697,16 @@ try
     passed.Add("SQLite 任务存储规范化状态字段、丢弃结果正文并可创建一致性备份");
 
     await CheckSqliteV5ToV6SessionRecoveryMigrationAsync(tempRoot);
-    passed.Add("SQLite v5 到 v6 迁移先备份并将旧会话未完成任务标为待核对");
+    passed.Add("SQLite v5 到 v7 迁移先备份并将旧会话未完成任务标为待核对");
+
+    await CheckSqliteV6ToV7CheckpointMigrationAsync(tempRoot);
+    passed.Add("SQLite v6 到 v7 迁移保守标记旧任务，并能往返保存脱敏执行检查点");
 
     await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
     await CheckSqliteContactReplyStyleMigrationAsync(tempRoot);
-    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1/v2/v3/v4 到 v6 架构备份迁移");
+    passed.Add("SQLite 保存脱敏审批审计和联系人偏好，支持一致性备份及 v1-v6 到 v7 架构迁移");
 
     await CheckSqlitePersonalDataCleanupKeepsMigrationMarkersAsync(tempRoot);
     passed.Add("本地历史清理删除 SQLite 个人记录并保留迁移标记，重启后不会从旧源重新导入");
@@ -3401,12 +3404,13 @@ static async Task CheckSqliteTaskStoreRoundTripAndBackupAsync(string root)
     const string privateSentinel = "PRIVATE_CHAT_BODY_SENTINEL_DO_NOT_STORE";
     var store = new SqliteTaskStore(databasePath);
     await store.SaveAsync(new TaskRecord(id, "chat", "用户发来的完整私聊正文", TaskLifecycleState.Completed,
-        now.AddMinutes(-1), now, Result: privateSentinel, ErrorCode: "SAFE_TEST", HostSessionId: hostSessionId), CancellationToken.None);
+        now.AddMinutes(-1), now, Result: privateSentinel, ErrorCode: "SAFE_TEST", HostSessionId: hostSessionId,
+        CheckpointStage: TaskCheckpointStage.Terminal), CancellationToken.None);
 
     var recent = await store.GetRecentAsync(20, CancellationToken.None);
     Require(recent.Count == 1 && recent[0].Id == id && recent[0].Kind == "chat"
         && recent[0].Summary == "本地对话" && recent[0].Result is null && recent[0].ErrorCode == "SAFE_TEST"
-        && recent[0].HostSessionId == hostSessionId,
+        && recent[0].HostSessionId == hostSessionId && recent[0].CheckpointStage == TaskCheckpointStage.Terminal,
         "SQLite 任务往返写入保留了非规范字段或遗漏了必要状态。");
 
     var expectedCategories = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -3499,7 +3503,7 @@ static async Task CheckSqliteV5ToV6SessionRecoveryMigrationAsync(string root)
         && byId[states[TaskLifecycleState.Completed]].ErrorCode == "OLD_ERROR"
         && byId[states[TaskLifecycleState.Cancelled]].Status == TaskLifecycleState.Cancelled
         && byId[states[TaskLifecycleState.Cancelled]].ErrorCode == "OLD_ERROR",
-        "SQLite v5 到 v6 迁移没有先备份、保守标记旧会话未完成任务或保留终态任务。");
+        "SQLite v5 到 v7 迁移没有先备份、保守标记旧会话未完成任务或保留终态任务。");
 
     var newSessionId = Guid.NewGuid();
     var newTask = new TaskRecord(Guid.NewGuid(), "app", "不得保存自由文本", TaskLifecycleState.Running,
@@ -3509,7 +3513,55 @@ static async Task CheckSqliteV5ToV6SessionRecoveryMigrationAsync(string root)
         .Single(task => task.Id == newTask.Id);
     Require(roundTripped.HostSessionId == newSessionId
         && TaskHistoryRecoveryPolicy.ForDisplay(roundTripped, newSessionId) == roundTripped,
-        "v6 迁移后无法保存并读取当前Host会话标识。");
+        "v7 迁移后无法保存并读取当前Host会话标识。");
+}
+
+static async Task CheckSqliteV6ToV7CheckpointMigrationAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-v6-to-v7");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var now = DateTimeOffset.UtcNow;
+    var priorSession = Guid.NewGuid();
+    var rows = new[]
+    {
+        new TaskRecord(Guid.NewGuid(), "app", "ignored", TaskLifecycleState.Queued, now, now,
+            HostSessionId: priorSession, CheckpointStage: TaskCheckpointStage.Accepted),
+        new TaskRecord(Guid.NewGuid(), "file", "ignored", TaskLifecycleState.Planning, now, now,
+            HostSessionId: priorSession, CheckpointStage: TaskCheckpointStage.Planning),
+        new TaskRecord(Guid.NewGuid(), "file-copy", "ignored", TaskLifecycleState.Running, now, now,
+            HostSessionId: priorSession, CheckpointStage: TaskCheckpointStage.ActionStarted),
+        new TaskRecord(Guid.NewGuid(), "send", "ignored", TaskLifecycleState.AwaitingApproval, now, now,
+            HostSessionId: priorSession, CheckpointStage: TaskCheckpointStage.ApprovalPending),
+        new TaskRecord(Guid.NewGuid(), "chat", "ignored", TaskLifecycleState.Completed, now, now,
+            HostSessionId: priorSession, CheckpointStage: TaskCheckpointStage.Terminal)
+    };
+    var initial = new SqliteTaskStore(databasePath);
+    foreach (var row in rows) await initial.SaveAsync(row, CancellationToken.None);
+
+    SqliteSchemaFixture.RevertToVersionSix(databasePath);
+    var migrated = new SqliteTaskStore(databasePath);
+    var actual = (await migrated.GetRecentAsync(20, CancellationToken.None)).ToDictionary(task => task.Id);
+    var backupExists = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").Any();
+    var reopened = new SqliteTaskStore(databasePath);
+    Require(backupExists
+        && actual[rows[0].Id].Status == TaskLifecycleState.OutcomeUncertain
+        && actual[rows[0].Id].CheckpointStage == TaskCheckpointStage.ActionStarted
+        && actual[rows[1].Id].Status == TaskLifecycleState.OutcomeUncertain
+        && actual[rows[2].Id].Status == TaskLifecycleState.OutcomeUncertain
+        && actual[rows[3].Id].ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
+        && actual[rows[3].Id].CheckpointStage == TaskCheckpointStage.ApprovalPending
+        && actual[rows[4].Id].Status == TaskLifecycleState.Completed
+        && actual[rows[4].Id].CheckpointStage == TaskCheckpointStage.None
+        && (await reopened.GetRecentAsync(20, CancellationToken.None)).Count == rows.Length,
+        "SQLite v6 到 v7 迁移没有先备份、对旧未完成动作采取保守恢复或保留终态。");
+
+    var newTask = new TaskRecord(Guid.NewGuid(), "file", "ignored", TaskLifecycleState.Planning,
+        now, now, HostSessionId: Guid.NewGuid(), CheckpointStage: TaskCheckpointStage.Planning);
+    await migrated.SaveAsync(newTask, CancellationToken.None);
+    var roundTrip = (await migrated.GetRecentAsync(20, CancellationToken.None)).Single(task => task.Id == newTask.Id);
+    Require(roundTrip.CheckpointStage == TaskCheckpointStage.Planning,
+        "SQLite v7 未能往返保存固定检查点阶段。");
 }
 
 static async Task CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(string root)
@@ -3852,6 +3904,8 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
         processStartedAt.AddMinutes(-1), processStartedAt.AddSeconds(-1), "暂存结果",
         HostSessionId: previousSessionId);
     var staleQueued = stale with { Status = TaskLifecycleState.Queued };
+    var queuedBeforeAction = stale with { Status = TaskLifecycleState.Queued, CheckpointStage = TaskCheckpointStage.Accepted };
+    var planningBeforeAction = stale with { Status = TaskLifecycleState.Planning, CheckpointStage = TaskCheckpointStage.Planning };
     var awaitingApproval = stale with { Status = TaskLifecycleState.AwaitingApproval };
     var staleWithFutureClock = stale with { UpdatedAtUtc = processStartedAt.AddMinutes(5) };
     var unstampedInFlight = stale with { HostSessionId = null, UpdatedAtUtc = processStartedAt.AddMinutes(5) };
@@ -3866,6 +3920,13 @@ static void CheckInterruptedTaskHistoryIsNotReplayed()
     Require(interrupted.Status == TaskLifecycleState.OutcomeUncertain
         && interrupted.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
         && interrupted.Result is null, "上次进程中未结束的任务没有被标为待核对，或保留了旧结果内容。");
+    var interruptedBeforeAction = TaskHistoryRecoveryPolicy.ForDisplay(queuedBeforeAction, currentSessionId);
+    var interruptedWhilePlanning = TaskHistoryRecoveryPolicy.ForDisplay(planningBeforeAction, currentSessionId);
+    Require(interruptedBeforeAction.Status == TaskLifecycleState.Failed
+        && interruptedBeforeAction.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedBeforeActionErrorCode
+        && interruptedWhilePlanning.Status == TaskLifecycleState.Failed
+        && interruptedWhilePlanning.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedBeforeActionErrorCode,
+        "持久检查点未能区分操作开始前中断与可能已产生副作用的任务。");
     var interruptedApproval = TaskHistoryRecoveryPolicy.ForDisplay(awaitingApproval, currentSessionId);
     Require(interruptedApproval.Status == TaskLifecycleState.OutcomeUncertain
         && interruptedApproval.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
@@ -3904,6 +3965,16 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.EffectiveState(TaskLifecycleState.Queued, hasPendingActionConfirmation: true)
             == TaskLifecycleState.Queued,
         "当前进程的待确认动作没有反映在运行中任务状态，或投影影响了非运行中任务。");
+
+    Require(TaskHistoryDisplayPolicy.CheckpointStep(TaskCheckpointStage.Accepted, TaskLifecycleState.Queued)
+            == "已排队；操作尚未开始"
+        && TaskHistoryDisplayPolicy.CheckpointStep(TaskCheckpointStage.Planning, TaskLifecycleState.Planning)
+            == "正在分析请求；具体操作尚未开始"
+        && TaskHistoryDisplayPolicy.CheckpointStep(TaskCheckpointStage.ActionStarted, TaskLifecycleState.OutcomeUncertain)
+            == "操作已开始；结果需要核验"
+        && TaskHistoryDisplayPolicy.CheckpointStep(TaskCheckpointStage.ApprovalPending, TaskLifecycleState.AwaitingApproval)
+            == "等待用户确认；确认不会跨重启恢复",
+        "持久检查点没有给任务中心提供准确的操作阶段说明。");
 
     Require(TaskHistoryDisplayPolicy.TargetScope("file-move").Contains("同卷目标目录", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("file-delete").Contains("回收站", StringComparison.Ordinal)
@@ -9792,6 +9863,17 @@ internal static class SqliteSchemaFixture
         Execute(databasePath, $"PRAGMA user_version={version};");
 
     public static void RevertToVersionFive(string databasePath) => RebuildTasksTableWithoutHostSession(databasePath, 5);
+
+    public static void RevertToVersionSix(string databasePath) => Execute(databasePath,
+        "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_tasks_updated; "
+        + "ALTER TABLE tasks RENAME TO tasks_v7; "
+        + "CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, "
+        + "status INTEGER NOT NULL, created_utc_ticks INTEGER NOT NULL, updated_utc_ticks INTEGER NOT NULL, "
+        + "error_code TEXT NULL, host_session_id TEXT NULL); "
+        + "INSERT INTO tasks(id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id) "
+        + "SELECT id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id FROM tasks_v7; "
+        + "DROP TABLE tasks_v7; CREATE INDEX ix_tasks_updated ON tasks(updated_utc_ticks DESC); "
+        + "PRAGMA user_version=6; COMMIT;");
 
     public static void RevertToVersionTwo(string databasePath)
     {

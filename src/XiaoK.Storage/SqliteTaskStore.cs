@@ -12,7 +12,7 @@ namespace XiaoK.Storage;
 /// </summary>
 public sealed class SqliteTaskStore : ITaskStore
 {
-    private const int CurrentSchemaVersion = 6;
+    private const int CurrentSchemaVersion = 7;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private const string TasksJsonMigrationMarker = "tasks-json-v1";
@@ -127,7 +127,7 @@ public sealed class SqliteTaskStore : ITaskStore
         finally { _gate.Release(); }
     }
 
-    /// <summary>Restores a validated v6 snapshot and retains the current database as a rollback copy.</summary>
+    /// <summary>Restores a validated v7 snapshot and retains the current database as a rollback copy.</summary>
     public async Task<string> RestoreBackupAsync(string backupPath, CancellationToken cancellationToken)
     {
         var source = ValidateDatabasePath(backupPath);
@@ -192,7 +192,8 @@ public sealed class SqliteTaskStore : ITaskStore
             {
                 database.Execute("CREATE TABLE IF NOT EXISTS tasks ("
                     + "id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, status INTEGER NOT NULL, "
-                    + "created_utc_ticks INTEGER NOT NULL, updated_utc_ticks INTEGER NOT NULL, error_code TEXT NULL, host_session_id TEXT NULL);"
+                    + "created_utc_ticks INTEGER NOT NULL, updated_utc_ticks INTEGER NOT NULL, error_code TEXT NULL, host_session_id TEXT NULL, "
+                    + $"checkpoint_stage INTEGER NOT NULL DEFAULT 0 CHECK(checkpoint_stage BETWEEN 0 AND {(int)TaskCheckpointStage.Terminal}));"
                     + "CREATE INDEX IF NOT EXISTS ix_tasks_updated ON tasks(updated_utc_ticks DESC);"
                     + "CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY NOT NULL, completed_utc_ticks INTEGER NOT NULL);"
                     + CreateContactReplyStylesTableSql()
@@ -305,6 +306,35 @@ public sealed class SqliteTaskStore : ITaskStore
             }
         }
 
+        if (version == 6)
+        {
+            database.Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                database.Execute("ALTER TABLE tasks ADD COLUMN checkpoint_stage INTEGER NOT NULL DEFAULT 0 "
+                    + $"CHECK(checkpoint_stage BETWEEN 0 AND {(int)TaskCheckpointStage.Terminal});"
+                    + $"UPDATE tasks SET checkpoint_stage=CASE WHEN status={(int)TaskLifecycleState.AwaitingApproval} "
+                    + $"THEN {(int)TaskCheckpointStage.ApprovalPending} "
+                    + $"WHEN status IN ({(int)TaskLifecycleState.Queued},{(int)TaskLifecycleState.Planning},"
+                    + $"{(int)TaskLifecycleState.Running},{(int)TaskLifecycleState.Verifying}) "
+                    + $"THEN {(int)TaskCheckpointStage.ActionStarted} ELSE {(int)TaskCheckpointStage.None} END;"
+                    + $"UPDATE tasks SET status={(int)TaskLifecycleState.OutcomeUncertain}, "
+                    + $"error_code=CASE WHEN status={(int)TaskLifecycleState.AwaitingApproval} "
+                    + $"THEN '{TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode}' "
+                    + $"ELSE '{TaskHistoryRecoveryPolicy.HostRestartedErrorCode}' END "
+                    + $"WHERE status IN ({(int)TaskLifecycleState.Queued},{(int)TaskLifecycleState.Planning},"
+                    + $"{(int)TaskLifecycleState.AwaitingApproval},{(int)TaskLifecycleState.Running},{(int)TaskLifecycleState.Verifying});"
+                    + "PRAGMA user_version=7;");
+                database.Execute("COMMIT;");
+                version = 7;
+            }
+            catch
+            {
+                TryRollback(database);
+                throw;
+            }
+        }
+
         MigrateLegacyJson(database);
         MigrateLegacyContactReplyStyles(database);
     }
@@ -363,7 +393,8 @@ public sealed class SqliteTaskStore : ITaskStore
             foreach (var task in legacy)
             {
                 if (task is null || !TrySanitize(task, out var sanitized)) continue;
-                InsertOrReplace(database, sanitized);
+                // Legacy JSON has no trustworthy execution checkpoint; never infer that an action did not start.
+                InsertOrReplace(database, sanitized with { CheckpointStage = TaskCheckpointStage.None });
             }
             using (var marker = database.Prepare("INSERT INTO migration_state(name,completed_utc_ticks) VALUES(?1,?2);"))
             {
@@ -576,10 +607,11 @@ public sealed class SqliteTaskStore : ITaskStore
     private void SaveCore(TaskRecord task)
     {
         using var database = SqliteDatabase.Open(_path, create: false);
-        using var statement = database.Prepare("INSERT INTO tasks(id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id) "
-            + "VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET "
+        using var statement = database.Prepare("INSERT INTO tasks(id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id,checkpoint_stage) "
+            + "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(id) DO UPDATE SET "
             + "kind=excluded.kind,summary=excluded.summary,status=excluded.status,created_utc_ticks=excluded.created_utc_ticks,"
-            + "updated_utc_ticks=excluded.updated_utc_ticks,error_code=excluded.error_code,host_session_id=excluded.host_session_id;");
+            + "updated_utc_ticks=excluded.updated_utc_ticks,error_code=excluded.error_code,host_session_id=excluded.host_session_id,"
+            + "checkpoint_stage=excluded.checkpoint_stage;");
         BindTask(statement, task);
         statement.ExpectDone();
     }
@@ -588,7 +620,7 @@ public sealed class SqliteTaskStore : ITaskStore
     {
         if (count == 0) return [];
         using var database = SqliteDatabase.Open(_path, create: false);
-        using var statement = database.Prepare("SELECT id,kind,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id "
+        using var statement = database.Prepare("SELECT id,kind,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id,checkpoint_stage "
             + "FROM tasks ORDER BY updated_utc_ticks DESC LIMIT ?1;");
         statement.BindInt32(1, count);
         var result = new List<TaskRecord>(count);
@@ -615,9 +647,13 @@ public sealed class SqliteTaskStore : ITaskStore
                     throw new InvalidDataException("SQLite 任务表包含无效Host会话标识；已停止读取历史记录。");
                 hostSessionId = parsedSessionId;
             }
+            var checkpointStageValue = statement.ColumnInt32(7);
+            if (!Enum.IsDefined(typeof(TaskCheckpointStage), checkpointStageValue))
+                throw new InvalidDataException("SQLite 任务表包含无效检查点阶段；已停止读取历史记录。");
             var kind = statement.ColumnText(1);
             result.Add(new TaskRecord(id, kind, summary, (TaskLifecycleState)statement.ColumnInt32(2), created, updated,
-                Result: null, ErrorCode: error, HostSessionId: hostSessionId));
+                Result: null, ErrorCode: error, HostSessionId: hostSessionId,
+                CheckpointStage: (TaskCheckpointStage)checkpointStageValue));
         }
         return result;
     }
@@ -754,7 +790,7 @@ public sealed class SqliteTaskStore : ITaskStore
     {
         if (database.ScalarInt32("PRAGMA user_version;") != CurrentSchemaVersion
             || !string.Equals(database.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v6 备份；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v7 备份；活动数据库未替换。");
 
         if (database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';") != 4
             || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger','view');") != 0
@@ -765,14 +801,18 @@ public sealed class SqliteTaskStore : ITaskStore
                 + "('tasks','migration_state','contact_reply_styles','approval_audit');") != 4)
             throw new InvalidDataException("恢复文件含有未知数据库结构；活动数据库未替换。");
 
-        ValidateColumnLayout(database, "tasks", "id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id");
+        ValidateColumnLayout(database, "tasks", "id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id,checkpoint_stage");
         ValidateColumnLayout(database, "migration_state", "name,completed_utc_ticks");
         ValidateColumnLayout(database, "contact_reply_styles", "contact_name_key,contact_name,style_id,source,updated_utc_ticks");
         ValidateColumnLayout(database, "approval_audit", "id,action_id,outcome,created_utc_ticks");
+        var taskSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='tasks';");
+        if (taskSql is null || !taskSql.Contains(
+                $"checkpoint_stage BETWEEN 0 AND {(int)TaskCheckpointStage.Terminal}", StringComparison.Ordinal))
+            throw new InvalidDataException("恢复文件的任务检查点约束与 SQLite v7 不匹配；活动数据库未替换。");
         var auditSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='approval_audit';");
         if (auditSql is null || !auditSql.Contains("'code.patch.apply.v1' AND outcome='confirmed'", StringComparison.Ordinal)
             || !auditSql.Contains("'file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v6 不匹配；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v7 不匹配；活动数据库未替换。");
     }
 
     private static void ValidateColumnLayout(SqliteDatabase database, string table, string expectedColumns)
@@ -875,8 +915,8 @@ public sealed class SqliteTaskStore : ITaskStore
 
     private static void InsertOrReplace(SqliteDatabase database, TaskRecord task)
     {
-        using var statement = database.Prepare("INSERT OR IGNORE INTO tasks(id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id) "
-            + "VALUES(?1,?2,?3,?4,?5,?6,?7,?8);");
+        using var statement = database.Prepare("INSERT OR IGNORE INTO tasks(id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id,checkpoint_stage) "
+            + "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9);");
         BindTask(statement, task);
         statement.ExpectDone();
     }
@@ -891,6 +931,7 @@ public sealed class SqliteTaskStore : ITaskStore
         statement.BindInt64(6, task.UpdatedAtUtc.UtcTicks);
         statement.BindNullableText(7, task.ErrorCode);
         statement.BindNullableText(8, task.HostSessionId?.ToString("D"));
+        statement.BindInt32(9, (int)task.CheckpointStage);
     }
 
     private static TaskRecord Sanitize(TaskRecord task)
@@ -905,6 +946,7 @@ public sealed class SqliteTaskStore : ITaskStore
         sanitized = task;
         if (task.Id == Guid.Empty || task.HostSessionId == Guid.Empty || !TryCategory(task.Kind, out var summary)
             || !Enum.IsDefined(typeof(TaskLifecycleState), task.Status)
+            || !Enum.IsDefined(typeof(TaskCheckpointStage), task.CheckpointStage)
             || task.CreatedAtUtc == default || task.UpdatedAtUtc == default)
             return false;
 

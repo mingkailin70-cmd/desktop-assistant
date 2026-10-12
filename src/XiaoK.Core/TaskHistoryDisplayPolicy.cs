@@ -71,6 +71,30 @@ public static class TaskHistoryDisplayPolicy
         };
     }
 
+    public static string CheckpointStep(TaskCheckpointStage stage, TaskLifecycleState state) => stage switch
+    {
+        TaskCheckpointStage.Accepted => "已排队；操作尚未开始",
+        TaskCheckpointStage.Planning => "正在分析请求；具体操作尚未开始",
+        TaskCheckpointStage.ActionStarted => "操作已开始；结果需要核验",
+        TaskCheckpointStage.ApprovalPending => "等待用户确认；确认不会跨重启恢复",
+        TaskCheckpointStage.Terminal => TaskStepForState(state),
+        _ => TaskStepForState(state)
+    };
+
+    private static string TaskStepForState(TaskLifecycleState state) => state switch
+    {
+        TaskLifecycleState.Queued => "等待本机交互任务执行权",
+        TaskLifecycleState.Planning => "正在分析请求并选择本地处理路径",
+        TaskLifecycleState.Running => "正在执行本地任务步骤；结束后会显示结果或待办",
+        TaskLifecycleState.Verifying => "正在核验任务结果",
+        TaskLifecycleState.AwaitingApproval => "等待用户确认",
+        TaskLifecycleState.Completed => "任务已完成",
+        TaskLifecycleState.Failed => "任务失败",
+        TaskLifecycleState.Cancelled => "任务已取消",
+        TaskLifecycleState.OutcomeUncertain => "结果待核对；不会自动重试",
+        _ => "状态未知；请先核对目标状态"
+    };
+
     private static bool IsCancellableState(TaskLifecycleState state) => state is
         TaskLifecycleState.Queued or TaskLifecycleState.Planning or TaskLifecycleState.Running
         or TaskLifecycleState.Verifying or TaskLifecycleState.AwaitingApproval;

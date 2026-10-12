@@ -494,6 +494,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 : _transientUserTaskResults.TryGetValue(record.Id, out var transientResult) ? transientResult
                 : record.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
                     ? "上次关闭时的审批待办不会跨进程恢复；小K没有自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
+                : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedBeforeActionErrorCode
+                    ? "小K在实际操作开始前退出；该任务没有执行。检查条件后可以重新提交。"
                 : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
                     ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
                 : TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)
@@ -509,7 +511,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 TaskHistoryDisplayPolicy.CanCancel(record.Status, cancellationRequested)
                     && _userTaskOperations.ContainsKey(record.Id),
                 cancellationRequested ? TaskHistoryDisplayPolicy.CancellationRequestedStep
-                    : _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step : TaskStepForStoredState(record.Status),
+                    : _transientUserTaskSteps.TryGetValue(record.Id, out var step) ? step
+                    : TaskHistoryDisplayPolicy.CheckpointStep(record.CheckpointStage, record.Status),
                 TaskHistoryDisplayPolicy.TargetScope(record.Kind),
                 TaskHistoryDisplayPolicy.ExecutionMode(record.Kind),
                 TaskHistoryDisplayPolicy.NextAction(record.Status, cancellationRequested));
@@ -561,7 +564,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var category = Classify(request);
-        var task = new TaskRecord(id, category, CategoryLabel(category), TaskLifecycleState.Queued, now, now);
+        var task = new TaskRecord(id, category, CategoryLabel(category), TaskLifecycleState.Queued, now, now,
+            CheckpointStage: TaskCheckpointStage.Accepted);
         if (!await TrySaveStateAsync(task, cancellationToken))
             return new(false, null, "无法保存本地任务状态，本次操作未排队。请检查 D 盘数据目录。");
 
@@ -609,19 +613,22 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
         if (shuttingDown)
         {
-            task = task with { Status = TaskLifecycleState.Cancelled, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "SHUTTING_DOWN" };
+            task = task with { Status = TaskLifecycleState.Cancelled, UpdatedAtUtc = DateTimeOffset.UtcNow,
+                ErrorCode = "SHUTTING_DOWN", CheckpointStage = TaskCheckpointStage.Terminal };
             await TrySaveStateAsync(task, CancellationToken.None);
             return new(false, null, "小K正在退出，本次操作没有排队或执行。");
         }
         if (taskIdCollision)
         {
-            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "TASK_ID_COLLISION" };
+            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow,
+                ErrorCode = "TASK_ID_COLLISION", CheckpointStage = TaskCheckpointStage.Terminal };
             await TrySaveStateAsync(task, CancellationToken.None);
             return new(false, null, "无法创建唯一任务编号；本次操作未排队。");
         }
         if (queueFull)
         {
-            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = "QUEUE_FULL" };
+            task = task with { Status = TaskLifecycleState.Failed, UpdatedAtUtc = DateTimeOffset.UtcNow,
+                ErrorCode = "QUEUE_FULL", CheckpointStage = TaskCheckpointStage.Terminal };
             await TrySaveStateAsync(task, CancellationToken.None);
             PublishUserTaskStateChanged(id, task.Status);
             return new(false, null, "小K的本地任务队列已满，本次操作没有执行；请稍后再试。");
@@ -665,7 +672,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
 
             var cancelledAt = DateTimeOffset.UtcNow;
             var cancelled = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
-                TaskLifecycleState.Cancelled, work.CreatedAtUtc, cancelledAt, ErrorCode: "CANCELLED");
+                TaskLifecycleState.Cancelled, work.CreatedAtUtc, cancelledAt, ErrorCode: "CANCELLED",
+                CheckpointStage: TaskCheckpointStage.Terminal);
             var stateSaved = await TrySaveStateAsync(cancelled, CancellationToken.None).ConfigureAwait(false);
             if (stateSaved)
                 _transientUserTaskStates.TryRemove(work.Id, out _);
@@ -697,7 +705,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 // One failed task must not terminate the serial worker and strand later queue entries.
                 var uncertain = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
                     TaskLifecycleState.OutcomeUncertain, work.CreatedAtUtc, DateTimeOffset.UtcNow,
-                    ErrorCode: "WORKER_EXCEPTION");
+                    ErrorCode: "WORKER_EXCEPTION", CheckpointStage: TaskCheckpointStage.Terminal);
                 await TrySaveStateAsync(uncertain, CancellationToken.None).ConfigureAwait(false);
                 work.Admission.TryComplete();
                 var operationWasTracked = _userTaskOperations.TryRemove(work.Id, out _);
@@ -715,7 +723,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private async Task ExecuteUserTaskAsync(UserTaskWork work)
     {
         var task = new TaskRecord(work.Id, work.Category, CategoryLabel(work.Category),
-            TaskLifecycleState.Queued, work.CreatedAtUtc, work.CreatedAtUtc);
+            TaskLifecycleState.Queued, work.CreatedAtUtc, work.CreatedAtUtc,
+            CheckpointStage: TaskCheckpointStage.Accepted);
         var finalState = TaskLifecycleState.Failed;
         var output = "任务失败。为保护隐私，故障内容未写入日志。";
         var gateEntered = false;
@@ -734,7 +743,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             linked.Token.ThrowIfCancellationRequested();
             if (Volatile.Read(ref _stopping) != 0) throw new OperationCanceledException(linked.Token);
 
-            task = task with { Status = TaskLifecycleState.Planning, UpdatedAtUtc = DateTimeOffset.UtcNow };
+            task = task with { Status = TaskLifecycleState.Planning, UpdatedAtUtc = DateTimeOffset.UtcNow,
+                CheckpointStage = TaskCheckpointStage.Planning };
             SetTransientTaskStep(work.Id, "正在分析请求并选择本地处理路径");
             if (!await TrySaveStateAsync(task, linked.Token).ConfigureAwait(false))
             {
@@ -745,7 +755,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             else
             {
                 PublishUserTaskStateChanged(work.Id, task.Status);
-                task = task with { Status = TaskLifecycleState.Running, UpdatedAtUtc = DateTimeOffset.UtcNow };
+                task = task with { Status = TaskLifecycleState.Running, UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    CheckpointStage = TaskCheckpointStage.ActionStarted };
                 SetTransientTaskStep(work.Id, "正在执行本地任务步骤；结束后会显示结果或待办");
                 if (!await TrySaveStateAsync(task, linked.Token).ConfigureAwait(false))
                 {
@@ -766,7 +777,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                             ? $"{result.Summary}{Environment.NewLine}{Environment.NewLine}{result.Data}"
                             : result.Data ?? result.Summary
                         : $"{result.Summary}{(result.ErrorCode is null ? "" : $" [{result.ErrorCode}]")}";
-                    task = task with { Status = finalState, UpdatedAtUtc = DateTimeOffset.UtcNow, ErrorCode = result.ErrorCode };
+                    task = task with
+                    {
+                        Status = finalState,
+                        UpdatedAtUtc = DateTimeOffset.UtcNow,
+                        ErrorCode = result.ErrorCode,
+                        CheckpointStage = finalState == TaskLifecycleState.AwaitingApproval
+                            ? TaskCheckpointStage.ApprovalPending : TaskCheckpointStage.Terminal
+                    };
                     finalStateSaved = await TrySaveStateAsync(task, CancellationToken.None).ConfigureAwait(false);
                 }
             }
@@ -781,6 +799,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             {
                 Status = finalState,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
+                CheckpointStage = finalState == TaskLifecycleState.AwaitingApproval
+                    ? TaskCheckpointStage.ApprovalPending : TaskCheckpointStage.Terminal,
                 ErrorCode = outcomeMayBeUncertain
                     ? cancellationWasRequested
                         ? TaskFailureSafetyPolicy.CancelledOutcomeUncertainErrorCode
@@ -800,6 +820,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             {
                 Status = finalState,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
+                CheckpointStage = finalState == TaskLifecycleState.AwaitingApproval
+                    ? TaskCheckpointStage.ApprovalPending : TaskCheckpointStage.Terminal,
                 ErrorCode = outcomeMayBeUncertain
                     ? TaskFailureSafetyPolicy.ExceptionOutcomeUncertainErrorCode : "INTERNAL"
             };
@@ -811,7 +833,13 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             if (linked is null || !finalStateSaved)
             {
-                task = task with { Status = finalState, UpdatedAtUtc = DateTimeOffset.UtcNow };
+                task = task with
+                {
+                    Status = finalState,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    CheckpointStage = finalState == TaskLifecycleState.AwaitingApproval
+                        ? TaskCheckpointStage.ApprovalPending : TaskCheckpointStage.Terminal
+                };
                 finalStateSaved = await TrySaveStateAsync(task, CancellationToken.None).ConfigureAwait(false);
                 if (!finalStateSaved) output += "（最终状态未能写入本地历史）";
             }
