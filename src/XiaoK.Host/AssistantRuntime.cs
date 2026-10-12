@@ -500,7 +500,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                     ? "小K在上次任务完成前退出；不会自动重试。请手动核对相关应用或项目状态。"
                 : TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(record.ErrorCode)
                     ? "工具在取消、超时或异常后未能确认结果；小K不会自动重试。请先检查目标状态，再决定下一步。"
-                    : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。" : $"错误类别：{record.ErrorCode}";
+                : record.ErrorCode is null ? "仅保留任务状态，不保存请求正文或模型回答。"
+                : TaskHistoryDisplayPolicy.FailureDetail(record.ErrorCode);
             return new TaskHistoryEntry(
                 $"task:{record.Id:N}",
                 record.Id,

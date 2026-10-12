@@ -3984,6 +3984,12 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file").Contains("不改变前台窗口", StringComparison.Ordinal),
         "任务中心没有显示准确的固定目标范围或执行模式。");
+    Require(TaskHistoryDisplayPolicy.FailureDetail("FOREGROUND_REQUIRED").Contains("没有执行，也没有排队", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.FailureDetail("WINDOW_NOT_FOUND").Contains("没有切换焦点", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.FailureDetail("SEND_ADAPTER_UNAVAILABLE").Contains("消息没有发送", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.FailureDetail("LOW_VRAM").Contains("没有继续启动模型", StringComparison.Ordinal)
+        && !TaskHistoryDisplayPolicy.FailureDetail("UNRECOGNIZED_PRIVATE_CODE").Contains("UNRECOGNIZED_PRIVATE_CODE", StringComparison.Ordinal),
+        "任务历史没有提供安全、具体的常见故障指引，或把未知错误字段原样显示。");
     Require(TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Queued).Contains("不会执行", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running).Contains("副作用", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.OutcomeUncertain).Contains("不会自动重试", StringComparison.Ordinal)

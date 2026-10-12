@@ -48,6 +48,28 @@ public static class TaskHistoryDisplayPolicy
         _ => "后台处理：不发送键鼠输入，不改变前台窗口"
     };
 
+    /// <summary>把固定错误码转换成不含任务正文或本机路径的恢复指引。</summary>
+    public static string FailureDetail(string? errorCode) => errorCode switch
+    {
+        "FOREGROUND_REQUIRED" => "该操作需要桌面前台；小K没有执行，也没有排队。你可以在方便时切到前台再重新提交。",
+        "WINDOW_NOT_FOUND" or "APP_WINDOW_NOT_FOUND" => "没有找到唯一且允许的目标窗口；小K没有切换焦点。请确认目标应用已打开，并提供更明确的目标。",
+        "SEARCH_ROOT_UNAVAILABLE" or "INVALID_SEARCH_ROOT" => "没有可用的已配置搜索目录；小K没有读取文件。请在设置中检查搜索目录后重试。",
+        "EXPORT_ROOT_UNAVAILABLE" => "小K导出目录不可用；没有写入文件。请在设置中检查导出目录后重试。",
+        "BROWSER_ENGINE_UNAVAILABLE" => "隔离浏览器不可用；没有使用你已登录的 Edge 窗口。请检查本机 Edge 安装后重试。",
+        "BROWSER_SESSION_NOT_FOUND" => "没有可用的隔离网页会话；请重新打开公开网页后再提交操作。",
+        "BROWSER_SESSION_BUSY" => "已有一个隔离网页会话正在使用；先结束或关闭该会话，再重新提交。",
+        "LOW_VRAM" or "LOW_SYSTEM_MEMORY" => "本机可用资源不足或无法确认；小K没有继续启动模型。关闭不需要的负载后可以重试。",
+        "LOCAL_MODEL_OFFLINE" or "MODEL_RUNTIME_UNAVAILABLE" => "本地模型运行环境不可用；没有切换到云端。请检查本机模型与运行时配置后重试。",
+        "LOCAL_MODEL_TIMEOUT" => "本地模型没有在时限内完成；没有调用云端服务。请缩小任务范围后重试。",
+        "RESOURCE_BUSY" => "本地模型正忙；本次任务没有排队。稍后可以重新提交。",
+        "SEND_ADAPTER_UNAVAILABLE" => "当前版本没有微信/QQ发送适配器；消息没有发送。请勿把这条任务当作已发送。",
+        "STATE_WRITE_FAILED" => "无法保存任务状态；为避免状态不明，小K没有开始操作。请检查本机数据目录后重试。",
+        "NO_CODE_FILES" => "所选项目中没有可读取的支持类型源文件；请确认项目位置和文件类型后重试。",
+        "PROJECT_TOO_LARGE" => "所选项目超出当前单任务读取上限；请缩小项目范围后重试。",
+        "NO_VALID_FILES_SELECTED" => "本地模型没有选出有效项目文件；原项目未修改。请缩小任务范围后重试。",
+        _ => "任务失败。为保护隐私，历史记录不保存请求正文、模型回答或本机路径；请从小K当前反馈查看下一步。"
+    };
+
     public static bool CanCancel(TaskLifecycleState state, bool cancellationRequested = false) =>
         !cancellationRequested && IsCancellableState(state);
 
