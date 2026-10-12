@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "p0-required-model-assets-downloaded-and-verified",
-  "lastSourceReviewDate": "2026-10-12",
+  "lastSourceReviewDate": "2026-10-13",
   "models": [
     {
       "id": "qwen3.5-4b-q4km",
@@ -1076,6 +1076,30 @@
       "status": "downloaded_and_verified",
       "notes": "GitHub IST-DASLab/GSQ量化代码与ISTA-DASLab发布的固定GGUF权重构成可追溯社区候选；上游声明权重继承Qwen3.8-27B Apache-2.0。模型卡报告IQ2_XS约8.42GB，并报告其在若干通用基准优于同体积Unsloth UD-IQ2_S；这些是上游结果，不代表小K代码/工具任务表现。隔离评测profile为8个GPU层、3,500 MiB预算、启动前至少4,524 MiB独显空闲和15,360 MiB可用RAM，并在运行中保留至少1 GiB显存和4 GiB系统内存。当前资源低于系统内存准入线；未通过b11259兼容、资源和同任务集门槛前不得运行或进入生产路由。",
       "localDirectory": "llm/qwen3.8-27b-gsq-rco-iq2-xs-eval/d562806dbafae37109975e970aae91b43e73b440",
+      "requiredForP0": false
+    },
+    {
+      "id": "h2o-lightning-4b-native-q8-decision-eval",
+      "role": "decision-candidate",
+      "source": "https://huggingface.co/h2oai/h2o-lightning-4b-native-gguf",
+      "baseModel": "Qwen/Qwen3.5-4B",
+      "revision": "9d61a75a111b0b64874f2d58224820dd0f6eeb70",
+      "format": "GGUF",
+      "quantization": "Q8_0",
+      "quantizer": "H2O native decision GGUF",
+      "conversionRuntime": "Community llama.cpp fork pseudotensor/llama.cpp commit 6245df86208e383bd12ffeee374c52b0c0f94a3a; H2O decision endpoint support is not in the project's pinned b11259 or verified in this repository",
+      "files": [
+        {
+          "name": "h2o-lightning-4b-native-Q8_0.gguf",
+          "upstreamReportedSizeBytes": 4482407296,
+          "expectedUpstreamSha256": "af870597bc5da17c97712cc3b4eda987a142e6e8619ba705d1735d1c8727ad8b",
+          "localVerifiedSha256": "af870597bc5da17c97712cc3b4eda987a142e6e8619ba705d1735d1c8727ad8b"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "H2O-Lightning-4B是Qwen3.5-4B上的typed-decision微调；权重页为Apache-2.0。发布方称Q8_0约4.48 GB并通过其冻结文本标签门槛，Q4_K_M/Q5_K_M失败；作者的JevBench文字集成绩与硬件不代表小K中文任务。模型卡称其评估以英语为主。原生/v1/systemone路径需要H2O decision类型的llama.cpp分支；通用GGUF需要配套shim与精确Tokenizer/NFC预处理。2026-10-13按固定revision下载，文件大小与SHA-256复核通过；尚未编译运行时、加载推理或接入Host。8 GB RTX 5060的实测快照约5.4 GiB空闲；后续优先CPU或受限混合卸载并由资源监视器保证至少1 GiB显存余量。模型输出始终只是ToolBroker提案，不能授权动作或消息发送。",
+      "localDirectory": "llm/h2o-lightning-4b-native-q8-decision-eval/9d61a75a111b0b64874f2d58224820dd0f6eeb70",
       "requiredForP0": false
     }
   ]
