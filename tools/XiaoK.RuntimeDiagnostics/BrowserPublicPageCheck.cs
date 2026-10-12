@@ -6,6 +6,7 @@ using XiaoK.Core;
 internal static class BrowserPublicPageCheck
 {
     private const string Url = "https://example.com/";
+    private const string NextUrl = "https://example.org/";
 
     public static async Task<int> RunAsync()
     {
@@ -16,7 +17,11 @@ internal static class BrowserPublicPageCheck
         string? sessionId = null;
         var openSucceeded = false;
         var snapshotSucceeded = false;
-        var expectedPageSeen = false;
+        var initialPageSeen = false;
+        var navigationSucceeded = false;
+        var nextPageSeen = false;
+        var snapshotRotated = false;
+        var staleSnapshotRejected = false;
         var closeSucceeded = false;
         string? errorCode = null;
 
@@ -28,15 +33,51 @@ internal static class BrowserPublicPageCheck
             if (opened.Success && opened.Data is { } openedSnapshot)
             {
                 sessionId = ReadField(openedSnapshot, "会话ID：");
+                initialPageSeen = openedSnapshot.Contains("网址:https://example.com/", StringComparison.Ordinal)
+                    || openedSnapshot.Contains("网址：https://example.com/", StringComparison.Ordinal);
+                initialPageSeen &= openedSnapshot.Contains("Example Domain", StringComparison.Ordinal);
+
                 phase = "snapshot";
                 var snapshot = sessionId is null
                     ? new ToolResult(false, "诊断没有取得会话标识。", "BROWSER_DIAGNOSTIC_SESSION_ID_MISSING")
                     : await manager.SnapshotAsync(sessionId, timeout.Token).ConfigureAwait(false);
                 snapshotSucceeded = snapshot.Success && snapshot.Data is not null;
-                expectedPageSeen = snapshotSucceeded
+                var currentSnapshotId = snapshotSucceeded ? ReadField(snapshot.Data!, "快照ID：") : null;
+                initialPageSeen &= snapshotSucceeded
                     && snapshot.Data!.Contains("网址：https://example.com/", StringComparison.Ordinal)
                     && snapshot.Data.Contains("Example Domain", StringComparison.Ordinal);
                 errorCode = snapshot.Success ? null : snapshot.ErrorCode;
+
+                phase = "navigate";
+                var navigated = sessionId is null || currentSnapshotId is null
+                    ? new ToolResult(false, "诊断没有取得当前页面令牌。", "BROWSER_DIAGNOSTIC_SNAPSHOT_ID_MISSING")
+                    : await manager.NavigateAsync(sessionId, currentSnapshotId, NextUrl, timeout.Token).ConfigureAwait(false);
+                navigationSucceeded = navigated.Success && navigated.Data is not null;
+                var nextSnapshotId = navigationSucceeded ? ReadField(navigated.Data!, "快照ID：") : null;
+                snapshotRotated = nextSnapshotId is not null && currentSnapshotId is not null
+                    && !string.Equals(nextSnapshotId, currentSnapshotId, StringComparison.Ordinal);
+                nextPageSeen = navigationSucceeded
+                    && navigated.Data!.Contains("网址：https://example.org/", StringComparison.Ordinal)
+                    && navigated.Data.Contains("Example Domain", StringComparison.Ordinal)
+                    && snapshotRotated;
+                errorCode = navigated.Success ? null : navigated.ErrorCode;
+
+                phase = "stale-snapshot";
+                var staleReplay = sessionId is null || currentSnapshotId is null
+                    ? new ToolResult(false, "诊断没有取得旧页面令牌。", "BROWSER_DIAGNOSTIC_SNAPSHOT_ID_MISSING")
+                    : await manager.NavigateAsync(sessionId, currentSnapshotId, Url, timeout.Token).ConfigureAwait(false);
+                staleSnapshotRejected = !staleReplay.Success && staleReplay.ErrorCode == "BROWSER_STALE_SNAPSHOT";
+                if (!staleSnapshotRejected) errorCode = staleReplay.ErrorCode ?? "BROWSER_STALE_SNAPSHOT_NOT_REJECTED";
+
+                phase = "post-navigation-snapshot";
+                var afterNavigation = sessionId is null
+                    ? new ToolResult(false, "诊断没有取得会话标识。", "BROWSER_DIAGNOSTIC_SESSION_ID_MISSING")
+                    : await manager.SnapshotAsync(sessionId, timeout.Token).ConfigureAwait(false);
+                nextPageSeen &= afterNavigation.Success && afterNavigation.Data is not null
+                    && afterNavigation.Data.Contains("网址：https://example.org/", StringComparison.Ordinal)
+                    && afterNavigation.Data.Contains("Example Domain", StringComparison.Ordinal)
+                    && snapshotRotated;
+                if (!afterNavigation.Success) errorCode = afterNavigation.ErrorCode;
             }
 
             if (sessionId is not null)
@@ -48,14 +89,19 @@ internal static class BrowserPublicPageCheck
             }
 
             clock.Stop();
-            var passed = openSucceeded && snapshotSucceeded && expectedPageSeen && closeSucceeded;
+            var passed = openSucceeded && snapshotSucceeded && initialPageSeen && navigationSucceeded
+                && nextPageSeen && staleSnapshotRejected && closeSucceeded;
             Console.WriteLine(JsonSerializer.Serialize(new
             {
                 passed,
-                urlHost = "example.com",
+                urlHosts = new[] { "example.com", "example.org" },
                 openSucceeded,
                 snapshotSucceeded,
-                expectedPageSeen,
+                initialPageSeen,
+                navigationSucceeded,
+                nextPageSeen,
+                snapshotRotated,
+                staleSnapshotRejected,
                 closeSucceeded,
                 rawPageTextLogged = false,
                 diagnosticReportWritten = false,
