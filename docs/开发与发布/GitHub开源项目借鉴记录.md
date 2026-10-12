@@ -1,5 +1,14 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-12 sherpa-onnx KWS许可复核与候选锁定
+
+- 项目：[k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)，推理引擎采用Apache-2.0；本次候选为`sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20`，不是引擎代码本身。
+- 许可证证据：维护者在[许可澄清讨论#3802](https://github.com/k2-fsa/sherpa-onnx/issues/3802)于2026-10-08回复已更新ModelScope模型仓库许可证；固定ModelScope revision `afc4a534ef85f2db4f84f05ed78eaac385b3387e`的模型卡README前置信息标为Apache License 2.0。模型卡没有说明训练数据来源，本项目仅在本机评估，暂不再分发权重。
+- 固定的官方GitHub release资产为`sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2`，大小32,885,699字节；GitHub Releases API返回SHA-256 `68447f4fbc67e70eee3a93961f36e81e98f47aef73ce7e7ca00885c6cd3616a6`，下载后本机散列匹配。解包成员均位于单一预期根目录，未发现绝对路径、盘符或`..`成员；24个文件逐项核验大小和SHA-256，锁文件登记为`sherpa-kws-zh-en`。
+- 官方KWS文档列出中英自定义关键词生成流程；chunk-16使用约320ms块延迟，文档提醒chunk-8的延迟更低但通常精度较低，并给出INT8编码器/连接器与FP32解码器的组合。后续须按自定义唤醒短语评测，不能把上游示例或许可状态当成识别质量证据。
+- 当前只下载并锁定隔离候选；未安装运行时、未加载KWS模型、未访问麦克风，也没有启用桌宠唤醒。CPU占用、识别质量、硬停麦与设备生命周期均待实机验收。
+- 来源：[KWS预训练模型官方文档](https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/kws/pretrained_models/index.rst)、[模型仓库](https://modelscope.cn/models/pkufool/icefall-kws-zipformer-zh-en-3M-2025-12-20)、[许可澄清讨论](https://github.com/k2-fsa/sherpa-onnx/issues/3802)。本轮只集成锁定的模型资产，不复制第三方代码。
+
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
 ## 2026-10-12 微软 UFO² Windows 桌面代理架构

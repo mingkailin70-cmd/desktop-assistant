@@ -171,16 +171,174 @@
       "requiredForP0": true
     },
     {
-      "id": "sherpa-kws-zh",
-      "role": "wakeword-model-license-pending",
-      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models",
-      "modelName": "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01",
-      "revision": null,
-      "format": "ONNX tar.bz2 release archive",
-      "files": [],
-      "license": "unconfirmed",
-      "status": "blocked-license-review",
-      "notes": "官方 KWS 文档将此模型列为仅中文，并要求逐模型核对许可；没有取得该模型权重和附带 tokens 的明确许可证。sherpa-onnx 引擎的 Apache-2.0 不自动证明模型权重许可。确认权利人条款前禁止下载、部署或再分发。"
+      "id": "sherpa-kws-zh-en",
+      "role": "p2-wakeword-evaluation-candidate",
+      "source": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+      "modelCardSource": "https://modelscope.cn/models/pkufool/icefall-kws-zipformer-zh-en-3M-2025-12-20",
+      "licenseEvidenceSource": "https://github.com/k2-fsa/sherpa-onnx/issues/3802",
+      "licenseEvidenceRevision": "afc4a534ef85f2db4f84f05ed78eaac385b3387e",
+      "revision": "afc4a534ef85f2db4f84f05ed78eaac385b3387e",
+      "format": "ONNX",
+      "quantization": "INT8 encoder/joiner and FP32 decoder, chunk-16",
+      "conversionRuntime": "sherpa-onnx CPU runtime not yet pinned or integrated",
+      "files": [
+        {
+          "name": "decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+          "upstreamReportedSizeBytes": 759829,
+          "expectedUpstreamSha256": "63a22dd60f40fff082ac3e09afa507f6787da36df76ded2fbe145fa233e22c21",
+          "localVerifiedSha256": "63a22dd60f40fff082ac3e09afa507f6787da36df76ded2fbe145fa233e22c21"
+        },
+        {
+          "name": "decoder-epoch-13-avg-2-chunk-8-left-64.onnx",
+          "upstreamReportedSizeBytes": 759829,
+          "expectedUpstreamSha256": "63a22dd60f40fff082ac3e09afa507f6787da36df76ded2fbe145fa233e22c21",
+          "localVerifiedSha256": "63a22dd60f40fff082ac3e09afa507f6787da36df76ded2fbe145fa233e22c21"
+        },
+        {
+          "name": "en.phone",
+          "upstreamReportedSizeBytes": 3330061,
+          "expectedUpstreamSha256": "f7000ec3a90544c0c7c16090d8951779c2b322e14dad5006290f498567d439ea",
+          "localVerifiedSha256": "f7000ec3a90544c0c7c16090d8951779c2b322e14dad5006290f498567d439ea"
+        },
+        {
+          "name": "encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+          "upstreamReportedSizeBytes": 4599656,
+          "expectedUpstreamSha256": "408bbd740838c42d5bf6d1c5b80b3c88b616c7860b92d980328b5b068c76ae48",
+          "localVerifiedSha256": "408bbd740838c42d5bf6d1c5b80b3c88b616c7860b92d980328b5b068c76ae48"
+        },
+        {
+          "name": "encoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+          "upstreamReportedSizeBytes": 11976272,
+          "expectedUpstreamSha256": "540ff509ed89bd22afe04bf7049a54bb1c95c6d8a18742ea9691910cdb5f859e",
+          "localVerifiedSha256": "540ff509ed89bd22afe04bf7049a54bb1c95c6d8a18742ea9691910cdb5f859e"
+        },
+        {
+          "name": "encoder-epoch-13-avg-2-chunk-8-left-64.int8.onnx",
+          "upstreamReportedSizeBytes": 4600657,
+          "expectedUpstreamSha256": "2ca84d6bfe73e1ea3c9c49f600f7cad1c9ddd423c53c906b8bfe802444dd78d5",
+          "localVerifiedSha256": "2ca84d6bfe73e1ea3c9c49f600f7cad1c9ddd423c53c906b8bfe802444dd78d5"
+        },
+        {
+          "name": "encoder-epoch-13-avg-2-chunk-8-left-64.onnx",
+          "upstreamReportedSizeBytes": 11976951,
+          "expectedUpstreamSha256": "307e2f5e87e9d6df4fd058239f4437b6236db7699b9c61decb490f89fb4226d0",
+          "localVerifiedSha256": "307e2f5e87e9d6df4fd058239f4437b6236db7699b9c61decb490f89fb4226d0"
+        },
+        {
+          "name": "joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+          "upstreamReportedSizeBytes": 86629,
+          "expectedUpstreamSha256": "190d4067b4cc20b72a42a1916e69d92052000fb7051a427ebb1bc72a69207dc1",
+          "localVerifiedSha256": "190d4067b4cc20b72a42a1916e69d92052000fb7051a427ebb1bc72a69207dc1"
+        },
+        {
+          "name": "joiner-epoch-13-avg-2-chunk-16-left-64.onnx",
+          "upstreamReportedSizeBytes": 338154,
+          "expectedUpstreamSha256": "76f7a24ed0c08633af14b2ee377f747af880d3b65eeba2cd3f31f3380fb73e8d",
+          "localVerifiedSha256": "76f7a24ed0c08633af14b2ee377f747af880d3b65eeba2cd3f31f3380fb73e8d"
+        },
+        {
+          "name": "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx",
+          "upstreamReportedSizeBytes": 86629,
+          "expectedUpstreamSha256": "190d4067b4cc20b72a42a1916e69d92052000fb7051a427ebb1bc72a69207dc1",
+          "localVerifiedSha256": "190d4067b4cc20b72a42a1916e69d92052000fb7051a427ebb1bc72a69207dc1"
+        },
+        {
+          "name": "joiner-epoch-13-avg-2-chunk-8-left-64.onnx",
+          "upstreamReportedSizeBytes": 338154,
+          "expectedUpstreamSha256": "76f7a24ed0c08633af14b2ee377f747af880d3b65eeba2cd3f31f3380fb73e8d",
+          "localVerifiedSha256": "76f7a24ed0c08633af14b2ee377f747af880d3b65eeba2cd3f31f3380fb73e8d"
+        },
+        {
+          "name": "test_wavs/en_0.wav",
+          "upstreamReportedSizeBytes": 212044,
+          "expectedUpstreamSha256": "6bc58a4efdf20daac252b6b1502632601a71efe0308f6757dc1eda34891a7e4f",
+          "localVerifiedSha256": "6bc58a4efdf20daac252b6b1502632601a71efe0308f6757dc1eda34891a7e4f"
+        },
+        {
+          "name": "test_wavs/en_1.wav",
+          "upstreamReportedSizeBytes": 534924,
+          "expectedUpstreamSha256": "5143a6ba93c4b274e2c4ac22deb75c2c48936c853f0519add1de828b6c79cc5a",
+          "localVerifiedSha256": "5143a6ba93c4b274e2c4ac22deb75c2c48936c853f0519add1de828b6c79cc5a"
+        },
+        {
+          "name": "test_wavs/en_trans.txt",
+          "upstreamReportedSizeBytes": 367,
+          "expectedUpstreamSha256": "55ca91f3ee53c324b2f802f63c50cacc8931da846c4aaa35f115680201ff904b",
+          "localVerifiedSha256": "55ca91f3ee53c324b2f802f63c50cacc8931da846c4aaa35f115680201ff904b"
+        },
+        {
+          "name": "test_wavs/keywords_raw.txt",
+          "upstreamReportedSizeBytes": 208,
+          "expectedUpstreamSha256": "5b1ade36d81417b3479410134a0fb1f3b099b7cac4dea42f6939421902b59d19",
+          "localVerifiedSha256": "5b1ade36d81417b3479410134a0fb1f3b099b7cac4dea42f6939421902b59d19"
+        },
+        {
+          "name": "test_wavs/keywords.txt",
+          "upstreamReportedSizeBytes": 284,
+          "expectedUpstreamSha256": "4878b5c2cddd6605d228877a196137e2412f0fcda1af44a524d7265a1547835c",
+          "localVerifiedSha256": "4878b5c2cddd6605d228877a196137e2412f0fcda1af44a524d7265a1547835c"
+        },
+        {
+          "name": "test_wavs/zh_0.wav",
+          "upstreamReportedSizeBytes": 179646,
+          "expectedUpstreamSha256": "668bf8df51a10027b84d5d8816a1ce11ae93545538dc05cfe2aa6811d399c250",
+          "localVerifiedSha256": "668bf8df51a10027b84d5d8816a1ce11ae93545538dc05cfe2aa6811d399c250"
+        },
+        {
+          "name": "test_wavs/zh_1.wav",
+          "upstreamReportedSizeBytes": 164976,
+          "expectedUpstreamSha256": "30edbabea84ca4c076f5b43bb44495f436f6711319c32a200d3fc5c67c1fee1d",
+          "localVerifiedSha256": "30edbabea84ca4c076f5b43bb44495f436f6711319c32a200d3fc5c67c1fee1d"
+        },
+        {
+          "name": "test_wavs/zh_2.wav",
+          "upstreamReportedSizeBytes": 144856,
+          "expectedUpstreamSha256": "04a579c23bdd6de049814f1cbfb470d735d7747ba37eb0a92d813c89da942706",
+          "localVerifiedSha256": "04a579c23bdd6de049814f1cbfb470d735d7747ba37eb0a92d813c89da942706"
+        },
+        {
+          "name": "test_wavs/zh_3.wav",
+          "upstreamReportedSizeBytes": 257006,
+          "expectedUpstreamSha256": "710e79fb3450042be50bb2f6432a2a549b53577aea041a577e53a926fcabb614",
+          "localVerifiedSha256": "710e79fb3450042be50bb2f6432a2a549b53577aea041a577e53a926fcabb614"
+        },
+        {
+          "name": "test_wavs/zh_4.wav",
+          "upstreamReportedSizeBytes": 147216,
+          "expectedUpstreamSha256": "d46ca3a2ce52b5059f3d84e2cfdc62907e8579faa7078b1becaea614dd41b35d",
+          "localVerifiedSha256": "d46ca3a2ce52b5059f3d84e2cfdc62907e8579faa7078b1becaea614dd41b35d"
+        },
+        {
+          "name": "test_wavs/zh_5.wav",
+          "upstreamReportedSizeBytes": 132938,
+          "expectedUpstreamSha256": "55321b6d1ab4bd9a16928957a52cf943b2ae864543cca7f39e9844b4889e9bb8",
+          "localVerifiedSha256": "55321b6d1ab4bd9a16928957a52cf943b2ae864543cca7f39e9844b4889e9bb8"
+        },
+        {
+          "name": "test_wavs/zh_6.wav",
+          "upstreamReportedSizeBytes": 113518,
+          "expectedUpstreamSha256": "f5da5689f1960431a53855d7fbe78c9ab0b73e5495ffba631cd43458225d9039",
+          "localVerifiedSha256": "f5da5689f1960431a53855d7fbe78c9ab0b73e5495ffba631cd43458225d9039"
+        },
+        {
+          "name": "tokens.txt",
+          "upstreamReportedSizeBytes": 1928,
+          "expectedUpstreamSha256": "2d3f32311f9b692b964da3c90e830258d3e78e013cb0c992dbfb15cd5a1a71b0",
+          "localVerifiedSha256": "2d3f32311f9b692b964da3c90e830258d3e78e013cb0c992dbfb15cd5a1a71b0"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "2026-10-12上游模型作者在GitHub issue中确认已把ModelScope模型仓库许可更新为Apache 2.0；固定ModelScope revision的README front matter也标明Apache 2.0。该README未说明训练数据来源；本项目只用于本机候选评估，当前不再分发权重。GitHub官方release asset的SHA-256由GitHub Releases API返回并校验；解包后24个文件逐项记录大小和SHA-256。模型运行、中文唤醒短语定制、CPU/误唤醒质量与真实麦克风验收仍未完成。",
+      "localDirectory": "speech/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/afc4a534ef85f2db4f84f05ed78eaac385b3387e",
+      "requiredForP0": false,
+      "licenseEvidenceCheckedAt": "2026-10-12",
+      "upstreamArchive": {
+        "name": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2",
+        "sizeBytes": 32885699,
+        "sha256": "68447f4fbc67e70eee3a93961f36e81e98f47aef73ce7e7ca00885c6cd3616a6"
+      }
     },
     {
       "id": "mimo-v2.6-distill-qwen-9b",
