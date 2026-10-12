@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Text.Json;
-using SherpaOnnx;
+using XiaoK.Voice;
 
 try
 {
@@ -10,64 +10,28 @@ try
     var wavePath = Path.GetFullPath(options.WavePath);
     var keywordsPath = Path.GetFullPath(options.KeywordsPath ?? Path.Combine(modelDirectory, "test_wavs", "keywords.txt"));
 
-    var encoder = RequireFile(modelDirectory, "encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx");
-    var decoder = RequireFile(modelDirectory, "decoder-epoch-13-avg-2-chunk-16-left-64.onnx");
-    var joiner = RequireFile(modelDirectory, "joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx");
-    var tokens = RequireFile(modelDirectory, "tokens.txt");
-    RequireFile(Path.GetDirectoryName(keywordsPath)!, Path.GetFileName(keywordsPath));
     RequireFile(Path.GetDirectoryName(wavePath)!, Path.GetFileName(wavePath));
 
     var (sampleRate, samples) = ReadMonoPcm16Wave(wavePath);
-    var config = new KeywordSpotterConfig
-    {
-        FeatConfig = new FeatureConfig { SampleRate = sampleRate, FeatureDim = 80 },
-        ModelConfig = new OnlineModelConfig
-        {
-            Transducer = new OnlineTransducerModelConfig
-            {
-                Encoder = encoder,
-                Decoder = decoder,
-                Joiner = joiner
-            },
-            Tokens = tokens,
-            Provider = "cpu",
-            NumThreads = 1,
-            Debug = 0
-        },
-        MaxActivePaths = 4,
-        NumTrailingBlanks = 1,
-        KeywordsScore = 1.0f,
-        KeywordsThreshold = 0.25f,
-        KeywordsFile = keywordsPath,
-        KeywordsBuf = string.Empty,
-        KeywordsBufSize = 0
-    };
-
     var loadTimer = Stopwatch.StartNew();
-    using var spotter = new KeywordSpotter(config);
+    using var detector = SherpaKeywordSpotter.Create(modelDirectory, keywordsPath);
     loadTimer.Stop();
 
     var decodeTimer = Stopwatch.StartNew();
-    using var stream = spotter.CreateStream();
-    stream.AcceptWaveform(sampleRate, samples);
-    stream.AcceptWaveform(sampleRate, new float[sampleRate / 2]);
-    stream.InputFinished();
-
     var hits = new HashSet<string>(StringComparer.Ordinal);
-    var decodeIterations = 0;
-    while (spotter.IsReady(stream))
+    for (var offset = 0; offset < samples.Length; offset += SherpaKeywordSpotter.MaximumSamplesPerCall)
     {
-        if (++decodeIterations > 10000)
-            throw new InvalidOperationException("KWS 解码超过安全步数上限。");
-
-        spotter.Decode(stream);
-        var keyword = spotter.GetResult(stream).Keyword;
-        if (!string.IsNullOrWhiteSpace(keyword))
-        {
+        var count = Math.Min(SherpaKeywordSpotter.MaximumSamplesPerCall, samples.Length - offset);
+        foreach (var keyword in detector.AcceptWaveform(samples.AsSpan(offset, count), sampleRate))
             hits.Add(keyword);
-            spotter.Reset(stream);
-        }
     }
+    var tailPadding = new float[sampleRate / 2];
+    try
+    {
+        foreach (var keyword in detector.AcceptWaveform(tailPadding, sampleRate)) hits.Add(keyword);
+        foreach (var keyword in detector.Finish()) hits.Add(keyword);
+    }
+    finally { Array.Clear(tailPadding); }
     decodeTimer.Stop();
 
     Console.WriteLine(JsonSerializer.Serialize(new
@@ -80,7 +44,8 @@ try
         durationSeconds = Math.Round((double)samples.Length / sampleRate, 3),
         modelLoadMilliseconds = loadTimer.ElapsedMilliseconds,
         decodeMilliseconds = decodeTimer.ElapsedMilliseconds,
-        decodeIterations,
+        streamingChunks = (samples.Length + SherpaKeywordSpotter.MaximumSamplesPerCall - 1)
+            / SherpaKeywordSpotter.MaximumSamplesPerCall,
         detected = hits.Count > 0,
         keywords = hits.Order(StringComparer.Ordinal).ToArray()
     }));

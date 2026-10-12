@@ -3,8 +3,7 @@
   "dependencies": {
     "net10.0": {
       "org.k2fsa.sherpa.onnx": {
-        "type": "Direct",
-        "requested": "[1.13.5, 1.13.5]",
+        "type": "Transitive",
         "resolved": "1.13.5",
         "contentHash": "YCk9fwwlioQ2F9dQHhHpUyP96O+YWn3WTQJERWXdHqWgHOMzwKu+TKgW9Rx8hKA3ukDJwS1i5OqLdSCB4bUbvw==",
         "dependencies": {
@@ -63,6 +62,23 @@
         "type": "Transitive",
         "resolved": "1.13.5",
         "contentHash": "5pdNAFMm/2lzNvvEFlRi7XZttg1l8869EKczh21UFNN0qhHZld7iZhOQXsuopfFGXZvCnr+bGfWy9pqUA530pw=="
+      },
+      "xiaok.core": {
+        "type": "Project"
+      },
+      "xiaok.inference": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )"
+        }
+      },
+      "xiaok.voice": {
+        "type": "Project",
+        "dependencies": {
+          "XiaoK.Core": "[1.0.0, )",
+          "XiaoK.Inference": "[1.0.0, )",
+          "org.k2fsa.sherpa.onnx": "[1.13.5, 1.13.5]"
+        }
       }
     },
     "net10.0/win-x64": {

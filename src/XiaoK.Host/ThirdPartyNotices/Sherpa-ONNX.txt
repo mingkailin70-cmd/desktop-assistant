@@ -1,0 +1,15 @@
+Sherpa-ONNX
+==========
+
+This application includes the Sherpa-ONNX .NET wrapper and Windows x64 native
+runtime, version 1.13.5.
+
+Copyright 2019-2023 Xiaomi Corporation and contributors.
+Licensed under the Apache License, Version 2.0. A copy of that license is
+provided in Apache-2.0.txt.
+
+Project: https://github.com/k2-fsa/sherpa-onnx
+NuGet package: org.k2fsa.sherpa.onnx 1.13.5
+
+Sherpa-ONNX model weights are stored separately and are not included in this
+application package.
