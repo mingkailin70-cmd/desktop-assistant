@@ -180,7 +180,14 @@
       "revision": "afc4a534ef85f2db4f84f05ed78eaac385b3387e",
       "format": "ONNX",
       "quantization": "INT8 encoder/joiner and FP32 decoder, chunk-16",
-      "conversionRuntime": "sherpa-onnx CPU runtime not yet pinned or integrated",
+      "conversionRuntime": "org.k2fsa.sherpa.onnx 1.13.5; isolated CPU diagnostic only, not integrated into XiaoK.Host",
+      "runtimeLock": {
+        "packageId": "org.k2fsa.sherpa.onnx",
+        "version": "1.13.5",
+        "target": "net10.0/win-x64",
+        "packageContentHash": "YCk9fwwlioQ2F9dQHhHpUyP96O+YWn3WTQJERWXdHqWgHOMzwKu+TKgW9Rx8hKA3ukDJwS1i5OqLdSCB4bUbvw==",
+        "lockFile": "tools/XiaoK.KwsDiagnostics/packages.lock.json"
+      },
       "files": [
         {
           "name": "decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
@@ -329,7 +336,7 @@
       ],
       "license": "apache-2.0",
       "status": "downloaded_and_verified",
-      "notes": "2026-10-12上游模型作者在GitHub issue中确认已把ModelScope模型仓库许可更新为Apache 2.0；固定ModelScope revision的README front matter也标明Apache 2.0。该README未说明训练数据来源；本项目只用于本机候选评估，当前不再分发权重。GitHub官方release asset的SHA-256由GitHub Releases API返回并校验；解包后24个文件逐项记录大小和SHA-256。模型运行、中文唤醒短语定制、CPU/误唤醒质量与真实麦克风验收仍未完成。",
+      "notes": "2026-10-12上游模型作者在GitHub issue中确认已把ModelScope模型仓库许可更新为Apache 2.0；固定ModelScope revision的README front matter也标明Apache 2.0。该README未说明训练数据来源；本项目只用于本机候选评估，当前不再分发权重。GitHub官方release asset的SHA-256由GitHub Releases API返回并校验；解包后24个文件逐项记录大小和SHA-256。Sherpa-ONNX 1.13.5 CPU单线程隔离诊断已对上游9段测试音频完成运行时冒烟，其中6段返回一个或多个表内关键词；没有可用于小K短语的正负样本真值集，不能据此计算准确率或误唤醒率。小K自定义短语、Windows Host集成、真实麦克风与资源验收仍未完成。",
       "localDirectory": "speech/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/afc4a534ef85f2db4f84f05ed78eaac385b3387e",
       "requiredForP0": false,
       "licenseEvidenceCheckedAt": "2026-10-12",
