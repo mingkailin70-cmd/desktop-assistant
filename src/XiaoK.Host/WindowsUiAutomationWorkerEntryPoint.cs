@@ -20,6 +20,8 @@ public static class WindowsUiAutomationWorkerEntryPoint
     [
         ControlType.Button,
         ControlType.CheckBox,
+        ControlType.ComboBox,
+        ControlType.Edit,
         ControlType.Hyperlink,
         ControlType.MenuItem,
         ControlType.RadioButton,
@@ -79,10 +81,11 @@ public static class WindowsUiAutomationWorkerEntryPoint
             var current = element.Current;
             if (depth > 0 && SafeNamedControlTypes.Contains(current.ControlType) && !current.IsPassword)
             {
+                var isEditable = IsEditableControl(current.ControlType);
                 items.Add(new UiAutomationSnapshotItem(
                     Clean(current.AutomationId, 96),
                     Clean(current.ControlType.ProgrammaticName, 48),
-                    Clean(current.Name, 160),
+                    isEditable ? string.Empty : Clean(current.Name, 160),
                     current.IsEnabled,
                     current.IsOffscreen));
             }
@@ -102,6 +105,9 @@ public static class WindowsUiAutomationWorkerEntryPoint
         if (!IsWindow(handle) || !IsWindowVisible(handle)) return new(false, "UIA_TARGET_CHANGED", []);
         return new(true, null, items.ToArray(), pending.Count > 0 || visitedNodes >= MaximumVisitedNodes);
     }
+
+    private static bool IsEditableControl(ControlType controlType) =>
+        controlType == ControlType.Edit || controlType == ControlType.ComboBox;
 
     private static WindowsUiAutomationSnapshotAdapter.WorkerResponse WaitForEnabledControl(
         WindowsUiAutomationSnapshotAdapter.WorkerRequest request)

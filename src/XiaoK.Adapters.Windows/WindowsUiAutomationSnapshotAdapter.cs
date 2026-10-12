@@ -211,8 +211,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     {
         if (items.Count == 0) return truncated ? "已到达只读遍历上限，未发现受支持的语义控件。" : "未发现受支持的语义控件。";
         var builder = new StringBuilder(truncated
-            ? "只读控件清单（已到遍历上限，结果可能不完整；不含文本框、编辑器、文档或列表内容）："
-            : "只读控件清单（不含文本框、编辑器、文档或列表内容）：");
+            ? "只读控件清单（已到遍历上限，结果可能不完整；不读取输入框当前内容，输入框只列控件类型和AutomationId）："
+            : "只读控件清单（不读取输入框当前内容，输入框只列控件类型和AutomationId）：");
         foreach (var item in items)
         {
             builder.AppendLine();

@@ -224,7 +224,7 @@
 
 ### Microsoft winapp CLI：协调器范围不能扩大解释
 
-当前[UI Automation文档](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)说明只读查询可并发；`set-value`、滚动使用UIA Pattern且不抢物理焦点，但会改变应用状态，仍需在自动化工作流中串行；`invoke`与截图等动作还要取得工作流轮次。文档也说明协调器只协调参与`winapp`工作流的调用，不控制用户输入或其他UIA进程。小K的交互仲裁只覆盖自身ToolBroker调用，因此仍不得宣称对用户或其他自动化工具形成全局锁。当前小K只实现只读快照和启用状态等待；针对UIA写入的后台行为要逐应用证明不会覆盖用户正在编辑的内容，再决定是否允许。
+固定版[UI Automation文档](https://github.com/microsoft/winappCli/blob/v0.7.1/docs/ui-automation.md)说明其`set-value`命令以UIA Pattern执行并按目标状态变化做工作流仲裁；CLI对其实现声称不会取得桌面焦点。这个保证不自动适用于小K直接调用的Windows UI Automation API。微软文档指出UIA Pattern默认会自动设焦点，客户端需显式把`IUIAutomation2.AutoSetFocus`关掉；本机使用的WPF `System.Windows.Automation`公开封装没有该属性，不能把其它库中的同名API当成可用接口。因此小K继续限定为只读控件检查与状态等待，不实现后台输入，除非后续通过受支持的COM接口证明能关闭自动设焦点并完成独立实测。
 
 **本轮结论：** GitHub上存在可复用的机制，但没有找到同时满足“不读微信客户端数据、不抢用户焦点、不假称后台安全”的微信/QQ通用操作模块。没有新增依赖，也没有修改通知权限策略。下一步仍是：基于自然到达、来源可确认的Toast样本验证私聊字段；后台操作逐应用测试，不能从通用演示推断兼容性。
 
@@ -279,3 +279,10 @@
 **本轮取舍：** 优先完成小K设置页的候选绑定：采样来源必须选自最近一次只读诊断结果，按微信/QQ平台筛选；候选不能手输成任意AUMID，也不能自动写入监听白名单。真实通知正文仍仅在用户主动开始样本核验后短时留于本机内存。桌面写操作仍逐应用、逐动作验收。
 
 来源：[Aevra桌面控制指南](https://github.com/the-long-ride/aevra/blob/main/docs/user-manual/19-desktop-control.md)、[Aevra许可证](https://github.com/the-long-ride/aevra/blob/main/LICENSE)、[Microsoft UI Automation Remote Operations说明](https://github.com/microsoft/Microsoft-UI-UIAutomation)。仓库页面与`main`分支可变；本次只核对公开文档和许可证线索，没有克隆、构建、安装或运行候选，也没有复用代码。
+
+## 2026-10-12 UIA后台输入方案复核
+
+- 参考[Microsoft winapp CLI v0.7.1 UI Automation文档](https://github.com/microsoft/winappCli/blob/v0.7.1/docs/ui-automation.md)：该项目把UIA `set-value`归为不注入物理键鼠的目标状态变化，并对该项目自身的写调用串行化；没有安装、集成CLI或添加其依赖。
+- 微软[SetValue方法](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)与[`IUIAutomation2.AutoSetFocus`](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)文档说明直接调用ValuePattern前必须考虑默认自动设焦点。本机WPF `System.Windows.Automation`封装没有公开`AutoSetFocus`；编译器也拒绝该调用，因此本轮撤回了未能安全编译的输入实现，没有交付后台写入功能。
+- 本轮只扩展只读快照：Edit/ComboBox仅列控件类型、AutomationId和状态，不读控件名称或当前值；密码控件继续排除。等待工具只查询唯一控件的启用状态，不调用动作Pattern。
+- 下一步若继续研究无焦点后台输入，需先使用受支持的COM接口正确设置`IUIAutomation2.AutoSetFocus=false`，确认作用于实际操作所用Automation对象，再以专用无害窗口验证焦点、用户并发和取消行为；在此之前不接入ToolBroker写动作。
