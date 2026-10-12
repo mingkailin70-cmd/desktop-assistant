@@ -12,6 +12,8 @@
 
 2026-10-12 R0实机只读UIA探针：工具按精确进程路径核验目标，再用Win32 `EnumWindows`、窗口PID和可见状态枚举顶层窗口；不依赖`Process.MainWindowHandle`，不读窗口标题、控件名称、值、截图、通知或聊天正文，不发输入。14:27复扫微信5个进程中当前有1个可见顶层窗口（3个UIA节点），QQ 8个进程中1个可见顶层窗口（9个节点）；当前窗口均无Edit/ValuePattern与Button/InvokePattern，前台和焦点不变。之前14:14结果由旧窗口选择路径取得，现以显式PID枚举结果为准。该探针不改变生产Host行为，也不证明其他窗口/API不可行；真实消息读写和发送仍未验收。
 
+2026-10-12 14:34再查Windows Toast来源元数据：访问状态Allowed，枚举35条Toast，仍只有QQ/AUMID `QQ`一条（创建时间仍为2026-10-10 17:39:23 UTC），没有微信候选。`%LOCALAPPDATA%\XiaoK\settings.json`中两端监听均关闭且AUMID名单为空；Host和llama-server进程均为0。只读显示名、AUMID和创建时间，没有正文、事件订阅或设置变更；R0仍等待微信自然通知及人工来源核对。
+
 当前源码的编程代理文件选择使用Roslyn语法树，从已脱敏C#源码提取命名空间、类型和方法声明；每文件最多5个符号，清单总长不超过12,000字符。Roslyn解析每文件不超过128 Ki字符、单任务累计不超过2 Mi字符。模型仍只能输出清单中的最多4条精确路径。此变化不扩大工具权限；完整40题评估尚未运行，不能据此声称代码任务通过率提高。GitHub参考筛选含Aider、Roslyn、Ghost与Rynne；不接入其MCP或宽权限工具面，具体判断见GitHub开源项目借鉴记录。
 
 总体目标仍未完成，R0/P4闸门未通过。2026-10-12通过安装包内无窗口诊断刷新通知来源：权限为Allowed，检查35条当前Toast，发现QQ/AUMID `QQ`两条（最近时间2026-10-10 09:39:23 UTC），没有微信候选；只读应用名、AUMID和时间，没有读取正文、订阅事件或保存结果，诊断退出后Host为0。当前脚本还只读输出微信/QQ开始菜单AppID与进程路径；这些身份线索不等同Toast AUMID，诊断增强提交`5bf0629`已推送、Build #499成功。可复用入口为`tools/get_notification_source_candidates.ps1`，运行前检查并拒绝已有Host，stdout结果只在内存解析；在仓库根目录运行`& '.\tools\get_notification_source_candidates.ps1'`即可再次刷新。监听开关和AUMID白名单最近一次设置核验仍为2026-10-09的关闭/空，来源诊断不会改变它们。设置页区分尚未诊断、没有匹配候选和发现候选；必须由用户选择与可见自然通知对应的候选并确认后，才可开始一次性样本核验。当前仍未读取真实Toast正文；监控器传入的会话ID、发送者和私聊标记为空，故`GateBodyReader`不提供真实正文读取器。每客户端30条/95%通知门槛、稳定联系人身份、真实私聊/群聊分类及微信/QQ外发适配器均未验收。阶段提交`47f09cf`已推送，GitHub Actions Build #497成功（https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38182451737）。下一步需要微信自然显示一条系统Toast后刷新候选，再由用户确认一次性样本核验；不得发送试探消息或放宽门槛。
