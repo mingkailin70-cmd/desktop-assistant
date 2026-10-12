@@ -1,5 +1,14 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-13 社区决策模型权重来源扩展
+
+- **Kev 1.0：GitHub Release确实附带模型增量权重。** [jaredpalmer/kev](https://github.com/jaredpalmer/kev)的正式版本提供0.8B、4B、9B三个可校验tar包，分别包含LoRA适配器、决策头和来源记录；Qwen3.5底模仍需另行取得。Release公布逐包SHA-256，模型卡将适配器/决策头与基座都标为Apache-2.0。它是有限选项概率分类器，不是聊天或代码生成模型。模型卡标注英文；0.8B明确不适合工具调用路由。4B/9B可作为将来System 1架构参考，但不能据此作为小K中文决策候选。当前不下载：中文覆盖不足，而且其独立Transformers运行管线与小K锁定的GGUF路径不同；先保留为可复现评测/实现参考。
+- **Vev：GitHub维护代码，权重另托管在Hugging Face。** [Xiaooolong/vev](https://github.com/Xiaooolong/vev)公开文本和图像类型化决策代码，报告了中文判别集；但README将权重标成研究预览，4B约需10 GB显存、9B约19 GB，均超过本机8 GB显存及至少1 GB余量要求。权重许可证为CC BY-NC 4.0，作者说明这是因训练数据包含非商业/未明确许可来源。故不进入小K发布候选，也不下载；可用于离线学习其接口和局限。
+- **对更大Qwen量化权重仍保留实机评测通道。** Qwen3.8-27B的社区GGUF、GSQ-RCO极低比特量化、Ternary Bonsai 2和编码微调仍列为按需候选；量化文件大小小不等于运行时必然放得下，仍须验证上下文/KV缓存、CPU卸载、运行时兼容、速度和显存余量。GSQ-RCO与Ternary Bonsai 2已有固定文件；截至02:57本机可用RAM约12.2 GiB、独显空闲约5,543 MiB，未达27B候选15 GiB可用RAM准入线，本轮没有启动模型。
+- **筛选规则。** 允许官方或社区作者提供权重；逐项登记训练基座、权重/数据/代码各自许可证、固定提交或revision、SHA-256、量化/专用kernel要求、中文证据、资源峰值和本机同题结果。GitHub代码仓库存在不代表权重在GitHub，也不代表可商用或适合生产。任何决策权重只能提出固定ToolBroker候选，不负责批准或执行副作用。
+
+来源：[Kev代码与训练/评测说明](https://github.com/jaredpalmer/kev)、[Kev 1.0 GitHub Release及SHA-256](https://github.com/jaredpalmer/kev/releases/tag/kev-1.0)、[Kev-0.8B模型卡](https://huggingface.co/jaredpalmer/kev-0.8b)、[Kev-4B模型卡](https://huggingface.co/jaredpalmer/kev-4b)、[Vev代码及限制](https://github.com/Xiaooolong/vev)、[Vev训练数据许可说明](https://github.com/Xiaooolong/vev/blob/main/TRAINING.md)。
+
 ## 2026-10-13 R0微信/QQ后台发送方案复核
 
 - **weixin-auto-send：不满足不打扰要求。** 项目面向微信4.x，但明确通过OCR、鼠标/键盘和剪贴板操作已登录客户端，并提醒运行时不要同时使用鼠标；会与用户工作竞争，不引入。[GitHub项目](https://github.com/raphael2025/weixin-auto-send)
