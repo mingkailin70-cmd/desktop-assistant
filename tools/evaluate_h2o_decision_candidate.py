@@ -18,14 +18,26 @@ from decision_benchmark_suites import INTENT_PILOT_V1, SUITES, get_suite
 
 MODEL_ID = "h2o-lightning-4b-native-q8-decision-eval"
 MODEL_FILE = "h2o-lightning-4b-native-Q8_0.gguf"
-DEFAULT_URL = "http://127.0.0.1:9931"
+
+
+def local_service_url() -> str:
+    raw_port = os.environ.get("XIAOK_H2O_EVAL_PORT", "9931")
+    if not raw_port.isdecimal():
+        raise RuntimeError("本机评测端口必须是十进制数字。")
+    port = int(raw_port)
+    if not 1024 <= port <= 65535:
+        raise RuntimeError("本机评测端口超出允许范围。")
+    return f"http://127.0.0.1:{port}"
 
 
 def local_auth_headers() -> dict[str, str]:
     headers = {"Accept": "application/json"}
     api_key = os.environ.get("XIAOK_H2O_EVAL_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if len(api_key) < 32:
+        raise RuntimeError(
+            "缺少随机服务密钥；请通过 run_h2o_decision_candidate_eval.py 启动受限服务。"
+        )
+    headers["Authorization"] = f"Bearer {api_key}"
     return headers
 
 
@@ -123,7 +135,7 @@ def main() -> int:
     model_file, model_sha256 = read_locked_model(repository)
 
     # 不接受自定义主机、协议或端口，避免将合成集发送到外部服务。
-    base_url = DEFAULT_URL
+    base_url = local_service_url()
     get_json(f"{base_url}/health")
     model_response = get_json(f"{base_url}/v1/models")
     data = model_response.get("data")
