@@ -1,3 +1,19 @@
+## v0.1.121.0 R1任务中心恢复说明（2026-10-13）
+
+此版把固定任务错误码转成隐私安全的中文恢复提示：未执行/未排队、窗口未找到、资源不足、本地模型不可用和发送适配器缺失等情况提供下一步；未知错误不回显任意错误字段。不会在历史中写请求正文、模型输出或本机路径。
+
+固定SDK `10.0.401` 的自包含 `win-x64` 发布成功，包含Microsoft.NETCore.App与Microsoft.WindowsDesktop.App `10.0.12`。针对同一源码提交先前的Release构建0警告、0错误；安全检查131项通过/0跳过；桌面体验检查91项通过。本次重新生成自包含发布包和MSIX，未重跑测试。签名包`artifacts\msix-validation\3c41a487887d40b6a2f91744f70aaf84\XiaoK-signed-validation.msix`，155,777,954字节，SHA-256 `50906F89A623D14A4FE6585BCB29AC80B5BF91E062975BF3871A6CD43030F1E0`。SignTool签名验证有效、0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本次没有改变证书信任。当前账户安装`MingKaiLin.XiaoK_0.1.121.0_neutral__g0ndt6g65c8pe`、状态`Ok`，安装版Host DLL SHA-256为`019C971AE4F848E821CEB24895DBC6D733B94A7D7EE757596B54BFEDC7398ECC`。
+
+安装前确认小K未运行；安装后设置实读为微信/QQ监控`false`、两个发布者AUMID名单为空、唤醒词`false`，Host进程为0。安装器没有启动应用，没有读取或更改用户数据和证书信任。该版本还没有打开界面，故不代表任务历史文案或真实失败恢复流程已在实机验收。
+
+回滚包为已签名`0.1.120.0`：`artifacts\msix-validation\71c23317b9084504bb4c03409e0e32ff\XiaoK-signed-validation.msix`，155,776,675字节，SHA-256 `33C23E4D5FF584D1130CD7403F3405011CB0F2E4735382B1EAB1450BF87D3AD7`。如需回滚，先运行`tools\uninstall_xiaok_msix.ps1`移除当前账户注册，再执行：
+
+```powershell
+.\tools\install_xiaok_msix.ps1 -PackagePath 'D:\Desktop\learn\siri\artifacts\msix-validation\71c23317b9084504bb4c03409e0e32ff\XiaoK-signed-validation.msix' -Install
+```
+
+任务中心UI实测、登录启动恢复以及微信/QQ通知与端到端验收仍待完成。
+
 ## v0.1.120.0 R1任务检查点与R0通知时间戳保护（2026-10-13）
 
 此版本将SQLite v7脱敏任务检查点和通知未来时间戳失败关闭打包安装。固定.NET SDK 10.0.401 Release全解决方案构建0警告、0错误；`XiaoK.Tools.SafetyChecks` 131项通过、0项跳过；`XiaoK.DesktopExperience.Checks` 91项通过。发布使用固定锁文件依赖和仓库自包含`win-x64`发布配置。
