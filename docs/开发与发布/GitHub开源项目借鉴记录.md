@@ -286,3 +286,17 @@
 - 微软[SetValue方法](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)与[`IUIAutomation2.AutoSetFocus`](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)文档说明直接调用ValuePattern前必须考虑默认自动设焦点。本机WPF `System.Windows.Automation`封装没有公开`AutoSetFocus`；编译器也拒绝该调用，因此本轮撤回了未能安全编译的输入实现，没有交付后台写入功能。
 - 本轮只扩展只读快照：Edit/ComboBox仅列控件类型、AutomationId和状态，不读控件名称或当前值；密码控件继续排除。等待工具只查询唯一控件的启用状态，不调用动作Pattern。
 - 下一步若继续研究无焦点后台输入，需先使用受支持的COM接口正确设置`IUIAutomation2.AutoSetFocus=false`，确认作用于实际操作所用Automation对象，再以专用无害窗口验证焦点、用户并发和取消行为；在此之前不接入ToolBroker写动作。
+
+## 2026-10-12 UIA COM隔离验证更新
+
+本节更新并完成上一节提出的“受支持COM接口 + 同一对象 + 隔离无害窗口”验证；生产ToolBroker仍没有通用后台写入动作。
+
+- 微软固定版[winapp CLI v0.7.1文档](https://github.com/microsoft/winappCli/blob/e3cd0b94f3e7b776ac51ba0564f4908094e979b5/docs/ui-automation.md)把`set-value`定义为UIA Pattern写入，不注入键鼠；该CLI自己的工作流仲裁不能覆盖使用者本人或其它程序对同一字段的并发操作。
+- 对照固定提交[pywinauto 90eebe4](https://github.com/pywinauto/pywinauto/blob/90eebe493a85bf4063fcba05b70481c91309980f/pywinauto/controls/uia_controls.py#L2989-L3066)：`set_edit_text`直接使用ValuePattern，而`set_window_text`先明确调用`set_focus()`。这证明不同封装路径行为有差异，但该实现没有替小K关闭`IUIAutomation2.AutoSetFocus`，不直接采用。
+- 新增[隔离诊断工具](../../tools/XiaoK.UiAutomationDiagnostics/README.md)，只测试工具自己创建的跨进程WinForms合成窗体。固定同一个`IUIAutomation2`对象：将`AutoSetFocus`设为false，再从该对象获取目标`AutomationElement`和`ValuePattern`。目标通过空值、唯一AutomationId、PID、Edit类型、Enabled、非密码核验；先后确认前台HWND与当前UIA焦点一致。窗口由原生`ShowWindow(SW_SHOWNOACTIVATE)`显示。固定SDK Release构建0警告/0错误，本机诊断输出PASS，合成值正确回读。
+- 最早一次隔离尝试用了普通WinForms显示，发现前台已变化后在任何`SetValue`之前停止。改用SW_SHOWNOACTIVATE后，目标进程启动与显示前后前台都保持原值；这次排错说明不能只从库文档推断不抢焦点。
+- `Microsoft.Windows.CsWin32` 0.3.333生成的COM定义只用于此独立工具，`PrivateAssets=all`。NuGet依赖锁固定，但含预览/实验元数据版本，因此不纳入Host/MSIX。没有复制或引入上述GitHub项目代码。
+
+本机结论严格限于此WinForms Provider和空文本框；微信/QQ、Chromium/WebView2、其它UIA Provider、用户并发编辑、取消和发送都未验证。生产UI工具仍只读，真实消息仍无发送适配器。任何目标应用都必须单独测试；目标身份不唯一、窗口成为前台或焦点/结果变化时必须停止并反馈，结果不确定不能重试。
+
+来源：[Microsoft winapp CLI v0.7.1固定源码](https://github.com/microsoft/winappCli/tree/e3cd0b94f3e7b776ac51ba0564f4908094e979b5)、[pywinauto固定提交源码](https://github.com/pywinauto/pywinauto/tree/90eebe493a85bf4063fcba05b70481c91309980f)、[FlaUI ValuePattern固定提交源码](https://github.com/FlaUI/FlaUI/blob/fd7cc64ab01908a0ae4cc7d05e704caa34f98d16/src/FlaUI.Core/Patterns/ValuePattern.cs)、[Microsoft SetValue API](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)、[Microsoft AutoSetFocus API](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)。
