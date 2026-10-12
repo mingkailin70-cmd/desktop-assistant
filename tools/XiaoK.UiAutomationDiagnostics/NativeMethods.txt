@@ -10,3 +10,6 @@ UIA_CONTROLTYPE_ID
 TreeScope
 
 GetForegroundWindow
+EnumWindows
+GetWindowThreadProcessId
+IsWindowVisible

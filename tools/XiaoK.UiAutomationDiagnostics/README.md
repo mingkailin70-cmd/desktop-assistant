@@ -1,6 +1,6 @@
 # UI Automation 后台焦点隔离诊断
 
-此工具仅验证小K采用 Windows UI Automation `ValuePattern.SetValue`时，关闭 `IUIAutomation2.AutoSetFocus` 是否能在合成控件上保持当前前台窗口和键盘焦点。它不属于小K Host，不注册 ToolBroker 工具，也不自动运行。
+此工具包含两种隔离诊断：合成控件写入探针，用来验证关闭 `IUIAutomation2.AutoSetFocus` 时 `ValuePattern.SetValue` 能否保持前台与键盘焦点；微信/QQ只读结构探针，用来统计实际应用窗口暴露的控件类型和模式可用性。它不属于小K Host，不注册 ToolBroker 工具，也不自动运行。
 
 ## 安全范围
 
@@ -9,6 +9,8 @@
 - 写入前比对目标进程ID、唯一 AutomationId、Edit 控件类型、启用状态、密码标记和空值前置条件。
 - 写入前后核对前台 HWND，并比较 UIA 当前焦点元素。任何显示阶段已经改变前台的情况都会在写值前失败关闭。
 - 不打开其他应用，不读取截图、通知或聊天内容，不注入进程，不调用鼠标、键盘、剪贴板或发送动作。退出时只关闭它自己启动的测试子进程。
+- `--inspect-live-app wechat|qq` 只匹配已知可执行文件路径，再通过 `EnumWindows` 与窗口进程ID枚举可见顶层窗口；不调用 `Process.MainWindowHandle`，避免依赖其内部主窗口选择逻辑。UIA只查询控件类型、AutomationId是否存在以及Edit/ValuePattern和Button/InvokePattern是否可用，并输出汇总数量。不会读取窗口标题、控件名称、文本值、消息正文或截图，不调用任何模式，不写入目标应用；探针进程最多运行20秒，超时只结束探针自身。
+- 实际应用结构探针只用于回答“该窗口暴露了哪些结构化控件能力”。即便发现Edit/ValuePattern或Button/InvokePattern，也不证明它是联系人/消息框或发送按钮，不证明后台写入安全、私聊身份可靠或发送结果可核验。
 
 ## 运行
 
@@ -16,10 +18,12 @@
 
 ```powershell
 & '.\.tools\dotnet\dotnet.exe' restore '.\tools\XiaoK.UiAutomationDiagnostics\XiaoK.UiAutomationDiagnostics.csproj' --locked-mode --configfile '.\tools\XiaoK.UiAutomationDiagnostics\NuGet.Config'
-& '.\.tools\dotnet\dotnet.exe' run --project '.\tools\XiaoK.UiAutomationDiagnostics\XiaoK.UiAutomationDiagnostics.csproj' --no-restore
+& '.\.tools\dotnet\dotnet.exe' run --configuration Release --project '.\tools\XiaoK.UiAutomationDiagnostics\XiaoK.UiAutomationDiagnostics.csproj' --no-restore
+& '.\.tools\dotnet\dotnet.exe' run --configuration Release --project '.\tools\XiaoK.UiAutomationDiagnostics\XiaoK.UiAutomationDiagnostics.csproj' --no-build --no-restore -- --inspect-live-app wechat
+& '.\.tools\dotnet\dotnet.exe' run --configuration Release --project '.\tools\XiaoK.UiAutomationDiagnostics\XiaoK.UiAutomationDiagnostics.csproj' --no-build --no-restore -- --inspect-live-app qq
 ```
 
-仅在 Windows 交互登录会话运行。看到 `PASS` 只表示此 WinForms 合成控件路径通过；不表示其它应用、微信或QQ控件支持后台写入。只有针对具体应用的隔离样例重复证明目标身份、空值/前置状态、无焦点变化、无并发冲突和可观察结果后，才能评估接入其应用专用适配器；通用写入入口仍不暴露给模型。
+仅在 Windows 交互登录会话运行。看到合成控件 `PASS` 只表示该 WinForms 控件路径通过；实际应用探针的 `READ_ONLY_SCAN_COMPLETE` 只表示结构枚举期间前台HWND与UIA焦点未变化。它们都不表示微信或QQ消息操作已通过。只有针对具体应用的隔离样例重复证明目标身份、空值/前置状态、无焦点变化、无并发冲突和可观察结果后，才能评估接入其应用专用适配器；通用写入入口仍不暴露给模型。
 
 ## 依赖
 
