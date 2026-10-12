@@ -58,6 +58,8 @@ internal static class Program
                 _ = CreateEvaluationManifestJson(validationModel);
                 Console.WriteLine($"模型权重与 llama.cpp b11259 文件散列已核验：{validationModel.Id} @ {validationModel.Revision}");
                 Console.WriteLine($"显存配置：GPU层 {validationModel.GpuLayers}，预计 {validationModel.ExpectedGpuMemoryMiB:N0} MiB，启动保护线 {validationModel.MinimumInitialGpuFreeMiB:N0} MiB（另保留 {MinimumRuntimeGpuFreeMiB:N0} MiB）。");
+                if (validationModel.MinimumInitialSystemMemoryMiB > 0)
+                    Console.WriteLine($"系统内存保护线：启动前至少 {validationModel.MinimumInitialSystemMemoryMiB:N0} MiB，模型就绪后至少 {SystemMemoryAdmissionPolicy.MinimumRuntimeReserveMiB:N0} MiB。仅显示锁定阈值，没有读取当前内存。");
                 Console.WriteLine("仅核验锁定文件；没有查询/占用GPU、启动模型或写入评测结果。");
                 return 0;
             }
@@ -97,6 +99,18 @@ internal static class Program
             var gpuBaseline = await ReadGpuSnapshotAsync();
             if (gpuBaseline.FreeMiB < model.MinimumInitialGpuFreeMiB)
                 throw new InvalidOperationException($"启动前显存空闲 {gpuBaseline.FreeMiB} MiB，低于该模型预算 {model.ExpectedGpuMemoryMiB:N0} MiB 加 1,024 MiB 余量；本次未启动。");
+            SystemMemorySnapshot? systemMemoryBaseline = null;
+            if (model.MinimumInitialSystemMemoryMiB > 0)
+            {
+                systemMemoryBaseline = WindowsSystemMemoryProbe.Read();
+                var memoryAdmission = SystemMemoryAdmissionPolicy.Evaluate(
+                    systemMemoryBaseline, model.MinimumInitialSystemMemoryMiB);
+                if (!memoryAdmission.Allowed) throw new InvalidOperationException(memoryAdmission.Reason);
+                Console.WriteLine($"启动前系统可用内存 {systemMemoryBaseline!.AvailableMiB} MiB，保护线 {model.MinimumInitialSystemMemoryMiB} MiB。");
+            }
+            var systemMemorySamples = systemMemoryBaseline is null
+                ? null
+                : new SystemMemorySampleAccumulator(systemMemoryBaseline);
             if (Process.GetProcessesByName("llama-server").Length != 0 || Process.GetProcessesByName("llama-bench").Length != 0)
                 throw new InvalidOperationException("发现已有 llama.cpp 进程；为避免资源争用，本次未启动。");
 
@@ -165,11 +179,19 @@ internal static class Program
                 var proposal = ToolBroker.Proposal(toolId,
                     [new KeyValuePair<string, string>("instruction", task.Prompt)], "configured-project", expected);
 
-                gpuMonitor = MonitorGpuAsync(gpuSamples, cancellation, stopReason);
+                gpuMonitor = MonitorGpuAsync(gpuSamples, systemMemorySamples, cancellation, stopReason);
                 Console.WriteLine($"固定评测题：{task.Id}（{task.Category}）；模型：{model.Id}；只读检索思考模式：{(options.EnableThinking ? "开启（显式选择）" : "关闭（生产默认）")}；管线：{pipelineVersion}；推理地址：127.0.0.1:{endpoint.Port}");
                 Console.WriteLine("只发送本地模型的合成任务提示；不会访问账号、通知或发送任何消息。");
-                Console.WriteLine("执行中……按 Ctrl+C 可取消；若显存余量低于 1 GiB，运行器会自动取消并停止。");
+                Console.WriteLine(model.MinimumInitialSystemMemoryMiB > 0
+                    ? "执行中……按 Ctrl+C 可取消；显存余量低于 1 GiB或系统可用内存低于 4 GiB时，运行器会自动取消并停止。"
+                    : "执行中……按 Ctrl+C 可取消；若显存余量低于 1 GiB，运行器会自动取消并停止。");
                 var result = await toolBroker.ExecuteAsync(proposal, cancellation.Token);
+                if (result.ErrorCode == LowSystemMemoryException.ErrorCode)
+                {
+                    stopReason.LowSystemMemory = true;
+                    cancellation.Cancel();
+                    throw new OperationCanceledException(cancellation.Token);
+                }
 
                 var workspaceHistory = CodeTaskAgent.ReadRetainedTasks(workspaceRoot);
                 var latest = workspaceHistory.OrderByDescending(item => item.CreatedAtUtc).FirstOrDefault();
@@ -187,6 +209,8 @@ internal static class Program
                 Console.WriteLine();
                 Console.WriteLine($"工具返回：{(result.Success ? "成功" : "失败")} / {result.ErrorCode ?? "无错误码"}");
                 Console.WriteLine($"耗时：{timer.Elapsed.TotalSeconds:F1} 秒；显存最低空闲：{gpuSamples.MinimumFreeMiB} MiB；显存峰值占用：{gpuSamples.PeakUsedMiB} MiB");
+                if (systemMemorySamples is not null)
+                    Console.WriteLine($"系统可用内存最低：{systemMemorySamples.MinimumAvailableMiB} MiB（启动前 {systemMemoryBaseline!.AvailableMiB} MiB；运行中保留线 {SystemMemoryAdmissionPolicy.MinimumRuntimeReserveMiB} MiB）");
                 if (responseDiagnostics.Count != 0)
                 {
                     Console.WriteLine("模型响应诊断（仅长度/token/结束原因，不含原文）：");
@@ -201,6 +225,7 @@ internal static class Program
                     Console.WriteLine("检测到的补丁文件：" + (changedFiles.Count == 0 ? "（无）" : string.Join("、", changedFiles)));
                     Console.WriteLine($"目标范围：{(inScope ? "通过" : "失败，至少一个改动超出题目范围")}");
                 }
+                cancellation.Token.ThrowIfCancellationRequested();
                 if (fixtureResult is not null)
                     Console.WriteLine($"隔离夹具：{(fixtureResult.RestoreExitCode == 0 && fixtureResult.TestExitCode == 0 ? "通过" : "失败")}（离线 AppContainer）\n{fixtureResult.Output}");
 
@@ -218,8 +243,9 @@ internal static class Program
                     : "安全/执行门槛未通过，本题自动记为未通过。按 Enter 查看汇总：");
                 var reviewerPassed = automaticallySafe && string.Equals(Console.ReadLine()?.Trim(), "y", StringComparison.OrdinalIgnoreCase);
                 if (!automaticallySafe) _ = Console.ReadLine();
+                cancellation.Token.ThrowIfCancellationRequested();
 
-                var aggregate = new AggregateResult(4, pipelineVersion, runtimeFileSetSha256, pipelineBuildSha256,
+                var aggregate = new AggregateResult(5, pipelineVersion, runtimeFileSetSha256, pipelineBuildSha256,
                     responseDiagnostics.Count,
                     responseDiagnostics.Sum(item => item.PromptTokens), responseDiagnostics.Sum(item => item.CompletionTokens),
                     responseDiagnostics.Count(item => item.ContentCharacters == 0),
@@ -227,7 +253,8 @@ internal static class Program
                     runId, DateTimeOffset.UtcNow, manifest.Version, baselineCommit,
                     task.Id, task.Category, model.Id, model.Revision, model.ModelSha256, model.RuntimeVersion,
                     timer.Elapsed.TotalMilliseconds, gpuBaseline.FreeMiB, gpuSamples.MinimumFreeMiB,
-                    gpuSamples.PeakUsedMiB, result.Success, inScope, fixtureResult?.RestoreExitCode,
+                    gpuSamples.PeakUsedMiB, systemMemoryBaseline?.AvailableMiB,
+                    systemMemorySamples?.MinimumAvailableMiB, result.Success, inScope, fixtureResult?.RestoreExitCode,
                     fixtureResult?.TestExitCode, reviewerPassed, Sha256(Encoding.UTF8.GetBytes(result.Data ?? result.Summary)));
                 AppendAggregate(resultFile, aggregate);
                 completed = true;
@@ -239,6 +266,10 @@ internal static class Program
                 timer.Stop();
                 Console.Error.WriteLine(stopReason.LowGpuMemory
                     ? $"显存空闲低于 {MinimumRuntimeGpuFreeMiB} MiB，任务已取消。"
+                    : stopReason.LowSystemMemory
+                        ? $"系统可用内存低于 {SystemMemoryAdmissionPolicy.MinimumRuntimeReserveMiB} MiB，任务已取消。"
+                    : stopReason.SystemMemoryReadFailed
+                        ? "系统可用内存读取失败，任务已取消并停止模型。"
                     : stopReason.UserCancelled ? "已取消任务。" : "评测任务已取消。");
                 return 130;
             }
@@ -433,8 +464,8 @@ internal static class Program
             "qwen3.5-4b-q4km" => new ModelProfile("Qwen3.5-4B-Q4_K_M.gguf", 99, 5_000, 6_024, false),
             "mimo-v2.6-distill-qwen-9b-gguf-q8-0" => new ModelProfile("MiMo-V2.6-Distill-Qwen-9B-Q8_0.gguf", 8, 3_500, 4_524, true),
             "qwen3.5-9b-q4km-eval" => new ModelProfile("Qwen3.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
-            "qwen3.8-27b-ud-q4km-eval" => new ModelProfile("Qwen3.8-27B-UD-Q4_K_M.gguf", 8, 4_000, 5_024, true),
-            "qwen3.8-27b-ud-q3kxl-eval" => new ModelProfile("Qwen3.8-27B-UD-Q3_K_XL.gguf", 8, 3_500, 4_524, true),
+            "qwen3.8-27b-ud-q4km-eval" => new ModelProfile("Qwen3.8-27B-UD-Q4_K_M.gguf", 8, 4_000, 5_024, true, 18_432),
+            "qwen3.8-27b-ud-q3kxl-eval" => new ModelProfile("Qwen3.8-27B-UD-Q3_K_XL.gguf", 8, 3_500, 4_524, true, 15_360),
             "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "gemma-4-e4b-it-qat-q4-0-eval" => new ModelProfile("gemma-4-E4B_q4_0-it.gguf", 24, 4_500, 5_524, true),
             "ornith-1.5-9b-q4km-eval" => new ModelProfile("Ornith-1.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
@@ -466,7 +497,8 @@ internal static class Program
         return new(model.Id, model.Revision, root, profile.ModelFileName, modelFile.LocalVerifiedSha256,
             runtimeRoot, runtime.Version, serverFile.Sha256, runtime.StagedFiles,
             EvaluationContextTokens, profile.GpuLayers, profile.ExpectedGpuMemoryMiB,
-            profile.MinimumInitialGpuFreeMiB, profile.EvaluationCandidate);
+            profile.MinimumInitialGpuFreeMiB, profile.MinimumInitialSystemMemoryMiB,
+            profile.EvaluationCandidate);
     }
 
     private static string CreateEvaluationManifestJson(ModelConfig model)
@@ -483,7 +515,8 @@ internal static class Program
             throw new InvalidDataException("锁定模型文件缺失或哈希不符；本次未启动。");
 
         return JsonSerializer.Serialize(new RuntimeManifest(1, model.RuntimeVersion, model.RuntimeSha256,
-            model.Id, model.ModelSha256, model.ContextTokens, model.GpuLayers, model.ExpectedGpuMemoryMiB), JsonOptions);
+            model.Id, model.ModelSha256, model.ContextTokens, model.GpuLayers, model.ExpectedGpuMemoryMiB,
+            model.MinimumInitialSystemMemoryMiB), JsonOptions);
     }
 
     private static Uri GetUnusedLoopbackEndpoint()
@@ -516,7 +549,9 @@ internal static class Program
         return new(values[0], values[1]);
     }
 
-    private static async Task MonitorGpuAsync(GpuSampleAccumulator samples, CancellationTokenSource cancellation, StopReason stopReason)
+    private static async Task MonitorGpuAsync(GpuSampleAccumulator samples,
+        SystemMemorySampleAccumulator? systemMemorySamples, CancellationTokenSource cancellation,
+        StopReason stopReason)
     {
         try
         {
@@ -530,6 +565,23 @@ internal static class Program
                     stopReason.LowGpuMemory = true;
                     cancellation.Cancel();
                     return;
+                }
+                if (systemMemorySamples is not null)
+                {
+                    var memorySnapshot = WindowsSystemMemoryProbe.Read();
+                    if (memorySnapshot is null)
+                    {
+                        stopReason.SystemMemoryReadFailed = true;
+                        cancellation.Cancel();
+                        return;
+                    }
+                    systemMemorySamples.Observe(memorySnapshot);
+                    if (!SystemMemoryAdmissionPolicy.HasRuntimeReserve(memorySnapshot))
+                    {
+                        stopReason.LowSystemMemory = true;
+                        cancellation.Cancel();
+                        return;
+                    }
                 }
             }
         }
@@ -816,7 +868,14 @@ internal static class Program
             Task.FromResult(CodeTaskReviewDecision.KeepPatch);
     }
 
-    private sealed class StopReason { public bool UserCancelled; public bool LowGpuMemory; public bool GpuReadFailed; }
+    private sealed class StopReason
+    {
+        public bool UserCancelled;
+        public bool LowGpuMemory;
+        public bool GpuReadFailed;
+        public bool LowSystemMemory;
+        public bool SystemMemoryReadFailed;
+    }
 
     private sealed class GpuSampleAccumulator(GpuSnapshot initial)
     {
@@ -830,6 +889,16 @@ internal static class Program
                 MinimumFreeMiB = Math.Min(MinimumFreeMiB, sample.FreeMiB);
                 PeakUsedMiB = Math.Max(PeakUsedMiB, sample.UsedMiB);
             }
+        }
+    }
+
+    private sealed class SystemMemorySampleAccumulator(SystemMemorySnapshot initial)
+    {
+        private readonly object _gate = new();
+        public long MinimumAvailableMiB { get; private set; } = initial.AvailableMiB;
+        public void Observe(SystemMemorySnapshot sample)
+        {
+            lock (_gate) MinimumAvailableMiB = Math.Min(MinimumAvailableMiB, sample.AvailableMiB);
         }
     }
 
@@ -852,19 +921,21 @@ internal static class Program
     private sealed record RuntimeRecord(string Id, string Version, string Status, IReadOnlyList<RuntimeFile> StagedFiles);
     private sealed record RuntimeFile(string Name, long SizeBytes, string Sha256);
     private sealed record ModelProfile(string ModelFileName, int GpuLayers, long ExpectedGpuMemoryMiB,
-        long MinimumInitialGpuFreeMiB, bool EvaluationCandidate);
+        long MinimumInitialGpuFreeMiB, bool EvaluationCandidate, long MinimumInitialSystemMemoryMiB = 0);
     private sealed record ModelConfig(string Id, string Revision, string Root, string ModelFile, string ModelSha256,
         string RuntimeRoot, string RuntimeVersion, string RuntimeSha256, IReadOnlyList<RuntimeFile> RuntimeFiles,
         int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB, long MinimumInitialGpuFreeMiB,
-        bool EvaluationCandidate);
+        long MinimumInitialSystemMemoryMiB, bool EvaluationCandidate);
     private sealed record RuntimeManifest(int SchemaVersion, string RuntimeVersion, string RuntimeSha256, string ModelId,
-        string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB);
+        string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB,
+        long MinimumAvailableSystemMemoryMiB = 0);
     private sealed record AggregateResult(int SchemaVersion, string? PipelineVersion,
         string? RuntimeFileSetSha256, string? PipelineBuildSha256, int ResponseCount,
         int PromptTokens, int CompletionTokens, int EmptyContentResponses, string? FinishReasons,
         string RunId, DateTimeOffset FinishedAtUtc,
         string DatasetVersion, string BaselineCommit, string TaskId, string Category, string ModelId,
         string ModelRevision, string ModelSha256, string RuntimeVersion, double DurationMilliseconds,
-        long InitialGpuFreeMiB, long MinimumGpuFreeMiB, long PeakGpuUsedMiB, bool ToolSucceeded,
+        long InitialGpuFreeMiB, long MinimumGpuFreeMiB, long PeakGpuUsedMiB,
+        long? InitialAvailableSystemMemoryMiB, long? MinimumAvailableSystemMemoryMiB, bool ToolSucceeded,
         bool ScopePassed, int? OfflineRestoreExitCode, int? FixtureExitCode, bool ReviewerPassed, string OutputSha256);
 }

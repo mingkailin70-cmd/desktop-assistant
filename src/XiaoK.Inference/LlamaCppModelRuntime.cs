@@ -30,8 +30,10 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     private const string Qwen9BEvaluationModelFileName = "Qwen3.5-9B-Q4_K_M.gguf";
     private const string Qwen38Q4EvaluationModelId = "qwen3.8-27b-ud-q4km-eval";
     private const string Qwen38Q4EvaluationModelFileName = "Qwen3.8-27B-UD-Q4_K_M.gguf";
+    private const long Qwen38Q4MinimumAvailableSystemMemoryMiB = 18_432;
     private const string Qwen38Q3EvaluationModelId = "qwen3.8-27b-ud-q3kxl-eval";
     private const string Qwen38Q3EvaluationModelFileName = "Qwen3.8-27B-UD-Q3_K_XL.gguf";
+    private const long Qwen38Q3MinimumAvailableSystemMemoryMiB = 15_360;
     private const string Jev9BEvaluationModelId = "autotrust-jev-9b-q4km-eval";
     private const string Jev9BEvaluationModelFileName = "JEV-9B.Q4_K_M.gguf";
     private const string Gemma4E4BEvaluationModelId = "gemma-4-e4b-it-qat-q4-0-eval";
@@ -53,6 +55,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     private readonly int _contextTokens;
     private readonly int _gpuLayers;
     private readonly long _expectedGpuMemoryMiB;
+    private readonly long _minimumAvailableSystemMemoryMiB;
     private readonly Uri _endpoint;
     private readonly IGpuMemoryProbe _gpuMemoryProbe;
     private readonly HttpClient _healthClient;
@@ -70,7 +73,8 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
 
     private LlamaCppModelRuntime(string modelRoot, string runtimePath, string modelPath,
         string runtimeSha256, string modelSha256, int contextTokens, int gpuLayers,
-        long expectedGpuMemoryMiB, Uri endpoint, IGpuMemoryProbe gpuMemoryProbe)
+        long expectedGpuMemoryMiB, long minimumAvailableSystemMemoryMiB, Uri endpoint,
+        IGpuMemoryProbe gpuMemoryProbe)
     {
         _modelRoot = modelRoot;
         _runtimePath = runtimePath;
@@ -80,6 +84,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         _contextTokens = contextTokens;
         _gpuLayers = gpuLayers;
         _expectedGpuMemoryMiB = expectedGpuMemoryMiB;
+        _minimumAvailableSystemMemoryMiB = minimumAvailableSystemMemoryMiB;
         _endpoint = endpoint;
         _gpuMemoryProbe = gpuMemoryProbe;
         _healthClient = new HttpClient(new SocketsHttpHandler
@@ -204,6 +209,14 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         if (manifest.GpuLayers == 0 ? manifest.ExpectedGpuMemoryMiB != 0
                 : manifest.ExpectedGpuMemoryMiB is <= 0 or > 16384)
             throw new InvalidDataException("GPU 层数与已评估的显存预算不匹配。CPU 模式预算必须为 0；GPU 模式必须提供 1–16,384 MiB 预算。");
+        var minimumAvailableSystemMemoryMiB = expectedModelId switch
+        {
+            Qwen38Q3EvaluationModelId => Qwen38Q3MinimumAvailableSystemMemoryMiB,
+            Qwen38Q4EvaluationModelId => Qwen38Q4MinimumAvailableSystemMemoryMiB,
+            _ => 0
+        };
+        if (manifest.MinimumAvailableSystemMemoryMiB != minimumAvailableSystemMemoryMiB)
+            throw new InvalidDataException("模型评测清单中的系统内存保护线与固定模型策略不匹配。");
 
         if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
             || uri.Scheme != Uri.UriSchemeHttp
@@ -217,7 +230,8 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         var modelPath = Path.Combine(root, expectedModelFileName);
         return new LlamaCppModelRuntime(root, runtimePath, modelPath,
             manifest.RuntimeSha256, manifest.ModelSha256, contextTokens, manifest.GpuLayers,
-            manifest.ExpectedGpuMemoryMiB, uri, gpuMemoryProbe ?? new NvidiaSmiGpuMemoryProbe());
+            manifest.ExpectedGpuMemoryMiB, minimumAvailableSystemMemoryMiB, uri,
+            gpuMemoryProbe ?? new NvidiaSmiGpuMemoryProbe());
     }
 
     public int ContextTokens => _contextTokens;
@@ -306,6 +320,13 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
 
     private async Task StartCoreAsync(ModelWorkloadPriority priority, CancellationToken cancellationToken)
     {
+        if (_minimumAvailableSystemMemoryMiB > 0)
+        {
+            var systemAdmission = SystemMemoryAdmissionPolicy.Evaluate(
+                WindowsSystemMemoryProbe.Read(), _minimumAvailableSystemMemoryMiB);
+            if (!systemAdmission.Allowed) throw new LowSystemMemoryException(systemAdmission.Reason);
+        }
+
         if (_gpuLayers > 0)
         {
             var admission = GpuMemoryAdmissionPolicy.Evaluate(
@@ -361,6 +382,9 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             _ = DrainAndDiscardAsync(_process.StandardOutput);
             _ = DrainAndDiscardAsync(_process.StandardError);
             await WaitUntilReadyAsync(cancellationToken).ConfigureAwait(false);
+            if (_minimumAvailableSystemMemoryMiB > 0
+                && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(WindowsSystemMemoryProbe.Read()))
+                throw new LowSystemMemoryException($"模型加载后系统可用内存低于 {SystemMemoryAdmissionPolicy.MinimumRuntimeReserveMiB} MiB；已停止本地模型进程。");
             if (_gpuLayers > 0
                 && !GpuMemoryAdmissionPolicy.HasMinimumReserve(
                     await _gpuMemoryProbe.ReadAsync(cancellationToken).ConfigureAwait(false)))
@@ -596,7 +620,8 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     }
 
     private sealed record RuntimeManifest(int SchemaVersion, string RuntimeVersion, string RuntimeSha256,
-        string ModelId, string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB);
+        string ModelId, string ModelSha256, int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB,
+        long MinimumAvailableSystemMemoryMiB = 0);
 
     private static SafeJobHandle CreateKillOnCloseJob()
     {

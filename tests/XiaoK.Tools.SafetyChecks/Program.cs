@@ -771,6 +771,9 @@ try
     CheckGpuMemoryAdmissionRequiresReserve();
     passed.Add("GPU 推理准入要求模型预算之外保留至少 1 GiB 显存");
 
+    CheckSystemMemoryAdmissionRequiresReserve();
+    passed.Add("大型模型系统内存准入失败关闭并保留至少 4 GiB 运行余量");
+
     await CheckInstalledModelRootResolutionAsync(tempRoot);
     passed.Add("安装版模型根目录定位固定 revision 子目录，并在直接配置无效时失败关闭");
 
@@ -6349,7 +6352,8 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
           "modelSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "contextTokens": 6144,
           "gpuLayers": 8,
-          "expectedGpuMemoryMiB": 3500
+          "expectedGpuMemoryMiB": 3500,
+          "minimumAvailableSystemMemoryMiB": 15360
         }
         """);
     var qwen38Q3Candidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
@@ -6374,7 +6378,8 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
           "modelSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "contextTokens": 6144,
           "gpuLayers": 8,
-          "expectedGpuMemoryMiB": 4000
+          "expectedGpuMemoryMiB": 4000,
+          "minimumAvailableSystemMemoryMiB": 18432
         }
         """);
     var qwen38Q4Candidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
@@ -6568,6 +6573,21 @@ static void CheckGpuMemoryAdmissionRequiresReserve()
         "余量不足或显存读数缺失时仍允许启动模型。");
     Require(!GpuMemoryAdmissionPolicy.HasMinimumReserve(new GpuMemorySnapshot(1023, 8192)),
         "模型运行后低于 1 GiB 的余量仍通过校验。");
+}
+
+static void CheckSystemMemoryAdmissionRequiresReserve()
+{
+    var admitted = SystemMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(16_000, 32_000), 15_360);
+    var insufficient = SystemMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(15_359, 32_000), 15_360);
+    var unavailable = SystemMemoryAdmissionPolicy.Evaluate(null, 15_360);
+    var invalidThreshold = SystemMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(20_000, 32_000), 0);
+    Require(admitted.Allowed, "系统可用内存超过模型启动保护线时未获准。");
+    Require(!insufficient.Allowed && !unavailable.Allowed && !invalidThreshold.Allowed,
+        "系统内存不足、读数缺失或阈值无效时仍允许模型启动。");
+    Require(SystemMemoryAdmissionPolicy.HasRuntimeReserve(new SystemMemorySnapshot(4_096, 32_000))
+        && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(new SystemMemorySnapshot(4_095, 32_000))
+        && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(null),
+        "运行期间系统可用内存低于4 GiB或读数缺失时仍通过保护检查。");
 }
 
 static async Task CheckGpuPreflightBlocksBeforeRuntimeLaunchAsync(string root)

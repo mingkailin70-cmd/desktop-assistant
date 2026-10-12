@@ -344,6 +344,12 @@ public sealed class CodeTaskAgent
                 ? new(false, "可用独显显存不足或读数不可用；已拒绝启动模型。", "LOW_VRAM")
                 : await FailAsync(snapshot, $"隔离工作区已创建：{snapshot.WorkspacePath}。可用独显显存不足或读数不可用；已拒绝启动模型。", "LOW_VRAM");
         }
+        catch (LowSystemMemoryException ex)
+        {
+            return snapshot is null
+                ? new(false, ex.Message, LowSystemMemoryException.ErrorCode)
+                : await FailAsync(snapshot, $"隔离工作区已创建：{snapshot.WorkspacePath}。{ex.Message}", LowSystemMemoryException.ErrorCode);
+        }
         catch (HttpRequestException)
         {
             return snapshot is null
@@ -627,6 +633,12 @@ public sealed class CodeTaskAgent
             return snapshot is null
                 ? new(false, "可用独显显存不足或读数不可用；已拒绝启动模型。", "LOW_VRAM")
                 : await FailAsync(snapshot, "可用独显显存不足或读数不可用；已拒绝启动模型，原项目未修改。", "LOW_VRAM");
+        }
+        catch (LowSystemMemoryException ex)
+        {
+            return snapshot is null
+                ? new(false, ex.Message, LowSystemMemoryException.ErrorCode)
+                : await FailAsync(snapshot, $"{ex.Message}原项目未修改。", LowSystemMemoryException.ErrorCode);
         }
         catch (HttpRequestException)
         {
