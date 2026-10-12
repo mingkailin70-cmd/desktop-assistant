@@ -10,6 +10,14 @@
 
 来源：[Kev代码与训练/评测说明](https://github.com/jaredpalmer/kev)、[Kev 1.0 GitHub Release及SHA-256](https://github.com/jaredpalmer/kev/releases/tag/kev-1.0)、[Kev-0.8B模型卡](https://huggingface.co/jaredpalmer/kev-0.8b)、[Kev-4B模型卡](https://huggingface.co/jaredpalmer/kev-4b)、[Vev代码及限制](https://github.com/Xiaooolong/vev)、[Vev训练数据许可说明](https://github.com/Xiaooolong/vev/blob/main/TRAINING.md)。
 
+## 2026-10-13 GitHub 社区生成模型权重补充
+
+- **LocoOperator-4B：本地代码库只读探索候选。** GitHub项目固定查看到提交`b185a4198e4a3a2d8655120513326d8b1b487872`，代码为MIT；实际GGUF由作者发布在Hugging Face，模型卡标MIT，Q4_K_M约2.50 GB。其底模为Qwen3-4B-Instruct-2507，使用Qwen3-Coder-Next教师轨迹进行全参数蒸馏，作者说明训练集约170,356条多轮代码探索对话。[固定GitHub源码](https://github.com/LocoreMind/LocoOperator/tree/b185a4198e4a3a2d8655120513326d8b1b487872)、[GGUF权重页和量化清单](https://huggingface.co/LocoreMind/LocoOperator-4B-GGUF)、[模型评测与局限](https://github.com/LocoreMind/LocoOperator/blob/b185a4198e4a3a2d8655120513326d8b1b487872/README.md)
+- 发布方65条英语样本评测报告JSON和参数语法有效率均为100%，但首个工具类型与教师答案匹配率为65.6%；测试集标签来自教师模型，样本量有限。模型工具表包含Bash、Write、Edit和Task，并比教师更常选Bash。若进入本机试评，只允许通过适配层映射到小K既有的固定只读搜索/读取工具；Shell、写入、任意点击和子代理动作一律不暴露给它。中文效果、训练数据逐项来源/许可、固定权重revision与SHA-256、b11259加载兼容性均待核实；目前不下载、不加入模型锁、不接生产流程。
+- **Qwen3.5-4B APIGen-MT-5k：适合作为工具调用回归案例，不是当前优先候选。** 独立作者公开了F16 GGUF与Safetensors权重，权重页标注继承Qwen3.5-4B许可，APIGen-MT-5k数据另有自己的条款；GitHub账号页介绍该项目关注小模型工具使用和量化影响。[作者GitHub研究简介](https://github.com/CFitzsimons)、[权重、文件和基准](https://huggingface.co/CFitzsimons/Qwen3.5-4B-APIGen-MT-5k-F16-GGUF)
+- 作者在其英文BFCL v4对照中报告总分只提高0.39个百分点；parallel子项提高9.5个百分点，但irrelevance下降4.17个百分点、parallel_multiple下降7个百分点、多轮子项下降6.5个百分点。F16 GGUF约8.67 GB，当前没有同仓Q4权重。它说明专门微调可能改善某个动作维度、同时损害“不该调用时不调用”和多轮状态保持，不能按单一总分或宣传结论切换模型。本轮只登记评测线索，不下载或量化。
+- **结论：** 社区权重可以进入小K候选池，但先核验基座/训练数据/权重许可和可复现文件，再用小K的中文、后台无干扰、取消/失败及安全拒绝任务集复测。LocoOperator仅可能承担只读代码探索；APIGen权重暴露了工具微调的回归风险。两者都不能改变ToolBroker权限，且社区仓库附带的OpenRouter/cloud fallback、Bash或宽泛桌面能力均不复用。
+
 ## 2026-10-13 R0微信/QQ后台发送方案复核
 
 - **weixin-auto-send：不满足不打扰要求。** 项目面向微信4.x，但明确通过OCR、鼠标/键盘和剪贴板操作已登录客户端，并提醒运行时不要同时使用鼠标；会与用户工作竞争，不引入。[GitHub项目](https://github.com/raphael2025/weixin-auto-send)
