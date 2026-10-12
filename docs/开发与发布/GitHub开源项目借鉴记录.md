@@ -2,6 +2,14 @@
 
 本清单记录经过初步核对、可能帮助小K的公开项目。列入清单不等于采用；每次实际引入代码、依赖或素材前，仍要固定提交/版本，复查许可证、维护状态、传递依赖、联网行为和本项目安全边界。
 
+## 2026-10-12 微软 UFO² Windows 桌面代理架构
+
+- 项目：[microsoft/UFO](https://github.com/microsoft/UFO)，本次检查固定在`main`提交`a795552d976c4c019d7c2f778a0effb5cef7de6b`；仓库许可证为MIT。仓库当前README将UFO²称为稳定的单Windows设备路线，并介绍UIA、Win32、WinCOM、本机应用API和GUI动作混合方案，以及HostAgent协调器、按应用隔离的AppAgent、状态机和MCP动作服务器。
+- 可借鉴到小K：对Excel/Word等具备稳定本机接口的应用，优先实现小范围、类型化的应用适配器；跨应用计划由Host编排，具体执行者按目标应用隔离；每一步返回可观察结果，再由ToolBroker独立核验。该方向与小K既有的固定工具注册、后台入口及确定性策略相容，不能绕开ToolBroker。
+- 不直接采用的原因：UFO²的`select_application_window`明确把目标窗口设为前台并聚焦；其点击、输入、滚轮和截图命令也不能视为无打扰。UFO² README把Picture-in-Picture虚拟桌面列为“coming soon/开发中”，因此当前不能用它证明在用户继续工作时可并行自动化。项目安装路线依赖Python，默认方案还展示可配置云模型；这与小K .NET/WPF、主机本地推理和最小依赖要求不同。
+- 结论：只采纳“原生应用API优先、执行器按应用隔离、状态机、动作回执和逐步核验”的设计线索。真实后台输入仍须针对每个应用独立证明不会改变焦点、鼠标、键盘或剪贴板；无法证明时应报告该动作当前不支持后台执行。未克隆、安装、运行或复制UFO代码，也未增加依赖。
+- 来源：[UFO²项目说明](https://github.com/microsoft/UFO/blob/a795552d976c4c019d7c2f778a0effb5cef7de6b/ufo/README.md)、[UFO²架构说明](https://github.com/microsoft/UFO/blob/a795552d976c4c019d7c2f778a0effb5cef7de6b/documents/docs/ufo2/overview.md)、[HostUIExecutor前台聚焦行为](https://github.com/microsoft/UFO/blob/a795552d976c4c019d7c2f778a0effb5cef7de6b/documents/docs/mcp/servers/host_ui_executor.md)、[MIT许可证](https://github.com/microsoft/UFO/blob/a795552d976c4c019d7c2f778a0effb5cef7de6b/LICENSE)。
+
 ## 2026-10-12 桌宠缩放、DPI与三维渲染对照
 
 | 项目与固定快照 | 公开资料核对 | 小K的取舍 |
