@@ -811,6 +811,9 @@ try
     CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral();
     passed.Add("通知来源诊断只投影微信/QQ应用显示名、AUMID和最近创建时间，限制数量且不包含正文");
 
+    CheckNotificationSampleTextProjectionIsBounded();
+    passed.Add("通知样本文本在枚举时即限制元素数、字符数并清除控制字符");
+
     CheckPackagedAndDesktopAppUserModelIds();
     passed.Add("通知 allowlist 接受已核实的 MSIX 与经典桌面应用 AUMID，并拒绝空白、控制字符和超长值");
 
@@ -5106,6 +5109,47 @@ static void CheckNotificationEventQueueIsBoundedAndDeduplicated()
     queue.Complete(third);
     Require(queue.Count == 0 && !queue.TryDequeue(out _),
         "通知事件队列清空后仍保留了跟踪项。");
+}
+
+static void CheckNotificationSampleTextProjectionIsBounded()
+{
+    var exactLimit = NotificationSampleTextPolicy.Project([new string('x', NotificationSampleTextPolicy.MaximumCharacters)]);
+    Require(exactLimit.Elements.Count == 1
+        && exactLimit.Elements[0].Length == NotificationSampleTextPolicy.MaximumCharacters
+        && !exactLimit.Truncated,
+        "恰好达到通知样本文本上限时被错误截断或保留了超长文本。");
+
+    var overLimit = NotificationSampleTextPolicy.Project([new string('x', NotificationSampleTextPolicy.MaximumCharacters + 1)]);
+    Require(overLimit.Elements.Count == 1
+        && overLimit.Elements[0].Length == NotificationSampleTextPolicy.MaximumCharacters
+        && overLimit.Truncated,
+        "超长通知文本没有在上限处截断并标记结果不完整。");
+
+    var controls = NotificationSampleTextPolicy.Project(["A\0B\u0001C\tD\r\n"]);
+    Require(controls.Elements.SequenceEqual(["ABC\tD\r\n"]) && !controls.Truncated,
+        "通知样本文本未移除控制字符或错误移除了可保留的换行/制表符。");
+
+    var supplementary = NotificationSampleTextPolicy.Project([new string('x', NotificationSampleTextPolicy.MaximumCharacters - 1) + "😊"]);
+    Require(supplementary.Elements[0].Length == NotificationSampleTextPolicy.MaximumCharacters - 1
+        && supplementary.Truncated
+        && !char.IsHighSurrogate(supplementary.Elements[0][^1]),
+        "文本上限截断了UTF-16代理项对并留下无效字符。");
+
+    var enumerated = 0;
+    IEnumerable<string?> ManyElements()
+    {
+        for (var index = 0; index < 10_000; index++)
+        {
+            enumerated++;
+            yield return "x";
+        }
+    }
+
+    var many = NotificationSampleTextPolicy.Project(ManyElements());
+    Require(many.Elements.Count == NotificationSampleTextPolicy.MaximumTextElements
+        && many.Truncated
+        && enumerated == NotificationSampleTextPolicy.MaximumTextElements + 1,
+        "超量通知文本元素在检测截断后仍继续枚举或被完整复制。");
 }
 
 static void CheckStartupWindowVisibilityPolicy()

@@ -22,8 +22,6 @@ internal sealed record NotificationFormatSample(
 internal sealed class NotificationFormatSampleCapture : IDisposable
 {
     public const int MaximumSamples = 30;
-    private const int MaximumTextElements = 12;
-    private const int MaximumCharactersPerSample = 20_000;
     private static readonly TimeSpan MaximumDuration = TimeSpan.FromHours(8);
 
     private readonly Dispatcher _dispatcher;
@@ -269,28 +267,8 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
     {
         var binding = notification.Notification.Visual.GetBinding(KnownNotificationBindings.ToastGeneric);
         if (binding is null) return ([], false);
-        var rawElements = binding.GetTextElements().Select(element => element.Text ?? string.Empty).ToArray();
-        var truncated = rawElements.Length > MaximumTextElements;
-        var remainingCharacters = MaximumCharactersPerSample;
-        var elements = new List<string>(Math.Min(rawElements.Length, MaximumTextElements));
-        foreach (var raw in rawElements.Take(MaximumTextElements))
-        {
-            if (remainingCharacters <= 0)
-            {
-                truncated = true;
-                break;
-            }
-            var safe = new string(raw.Where(character => !char.IsControl(character) || character is '\r' or '\n' or '\t').ToArray());
-            if (safe.Length > remainingCharacters)
-            {
-                safe = safe[..remainingCharacters];
-                truncated = true;
-            }
-            elements.Add(safe);
-            remainingCharacters -= safe.Length;
-        }
-        if (rawElements.Length > MaximumTextElements || rawElements.Skip(MaximumTextElements).Any()) truncated = true;
-        return (elements, truncated);
+        return NotificationSampleTextPolicy.Project(
+            binding.GetTextElements().Select(element => element.Text));
     }
 
     private static string CreateKey(string? sourceAppId, uint notificationId, DateTimeOffset creationTime) =>
