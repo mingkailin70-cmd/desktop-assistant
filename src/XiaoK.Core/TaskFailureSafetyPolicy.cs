@@ -17,5 +17,12 @@ public static class TaskFailureSafetyPolicy
         routeStarted && taskCategory is not null && SideEffectCategories.Contains(taskCategory);
 
     public static bool IsUncertainOutcomeErrorCode(string? errorCode) => errorCode is
-        CancelledOutcomeUncertainErrorCode or TimedOutOutcomeUncertainErrorCode or ExceptionOutcomeUncertainErrorCode;
+        CancelledOutcomeUncertainErrorCode or TimedOutOutcomeUncertainErrorCode or ExceptionOutcomeUncertainErrorCode
+        or "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        or "FILE_COPY_OUTCOME_UNCERTAIN" or "FILE_DOWNLOAD_OUTCOME_UNCERTAIN"
+        or "FILE_ARCHIVE_OUTCOME_UNCERTAIN" or "FILE_MOVE_OUTCOME_UNCERTAIN"
+        or "FILE_RENAME_OUTCOME_UNCERTAIN" or "FILE_RECYCLE_OUTCOME_UNCERTAIN"
+        or "TEXT_FILE_CREATE_OUTCOME_UNCERTAIN" or "DOCX_CREATE_OUTCOME_UNCERTAIN"
+        or "PPTX_CREATE_OUTCOME_UNCERTAIN" or "XLSX_CREATE_OUTCOME_UNCERTAIN"
+        or "CODE_PATCH_OUTCOME_UNCERTAIN";
 }

@@ -51,6 +51,8 @@ public static class TaskHistoryDisplayPolicy
     /// <summary>把固定错误码转换成不含任务正文或本机路径的恢复指引。</summary>
     public static string FailureDetail(string? errorCode) => errorCode switch
     {
+        "FILE_RECYCLE_NOT_CONFIRMED" => "Windows 未确认回收站操作，且原文件仍在原位置。先检查回收站和原文件状态，再决定是否重新提交。",
+        "ARCHIVE_OUTPUT_UNVERIFIABLE" => "压缩文件未能通过独立核验，没有发布到目标目录。请检查空间和目录权限后再重新提交。",
         "FOREGROUND_REQUIRED" => "该操作需要桌面前台；小K没有执行，也没有排队。你可以在方便时切到前台再重新提交。",
         "WINDOW_NOT_FOUND" or "APP_WINDOW_NOT_FOUND" => "没有找到唯一且允许的目标窗口；小K没有切换焦点。请确认目标应用已打开，并提供更明确的目标。",
         "SEARCH_ROOT_UNAVAILABLE" or "INVALID_SEARCH_ROOT" => "没有可用的已配置搜索目录；小K没有读取文件。请在设置中检查搜索目录后重试。",
@@ -68,6 +70,23 @@ public static class TaskHistoryDisplayPolicy
         "PROJECT_TOO_LARGE" => "所选项目超出当前单任务读取上限；请缩小项目范围后重试。",
         "NO_VALID_FILES_SELECTED" => "本地模型没有选出有效项目文件；原项目未修改。请缩小任务范围后重试。",
         _ => "任务失败。为保护隐私，历史记录不保存请求正文、模型回答或本机路径；请从小K当前反馈查看下一步。"
+    };
+
+    /// <summary>将明确报告为结果不确定的工具错误映射为安全、可执行且不含路径的核对步骤。</summary>
+    public static string UncertainOutcomeDetail(string? errorCode) => errorCode switch
+    {
+        "APP_LAUNCH_OUTCOME_UNCERTAIN" => "应用启动请求已提交，但是否成功打开无法确认。先检查目标应用当前状态，再决定是否重新提交；小K不会自动重试。",
+        "FILE_COPY_OUTCOME_UNCERTAIN" => "复制结果无法确认。先检查源文件和导出目录中的目标文件，再决定是否重新提交；小K不会自动重试。",
+        "FILE_DOWNLOAD_OUTCOME_UNCERTAIN" => "下载结果无法确认。先检查导出目录中是否已有完整文件，再决定是否重新提交；小K不会自动重试。",
+        "FILE_ARCHIVE_OUTCOME_UNCERTAIN" => "压缩结果无法确认。先检查源目录和导出目录中的压缩文件，再决定是否重新提交；小K不会自动重试。",
+        "FILE_MOVE_OUTCOME_UNCERTAIN" => "移动结果无法确认。先检查源文件和目标目录中的实际位置，再决定是否重新提交；小K不会自动重试。",
+        "FILE_RENAME_OUTCOME_UNCERTAIN" => "重命名结果无法确认。先检查当前目录中的原名称和新名称，再决定是否重新提交；小K不会自动重试。",
+        "FILE_RECYCLE_OUTCOME_UNCERTAIN" => "回收站操作结果无法确认。先检查原文件和回收站，再决定是否重新提交；小K不会自动重试。",
+        "TEXT_FILE_CREATE_OUTCOME_UNCERTAIN" or "DOCX_CREATE_OUTCOME_UNCERTAIN"
+            or "PPTX_CREATE_OUTCOME_UNCERTAIN" or "XLSX_CREATE_OUTCOME_UNCERTAIN" =>
+            "文件可能已创建，但独立核验未完成。先检查导出目录中的目标文件，再决定是否重新提交；小K不会自动重试。",
+        "CODE_PATCH_OUTCOME_UNCERTAIN" => "补丁应用结果无法确认。先检查隔离工作区和补丁状态，再决定下一步；小K不会自动重放。",
+        _ => "操作结果无法确认，可能已经产生副作用。先核对相关应用、文件或隔离工作区的实际状态，再决定下一步；小K不会自动重试。"
     };
 
     public static bool CanCancel(TaskLifecycleState state, bool cancellationRequested = false) =>
