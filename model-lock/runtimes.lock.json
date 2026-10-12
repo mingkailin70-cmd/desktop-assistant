@@ -446,16 +446,48 @@
       "status": "installed_and_hash_locked",
       "environment": ".tools/venvs/tts",
       "notes": "requirements-tts.lock.txt锁定90个包及wheel哈希；依赖一致性和离线导入检查通过。12Hz语音权重未加载，未执行语音合成。SoX提示来自可选25Hz tokenizer路径。"
+    },
+    {
+      "id": "llama.cpp-prism-b10772",
+      "version": "prism-b10772-e8fd209",
+      "source": "https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b10772-e8fd209",
+      "sourceCommit": "e8fd209c975c80aa7fb36a8423571ff3b1b7e955",
+      "license": "MIT (PrismML fork); bundled CUDA runtime components under NVIDIA CUDA Toolkit EULA 13.3.1",
+      "target": "windows-x64-cuda13.3",
+      "artifacts": [
+        {
+          "name": "llama-prism-b10772-e8fd209-bin-win-cuda-13.3-x64.zip",
+          "sizeBytes": 179142811,
+          "sha256": "984512655d5797835308ae7466c9d144f23ac511c1f18112806468c6bfb8876e",
+          "localVerifiedSha256": "984512655d5797835308ae7466c9d144f23ac511c1f18112806468c6bfb8876e",
+          "localPath": ".tools/downloads/runtimes/llama.cpp-prism-b10772/prism-b10772-e8fd209/llama-prism-b10772-e8fd209-bin-win-cuda-13.3-x64.zip"
+        },
+        {
+          "name": "cudart-llama-bin-win-cuda-13.3-x64.zip",
+          "sizeBytes": 390970417,
+          "sha256": "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e",
+          "localVerifiedSha256": "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e",
+          "localPath": ".tools/downloads/runtimes/llama.cpp-prism-b10772/prism-b10772-e8fd209/cudart-llama-bin-win-cuda-13.3-x64.zip"
+        }
+      ],
+      "status": "downloaded_and_verified",
+      "notes": "prism-b10772-e8fd209及CUDA 13.3运行库固定资产已下载、SHA-256校验并解压至仓库忽略的.tools/runtimes/llama.cpp-prism-b10772/prism-b10772-e8fd209。llama-cli --version成功，--list-devices以退出码0识别CUDA0 RTX 5060 Laptop（8150 MiB）；GGUF可解析为qwen35/851张量。首次1-token截断探测退出码1；随后1 GPU层、256上下文、reasoning-off的单轮合成推理输出预期OK并以退出码0退出，生成速度采样约2.9 token/s。仅为受限运行时冒烟，不代表完整任务质量或稳定性通过。"
     }
   ],
-  "lastLocalVerificationDate": "2026-10-03",
+  "lastLocalVerificationDate": "2026-10-12",
   "speechEnvironmentVerification": {
     "result": "dependency_check_and_offline_imports_passed",
     "asrEnvironment": ".tools/venvs/asr",
     "asrPackagesChecked": 97,
     "ttsEnvironment": ".tools/venvs/tts",
     "ttsPackagesChecked": 91,
-    "offlineImports": ["torch", "torchaudio", "qwen_asr", "qwen_tts", "onnxruntime"],
+    "offlineImports": [
+      "torch",
+      "torchaudio",
+      "qwen_asr",
+      "qwen_tts",
+      "onnxruntime"
+    ],
     "modelWeightsLoaded": false,
     "cudaDeviceAccessed": false,
     "microphoneAccessed": false,

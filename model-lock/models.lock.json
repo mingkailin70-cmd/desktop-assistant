@@ -849,6 +849,30 @@
       "notes": "Qwen3.8-27B同一底模与revision的Unsloth Dynamic 3.0 Q3量化版本；相比UD-Q4_K_M约少20%权重，更适合作为本机CPU/GPU混合卸载可行性候选，但更低位宽可能损失任务质量。仅作隔离对照，必须与Q4版本使用相同任务集、运行时和资源测量；不据模型规模或上游成绩切换生产配置。当前未启动推理。",
       "localDirectory": "llm/qwen3.8-27b-ud-q3kxl-eval/4ca720788d1e01f1bff70c033e0d0028fd02e502",
       "requiredForP0": false
+    },
+    {
+      "id": "ternary-bonsai-2-27b-ptq1-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": "b072e1d3b35a0a630cece372c2127528e0994386",
+      "format": "GGUF",
+      "quantization": "PTQ1_0",
+      "quantizer": "PrismML Ternary Bonsai 2 community transformation",
+      "conversionRuntime": "PrismML llama.cpp prism-b10772-e8fd209; official llama.cpp b11259 is incompatible",
+      "files": [
+        {
+          "name": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+          "upstreamReportedSizeBytes": 5946648928,
+          "expectedUpstreamSha256": "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3",
+          "localVerifiedSha256": "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "社区Ternary Bonsai 2由Qwen3.8-27B派生，PTQ1_0使用三值权重与Hadamard变换，权重文件5,946,648,928字节，锁定版本已下载并核验。GitHub社区镜像README列出的整文件SHA-256与主仓散列相同；本机仅从固定主仓revision下载。模型卡基准是发布方H100结果，不代表小K任务成绩。GGUF必须使用固定PrismML llama.cpp分支，不得交给官方b11259推理。GGUF元数据检查确认qwen35架构和851个张量；首次1-token截断探测退出码1，随后单轮、reasoning-off、32-token上限的合成探测准确返回OK并以退出码0结束，速度采样约2.9 token/s；此项只证明运行链路，不替代任务质量评估。仅作隔离候选，不接生产路由。",
+      "localDirectory": "llm/ternary-bonsai-2-27b-ptq1-eval/b072e1d3b35a0a630cece372c2127528e0994386",
+      "requiredForP0": false
     }
   ]
 }

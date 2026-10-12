@@ -33,9 +33,11 @@
 
 - 项目：[PrismML-Eng/Bonsai-demo](https://github.com/PrismML-Eng/Bonsai-demo)及其[PrismML-Eng/llama.cpp分支](https://github.com/PrismML-Eng/llama.cpp)；模型为由Qwen3.8-27B派生的Ternary Bonsai 2，Hugging Face模型卡标Apache-2.0，推理代码仓库标MIT。它不是普通Q4 GGUF，而是将权重映射到{−1,0,+1}并以组缩放、Hadamard变换及专用kernel压缩；PTQ1_0模型卡报告约5.95 GB，另有约7.21 GB的PQ2_0版本。
 - 值得小K优先研究的原因：它探索“保留27B底模推理能力，同时把权重压到接近单卡可用”的方向，比再下载15GB级Q3/Q4更贴近本机显存约束。PrismML模型卡报告在H100、14项基准上平均84.78，对照其Qwen3.8-27B FP16基线86.32；这些是模型发布方的结果，不是独立复现，也不能替代小K的中文代码代理、工具提案和后台任务评测。
-- 关键兼容限制：Bonsai 2需要其Hadamard/sign-flip图变换和定制kernel；项目明确警告标准`llama.cpp`即便能识别某些GGUF也可能漏掉变换并输出乱码。项目当前推荐固定Prism分支发布版；小K固定的官方b11259不兼容。需先独立审查并固定Windows CUDA构建、运行库、来源与散列，确认支持RTX 5060 Laptop/CUDA 13.4，再核对模型文件revision、上游SHA-256和许可证后才可下载权重。不能运行上游不固定的`setup.ps1`替项目安装依赖，也不能改动正式llama.cpp运行时。
-- 小K接入方式：只把PTQ1_0列为高优先级隔离候选；不启用视觉投影或 speculative/drafter 组件。通过版本固定后，依次做GGUF头/运行时加载、短上下文资源保护，再与现行4B、Qwen3.8 Q3/Q4和Pi候选以相同`coding-zh-v4`程序集、提示模板和任务门槛比较。模型动作输出仍只能进入ToolBroker提案，不获得权限或外发能力。当前只审阅公开模型卡、GitHub文档和许可证；没有下载模型/运行时、克隆源码、启动推理或改本机配置。
-- 来源：[模型卡和体积/许可证](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)、[Bonsai运行仓库](https://github.com/PrismML-Eng/Bonsai-demo)、[固定后端能力说明](https://github.com/PrismML-Eng/Bonsai-demo/blob/main/BACKEND-SUPPORT.md)、[定制llama.cpp分支](https://github.com/PrismML-Eng/llama.cpp)。
+- 关键兼容限制：Bonsai 2需要Hadamard激活变换及专用kernel。PTQ1_0的GGUF类型为Prism专用类型143；官方`llama.cpp` b11259不能正确运行，小K必须使用固定的PrismML分支。Prism发布包和CUDA 13.3运行库已固定版本、核对SHA-256并解压至仓库忽略的`.tools/`；压缩包成员扫描未发现绝对路径、`..`或符号链接。运行时`--version`成功，`--list-devices`识别RTX 5060 Laptop（8150 MiB），这只能证明二进制启动和设备枚举，不能证明完整CUDA推理稳定。
+- GitHub社区镜像：[leo-kreisman/Ternary-Bonsai-2-27B-mlx-2bit](https://github.com/leo-kreisman/Ternary-Bonsai-2-27B-mlx-2bit)的`gguf-v1` Release将PTQ1_0分为3段；镜像README列出的整文件SHA-256与Hugging Face主仓散列相同。小K从固定revision的主仓下载了完整权重并校验，未从GitHub镜像重新下载，也未执行镜像仓库中的Shell下载/服务脚本；镜像者的自测不作为小K评测。
+- 本机只读模型头检查确认`qwen35`架构、851个张量。固定Prism运行时的第一次单token截断探测以退出码1结束；之后以1个GPU层、256上下文、`--reasoning off`和32-token上限重做单轮合成探测，准确输出预期的`OK`并以退出码0退出。这确认受限本机推理链路可工作，但不等同于代码质量验收。生成速度采样约2.9 token/s；运行中一次采样RAM为6.24 GiB、RTX显存空闲5033 MiB，退出后资源恢复至RAM 12.43 GiB、显存空闲5436 MiB，未低于4 GiB RAM/1 GiB VRAM硬保护线。
+- 小K接入方式：只把PTQ1_0列为隔离候选；不启用视觉投影或 speculative/drafter 组件。下一步在每次启动前确认RAM≥12 GiB、显存空闲≥5 GiB，再与现行4B、Qwen3.8 Q3/Q4和Pi候选使用相同`coding-zh-v4`任务集评估，并把Prism运行时身份/散列作为独立管线标记，不与b11259历史分数拼接。模型动作输出仍只能进入ToolBroker提案，不获得权限或外发能力。
+- 来源：[模型卡和体积/许可证](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)、[Bonsai运行仓库](https://github.com/PrismML-Eng/Bonsai-demo)、[固定后端能力说明](https://github.com/PrismML-Eng/Bonsai-demo/blob/main/BACKEND-SUPPORT.md)、[定制llama.cpp分支](https://github.com/PrismML-Eng/llama.cpp)、[GitHub社区镜像与Release](https://github.com/leo-kreisman/Ternary-Bonsai-2-27B-mlx-2bit/releases/tag/gguf-v1)、[上游兼容性讨论](https://github.com/ggml-org/llama.cpp/issues/29058)。
 
 ## 2026-10-12 微软 UFO² Windows 桌面代理架构
 
