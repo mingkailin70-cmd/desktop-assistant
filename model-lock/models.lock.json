@@ -984,7 +984,7 @@
       ],
       "license": "apache-2.0",
       "status": "downloaded_and_verified",
-      "notes": "社区Jev-Style v3有限选项概率决策模型。12个锁定文件及权重散列均已验证。2026-10-12在独立CPU环境完成单条合成中文意图选择冒烟：返回billing，概率0.9713，加载约10.0秒、单题推理1.36秒；仅1条合成题，不代表中文准确率/校准或生产质量。权重卡标Apache-2.0，但训练数据卡披露DAIR Emotion研究用途、AG News许可不明/非商业和模型生成文本；仅限本机合成评估，不分发、不打包、不作商业部署，直至许可复核。不得参与身份核验、权限或外发决定。",
+      "notes": "社区Jev-Style v3有限选项概率决策模型。12个锁定文件及权重散列均已验证。2026-10-12最终固定评测器在独立CPU环境对20条合成中文意图题运行：20/20正确、macro-F1 1.00、multiclass Brier 0.0093、5-bin top-probability ECE 0.0562；加载8.376秒，推理中位1.620秒、p95 1.865秒。题目短且类别清晰，仅为小规模试筛，不能代表真实中文通知效果、难例能力或生产准入。权重卡标Apache-2.0，但训练数据卡披露DAIR Emotion研究用途、AG News许可不明/非商业和模型生成文本；仅限本机合成评估，不分发、不打包、不作商业部署，直至许可复核。不得参与身份核验、权限或外发决定。",
       "localDirectory": "llm/jev-style-v3-0.8b-decision-cpu-eval/b023d1f9c7858fbf01504577a3bfc349ea5c7385",
       "requiredForP0": false
     }
