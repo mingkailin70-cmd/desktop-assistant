@@ -22,7 +22,7 @@ internal sealed record NotificationFormatSample(
 internal sealed class NotificationFormatSampleCapture : IDisposable
 {
     public const int MaximumSamples = 30;
-    private static readonly TimeSpan MaximumDuration = TimeSpan.FromHours(8);
+    private static readonly TimeSpan MaximumDuration = TimeSpan.FromMinutes(15);
 
     private readonly Dispatcher _dispatcher;
     private readonly UserNotificationListener _listener;
@@ -87,7 +87,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 
             _baselineReady = true;
             _ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);
-            var message = $"已开始{GetApplicationDisplayName()}通知样本核验。最长8小时、最多采集30条新通知；正文只在内存和本机设置页显示，不送模型、不保存文件。关闭或锁定会话时不会读取正文。";
+            var message = $"已开始{GetApplicationDisplayName()}通知样本核验。最长15分钟、最多采集30条新通知；正文只在内存和本机设置页显示，不送模型、不保存文件。关闭设置页、锁定会话或权限撤销时会停止并清除样本。";
             RaiseStatus(message);
             StartDrain();
             return message;
@@ -105,8 +105,8 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         IsActive = false;
         _baselineReady = false;
         _pendingIds.Clear();
-        _timeoutCancellation.Cancel();
         if (clearSamples) _samples.Clear();
+        if (clearSamples || _samples.Count == 0) _timeoutCancellation.Cancel();
         RaiseStatus(message);
     }
 
@@ -183,7 +183,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         {
             if (!IsActive || _listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
-                Stop("Windows 通知访问权限已撤销；样本采集已停止。", clearSamples: false);
+                Stop("Windows 通知访问权限已撤销；样本采集已停止并清除。", clearSamples: true);
                 return;
             }
 
@@ -191,7 +191,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             if (!IsActive) return;
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
-                Stop("读取期间 Windows 通知访问权限已撤销；样本采集已停止。", clearSamples: false);
+                Stop("读取期间 Windows 通知访问权限已撤销；样本采集已停止并清除。", clearSamples: true);
                 return;
             }
 
@@ -206,12 +206,12 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 
                 if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
                 {
-                    Stop("读取通知正文前 Windows 通知访问权限已撤销；正文未读取。", clearSamples: false);
+                    Stop("读取通知正文前 Windows 通知访问权限已撤销；正文未读取，已有样本已清除。", clearSamples: true);
                     return;
                 }
                 if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
                 {
-                    Stop("Windows 会话已锁定；已停止样本核验，没有读取正文。", clearSamples: false);
+                    Stop("Windows 会话已锁定；已停止样本核验并清除，没有读取正文。", clearSamples: true);
                     return;
                 }
 
@@ -219,12 +219,12 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                 if (!IsActive) return;
                 if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
                 {
-                    Stop("读取期间 Windows 通知访问权限已撤销；该样本已丢弃。", clearSamples: false);
+                    Stop("读取期间 Windows 通知访问权限已撤销；该样本和已有样本均已丢弃。", clearSamples: true);
                     return;
                 }
                 if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
                 {
-                    Stop("Windows 会话已锁定；该样本已丢弃并停止核验。", clearSamples: false);
+                    Stop("Windows 会话已锁定；该样本和已有样本已清除并停止核验。", clearSamples: true);
                     return;
                 }
 
@@ -233,11 +233,11 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                     elements, truncated);
                 _samples.Add(sample);
                 SampleCaptured?.Invoke(sample);
-                RaiseStatus($"通知样本核验：已在内存中采集 {_samples.Count}/{MaximumSamples} 条新通知；没有送模型或保存文件。关闭小K会清除样本。" );
+                RaiseStatus($"通知样本核验：已在内存中采集 {_samples.Count}/{MaximumSamples} 条新通知；没有送模型或保存文件。样本最迟在本轮15分钟截止时清除。" );
 
                 if (_samples.Count >= MaximumSamples)
                 {
-                    Stop($"已达到单次上限 {MaximumSamples} 条；监听已停止。样本只在内存中保留，关闭小K或点击清除即可删除。", clearSamples: false);
+                    Stop($"已达到单次上限 {MaximumSamples} 条；监听已停止。样本只在内存中保留，最多到本轮15分钟截止；关闭设置页或点击清除可提前删除。", clearSamples: false);
                     return;
                 }
             }
@@ -257,7 +257,13 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         {
             await _dispatcher.InvokeAsync(() =>
             {
-                if (IsActive) Stop("通知样本核验达到8小时上限，监听已停止；样本仍只保留在内存中。", clearSamples: false);
+                if (IsActive)
+                    Stop("通知样本核验达到15分钟上限；监听已停止并清除内存样本。", clearSamples: true);
+                else if (_samples.Count > 0)
+                {
+                    _samples.Clear();
+                    RaiseStatus("通知样本核验达到15分钟上限；内存样本已清除。");
+                }
             });
         }
         catch (InvalidOperationException) { }

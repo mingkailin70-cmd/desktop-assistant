@@ -203,7 +203,7 @@
                         <TextBox x:Name="NotificationPublisherCandidatesBox" MinHeight="48" MaxHeight="140" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,0,0,9"/>
                         <Separator Margin="0,2,0,8"/>
                         <TextBlock Text="一次性通知格式样本核验" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <TextBlock Text="仅在你逐次确认后采集所选 AUMID 的新 Toast，最多30条、最长8小时。当前不能区分私聊/群聊，可能包括所选应用的群聊、服务或其他通知正文；只有你同意检查这类内容时才开始。正文只在本机内存和本页显示，不送模型、不写日志/数据库/文件；停止后仍留在内存，点击清除或退出小K可删除。不会打开微信/QQ、抢焦点或自动分析。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                        <TextBlock Text="仅在你逐次确认后采集所选 AUMID 的新 Toast，最多30条、最长15分钟。当前不能区分私聊/群聊，可能包括所选应用的群聊、服务或其他通知正文；只有你同意检查这类内容时才开始。正文只在本机内存和本页显示，不送模型、不写日志/数据库/文件；停止后最迟在本轮15分钟截止时清除。关闭设置页、权限撤销、锁屏或点击清除会更早清除。不会打开微信/QQ、抢焦点或自动分析。" FontSize="10" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,6"/>
                         <DockPanel LastChildFill="True" Margin="0,0,0,6">
                             <ComboBox x:Name="NotificationSampleAppBox" DockPanel.Dock="Left" Width="90" SelectedIndex="1" Margin="0,0,6,0"
                                       SelectionChanged="NotificationSampleApp_SelectionChanged">
