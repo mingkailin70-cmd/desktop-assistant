@@ -541,7 +541,7 @@ public partial class SettingsWindow : Window
         var applicationDisplayName = applicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase) ? "微信" : "QQ";
         var confirmation = System.Windows.MessageBox.Show(
             this,
-            $"即将只对以下来源开始一次性新通知样本核验：\n\n平台：{applicationDisplayName}\nWindows 来源显示名：{candidate.DisplayName}\nAUMID：{candidate.AppUserModelId}\n\n小K会读取该来源之后新到达 Toast 的全部可见文本，并在本机设置页内存中显示，最多30条、最长15分钟。目前无法区分私聊、群聊、服务提醒等类型，因此样本可能包含所选应用的群聊或其他通知正文。文本不会发送到模型/网络，不会写入日志、数据库或文件；采集停止后最迟在本轮15分钟截止时清除。点击清除、关闭设置页、锁屏或权限撤销会更早清除。它不会打开微信/QQ或改变鼠标、键盘、剪贴板和前台焦点。\n\n只在你确认可以检查此平台新到达通知的完整可见内容时继续。",
+            $"即将只对以下来源开始一次性新通知样本核验：\n\n平台：{applicationDisplayName}\nWindows 来源显示名：{candidate.DisplayName}\nAUMID：{candidate.AppUserModelId}\n\n小K会读取该来源之后新到达 Toast 的全部可见文本，并在本机设置页内存中显示，最多30条、最长15分钟。目前无法区分私聊、群聊、服务提醒等类型，因此样本可能包含所选应用的群聊或其他通知正文。文本不会发送到模型/网络，不会写入日志、数据库或文件；采集停止后最迟在本轮15分钟截止时清除。小K每2秒检查通知权限和会话锁定状态，发现异常会停止并清除；点击清除或关闭设置页也会提前删除。它不会打开微信/QQ或改变鼠标、键盘、剪贴板和前台焦点。\n\n只在你确认可以检查此平台新到达通知的完整可见内容时继续。",
             "确认开始本地通知样本核验",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,

@@ -829,6 +829,9 @@ try
     CheckNotificationSampleTextProjectionIsBounded();
     passed.Add("通知样本文本在枚举时即限制元素数、字符数并清除控制字符");
 
+    CheckNotificationSampleRetentionIsBounded(FindRepositoryRoot());
+    passed.Add("通知样本最多内存保留15分钟；停止后保留清理计时，并每2秒检查锁屏/权限状态");
+
     CheckPackagedAndDesktopAppUserModelIds();
     passed.Add("通知 allowlist 接受已核实的 MSIX 与经典桌面应用 AUMID，并拒绝空白、控制字符和超长值");
 
@@ -5274,6 +5277,46 @@ static void CheckNotificationSampleTextProjectionIsBounded()
         && many.Truncated
         && enumerated == NotificationSampleTextPolicy.MaximumTextElements + 1,
         "超量通知文本元素在检测截断后仍继续枚举或被完整复制。");
+}
+
+static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
+{
+    var capturePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "NotificationFormatSampleCapture.cs");
+    var capture = File.ReadAllText(capturePath);
+    Require(capture.Contains("private static readonly TimeSpan MaximumDuration = TimeSpan.FromMinutes(15);", StringComparison.Ordinal)
+        && capture.Contains("private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);", StringComparison.Ordinal),
+        "通知样本保留期限或锁屏/权限轮询间隔不符合隐私约束。");
+
+    var stopStart = capture.IndexOf("public void Stop(", StringComparison.Ordinal);
+    var stopEnd = stopStart < 0 ? -1 : capture.IndexOf("public void Clear()", stopStart, StringComparison.Ordinal);
+    Require(stopStart >= 0 && stopEnd > stopStart,
+        "通知样本停止方法不存在或边界无法识别。");
+    var stop = capture[stopStart..stopEnd];
+    Require(stop.Contains("if (clearSamples) _samples.Clear();", StringComparison.Ordinal)
+        && stop.Contains("if (clearSamples || _samples.Count == 0) _timeoutCancellation.Cancel();", StringComparison.Ordinal),
+        "停止采集后未保留样本到既定截止时间，或显式清除时未取消到期计时。");
+
+    var expiryStart = capture.IndexOf("private async Task ExpireAfterMaximumDurationAsync(", StringComparison.Ordinal);
+    var expiryEnd = expiryStart < 0 ? -1
+        : capture.IndexOf("private static (IReadOnlyList<string> Elements, bool Truncated)", expiryStart, StringComparison.Ordinal);
+    Require(expiryStart >= 0 && expiryEnd > expiryStart,
+        "通知样本清理监视器不存在或边界无法识别。");
+    var expiry = capture[expiryStart..expiryEnd];
+    Require(expiry.Contains("Task.Delay(delay, cancellationToken)", StringComparison.Ordinal)
+        && expiry.Contains("_listener.GetAccessStatus()", StringComparison.Ordinal)
+        && expiry.Contains("WindowsNotificationMonitor.IsUnlockedInputDesktop()", StringComparison.Ordinal)
+        && expiry.Contains("_samples.Clear()", StringComparison.Ordinal)
+        && expiry.Contains("clearSamples: true", StringComparison.Ordinal),
+        "到期、权限失效或锁屏时没有停止采集并清除内存样本。");
+
+    var settingsCode = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml.cs"));
+    var closeStart = settingsCode.IndexOf("private void SettingsWindow_Closed(", StringComparison.Ordinal);
+    var closeEnd = closeStart < 0 ? -1
+        : settingsCode.IndexOf("private void UpdateNotificationSampleButtons()", closeStart, StringComparison.Ordinal);
+    Require(closeStart >= 0 && closeEnd > closeStart
+        && settingsCode[closeStart..closeEnd].Contains("_notificationMonitor.ClearNotificationSamples();", StringComparison.Ordinal)
+        && settingsCode[closeStart..closeEnd].Contains("NotificationSamplesBox.Clear();", StringComparison.Ordinal),
+        "关闭设置页时没有清除内存中的通知样本和正文展示。");
 }
 
 static void CheckStartupWindowVisibilityPolicy()
