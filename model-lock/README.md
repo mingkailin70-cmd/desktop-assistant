@@ -1,5 +1,7 @@
 # 模型与运行环境锁定清单
 
+2026-10-12：Ternary Bonsai 2 27B PTQ1_0的隔离评测配置已登记CodingBenchmark，固定Prism运行时文件散列预检通过（权重加74个运行时文件）。该入口的模型预检不查询GPU、不启动推理；候选仍未完成代码任务质量评估，不能据此切换生产模型。
+
 此目录只保存版本、来源、许可与校验记录，不保存模型、wheel、凭证或用户数据。
 
 - models.lock.json 是模型来源、固定 revision、文件清单和校验状态登记表。使用 `tools/download_locked_models.py` 前后都会查询固定 revision 的上游文件元数据；缺失的文件大小和 LFS SHA256 会先从该固定版本补入锁清单，再进行断点续传。响应提前结束或临时 SSL/连接/读取超时错误时最多自动重连8次；大小和 SHA-256 均通过才标为 `downloaded_and_verified`，仍不代表推理效果或资源验收通过。

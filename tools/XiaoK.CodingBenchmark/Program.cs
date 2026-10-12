@@ -56,7 +56,7 @@ internal static class Program
                 var validationRepoRoot = RequireLocalDirectory(options.RepositoryRoot, "仓库目录");
                 var validationModel = ResolveModel(validationRepoRoot, options.ModelId);
                 _ = CreateEvaluationManifestJson(validationModel);
-                Console.WriteLine($"模型权重与 llama.cpp b11259 文件散列已核验：{validationModel.Id} @ {validationModel.Revision}");
+                Console.WriteLine($"模型权重与固定运行时文件散列已核验：{validationModel.Id} @ {validationModel.Revision} / {validationModel.RuntimeVersion}");
                 Console.WriteLine($"显存配置：GPU层 {validationModel.GpuLayers}，预计 {validationModel.ExpectedGpuMemoryMiB:N0} MiB，启动保护线 {validationModel.MinimumInitialGpuFreeMiB:N0} MiB（另保留 {MinimumRuntimeGpuFreeMiB:N0} MiB）。");
                 if (validationModel.MinimumInitialSystemMemoryMiB > 0)
                     Console.WriteLine($"系统内存保护线：启动前至少 {validationModel.MinimumInitialSystemMemoryMiB:N0} MiB，模型就绪后至少 {SystemMemoryAdmissionPolicy.MinimumRuntimeReserveMiB:N0} MiB。仅显示锁定阈值，没有读取当前内存。");
@@ -467,34 +467,53 @@ internal static class Program
             "qwen3.8-27b-pi-q4km-eval" => new ModelProfile("Qwen3.8-27B-pi-Q4_K_M.gguf", 8, 4_000, 5_024, true, 18_432),
             "qwen3.8-27b-ud-q4km-eval" => new ModelProfile("Qwen3.8-27B-UD-Q4_K_M.gguf", 8, 4_000, 5_024, true, 18_432),
             "qwen3.8-27b-ud-q3kxl-eval" => new ModelProfile("Qwen3.8-27B-UD-Q3_K_XL.gguf", 8, 3_500, 4_524, true, 15_360),
+            "ternary-bonsai-2-27b-ptq1-eval" => new ModelProfile("Ternary-Bonsai-2-27B-PTQ1_0.gguf", 1, 1_000, 2_024, true, 12_288,
+                "llama.cpp-prism-b10772", "prism-b10772-e8fd209"),
             "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "gemma-4-e4b-it-qat-q4-0-eval" => new ModelProfile("gemma-4-E4B_q4_0-it.gguf", 24, 4_500, 5_524, true),
             "ornith-1.5-9b-q4km-eval" => new ModelProfile("Ornith-1.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "ornith-1.0-9b-q4km-eval" => new ModelProfile("ornith-1.0-9b-Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "oxcoder-9b-q4km-eval" => new ModelProfile("OxCoder-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
-            _ => throw new ArgumentException("评测仅允许锁定的 Qwen3.5-4B Q4_K_M、MiMo V2.6 Q8_0、Qwen3.5-9B Q4_K_M、Qwen3.8-27B-pi Q4_K_M、Qwen3.8-27B UD-Q4_K_M/UD-Q3_K_XL、AutoTrust JEV-9B Q4_K_M、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M 模型。", nameof(modelId))
+            _ => throw new ArgumentException("评测仅允许模型锁定清单与固定配置中登记的候选模型。", nameof(modelId))
         };
         var model = modelLock.Models.Single(item => item.Id == modelId);
-        var runtime = runtimeLock.Runtimes.Single(item => item.Id == "llama.cpp");
+        var runtime = runtimeLock.Runtimes.Single(item => item.Id == profile.RuntimeId);
         var modelStatusAllowsEvaluation = profile.EvaluationCandidate
             ? model.Status is "downloaded_and_verified" or "locally_evaluated"
             : model.Status == "downloaded_and_verified";
-        if (!modelStatusAllowsEvaluation || runtime.Version != "b11259"
+        if (!modelStatusAllowsEvaluation || runtime.Version != profile.RuntimeVersion
             || runtime.Status != "locally_evaluated" || model.Files.Count != 1 || runtime.StagedFiles.Count == 0)
-            throw new InvalidDataException("锁定模型尚未通过哈希校验，或 llama.cpp b11259 状态不符合评测要求。");
+            throw new InvalidDataException("锁定模型或其固定运行时尚未通过本机来源、哈希和短时启动核验。");
         var modelsRoot = Path.GetFullPath(Path.Combine(repoRoot, "models"));
         var root = Path.GetFullPath(Path.Combine(modelsRoot, model.LocalDirectory.Replace('/', Path.DirectorySeparatorChar)));
         if (!root.StartsWith(modelsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("模型目录越过忽略的 models 根目录。");
         var modelFile = model.Files.Single(file => file.Name == profile.ModelFileName);
         var serverFile = runtime.StagedFiles.Single(file => file.Name == "llama-server.exe");
-        var runtimeModel = modelId == "qwen3.5-4b-q4km"
-            ? model
-            : modelLock.Models.Single(item => item.Id == "qwen3.5-4b-q4km");
-        var runtimeRoot = Path.GetFullPath(Path.Combine(modelsRoot,
-            runtimeModel.LocalDirectory.Replace('/', Path.DirectorySeparatorChar), "Runtime"));
-        if (!runtimeRoot.StartsWith(modelsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("llama.cpp运行时目录越过忽略的 models 根目录。");
+        string runtimeRoot;
+        string runtimeBoundary;
+        if (runtime.Id == "llama.cpp")
+        {
+            var runtimeModel = modelId == "qwen3.5-4b-q4km"
+                ? model
+                : modelLock.Models.Single(item => item.Id == "qwen3.5-4b-q4km");
+            runtimeRoot = Path.GetFullPath(Path.Combine(modelsRoot,
+                runtimeModel.LocalDirectory.Replace('/', Path.DirectorySeparatorChar), "Runtime"));
+            runtimeBoundary = modelsRoot;
+        }
+        else if (runtime.Id == "llama.cpp-prism-b10772")
+        {
+            var toolsRoot = Path.GetFullPath(Path.Combine(repoRoot, ".tools"));
+            runtimeRoot = Path.GetFullPath(Path.Combine(repoRoot,
+                runtime.StagedDirectory.Replace('/', Path.DirectorySeparatorChar)));
+            runtimeBoundary = toolsRoot;
+        }
+        else
+        {
+            throw new InvalidDataException("评测运行时 ID 不在固定白名单中。");
+        }
+        if (!runtimeRoot.StartsWith(runtimeBoundary + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("推理运行时目录越过 Git 忽略的本机模型/工具目录。");
         return new(model.Id, model.Revision, root, profile.ModelFileName, modelFile.LocalVerifiedSha256,
             runtimeRoot, runtime.Version, serverFile.Sha256, runtime.StagedFiles,
             EvaluationContextTokens, profile.GpuLayers, profile.ExpectedGpuMemoryMiB,
@@ -919,10 +938,12 @@ internal static class Program
     private sealed record ModelRecord(string Id, string Revision, string Status, string LocalDirectory, IReadOnlyList<ModelFile> Files);
     private sealed record ModelFile(string Name, long UpstreamReportedSizeBytes, string LocalVerifiedSha256);
     private sealed record RuntimeLock(IReadOnlyList<RuntimeRecord> Runtimes);
-    private sealed record RuntimeRecord(string Id, string Version, string Status, IReadOnlyList<RuntimeFile> StagedFiles);
+    private sealed record RuntimeRecord(string Id, string Version, string Status, string StagedDirectory,
+        IReadOnlyList<RuntimeFile> StagedFiles);
     private sealed record RuntimeFile(string Name, long SizeBytes, string Sha256);
     private sealed record ModelProfile(string ModelFileName, int GpuLayers, long ExpectedGpuMemoryMiB,
-        long MinimumInitialGpuFreeMiB, bool EvaluationCandidate, long MinimumInitialSystemMemoryMiB = 0);
+        long MinimumInitialGpuFreeMiB, bool EvaluationCandidate, long MinimumInitialSystemMemoryMiB = 0,
+        string RuntimeId = "llama.cpp", string RuntimeVersion = "b11259");
     private sealed record ModelConfig(string Id, string Revision, string Root, string ModelFile, string ModelSha256,
         string RuntimeRoot, string RuntimeVersion, string RuntimeSha256, IReadOnlyList<RuntimeFile> RuntimeFiles,
         int ContextTokens, int GpuLayers, long ExpectedGpuMemoryMiB, long MinimumInitialGpuFreeMiB,

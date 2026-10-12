@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('qwen3.5-4b-q4km', 'mimo-v2.6-distill-qwen-9b-gguf-q8-0', 'qwen3.5-9b-q4km-eval', 'qwen3.8-27b-pi-q4km-eval', 'qwen3.8-27b-ud-q4km-eval', 'qwen3.8-27b-ud-q3kxl-eval', 'autotrust-jev-9b-q4km-eval', 'gemma-4-e4b-it-qat-q4-0-eval', 'ornith-1.5-9b-q4km-eval', 'ornith-1.0-9b-q4km-eval', 'oxcoder-9b-q4km-eval')]
+    [ValidateSet('qwen3.5-4b-q4km', 'mimo-v2.6-distill-qwen-9b-gguf-q8-0', 'qwen3.5-9b-q4km-eval', 'qwen3.8-27b-pi-q4km-eval', 'qwen3.8-27b-ud-q4km-eval', 'qwen3.8-27b-ud-q3kxl-eval', 'ternary-bonsai-2-27b-ptq1-eval', 'autotrust-jev-9b-q4km-eval', 'gemma-4-e4b-it-qat-q4-0-eval', 'ornith-1.5-9b-q4km-eval', 'ornith-1.0-9b-q4km-eval', 'oxcoder-9b-q4km-eval')]
     [string]$ModelId = 'qwen3.5-4b-q4km'
 )
 

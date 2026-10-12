@@ -21,6 +21,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     private const string ManifestName = "llama-runtime.json";
     private const string RuntimeFileName = "llama-server.exe";
     private const string RuntimeVersion = "b11259";
+    private const string PrismBonsaiRuntimeVersion = "prism-b10772-e8fd209";
     private const string PrimaryModelId = "qwen3.5-4b-q4km";
     private const string PrimaryModelFileName = "Qwen3.5-4B-Q4_K_M.gguf";
     private const string PrimaryModelRevision = "f9f88ac3e234be915e23811a6d28ea287bdb927e";
@@ -34,6 +35,9 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     private const string Qwen38Q3EvaluationModelId = "qwen3.8-27b-ud-q3kxl-eval";
     private const string Qwen38Q3EvaluationModelFileName = "Qwen3.8-27B-UD-Q3_K_XL.gguf";
     private const long Qwen38Q3MinimumAvailableSystemMemoryMiB = 15_360;
+    private const string BonsaiEvaluationModelId = "ternary-bonsai-2-27b-ptq1-eval";
+    private const string BonsaiEvaluationModelFileName = "Ternary-Bonsai-2-27B-PTQ1_0.gguf";
+    private const long BonsaiMinimumAvailableSystemMemoryMiB = 12_288;
     private const string Jev9BEvaluationModelId = "autotrust-jev-9b-q4km-eval";
     private const string Jev9BEvaluationModelFileName = "JEV-9B.Q4_K_M.gguf";
     private const string Gemma4E4BEvaluationModelId = "gemma-4-e4b-it-qat-q4-0-eval";
@@ -115,7 +119,8 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         }
 
         return TryLoadCore(resolvedRoot, Path.Combine(resolvedRoot, "Runtime"), endpoint,
-            PrimaryModelId, PrimaryModelFileName, gpuMemoryProbe, contextTokensOverride, manifestJsonOverride: null);
+            PrimaryModelId, PrimaryModelFileName, RuntimeVersion, gpuMemoryProbe, contextTokensOverride,
+            manifestJsonOverride: null);
     }
 
     /// <summary>
@@ -131,7 +136,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         if (string.IsNullOrWhiteSpace(evaluationManifestJson))
             throw new InvalidDataException("离线评测运行清单不能为空。");
         return TryLoadCore(modelRoot, runtimeDirectory, endpoint, PrimaryModelId, PrimaryModelFileName,
-            gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
+            RuntimeVersion, gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
     }
 
     /// <summary>
@@ -146,24 +151,25 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             throw new InvalidDataException("评测运行时目录必须是本机绝对路径。");
         var candidate = modelId switch
         {
-            MiMoEvaluationModelId => (MiMoEvaluationModelId, MiMoEvaluationModelFileName),
-            Qwen9BEvaluationModelId => (Qwen9BEvaluationModelId, Qwen9BEvaluationModelFileName),
-            Qwen38Q4EvaluationModelId => (Qwen38Q4EvaluationModelId, Qwen38Q4EvaluationModelFileName),
-            Qwen38Q3EvaluationModelId => (Qwen38Q3EvaluationModelId, Qwen38Q3EvaluationModelFileName),
-            Jev9BEvaluationModelId => (Jev9BEvaluationModelId, Jev9BEvaluationModelFileName),
-            Gemma4E4BEvaluationModelId => (Gemma4E4BEvaluationModelId, Gemma4E4BEvaluationModelFileName),
-            OrnithEvaluationModelId => (OrnithEvaluationModelId, OrnithEvaluationModelFileName),
-            Ornith10EvaluationModelId => (Ornith10EvaluationModelId, Ornith10EvaluationModelFileName),
-            OxCoderEvaluationModelId => (OxCoderEvaluationModelId, OxCoderEvaluationModelFileName),
-            _ => throw new InvalidDataException("评测入口仅允许加载锁定的 MiMo Q8_0、Qwen3.5-9B Q4、Qwen3.8-27B UD-Q4_K_M/UD-Q3_K_XL、JEV-9B Q4、Gemma 4 E4B QAT Q4_0、Ornith-1.5-9B Q4_K_M、Ornith-1.0-9B Q4_K_M 或 OxCoder-9B Q4_K_M候选模型。")
+            MiMoEvaluationModelId => (MiMoEvaluationModelId, MiMoEvaluationModelFileName, RuntimeVersion),
+            Qwen9BEvaluationModelId => (Qwen9BEvaluationModelId, Qwen9BEvaluationModelFileName, RuntimeVersion),
+            Qwen38Q4EvaluationModelId => (Qwen38Q4EvaluationModelId, Qwen38Q4EvaluationModelFileName, RuntimeVersion),
+            Qwen38Q3EvaluationModelId => (Qwen38Q3EvaluationModelId, Qwen38Q3EvaluationModelFileName, RuntimeVersion),
+            Jev9BEvaluationModelId => (Jev9BEvaluationModelId, Jev9BEvaluationModelFileName, RuntimeVersion),
+            Gemma4E4BEvaluationModelId => (Gemma4E4BEvaluationModelId, Gemma4E4BEvaluationModelFileName, RuntimeVersion),
+            OrnithEvaluationModelId => (OrnithEvaluationModelId, OrnithEvaluationModelFileName, RuntimeVersion),
+            Ornith10EvaluationModelId => (Ornith10EvaluationModelId, Ornith10EvaluationModelFileName, RuntimeVersion),
+            OxCoderEvaluationModelId => (OxCoderEvaluationModelId, OxCoderEvaluationModelFileName, RuntimeVersion),
+            BonsaiEvaluationModelId => (BonsaiEvaluationModelId, BonsaiEvaluationModelFileName, PrismBonsaiRuntimeVersion),
+            _ => throw new InvalidDataException("评测入口仅允许加载锁定的候选模型及其固定运行时版本。")
         };
         return TryLoadCore(modelRoot, runtimeDirectory, endpoint, candidate.Item1,
-            candidate.Item2, gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
+            candidate.Item2, candidate.Item3, gpuMemoryProbe, contextTokensOverride, evaluationManifestJson);
     }
 
     private static LlamaCppModelRuntime? TryLoadCore(string modelRoot, string runtimeDirectory, string endpoint,
-        string expectedModelId, string expectedModelFileName, IGpuMemoryProbe? gpuMemoryProbe,
-        int? contextTokensOverride, string? manifestJsonOverride)
+        string expectedModelId, string expectedModelFileName, string expectedRuntimeVersion,
+        IGpuMemoryProbe? gpuMemoryProbe, int? contextTokensOverride, string? manifestJsonOverride)
     {
         if (!Path.IsPathFullyQualified(modelRoot) || modelRoot.StartsWith("\\\\", StringComparison.Ordinal))
             throw new InvalidDataException("模型目录必须是本机绝对路径。");
@@ -196,7 +202,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             manifest = JsonSerializer.Deserialize<RuntimeManifest>(manifestJsonOverride, options)
                 ?? throw new InvalidDataException("离线评测运行清单为空。");
         }
-        if (manifest.SchemaVersion != 1 || manifest.RuntimeVersion != RuntimeVersion
+        if (manifest.SchemaVersion != 1 || manifest.RuntimeVersion != expectedRuntimeVersion
             || !string.Equals(manifest.ModelId, expectedModelId, StringComparison.Ordinal))
             throw new InvalidDataException("llama.cpp 清单版本或模型 ID 不受支持。");
         if (!IsSha256(manifest.RuntimeSha256) || !IsSha256(manifest.ModelSha256))
@@ -213,6 +219,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
         {
             Qwen38Q3EvaluationModelId => Qwen38Q3MinimumAvailableSystemMemoryMiB,
             Qwen38Q4EvaluationModelId => Qwen38Q4MinimumAvailableSystemMemoryMiB,
+            BonsaiEvaluationModelId => BonsaiMinimumAvailableSystemMemoryMiB,
             _ => 0
         };
         if (manifest.MinimumAvailableSystemMemoryMiB != minimumAvailableSystemMemoryMiB)
