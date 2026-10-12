@@ -3990,6 +3990,34 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.FailureDetail("LOW_VRAM").Contains("没有继续启动模型", StringComparison.Ordinal)
         && !TaskHistoryDisplayPolicy.FailureDetail("UNRECOGNIZED_PRIVATE_CODE").Contains("UNRECOGNIZED_PRIVATE_CODE", StringComparison.Ordinal),
         "任务历史没有提供安全、具体的常见故障指引，或把未知错误字段原样显示。");
+    var uncertainOutcomeGuidance = new (string Code, string ExpectedPhrase)[]
+    {
+        ("APP_LAUNCH_OUTCOME_UNCERTAIN", "目标应用当前状态"),
+        ("FILE_COPY_OUTCOME_UNCERTAIN", "源文件和导出目录"),
+        ("FILE_DOWNLOAD_OUTCOME_UNCERTAIN", "导出目录中是否已有完整文件"),
+        ("FILE_ARCHIVE_OUTCOME_UNCERTAIN", "源目录和导出目录"),
+        ("FILE_MOVE_OUTCOME_UNCERTAIN", "目标目录中的实际位置"),
+        ("FILE_RENAME_OUTCOME_UNCERTAIN", "原名称和新名称"),
+        ("FILE_RECYCLE_OUTCOME_UNCERTAIN", "原文件和回收站"),
+        ("TEXT_FILE_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
+        ("DOCX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
+        ("PPTX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
+        ("XLSX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
+        ("CODE_PATCH_OUTCOME_UNCERTAIN", "隔离工作区和补丁状态")
+    };
+    Require(uncertainOutcomeGuidance.All(item =>
+        {
+            var detail = TaskHistoryDisplayPolicy.UncertainOutcomeDetail(item.Code);
+            return TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(item.Code)
+                && detail.Contains(item.ExpectedPhrase, StringComparison.Ordinal)
+                && (detail.Contains("不会自动重试", StringComparison.Ordinal)
+                    || detail.Contains("不会自动重放", StringComparison.Ordinal))
+                && !detail.Contains(item.Code, StringComparison.Ordinal)
+                && !detail.Contains(":\\", StringComparison.Ordinal);
+        })
+        && !TaskHistoryDisplayPolicy.UncertainOutcomeDetail("UNKNOWN_PRIVATE_CODE")
+            .Contains("UNKNOWN_PRIVATE_CODE", StringComparison.Ordinal),
+        "可能已产生副作用的固定错误码没有显示准确、隐私安全的逐类恢复指引，或未知错误被原样回显。");
     Require(TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Queued).Contains("不会执行", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running).Contains("副作用", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.OutcomeUncertain).Contains("不会自动重试", StringComparison.Ordinal)
