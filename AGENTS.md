@@ -17,6 +17,8 @@
 
 06:59社区模型补核：候选不限于官方基础权重。Qwen3.5-4B-Prime个人微调（IQ4_NL约2.68 GB，Apache-2.0）已记为低优先级隔离研究；其训练轨迹绑定Emacs/MCP，主要为英语且含Bash动作，未核验固定权重散列与b11259兼容，故未下载或运行。详见`docs/开发与发布/GitHub开源项目借鉴记录.md`与`docs/产品与进度/实施计划与模型选型.md`。社区模型不得越过ToolBroker规则或改为云端推理。
 
+07:02许可补充：Prime衍生数据卡标MIT，但其引用的TeichAI上游轨迹数据集页面未显示许可；权重的Apache-2.0标记不能替代上游训练数据许可审查。当前不下载或运行该候选。
+
 06:51只读来源刷新仍为通知访问`Allowed`、43条Toast、QQ/AUMID `QQ`候选3条、没有微信候选；原始UTC创建时间`2026-10-12T16:45:11.0548243+00:00`是旧通知。PowerShell帮助脚本的时区转换误报已修正。随后对已运行的微信和QQ进程执行只读UIA结构扫描，扫描可见与隐藏顶层窗口且关闭AutoSetFocus：微信可见1窗/3节点、含隐藏窗口17窗/29节点；QQ可见1窗/9节点、含隐藏窗口29窗/159节点。两款客户端扫描均未发现`Edit/ValuePattern`消息输入面或可识别的发送/编辑语义；隐藏窗口存在的通用Button/Invoke模式不能证明其为消息控件。扫描前后前台窗口和UIA焦点不变；没有读取窗口标题、控件名称/值或消息正文，没有截图、输入、保存或启动Host。当前未找到安全的无焦点UIA消息发送路径；这不排除未来受支持的应用API，但发送适配器仍不得接入。通知来源诊断没有读取标题/正文、启动持续监听或保存结果。已安装包设置位于`%LOCALAPPDATA%\Packages\MingKaiLin.XiaoK_g0ndt6g65c8pe\LocalCache\Local\XiaoK\settings.json`；06:31实读为微信/QQ监听关闭、两个AUMID名单为空、唤醒词关闭。Host进程数为0；最近资源快照06:46为可用RAM`11.29 GiB`、RTX 5060 Laptop空闲`5,534/8,151 MiB`、利用率`1%`，低于Qwen3.8候选15 GiB准入线，没有加载模型。GitHub Actions run `38318535340`（提交`b9b3c3e`）Build与Desktop experience checks成功。
 
 06:15阶段包核验：固定SDK 10.0.401 Release全解决方案构建0警告、0错误；`XiaoK.Tools.SafetyChecks` 131项通过、0跳过，`XiaoK.DesktopExperience.Checks` 91项通过。0.1.120.0安装后Host与llama-server仍未运行；微信/QQ监听、白名单和唤醒词设置保持关闭/为空。检查只证明锁定合成回归与安装文件身份一致，不证明微信/QQ真实通知验收。

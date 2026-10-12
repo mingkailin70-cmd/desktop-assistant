@@ -2,8 +2,7 @@
 
 ## 2026-10-13 Qwen3.5-4B-Prime个人微调核查
 
-- 候选`Jadson/Qwen3.5-4B-Prime-GGUF`是个人作者公开的Emacs代码代理微调，权重页标Apache-2.0；IQ4_NL约2.68 GB。权重卡写明其从Qwen3.5-4B经蒸馏模型再微调而来，数据集卡标MIT并描述2,246条有效agent轨迹；模型为纯文本，不含视觉塔。[模型卡与量化说明](https://huggingface.co/Jadson/Qwen3.5-4B-Prime-GGUF)、[轨迹数据集](https://huggingface.co/datasets/Jadson/ox-alpha-pi-traces-emacs-bridge)
-- 适配范围很窄：轨迹将文件读写转成Emacs `python-bridge`/MCP调用，模型要求随附专用System Prompt；但转换后的工具模式仍保留Bash，不能直接暴露给小K。数据样例主要为英文编程任务。该候选固定模型revision/权重SHA-256、中文效果和仓库锁定llama.cpp b11259兼容性未核实；先列低优先级隔离研究，不下载、不运行、不接入。将来若做适配，必须只开放小K白名单工具并由ToolBroker逐项验证，禁止桥接、Bash、任意写入和云端回退。
+- 适配范围很窄：轨迹将文件读写转成Emacs `python-bridge`/MCP调用，模型要求随附专用System Prompt；但转换后的工具模式仍保留Bash，不能直接暴露给小K。数据样例主要为英文编程任务。衍生数据卡标MIT，但其引用的上游`TeichAI/Ox-Alpha-Pi-Traces`页面未显示数据许可证，故训练数据权利仍待厘清；模型权重Apache-2.0不能替代训练数据许可审查。该候选固定模型revision/权重SHA-256、中文效果和仓库锁定llama.cpp b11259兼容性也未核实；不下载、不运行、不接入。将来若做适配，必须先厘清数据许可，再只开放小K白名单工具并由ToolBroker逐项验证，禁止桥接、Bash、任意写入和云端回退。
 - 此次只读核对GitHub/Hugging Face公开模型页、数据卡及桥接项目说明，没有下载权重或启动推理。结果已同步至[实施计划与模型选型](../产品与进度/实施计划与模型选型.md)。
 
 ## 2026-10-13 社区决策模型权重来源扩展
