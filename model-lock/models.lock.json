@@ -899,6 +899,72 @@
       "requiredForP0": false
     },
     {
+      "id": "laya-multilingual-322m-decision-cpu-eval",
+      "role": "decision-candidate",
+      "source": "https://huggingface.co/convaiinnovations/laya",
+      "baseModel": "mmBERT-base multilingual Laya typed-decision checkpoint",
+      "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+      "format": "safetensors",
+      "quantization": "F16 checkpoint on CPU",
+      "quantizer": "Convai Innovations Laya multilingual checkpoint",
+      "conversionRuntime": "Laya 0.4.6 / Transformers 5.17.0 / PyTorch 2.14.0+cpu; isolated Python 3.12 at D:\\XiaoK\\Laya\\.venv",
+      "files": [
+        {
+          "name": "config.json",
+          "upstreamReportedSizeBytes": 160,
+          "expectedUpstreamSha256": "7add7c041b53f7091e65908553af79ab3f077946e5f2312d510ae13b17c7c134",
+          "localVerifiedSha256": "7add7c041b53f7091e65908553af79ab3f077946e5f2312d510ae13b17c7c134"
+        },
+        {
+          "name": "multilingual/encoder/config.json",
+          "upstreamReportedSizeBytes": 1938,
+          "expectedUpstreamSha256": "83f6916d13ef0f556ac461f28308dc2bffa7ebeadee8ec9e2db5812020ea5bb4",
+          "localVerifiedSha256": "83f6916d13ef0f556ac461f28308dc2bffa7ebeadee8ec9e2db5812020ea5bb4"
+        },
+        {
+          "name": "multilingual/model.safetensors",
+          "upstreamReportedSizeBytes": 643835514,
+          "expectedUpstreamSha256": "9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204",
+          "localVerifiedSha256": "9d628fd971b700382ac6f65920a86f149777b2e748e0c955fb3b19695aa8f204"
+        },
+        {
+          "name": "multilingual/rl_agent_config.json",
+          "upstreamReportedSizeBytes": 472,
+          "expectedUpstreamSha256": "25061739243b617ad88d1219ba6f8a9c86c5881ca28df024fa2d9b3b2fcc30c6",
+          "localVerifiedSha256": "25061739243b617ad88d1219ba6f8a9c86c5881ca28df024fa2d9b3b2fcc30c6"
+        },
+        {
+          "name": "multilingual/tokenizer/tokenizer.json",
+          "upstreamReportedSizeBytes": 34363188,
+          "expectedUpstreamSha256": "609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f",
+          "localVerifiedSha256": "609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f"
+        },
+        {
+          "name": "multilingual/tokenizer/tokenizer_config.json",
+          "upstreamReportedSizeBytes": 524,
+          "expectedUpstreamSha256": "6c6b2d8e3c84ce0e671c129cd6b374b235d6f9863042a5836358d00a89bbb5a1",
+          "localVerifiedSha256": "6c6b2d8e3c84ce0e671c129cd6b374b235d6f9863042a5836358d00a89bbb5a1"
+        },
+        {
+          "name": "rl_agent_api.py",
+          "upstreamReportedSizeBytes": 4732,
+          "expectedUpstreamSha256": "be3b46819c9999c3ef88e0f2ecf6d3ab1cdfed1d9a8b466fc89811e34d44031b",
+          "localVerifiedSha256": "be3b46819c9999c3ef88e0f2ecf6d3ab1cdfed1d9a8b466fc89811e34d44031b"
+        },
+        {
+          "name": "rl_common.py",
+          "upstreamReportedSizeBytes": 19139,
+          "expectedUpstreamSha256": "8d83611d480c971d640a7b7d3aa2f2219c5e8455e9cc2329fd073681bd8be23e",
+          "localVerifiedSha256": "8d83611d480c971d640a7b7d3aa2f2219c5e8455e9cc2329fd073681bd8be23e"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "社区多语言有限选项决策模型，仅作本机中文合成决策评估。权重卡声明Apache-2.0；作者所报多语言结果不代替小K本机中文任务证据。2026-10-13在Jev同一20题集上完成CPU试筛，19/20、Macro-F1 0.9492、单题中位0.124秒，摘要见docs/验收与评测/Laya多语言决策候选20题中文试筛.md。仅可提出ToolBroker建议，不参与身份核验、权限、授权或外发决定。权重下载仅在Git忽略的models目录；本机评测不使用GPU。",
+      "localDirectory": "llm/laya-multilingual-322m-decision-cpu-eval/7b928d828b7b0e022f929d9bd2e44165aa270148",
+      "requiredForP0": false
+    },
+    {
       "id": "jev-style-v3-0.8b-decision-cpu-eval",
       "role": "decision-candidate",
       "source": "https://huggingface.co/chaoliangUNSW/Jev-Style-0.8B-Decision-v3",
