@@ -16,6 +16,14 @@ public partial class App : Application
             return;
         }
 
+        if (e.Args.Contains("--3d-render-smoke", StringComparer.Ordinal))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var exitCode = await ThreeDPetOffscreenRenderer.RunAsync();
+            Shutdown(exitCode);
+            return;
+        }
+
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
