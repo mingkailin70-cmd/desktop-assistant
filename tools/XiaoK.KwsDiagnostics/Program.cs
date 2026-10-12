@@ -5,6 +5,22 @@ using XiaoK.Voice;
 
 try
 {
+    if (args.Length == 2 && args[0] == "--check-xiaok-keywords")
+    {
+        var candidateDirectory = Path.GetFullPath(args[1]);
+        using var candidate = SherpaKeywordSpotter.CreateWithKeywords(candidateDirectory,
+            SherpaKeywordSpotter.XiaoKWakeWordKeywords);
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            microphoneOpened = false,
+            device = "cpu",
+            threads = 1,
+            configuredLabels = new[] { "XIAOK_HI", "XIAOK_HELLO", "XIAOK_HI_EN" }
+        }));
+        return 0;
+    }
+
     var options = ParseArguments(args);
     var modelDirectory = Path.GetFullPath(options.ModelDirectory);
     var wavePath = Path.GetFullPath(options.WavePath);
@@ -53,7 +69,7 @@ try
 }
 catch (Exception error) when (error is ArgumentException or IOException or InvalidDataException
                                or InvalidOperationException or UnauthorizedAccessException
-                               or DllNotFoundException or BadImageFormatException)
+                               or DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
 {
     Console.Error.WriteLine(JsonSerializer.Serialize(new { ok = false, error = error.Message }));
     return 2;

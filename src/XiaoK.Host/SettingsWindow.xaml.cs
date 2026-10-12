@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 using Forms = System.Windows.Forms;
 using XiaoK.Adapters.Windows;
 using XiaoK.Core;
@@ -93,6 +94,9 @@ public partial class SettingsWindow : Window
         MonitorWeChatCheck.IsChecked = settings.MonitorWeChatNotifications;
         MonitorQQCheck.IsChecked = settings.MonitorQQNotifications;
         WakeWordCheck.IsChecked = settings.WakeWordEnabled;
+        WakeWordEngineCombo.SelectedItem = WakeWordEngineCombo.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), settings.WakeWordEngine, StringComparison.Ordinal));
         WeChatAppIdsBox.Text = string.Join(Environment.NewLine, settings.WeChatPublisherAppIds);
         QQAppIdsBox.Text = string.Join(Environment.NewLine, settings.QQPublisherAppIds);
         NotificationStatusText.Text = notificationMonitor.Status;
@@ -802,6 +806,9 @@ public partial class SettingsWindow : Window
                 MonitorWeChatNotifications = MonitorWeChatCheck.IsChecked == true,
                 MonitorQQNotifications = MonitorQQCheck.IsChecked == true,
                 WakeWordEnabled = WakeWordCheck.IsChecked == true,
+                WakeWordEngine = (WakeWordEngineCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "sherpa"
+                    ? "sherpa"
+                    : "windows",
                 WeChatPublisherAppIds = ParseAppIds(WeChatAppIdsBox.Text, "微信"),
                 QQPublisherAppIds = ParseAppIds(QQAppIdsBox.Text, "QQ")
             };

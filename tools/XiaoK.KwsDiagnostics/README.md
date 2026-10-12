@@ -11,7 +11,7 @@
 .\.tools\dotnet\dotnet.exe build tools/XiaoK.KwsDiagnostics/XiaoK.KwsDiagnostics.csproj -c Release --no-restore
 ```
 
-Sherpa-ONNX C# 包在语音模块固定为 `org.k2fsa.sherpa.onnx` 1.13.5，并通过`packages.lock.json`锁定。1.13.8 元包要求多个目标平台的1.13.8原生运行时，而NuGet上其中部分平台包未提供该版本；因此选用可完整锁定还原的1.13.5。Host现在通过`XiaoK.Voice`间接引用Sherpa运行时，但尚未接入实时麦克风音频图；只有用户在设置中启用唤醒监听时才允许打开麦克风。诊断工具本身始终不访问麦克风。
+Sherpa-ONNX C# 包在语音模块固定为 `org.k2fsa.sherpa.onnx` 1.13.5，并通过`packages.lock.json`锁定。1.13.8 元包要求多个目标平台的1.13.8原生运行时，而NuGet上其中部分平台包未提供该版本；因此选用可完整锁定还原的1.13.5。Host 已接入可选 AudioGraph 实时采集，默认唤醒关闭。只有 MSIX 安装版中用户在设置明确选择并开启唤醒时，才会申请麦克风。诊断工具始终不访问麦克风。
 
 ## 运行
 
@@ -24,3 +24,12 @@ Sherpa-ONNX C# 包在语音模块固定为 `org.k2fsa.sherpa.onnx` 1.13.5，并�
 ```
 
 可用 `--keywords <本地关键词文件>` 覆盖关键词表；该文件必须放在模型目录内部，便于运行时限制本地模型和关键词来源。工具拒绝非 PCM16、非单声道、非 16 kHz 或大于 64 MiB 的 WAV；不会重采样。它只验证运行时能否加载、处理音频以及返回关键词，不代表“小K”唤醒词准确率、误唤醒率或麦克风端到端通过。
+
+不启动麦克风即可检查小K三组唤醒短语能否构成有效 Sherpa 关键词流：
+
+```powershell
+.\.tools\dotnet\dotnet.exe run --project tools/XiaoK.KwsDiagnostics/XiaoK.KwsDiagnostics.csproj -c Release --no-build -- `
+  --check-xiaok-keywords models/speech/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/afc4a534ef85f2db4f84f05ed78eaac385b3387e
+```
+
+此检查只加载模型并创建关键词流，不读取样本音频，不打开麦克风，也不验证真实发音识别率。

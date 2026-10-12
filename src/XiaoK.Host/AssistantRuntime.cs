@@ -27,7 +27,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly IManagedModelRuntime? _managedModelRuntime;
     private readonly DotNetTestRunner _dotNetTestRunner;
     private readonly WindowsMicrophoneCapture _microphone = new();
-    private readonly WindowsLocalWakeWordListener? _wakeWordListener;
+    private ILocalWakeWordListener? _wakeWordListener;
+    private string _activeWakeWordEngine;
     private readonly VoiceInferenceService? _voiceInference;
     private readonly string _voiceStatus;
     private readonly ToolBroker _broker;
@@ -59,11 +60,12 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         _liveApprovalStateProvider = approval as ILiveApprovalStateProvider;
         _settings = XiaoKSettings.Load();
+        var workspaceRoot = XiaoKSettings.FindWorkspace(AppContext.BaseDirectory);
+        _activeWakeWordEngine = NormalizeWakeWordEngine(_settings.WakeWordEngine);
         if (!XiaoKSettings.IsDiagnosticsMode)
         {
-            _wakeWordListener = new WindowsLocalWakeWordListener();
-            _wakeWordListener.WakeWordDetected += () => WakeWordDetected?.Invoke();
-            _wakeWordListener.StatusChanged += message => WakeWordStatusChanged?.Invoke(message);
+            _wakeWordListener = CreateWakeWordListener(_activeWakeWordEngine, workspaceRoot);
+            SubscribeWakeWordListener(_wakeWordListener);
             SystemEvents.SessionSwitch += OnSessionSwitch;
         }
         _microphone.MaximumDurationReached += OnMicrophoneMaximumDurationReached;
@@ -83,7 +85,6 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         }
         _managedModelRuntime = managedRuntime;
         _models = new ModelBroker(managedRuntime);
-        var workspaceRoot = XiaoKSettings.FindWorkspace(AppContext.BaseDirectory);
         if (!XiaoKSettings.IsDiagnosticsMode)
         {
             var bundledWorker = Path.Combine(AppContext.BaseDirectory, "voice_worker.py");
@@ -184,6 +185,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             MonitorWeChatNotifications = settings.MonitorWeChatNotifications,
             MonitorQQNotifications = settings.MonitorQQNotifications,
             WakeWordEnabled = settings.WakeWordEnabled,
+            WakeWordEngine = NormalizeWakeWordEngine(settings.WakeWordEngine),
             WeChatPublisherAppIds = [.. settings.WeChatPublisherAppIds],
             QQPublisherAppIds = [.. settings.QQPublisherAppIds]
         };
@@ -194,14 +196,59 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         if (_wakeWordListener is null) return "诊断模式已禁用唤醒监听。";
         if (enabled && _microphone.IsActive)
             return "当前语音采集完成后才会启动唤醒词监听；录音期间不会并行监听。";
+        await EnsureWakeWordEngineAsync();
         return await _wakeWordListener.SetEnabledAsync(enabled);
     }
 
     public async Task ResumeWakeWordAfterDictationAsync()
     {
         if (_wakeWordListener is null || _microphone.IsActive || Volatile.Read(ref _stopping) != 0) return;
+        await EnsureWakeWordEngineAsync();
         await _wakeWordListener.SetEnabledAsync(_settings.WakeWordEnabled);
     }
+
+    private async Task EnsureWakeWordEngineAsync()
+    {
+        var requestedEngine = NormalizeWakeWordEngine(_settings.WakeWordEngine);
+        if (string.Equals(requestedEngine, _activeWakeWordEngine, StringComparison.Ordinal)) return;
+        if (_wakeWordListener is not null)
+        {
+            try { await _wakeWordListener.SetEnabledAsync(false); }
+            finally
+            {
+                UnsubscribeWakeWordListener(_wakeWordListener);
+                await _wakeWordListener.DisposeAsync();
+            }
+        }
+        _activeWakeWordEngine = requestedEngine;
+        _wakeWordListener = XiaoKSettings.IsDiagnosticsMode
+            ? null
+            : CreateWakeWordListener(requestedEngine, XiaoKSettings.FindWorkspace(AppContext.BaseDirectory));
+        if (_wakeWordListener is not null) SubscribeWakeWordListener(_wakeWordListener);
+    }
+
+    private ILocalWakeWordListener CreateWakeWordListener(string engine, string? workspaceRoot) =>
+        engine == "sherpa"
+            ? new SherpaAudioGraphWakeWordListener(SherpaAudioGraphWakeWordListener.ResolveModelDirectory(workspaceRoot))
+            : new WindowsLocalWakeWordListener();
+
+    private void SubscribeWakeWordListener(ILocalWakeWordListener listener)
+    {
+        listener.WakeWordDetected += OnWakeWordDetected;
+        listener.StatusChanged += OnWakeWordStatusChanged;
+    }
+
+    private void UnsubscribeWakeWordListener(ILocalWakeWordListener listener)
+    {
+        listener.WakeWordDetected -= OnWakeWordDetected;
+        listener.StatusChanged -= OnWakeWordStatusChanged;
+    }
+
+    private void OnWakeWordDetected() => WakeWordDetected?.Invoke();
+    private void OnWakeWordStatusChanged(string message) => WakeWordStatusChanged?.Invoke(message);
+
+    private static string NormalizeWakeWordEngine(string? engine) =>
+        string.Equals(engine, "sherpa", StringComparison.OrdinalIgnoreCase) ? "sherpa" : "windows";
 
     public async Task<bool> StopAllMicrophoneAsync()
     {
@@ -812,7 +859,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         await _executionGate.WaitAsync();
         try
         {
-            if (_wakeWordListener is not null) await _wakeWordListener.DisposeAsync();
+            if (_wakeWordListener is not null)
+            {
+                UnsubscribeWakeWordListener(_wakeWordListener);
+                await _wakeWordListener.DisposeAsync();
+            }
             await _microphone.DisposeAsync();
             if (_voiceInference is not null) await _voiceInference.DisposeAsync();
             if (_managedModelRuntime is not null) await _managedModelRuntime.DisposeAsync();
@@ -1632,6 +1683,7 @@ internal sealed record XiaoKSettings
     public bool MonitorWeChatNotifications { get; init; }
     public bool MonitorQQNotifications { get; init; }
     public bool WakeWordEnabled { get; init; }
+    public string WakeWordEngine { get; init; } = "windows";
     public List<string> WeChatPublisherAppIds { get; init; } = [];
     public List<string> QQPublisherAppIds { get; init; } = [];
     public List<ContactReplyStylePreference> ContactReplyStyles { get; init; } = [];
@@ -1669,6 +1721,7 @@ internal sealed record XiaoKSettings
             MonitorWeChatNotifications = false,
             MonitorQQNotifications = false,
             WakeWordEnabled = false,
+            WakeWordEngine = "windows",
             WeChatPublisherAppIds = [],
             QQPublisherAppIds = [],
             ContactReplyStyles = [],
@@ -1775,7 +1828,10 @@ internal sealed record XiaoKSettings
         SearchRoots = SearchRoots.Count == 0 ? defaults.SearchRoots : SearchRoots,
         WeChatPublisherAppIds = WeChatPublisherAppIds ?? [],
         QQPublisherAppIds = QQPublisherAppIds ?? [],
-        ContactReplyStyles = SanitizeContactReplyStyles(ContactReplyStyles)
+        ContactReplyStyles = SanitizeContactReplyStyles(ContactReplyStyles),
+        WakeWordEngine = string.Equals(WakeWordEngine, "sherpa", StringComparison.OrdinalIgnoreCase)
+            ? "sherpa"
+            : defaults.WakeWordEngine
     };
 
     private static List<ContactReplyStylePreference> SanitizeContactReplyStyles(IEnumerable<ContactReplyStylePreference>? preferences)

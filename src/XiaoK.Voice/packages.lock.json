@@ -73,6 +73,53 @@
           "XiaoK.Core": "[1.0.0, )"
         }
       }
+    },
+    "net10.0/win-x64": {
+      "org.k2fsa.sherpa.onnx.runtime.android-arm64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "mIGTtXxqK8UKOFAATAFUIO5WQeBVmmR0mPkFMLzHUKIb6Q7Wq6W106+g0k5zaI7S6zg9frrbn2OmDyqz53Nnvw=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.android-x64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "Z1hYSe8W1yDH0kO2/Yd+e1xduJxz3laPXXm4dP/gIwJn+7CPGeVI95rJtVHqmGoLoDkoeWiuePM6m95jvZ1pUQ=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.linux-arm64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "eagmOCQZBmmLBsPK7ye4O2ByCvMDhA03Xb3ddzf7EF/i9jpAmlN6Bk55vZ7yeo2xhBzUZKDbcNm9t6rmzU4Ygg=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.linux-x64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "4ztIRWpJOnaJ2c4s/m3QkZ9fM3hdvVEDQoa5rRWgeL3ru9dJbmpHpha4ZQQBMn2cy2IgafKZjqne126XHJj0Ww=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.osx-arm64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "r3PDv29Klz4P3r1iKORSXM0lcVS/O5EIiQ3kSf/XATRk6j76+TYJdLxkMlLIIEDxIYsH6KWxhIJSa+OsTtYXHA=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.osx-x64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "HIqaUkE8EHk0gL8RLWvIRe7ZMvFGjlG367ILe0sofXH/lNJ0z6F6eoJGy7cspPxzSop0aqCp/jJFfZqnADna0w=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.win-arm64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "N65U3UChsvVQMFDAAMAGMVdlsZY2gNzVo7+28Cz4/AW9VmdnJjGkioPbZNca2wYUnuSPlJBn2JwJIGntty5mmA=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.win-x64": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "IeH3t8RFhBI+AifZksnG3yvetC3/K7KV2Uo7kVWILN0M67UqC1OHE3T9saDersFaRxCWFFz1pV9L+Hsngj2wCg=="
+      },
+      "org.k2fsa.sherpa.onnx.runtime.win-x86": {
+        "type": "Transitive",
+        "resolved": "1.13.5",
+        "contentHash": "5pdNAFMm/2lzNvvEFlRi7XZttg1l8869EKczh21UFNN0qhHZld7iZhOQXsuopfFGXZvCnr+bGfWy9pqUA530pw=="
+      }
     }
   }
 }

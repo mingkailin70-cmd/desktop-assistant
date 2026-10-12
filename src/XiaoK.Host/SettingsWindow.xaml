@@ -181,7 +181,12 @@
                     <StackPanel>
                         <TextBlock Text="麦克风与唤醒词" FontWeight="SemiBold" Margin="0,0,0,4"/>
                         <CheckBox x:Name="WakeWordCheck" Content="启用本机唤醒词（嗨小K / 你好小K / Hi 小K）" Margin="0,0,0,4"/>
-                        <TextBlock Text="默认关闭。启用后仅用 Windows 本地中文短语语法检测唤醒；需要已安装 MSIX、麦克风权限和中文语音组件。唤醒后只展开面板，不自动录音、执行任务或发送消息。唤醒监听会在锁屏和按键录音期间暂停。"
+                        <TextBlock Text="唤醒引擎" FontSize="11" Margin="22,0,0,2"/>
+                        <ComboBox x:Name="WakeWordEngineCombo" Margin="22,0,0,6" MinHeight="30">
+                            <ComboBoxItem Content="Windows 本地中文语法（默认）" Tag="windows"/>
+                            <ComboBoxItem Content="Sherpa KWS（实验候选）" Tag="sherpa"/>
+                        </ComboBox>
+                        <TextBlock Text="默认关闭。Windows 引擎使用本地中文短语语法；Sherpa KWS 为实验候选，只有已安装 MSIX 且模型完整校验后才会打开麦克风。唤醒后只展开面板，不自动录音、执行任务或发送消息。唤醒监听会在锁屏和按键录音期间暂停。"
                                    FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="22,0,0,7"/>
                         <TextBlock Text="“停麦”会关闭唤醒监听，并把设置恢复为关闭。未启用唤醒时，小K不会在后台持续使用麦克风。" FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="22,0,0,8"/>
                         <TextBlock Text="微信 / QQ 通知监听" FontWeight="SemiBold" Margin="0,0,0,6"/>

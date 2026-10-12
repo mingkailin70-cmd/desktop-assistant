@@ -9,7 +9,7 @@ namespace XiaoK.Host;
 /// Optional Windows on-device phrase grammar. It never exposes arbitrary recognition text and
 /// stops listening for dictation, after a wake, when disabled, or while the session is locked.
 /// </summary>
-internal sealed class WindowsLocalWakeWordListener : IAsyncDisposable
+internal sealed class WindowsLocalWakeWordListener : ILocalWakeWordListener
 {
     private enum PauseReason { None, Disabled, Dictation, WakeDetected, SessionLocked, Failed }
 
