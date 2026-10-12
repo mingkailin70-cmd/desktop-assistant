@@ -1,5 +1,15 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-13 R0微信/QQ后台发送方案复核
+
+- **weixin-auto-send：不满足不打扰要求。** 项目面向微信4.x，但明确通过OCR、鼠标/键盘和剪贴板操作已登录客户端，并提醒运行时不要同时使用鼠标；会与用户工作竞争，不引入。[GitHub项目](https://github.com/raphael2025/weixin-auto-send)
+- **WeChatAuto：需要恢复客户端并走聊天搜索。** 项目按托盘唤起微信，再以`Ctrl+F`查联系人并发送；这会占用前台焦点，不适用于用户同时工作的后台发送。[GitHub项目](https://github.com/strong68/WeChatAuto)
+- **Persona Morph：具备窗口消息投递，但会短暂置前且读取本地库。** 作者README明确说明后台投递会“伪激活”微信，发消息时可能短暂置前约1秒，切会话约3–7秒，失败重试最长约15秒；项目还读取本地消息数据库和相关密钥。即使减少鼠标动作，也不能保证用户键入不被打断，并越过小K当前不读客户端数据库的边界。[GitHub项目及作者的实测/风险说明](https://github.com/Eifptaur/Eif-MAPT-PersonaMorph)
+- **wechatauto-replica：不满足隐私与焦点约束。** 项目读取SQLCipher加密的微信联系人/消息库，并以UIA与OCR混合驱动发送；其说明指出发送仍需要聚焦输入框和回车。项目也标注个人学习用途，不复用代码或数据库适配。[GitHub项目](https://github.com/jiatj/wechatapi)
+- **QQ官方机器人API：是另一种机器人身份。** 腾讯开放平台SDK的C2C目标是机器人事件给出的`openid`，需创建机器人应用和凭证；它不能以用户当前个人QQ账号身份向既有好友K发送。官方发送文档还列有主动/被动消息限制，应按当前平台规则单独核实。[腾讯官方Node SDK](https://github.com/tencent-connect/qqbot-nodejs)、[官方消息发送说明](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
+- **R0结论：当前未找到同时满足个人账号、稳定K/L身份、不读数据库、不抢焦点和可核验回执的微信/QQ发送路径。** 不接入上述客户端操控或注入方案，不把QQ机器人身份冒充成个人QQ。继续保留显式消息预览/逐条确认；若没有满足约束的API，具体发送能力按不可用反馈用户，不伪称后台完成。
+- 本次只检查公开文档和仓库说明，未克隆、安装、启动这些项目，未打开或操作微信/QQ窗口，也没有发送消息。
+
 ## 2026-10-12 sherpa-onnx KWS许可复核与候选锁定
 
 - 项目：[k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)，推理引擎采用Apache-2.0；本次候选为`sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20`，不是引擎代码本身。
