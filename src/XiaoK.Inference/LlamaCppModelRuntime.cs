@@ -43,6 +43,9 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
     private const string BonsaiEvaluationModelId = "ternary-bonsai-2-27b-ptq1-eval";
     private const string BonsaiEvaluationModelFileName = "Ternary-Bonsai-2-27B-PTQ1_0.gguf";
     private const long BonsaiMinimumAvailableSystemMemoryMiB = 12_288;
+    private const string Bonsai8BEvaluationModelId = "ternary-bonsai-8b-q2g64-eval";
+    private const string Bonsai8BEvaluationModelFileName = "Ternary-Bonsai-8B-Q2_0_g64.gguf";
+    private const long Bonsai8BMinimumAvailableSystemMemoryMiB = 12_288;
     private const string Jev9BEvaluationModelId = "autotrust-jev-9b-q4km-eval";
     private const string Jev9BEvaluationModelFileName = "JEV-9B.Q4_K_M.gguf";
     private const string Gemma4E4BEvaluationModelId = "gemma-4-e4b-it-qat-q4-0-eval";
@@ -166,6 +169,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             Ornith10EvaluationModelId => (Ornith10EvaluationModelId, Ornith10EvaluationModelFileName, RuntimeVersion),
             OxCoderEvaluationModelId => (OxCoderEvaluationModelId, OxCoderEvaluationModelFileName, RuntimeVersion),
             BonsaiEvaluationModelId => (BonsaiEvaluationModelId, BonsaiEvaluationModelFileName, PrismBonsaiRuntimeVersion),
+            Bonsai8BEvaluationModelId => (Bonsai8BEvaluationModelId, Bonsai8BEvaluationModelFileName, RuntimeVersion),
             _ => throw new InvalidDataException("评测入口仅允许加载锁定的候选模型及其固定运行时版本。")
         };
         return TryLoadCore(modelRoot, runtimeDirectory, endpoint, candidate.Item1,
@@ -225,6 +229,7 @@ public sealed class LlamaCppModelRuntime : IWorkloadPriorityModelRuntime
             Qwen38Q3EvaluationModelId => Qwen38Q3MinimumAvailableSystemMemoryMiB,
             Qwen38Q4EvaluationModelId => Qwen38Q4MinimumAvailableSystemMemoryMiB,
             BonsaiEvaluationModelId => BonsaiMinimumAvailableSystemMemoryMiB,
+            Bonsai8BEvaluationModelId => Bonsai8BMinimumAvailableSystemMemoryMiB,
             _ => 0
         };
         if (manifest.MinimumAvailableSystemMemoryMiB != minimumAvailableSystemMemoryMiB)

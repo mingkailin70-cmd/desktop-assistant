@@ -6486,6 +6486,53 @@ static async Task CheckEvaluationRuntimeIsExplicitlyIsolatedAsync(string root)
           "schemaVersion": 1,
           "runtimeVersion": "b11259",
           "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "ternary-bonsai-8b-q2g64-eval",
+          "modelSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "contextTokens": 6144,
+          "gpuLayers": 8,
+          "expectedGpuMemoryMiB": 3500,
+          "minimumAvailableSystemMemoryMiB": 12288
+        }
+        """);
+    var bonsai8BCandidate = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+        "http://127.0.0.1:8080/", "ternary-bonsai-8b-q2g64-eval", contextTokensOverride: 6144);
+    if (bonsai8BCandidate is null || bonsai8BCandidate.ContextTokens != 6144)
+        throw new InvalidOperationException("固定 Ternary Bonsai 8B 评测清单未能通过专用候选入口加载。");
+    await bonsai8BCandidate.DisposeAsync();
+
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoad(modelRoot, "http://127.0.0.1:8080/");
+        throw new InvalidOperationException("生产默认运行时入口接受了 Ternary Bonsai 8B 评测清单。");
+    }
+    catch (InvalidDataException) { }
+
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "modelId": "ternary-bonsai-8b-q2g64-eval",
+          "modelSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "contextTokens": 6144,
+          "gpuLayers": 8,
+          "expectedGpuMemoryMiB": 3500,
+          "minimumAvailableSystemMemoryMiB": 0
+        }
+        """);
+    try
+    {
+        _ = LlamaCppModelRuntime.TryLoadEvaluationCandidate(modelRoot, runtimeRoot,
+            "http://127.0.0.1:8080/", "ternary-bonsai-8b-q2g64-eval", contextTokensOverride: 6144);
+        throw new InvalidOperationException("Ternary Bonsai 8B 候选接受了未设置的RAM保护线。");
+    }
+    catch (InvalidDataException) { }
+
+    await File.WriteAllTextAsync(manifestPath, """
+        {
+          "schemaVersion": 1,
+          "runtimeVersion": "b11259",
+          "runtimeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "modelId": "autotrust-jev-9b-q4km-eval",
           "modelSha256": "3333333333333333333333333333333333333333333333333333333333333333",
           "contextTokens": 6144,

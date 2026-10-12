@@ -469,6 +469,7 @@ internal static class Program
             "qwen3.8-27b-ud-q3kxl-eval" => new ModelProfile("Qwen3.8-27B-UD-Q3_K_XL.gguf", 8, 3_500, 4_524, true, 15_360),
             "ternary-bonsai-2-27b-ptq1-eval" => new ModelProfile("Ternary-Bonsai-2-27B-PTQ1_0.gguf", 1, 1_000, 2_024, true, 12_288,
                 "llama.cpp-prism-b10772", "prism-b10772-e8fd209"),
+            "ternary-bonsai-8b-q2g64-eval" => new ModelProfile("Ternary-Bonsai-8B-Q2_0_g64.gguf", 8, 3_500, 4_524, true, 12_288),
             "autotrust-jev-9b-q4km-eval" => new ModelProfile("JEV-9B.Q4_K_M.gguf", 12, 3_500, 4_524, true),
             "gemma-4-e4b-it-qat-q4-0-eval" => new ModelProfile("gemma-4-E4B_q4_0-it.gguf", 24, 4_500, 5_524, true),
             "ornith-1.5-9b-q4km-eval" => new ModelProfile("Ornith-1.5-9B-Q4_K_M.gguf", 12, 3_500, 4_524, true),
