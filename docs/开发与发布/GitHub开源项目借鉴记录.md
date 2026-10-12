@@ -29,6 +29,14 @@
 - 当前处理：仅将其作为本机隔离候选；固定revision下载后核验散列，再在无副作用合成样本上检查加载与资源。生产模型、ToolBroker权限规则和任务执行链路均不因此改变。
 - 来源：[GitHub实现](https://github.com/n4ze3m/hmm)、[模型卡与风险说明](https://huggingface.co/n4ze3m/Qwen3.5-4B-Hmm)、[合成决策数据集卡](https://huggingface.co/datasets/n4ze3m/typed-decisions-synth)。
 
+## 2026-10-12 PrismML Ternary Bonsai 2 社区权重与推理分支
+
+- 项目：[PrismML-Eng/Bonsai-demo](https://github.com/PrismML-Eng/Bonsai-demo)及其[PrismML-Eng/llama.cpp分支](https://github.com/PrismML-Eng/llama.cpp)；模型为由Qwen3.8-27B派生的Ternary Bonsai 2，Hugging Face模型卡标Apache-2.0，推理代码仓库标MIT。它不是普通Q4 GGUF，而是将权重映射到{−1,0,+1}并以组缩放、Hadamard变换及专用kernel压缩；PTQ1_0模型卡报告约5.95 GB，另有约7.21 GB的PQ2_0版本。
+- 值得小K优先研究的原因：它探索“保留27B底模推理能力，同时把权重压到接近单卡可用”的方向，比再下载15GB级Q3/Q4更贴近本机显存约束。PrismML模型卡报告在H100、14项基准上平均84.78，对照其Qwen3.8-27B FP16基线86.32；这些是模型发布方的结果，不是独立复现，也不能替代小K的中文代码代理、工具提案和后台任务评测。
+- 关键兼容限制：Bonsai 2需要其Hadamard/sign-flip图变换和定制kernel；项目明确警告标准`llama.cpp`即便能识别某些GGUF也可能漏掉变换并输出乱码。项目当前推荐固定Prism分支发布版；小K固定的官方b11259不兼容。需先独立审查并固定Windows CUDA构建、运行库、来源与散列，确认支持RTX 5060 Laptop/CUDA 13.4，再核对模型文件revision、上游SHA-256和许可证后才可下载权重。不能运行上游不固定的`setup.ps1`替项目安装依赖，也不能改动正式llama.cpp运行时。
+- 小K接入方式：只把PTQ1_0列为高优先级隔离候选；不启用视觉投影或 speculative/drafter 组件。通过版本固定后，依次做GGUF头/运行时加载、短上下文资源保护，再与现行4B、Qwen3.8 Q3/Q4和Pi候选以相同`coding-zh-v4`程序集、提示模板和任务门槛比较。模型动作输出仍只能进入ToolBroker提案，不获得权限或外发能力。当前只审阅公开模型卡、GitHub文档和许可证；没有下载模型/运行时、克隆源码、启动推理或改本机配置。
+- 来源：[模型卡和体积/许可证](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)、[Bonsai运行仓库](https://github.com/PrismML-Eng/Bonsai-demo)、[固定后端能力说明](https://github.com/PrismML-Eng/Bonsai-demo/blob/main/BACKEND-SUPPORT.md)、[定制llama.cpp分支](https://github.com/PrismML-Eng/llama.cpp)。
+
 ## 2026-10-12 微软 UFO² Windows 桌面代理架构
 
 - 项目：[microsoft/UFO](https://github.com/microsoft/UFO)，本次检查固定在`main`提交`a795552d976c4c019d7c2f778a0effb5cef7de6b`；仓库许可证为MIT。仓库当前README将UFO²称为稳定的单Windows设备路线，并介绍UIA、Win32、WinCOM、本机应用API和GUI动作混合方案，以及HostAgent协调器、按应用隔离的AppAgent、状态机和MCP动作服务器。
