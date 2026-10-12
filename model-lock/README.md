@@ -2,7 +2,7 @@
 
 此目录只保存版本、来源、许可与校验记录，不保存模型、wheel、凭证或用户数据。
 
-- models.lock.json 是模型来源、固定 revision、文件清单和校验状态登记表。使用 `tools/download_locked_models.py` 前后都会查询固定 revision 的上游文件元数据；缺失的文件大小和 LFS SHA256 会先从该固定版本补入锁清单，再进行断点续传。响应提前结束或临时 SSL/连接错误时最多自动重连8次；大小和 SHA-256 均通过才标为 `downloaded_and_verified`，仍不代表推理效果或资源验收通过。
+- models.lock.json 是模型来源、固定 revision、文件清单和校验状态登记表。使用 `tools/download_locked_models.py` 前后都会查询固定 revision 的上游文件元数据；缺失的文件大小和 LFS SHA256 会先从该固定版本补入锁清单，再进行断点续传。响应提前结束或临时 SSL/连接/读取超时错误时最多自动重连8次；大小和 SHA-256 均通过才标为 `downloaded_and_verified`，仍不代表推理效果或资源验收通过。
 - 顶层 `status` 只汇总锁清单中 `requiredForP0` 资产的登记：模型条目为`downloaded_and_verified`、`locally_evaluated`或`accepted`，且每个锁定文件都有字节数和 SHA-256 时，显示`p0-required-model-assets-downloaded-and-verified`。此根状态只说明锁定资产文件记录完整，不代表模型质量合格或P0验收整体通过；模型是否已被接受，以模型条目的状态为准。需要中的模型或散列记录不完整时显示`p0-models-partially-downloaded`。许可阻塞且非P0必需的候选不会影响该汇总。根状态不会每次读取时扫描磁盘；要确认文件当前未损坏，仍需对照实际部署目录重新核验 SHA-256。
 - 当前根状态`p0-required-model-assets-downloaded-and-verified`依据锁定条目记录；2026-10-09只读复核确认仓库开发副本8份模型资产的49个文件均存在且字节数符合清单；D盘4组正式主模型/语音权重均存在且大小符合清单，本轮未重算大文件 SHA-256，也未核验D盘运行时文件。模型推理质量与资源门槛仍需独立验收。
 - runtimes.lock.json 是系统运行时与 Python 入口依赖登记表。使用 `tools/download_locked_runtime.py --runtime llama.cpp --proxy http://127.0.0.1:7897` 可下载经固定 SHA-256 锁定的官方 ZIP；`tools/stage_locked_llama_runtime.py` 会复核压缩包与 Qwen GGUF 后安全解压到对应模型版本目录。用户已接受 CUDA 本机使用许可。2026-10-02 使用托管 `LlamaCppModelRuntime`、`ModelBroker` 和回环 `LocalInferenceClient` 完成两次合成聊天请求；权重载入并返回指定短句。验证用 `llama-runtime.json` 已删除。实际 CUDA 层卸载、峰值显存、性能和进程退出时延仍未验收。
@@ -17,7 +17,7 @@
 - [Ornith-1.0-9B 官方 GGUF](https://huggingface.co/ornith-ai/Ornith-1.0-9B-GGUF/tree/d6b5f9b2ef835df5085615e0c405ce0092cc8b53) Q4_K_M固定revision `d6b5f9b2ef835df5085615e0c405ce0092cc8b53`，5,629,108,704字节，SHA-256 `5720d1f671b4996481274fffe01868c3c36e87c135cc8538471cc7bd6087b106`。2026-10-11下载并校验，仅作候选；尚未加载、核实llama.cpp b11259兼容性或运行任务评测。模型卡上游基准不作为本机成绩。
 - [OxCoder-9B GGUF](https://huggingface.co/mradermacher/OxCoder-9B-GGUF) Q4_K_M 固定 revision `525d7144604d67d86d138cde41e93c7bb545f82a`，文件5,629,117,888字节，本机 SHA-256 `00ba21659dc68e5dba5fb7a084fbdeb0f1f29e866dc04d1dc21b89bc4b572c3c`。GGUF为社区量化；官方模型权重来源讨论存在争议，因此仅作低置信度离线候选。2026-10-10固定构建R01–R10通过1/10（R07），余下30题全过最高31/40，按规则早停，不进入生产。基线、管线、资源及逐题判定见[候选编码任务评测记录](../docs/验收与评测/MiMo与Qwen编码任务初筛记录.md)。
 - 独立显式 thinking 配置的R01可行性探测未通过结构化源码解释校验，耗时273.5秒；最低空闲显存3,436 MiB、采样峰值占用4,464 MiB。该单题探测不能视作完整thinking评分或与无thinking成绩合并。
-- Qwen3.8-27B 是更新的官方模型，但官方 Q4_K_M GGUF 单文件约 18.97 GB（十进制），在本机32 GB内存和8 GB显卡条件下会挤占长时交互余量，不作为常驻部署首选。JEV-9B Q4_K_M 已作为编码生成候选完成本机首筛，11题通过2题，未达到80%门槛；本次GGUF文本评测不证明专用System 1决策头可用。JEV-27B约54.7 GB，不作为本机常驻模型，决策路由仍需单独离线验证。
+- Qwen3.8-27B UD-Q4_K_M（Unsloth Dynamic 3.0社区GGUF）已于2026-10-12按固定revision下载并校验；文件16,464,440,224字节，SHA-256与锁清单及上游LFS散列一致，条目状态为`downloaded_and_verified`。这只证明来源版本、文件大小和完整性，不代表llama.cpp兼容、资源或质量通过。下载时读取超时后已修复为保留断点自动重连；2026-10-12 12:15本机复核可用内存12.75 GiB，仍低于约15.33 GiB权重，因此未启动推理。生产模型未切换。
 - TTS 导入时会提示没有 SoX 和 flash-attn；当前锁定的 Qwen3-TTS 12Hz 权重不走可选 25Hz tokenizer 的 SoX 命令路径，缺少 flash-attn 时包会选用其 PyTorch 实现。此提示不代表已做推理速度或音频质量验收。
 - 本机文件 SHA256 必须由本机计算；上游文件树中 LFS SHA 作为预期值。固定 revision 中没有 LFS SHA 的小型配置文件，会在 TLS 下载并核对固定 revision/字节数后以首次本机散列建立后续校验基线。
 - 版本或文件变化时新增候选记录；新版本通过同一离线评测后再切换，不覆盖已验收版本。

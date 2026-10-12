@@ -218,15 +218,16 @@ def download_one(
                         if written >= next_report:
                             print(f"  {locked_file['name']}: {written:,}/{size:,} bytes", flush=True)
                             next_report = written + PROGRESS_INTERVAL
-        except urllib.error.URLError as error:
+        except (urllib.error.URLError, TimeoutError) as error:
             if isinstance(error, urllib.error.HTTPError):
                 raise
             if attempt == MAX_DOWNLOAD_RETRIES:
                 raise RuntimeError(
-                    f"上游连接连续失败；断点文件已保留：{locked_file['name']}；{error}"
+                    f"上游连接连续失败；断点文件已保留：{locked_file['name']}；{getattr(error, 'reason', error)}"
                 ) from error
+            reason = getattr(error, "reason", error)
             print(
-                f"  上游连接中断，保留断点并重连 {attempt + 1}/{MAX_DOWNLOAD_RETRIES}：{error.reason}",
+                f"  上游连接中断，保留断点并重连 {attempt + 1}/{MAX_DOWNLOAD_RETRIES}：{reason}",
                 flush=True,
             )
             time.sleep(1)

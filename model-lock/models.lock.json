@@ -588,6 +588,30 @@
       "notes": "Ornith 官方模型组织的 1.0 9B Q4_K_M 候选；固定仓库 revision 与上游 LFS SHA-256 来自 Hugging Face 文件树。模型卡声称其在多项 coding-agent benchmark 上领先同级模型，并声明 MIT；这些结果由上游报告，使用长上下文和较大内存/算力条件，不能代表这台 8GB 显卡上的表现。先作隔离本机候选；llama.cpp b11259 兼容性、资源与 coding-zh-v4 完整 40 题质量均待核验。不得据下载或上游跑分切换生产配置。",
       "localDirectory": "llm/ornith-1.0-9b-gguf-q4km/d6b5f9b2ef835df5085615e0c405ce0092cc8b53",
       "requiredForP0": false
+    },
+    {
+      "id": "qwen3.8-27b-ud-q4km-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+      "baseModel": "Qwen/Qwen3.8-27B",
+      "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "format": "GGUF",
+      "quantization": "UD-Q4_K_M",
+      "quantizer": "Unsloth Dynamic 3.0 GGUF",
+      "conversionRuntime": "llama.cpp compatible per quantized model card; fixed b11259 compatibility pending local smoke check",
+      "files": [
+        {
+          "name": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 16464440224,
+          "expectedUpstreamSha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482",
+          "localVerifiedSha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482"
+        }
+      ],
+      "license": "apache-2.0",
+      "status": "downloaded_and_verified",
+      "notes": "Qwen官方27B基础模型的Unsloth Dynamic 3.0社区量化版。模型卡称其改善编程、长程Agent与视觉语言能力；这些为发布方主张，须以小K固定评测独立验证。当前仅锁定文本GGUF，不含约928 MB的mmproj视觉投影文件。2026-10-12 12:15本机复核可用内存12.75 GiB、RTX 5060独显空闲显存5626 MiB（总计8151 MiB）；Q4权重16,464,440,224字节，当前不运行推理以免内存换页或影响前台工作。先完成下载与散列核验；待资源基线满足后，再用固定b11259做兼容性/资源短测，并与轻模型按同一任务评测。不得据下载或上游跑分切换生产配置。",
+      "localDirectory": "llm/qwen3.8-27b-ud-q4km-eval/4ca720788d1e01f1bff70c033e0d0028fd02e502",
+      "requiredForP0": false
     }
   ]
 }
