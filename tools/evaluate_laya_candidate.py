@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import math
@@ -12,11 +13,8 @@ import sys
 import time
 from pathlib import Path
 
+from decision_benchmark_suites import INTENT_PILOT_V1, SUITES, get_suite
 from evaluate_jev_style_candidate import (
-    CASES,
-    LABELS,
-    OPTIONS,
-    QUESTION,
     expected_calibration_error,
     percentile_nearest_rank,
 )
@@ -89,6 +87,15 @@ def peak_working_set_mib() -> float | None:
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=tuple(SUITES), default=INTENT_PILOT_V1.suite_id)
+    args = parser.parse_args()
+    suite = get_suite(args.suite)
+    labels = suite.labels
+
     repository = Path(__file__).resolve().parents[1]
     lock = json.loads((repository / "model-lock" / "models.lock.json").read_text(encoding="utf-8"))
     locked = next((item for item in lock["models"] if item.get("id") == MODEL_ID), None)
@@ -119,29 +126,29 @@ def main() -> int:
     questions = {
         "intent": {
             "type": "choice",
-            "instructions": QUESTION,
-            "criteria": OPTIONS,
+            "instructions": suite.question,
+            "criteria": suite.options,
         }
     }
     latencies: list[float] = []
     confidences: list[float] = []
     correct: list[bool] = []
     predictions: list[str] = []
-    per_label = {label: {"count": 0, "correct": 0} for label in LABELS}
+    per_label = {label: {"count": 0, "correct": 0} for label in labels}
     brier_sum = 0.0
 
-    for expected, state in CASES:
+    for expected, state in suite.cases:
         started = time.perf_counter()
         result = agent.system_one(state, questions, lang="zh")
         latencies.append(time.perf_counter() - started)
         answer = result.get("answers", {}).get("intent", {})
         prediction = answer.get("choice")
         probabilities = answer.get("probabilities")
-        if prediction not in LABELS:
+        if prediction not in labels:
             raise RuntimeError("模型返回了固定选项之外的标签。")
-        if not isinstance(probabilities, dict) or set(probabilities) != set(LABELS):
+        if not isinstance(probabilities, dict) or set(probabilities) != set(labels):
             raise RuntimeError("模型没有返回完整的固定选项概率。")
-        probabilities = {label: float(probabilities[label]) for label in LABELS}
+        probabilities = {label: float(probabilities[label]) for label in labels}
         probability_sum = sum(probabilities.values())
         if (
             not math.isfinite(probability_sum)
@@ -156,14 +163,14 @@ def main() -> int:
         confidences.append(max(probabilities.values()))
         per_label[expected]["count"] += 1
         per_label[expected]["correct"] += int(is_correct)
-        for label in LABELS:
+        for label in labels:
             target = 1.0 if expected == label else 0.0
             brier_sum += (probabilities[label] - target) ** 2
 
-    true_positive = {label: 0 for label in LABELS}
-    false_positive = {label: 0 for label in LABELS}
-    false_negative = {label: 0 for label in LABELS}
-    for (expected, _state), predicted in zip(CASES, predictions, strict=True):
+    true_positive = {label: 0 for label in labels}
+    false_positive = {label: 0 for label in labels}
+    false_negative = {label: 0 for label in labels}
+    for (expected, _state), predicted in zip(suite.cases, predictions, strict=True):
         if predicted == expected:
             true_positive[expected] += 1
         else:
@@ -171,16 +178,16 @@ def main() -> int:
             false_positive[predicted] += 1
 
     f1_values = []
-    for label in LABELS:
+    for label in labels:
         tp, fp, fn = true_positive[label], false_positive[label], false_negative[label]
         denominator = 2 * tp + fp + fn
         f1_values.append(0.0 if denominator == 0 else 2 * tp / denominator)
 
     summary = {
-        "benchmark": "synthetic-zh-intent-pilot-v1",
+        "benchmark": suite.suite_id,
         "model": MODEL_ID,
-        "samples": len(CASES),
-        "labels": list(LABELS),
+        "samples": len(suite.cases),
+        "labels": list(labels),
         "device": "cpu",
         "torch": torch.__version__,
         "cuda_available": torch.cuda.is_available(),
@@ -190,14 +197,14 @@ def main() -> int:
         "peak_working_set_mib": peak_working_set_mib(),
         "accuracy": round(sum(correct) / len(correct), 4),
         "macro_f1": round(statistics.mean(f1_values), 4),
-        "brier_multiclass_mean_sum_squares": round(brier_sum / len(CASES), 4),
+        "brier_multiclass_mean_sum_squares": round(brier_sum / len(suite.cases), 4),
         "ece_top_probability_5_bins": round(expected_calibration_error(confidences, correct), 4),
         "accuracy_by_expected_label": {
             label: round(values["correct"] / values["count"], 4)
             for label, values in per_label.items()
         },
         "per_example_predictions_saved": False,
-        "note": "20条人工合成中文样本的候选筛查；不是发布门槛或生产质量结论。",
+        "note": suite.note,
     }
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     del agent
