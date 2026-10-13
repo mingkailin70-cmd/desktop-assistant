@@ -44,6 +44,7 @@ PHRASES = (
 MAX_PROTOCOL_LINE = 20 * 1024 * 1024
 GPU_MINIMUM_INITIAL_FREE_MIB = 4_524
 GPU_MINIMUM_RUNTIME_FREE_MIB = 1_024
+CPU_THREADS = 2
 
 
 def load_locked_models(
@@ -118,9 +119,9 @@ def process_environment(python: pathlib.Path, allow_cuda: bool = False) -> dict[
         "CUDA_VISIBLE_DEVICES": "0" if allow_cuda else "-1",
         "HF_HOME": str(cache / "huggingface"),
         "TORCH_HOME": str(cache / "torch"),
-        "OMP_NUM_THREADS": "4",
-        "MKL_NUM_THREADS": "4",
-        "OPENBLAS_NUM_THREADS": "4",
+        "OMP_NUM_THREADS": str(CPU_THREADS),
+        "MKL_NUM_THREADS": str(CPU_THREADS),
+        "OPENBLAS_NUM_THREADS": str(CPU_THREADS),
     }
 
 
@@ -390,6 +391,8 @@ def run_worker_batch(
         encoding="utf-8",
         errors="replace",
         bufsize=1,
+        creationflags=(getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
     if gpu_sampler is not None:
         gpu_sampler.set_owned_pid(process.pid)
@@ -503,6 +506,8 @@ def main() -> int:
         summary = {
             "result": "PASS" if not args.strict_transcript or all(matches) else "TRANSCRIPT_MISMATCH",
             "mode": f"offline, {args.tts_device}-TTS/CPU-ASR, six synthetic samples, no microphone, no audio persisted",
+            "worker_priority": "below-normal",
+            "cpu_threads": CPU_THREADS,
             "resource_scope": "system-wide CPU/RAM and whole-GPU VRAM; system readings include unrelated background processes",
             "model_revisions": {key: EXPECTED[key][0] for key in EXPECTED},
             "tts_load_seconds": round(tts_load, 2),
