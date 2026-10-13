@@ -50,10 +50,15 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeStartPercent;
     private double _petResizeHorizontal;
     private double _petResizeVertical;
+    private readonly PetGlobalMouseTracker _petGlobalMouseTracker = new();
     private readonly PetWindowDragGesture _petWindowDragGesture = new();
     private PetWindowDragOrigin? _petWindowDragOrigin;
     private bool _petPointerGestureActive;
     private bool _petPointerPositionChanged;
+    private bool _petPointerDispatchScheduled;
+    private bool _petPointerReleasePending;
+    private int _pendingPetPointerX;
+    private int _pendingPetPointerY;
 
     public bool HasPendingActionConfirmationForTask(Guid taskId) =>
         _approvalInbox.HasPendingActionConfirmationForTask(taskId);
@@ -61,6 +66,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     public MainWindow()
     {
         InitializeComponent();
+        _petGlobalMouseTracker.PointerMoved += OnPetGlobalPointerMoved;
+        _petGlobalMouseTracker.LeftButtonReleased += OnPetGlobalLeftButtonReleased;
         CancelButton.IsEnabled = false;
         _runtime = new AssistantRuntime(this);
         _approvalInbox.Changed += OnApprovalInboxChanged;
@@ -899,21 +906,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     {
         if (_petPointerGestureActive)
         {
-            if (msg == WmMouseMove)
-            {
-                TrackPetPointerMove((wParam.ToInt64() & MkLeftButton) != 0);
-                handled = true;
-                return IntPtr.Zero;
-            }
-
-            if (msg == WmLeftButtonUp)
-            {
-                FinishPetPointerGesture(expandOnClick: true);
-                handled = true;
-                return IntPtr.Zero;
-            }
-
-            if (msg is WmCaptureChanged or WmCancelMode)
+            if (msg == WmCancelMode)
             {
                 FinishPetPointerGesture(expandOnClick: false);
                 handled = true;
@@ -1074,31 +1067,69 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             cursor.X, cursor.Y, originalRect.Left, originalRect.Top);
         _petWindowDragGesture.PointerDown(cursor.X, cursor.Y);
         _petPointerPositionChanged = false;
-        _ = SetCapture(handle);
-        if (GetCapture() != handle)
+        _petPointerDispatchScheduled = false;
+        _petPointerReleasePending = false;
+        _petPointerGestureActive = true;
+        if (!_petGlobalMouseTracker.TryStart())
         {
             _petWindowDragGesture.Reset();
             _petWindowDragOrigin = null;
+            _petPointerGestureActive = false;
             ReportPetWindowDragUnavailable();
             e.Handled = true;
+            RestoreFromTray();
             return;
         }
 
-        _petPointerGestureActive = true;
         e.Handled = true;
     }
 
-    private void TrackPetPointerMove(bool leftButtonPressed)
+    private void OnPetGlobalPointerMoved(int x, int y) => QueuePetPointerUpdate(x, y, released: false);
+
+    private void OnPetGlobalLeftButtonReleased(int x, int y)
+    {
+        // Put the pet under the release point before Windows routes the button-up message.
+        // Final persistence and work-area correction remain deferred outside the hook callback.
+        TrackPetPointerMove(x, y);
+        QueuePetPointerUpdate(x, y, released: true);
+    }
+
+    private void QueuePetPointerUpdate(int x, int y, bool released)
     {
         if (!_petPointerGestureActive) return;
-        if (!leftButtonPressed)
+        _pendingPetPointerX = x;
+        _pendingPetPointerY = y;
+        _petPointerReleasePending |= released;
+        if (_petPointerDispatchScheduled) return;
+
+        _petPointerDispatchScheduled = true;
+        _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,
+            new Action(ApplyPendingPetPointerUpdate));
+    }
+
+    private void ApplyPendingPetPointerUpdate()
+    {
+        _petPointerDispatchScheduled = false;
+        if (!_petPointerGestureActive)
         {
-            FinishPetPointerGesture(expandOnClick: true);
+            _petPointerReleasePending = false;
             return;
         }
 
+        var x = _pendingPetPointerX;
+        var y = _pendingPetPointerY;
+        var released = _petPointerReleasePending;
+        _petPointerReleasePending = false;
+        TrackPetPointerMove(x, y);
+        if (released) FinishPetPointerGesture(expandOnClick: true);
+    }
+
+    private void TrackPetPointerMove(int cursorX, int cursorY)
+    {
+        if (!_petPointerGestureActive) return;
+
         var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor))
+        if (handle == IntPtr.Zero)
         {
             ReportPetWindowDragUnavailable();
             FinishPetPointerGesture(expandOnClick: false);
@@ -1107,14 +1138,14 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
         var dpiScale = GetEffectiveDpi(handle) / 96d;
         if (!_petWindowDragGesture.IsDragging)
-            _petWindowDragGesture.TryStartDrag(cursor.X, cursor.Y,
+            _petWindowDragGesture.TryStartDrag(cursorX, cursorY,
                 leftButtonPressed: true,
                 minimumHorizontalDistance: SystemParameters.MinimumHorizontalDragDistance * dpiScale,
                 minimumVerticalDistance: SystemParameters.MinimumVerticalDragDistance * dpiScale);
         if (!_petWindowDragGesture.IsDragging) return;
 
         if (_petWindowDragOrigin is not { } origin
-            || !origin.TryGetTargetPosition(cursor.X, cursor.Y, out var left, out var top)
+            || !origin.TryGetTargetPosition(cursorX, cursorY, out var left, out var top)
             || !SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0,
                 SwpNoSize | SwpNoZOrder | SwpNoActivate))
         {
@@ -1135,9 +1166,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _petWindowDragOrigin = null;
         _petPointerPositionChanged = false;
         _petPointerGestureActive = false;
-
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle != IntPtr.Zero && GetCapture() == handle) _ = ReleaseCapture();
+        _petGlobalMouseTracker.Stop();
 
         if (wasDragging)
         {
@@ -1520,6 +1549,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
+        if (_petPointerGestureActive) FinishPetPointerGesture(expandOnClick: false);
+        else _petGlobalMouseTracker.Stop();
         if (!_exiting) { e.Cancel = true; Hide(); return; }
         if (!_shutdownComplete)
         {
@@ -1567,6 +1598,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _runtime.PrivateNoticeAnalysisCompleted -= OnPrivateNoticeAnalysisCompleted;
         _runtime.UserTaskStateChanged -= OnUserTaskStateChanged;
         _approvalInbox.Changed -= OnApprovalInboxChanged;
+        _petGlobalMouseTracker.Dispose();
         if (_source is not null)
         {
             if (_hotkeyRegistered) UnregisterHotKey(_source.Handle, 1901);
@@ -1585,14 +1617,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private const int WmHotkey = 0x0312;
     private const int WmMouseActivate = 0x0021;
-    private const int WmMouseMove = 0x0200;
-    private const int WmLeftButtonUp = 0x0202;
-    private const int WmCaptureChanged = 0x0215;
     private const int WmCancelMode = 0x001F;
     private const int WmDisplayChange = 0x007E;
     private const int WmDpiChanged = 0x02E0;
     private const int MaNoActivate = 3;
-    private const long MkLeftButton = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint MonitorDefaultToNearest = 2;
@@ -1642,13 +1670,6 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y,
         int width, int height, uint flags);
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetCapture(IntPtr hWnd);
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetCapture();
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ReleaseCapture();
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hWnd);
 }
