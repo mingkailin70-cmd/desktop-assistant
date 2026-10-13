@@ -136,6 +136,12 @@ if (args.Length == 1 && args[0] == "--only-window-activation")
     Console.WriteLine("通过：窗口切换成功、未找到、被拒绝和取消路径。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-msix-installer-contract")
+{
+    CheckInstallGracefulShutdownContract(FindRepositoryRoot());
+    Console.WriteLine("通过：MSIX升级通过ASCII脚本中的Unicode标题构造安全核验并请求正常退出。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-app-status")
 {
     await CheckApplicationStatusAsync();
@@ -4507,6 +4513,9 @@ static void CheckInstallGracefulShutdownContract(string repositoryRoot)
         && installerSource.Contains("GetWindowThreadProcessId", StringComparison.Ordinal)
         && installerSource.Contains("$hostProcess.MainWindowHandle", StringComparison.Ordinal)
         && installerSource.Contains("GetWindowText(window, title", StringComparison.Ordinal)
+        && installerSource.All(static character => character <= 0x7F)
+        && installerSource.Contains("$expectedWindowTitle = [string]([char]0x5C0F) + 'K'", StringComparison.Ordinal)
+        && installerSource.Contains("$expectedWindowTitle,", StringComparison.Ordinal)
         && !installerSource.Contains("EnumWindows(", StringComparison.Ordinal)
         && installerSource.Contains("[string]::Equals($processPath, $previousHostPath", StringComparison.Ordinal)
         && installerSource.Contains("TryRequestShutdown", StringComparison.Ordinal)

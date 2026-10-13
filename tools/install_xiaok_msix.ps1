@@ -110,7 +110,7 @@ if ($null -ne $previousPackage) {
     if ($matchingHostProcesses.Count -gt 0) {
         if ([version]$previousPackage.Version -lt [version]'0.1.7.0') {
             $runningIds = ($matchingHostProcesses | ForEach-Object { $_.Id }) -join ', '
-            throw "Installed XiaoK $($previousPackage.Version) does not support the verified graceful-shutdown request (PID $runningIds). Right-click the XiaoK pet or tray icon and choose '退出小K', then retry. No process was terminated; no certificate or package changes were made."
+            throw "Installed XiaoK $($previousPackage.Version) does not support the verified graceful-shutdown request (PID $runningIds). Right-click the XiaoK pet or tray icon and choose 'Exit XiaoK', then retry. No process was terminated; no certificate or package changes were made."
         }
 
         if (-not ('XiaoK.MsixInstaller.ShutdownWindowMessage' -as [type])) {
@@ -191,6 +191,7 @@ namespace XiaoK.MsixInstaller
         $shutdownRequested = $false
         $windowProcessId = [uint32]0
         $shutdownError = 0
+        $expectedWindowTitle = [string]([char]0x5C0F) + 'K'
         foreach ($hostProcess in $matchingHostProcesses) {
             $windowFound = $false
             $candidateWindowProcessId = [uint32]0
@@ -200,7 +201,7 @@ namespace XiaoK.MsixInstaller
             $posted = [XiaoK.MsixInstaller.ShutdownWindowMessage]::TryRequestShutdown(
                 $hostProcess.MainWindowHandle,
                 [uint32]$hostProcess.Id,
-                '小K',
+                $expectedWindowTitle,
                 [ref]$windowFound,
                 [ref]$candidateWindowProcessId,
                 [ref]$candidateError)
@@ -279,4 +280,4 @@ if ($null -eq $installedPackage) {
 }
 Write-Output "Installed for current user: $($installedPackage.PackageFullName)"
 $trustResult = if ($addedTrustedCertificate) { 'The certificate was added to LocalMachine\TrustedPeople.' } else { 'The certificate was already trusted in LocalMachine\TrustedPeople.' }
-Write-Output "The app was not launched. $trustResult See the rollback commands in docs\开发与发布\MSIX打包说明.md."
+Write-Output "The app was not launched. $trustResult See the rollback section in the repository packaging documentation."
