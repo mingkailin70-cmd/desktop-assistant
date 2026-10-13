@@ -4071,6 +4071,25 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.FailureDetail("LOW_VRAM").Contains("没有继续启动模型", StringComparison.Ordinal)
         && !TaskHistoryDisplayPolicy.FailureDetail("UNRECOGNIZED_PRIVATE_CODE").Contains("UNRECOGNIZED_PRIVATE_CODE", StringComparison.Ordinal),
         "任务历史没有提供安全、具体的常见故障指引，或把未知错误字段原样显示。");
+    var applicationFailureGuidance = new (string Code, string ExpectedPhrase)[]
+    {
+        ("APP_NOT_ALLOWLISTED", "没有启动、切换窗口或读取其界面"),
+        ("APP_LAUNCH_PRECHECK_FAILED", "没有发出启动请求"),
+        ("APP_LAUNCH_FAILED", "检查本地程序是否存在"),
+        ("APP_LAUNCH_TARGET_AMBIGUOUS", "没有启动新窗口或切换焦点"),
+        ("WINDOW_TARGET_AMBIGUOUS", "没有启动新窗口或切换焦点"),
+        ("WINDOW_ACTIVATION_FAILED", "手动确认当前前台"),
+        ("WINDOW_ACTIVATION_DENIED", "Windows 未允许或未确认"),
+        ("APP_STATUS_UNAVAILABLE", "没有读取标题或内容")
+    };
+    Require(applicationFailureGuidance.All(item =>
+        {
+            var detail = TaskHistoryDisplayPolicy.FailureDetail(item.Code);
+            return detail.Contains(item.ExpectedPhrase, StringComparison.Ordinal)
+                && !detail.Contains(item.Code, StringComparison.Ordinal)
+                && !detail.Contains(":\\", StringComparison.Ordinal);
+        }),
+        "应用启动、窗口切换或只读状态失败没有提供逐类的安全恢复提示。");
     var uncertainOutcomeGuidance = new (string Code, string ExpectedPhrase)[]
     {
         ("APP_LAUNCH_OUTCOME_UNCERTAIN", "目标应用当前状态"),
@@ -4902,6 +4921,25 @@ static async Task CheckAppLaunchRoutingAndFailureAsync()
     Require(!failure.Success && failure.ErrorCode == "APP_LAUNCH_FAILED"
         && failingProcessController.StartCount == 1 && failingProcessController.WindowCheckCount == 1,
         "固定应用启动器路径失效时没有如实返回启动失败。");
+
+    var precheckFailureController = new FakeDesktopAppProcessController(windowVisible: false,
+        windowCheckFailure: new InvalidOperationException(), windowCheckFailureNumber: 1);
+    var precheckFailureDesktop = new WindowsDesktopTools([app], [], precheckFailureController);
+    var precheckFailure = await precheckFailureDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(!precheckFailure.Success && precheckFailure.ErrorCode == "APP_LAUNCH_PRECHECK_FAILED"
+        && precheckFailureController.StartCount == 0 && precheckFailureController.WindowCheckCount == 1,
+        "启动前窗口预检失败时仍发出启动请求，或被误报为已启动失败。");
+
+    var postStartVerificationFailureController = new FakeDesktopAppProcessController(windowVisible: false,
+        windowCheckFailure: new InvalidOperationException(), windowCheckFailureNumber: 2);
+    var postStartVerificationFailureDesktop = new WindowsDesktopTools([app], [], postStartVerificationFailureController);
+    var postStartVerificationFailure = await postStartVerificationFailureDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(!postStartVerificationFailure.Success
+        && postStartVerificationFailure.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        && postStartVerificationFailure.FinalState == TaskLifecycleState.OutcomeUncertain
+        && postStartVerificationFailureController.StartCount == 1
+        && postStartVerificationFailureController.WindowCheckCount == 2,
+        "启动请求已发出但窗口核验异常时没有进入结果待核对，可能误导用户重复启动。");
 }
 
 static void CheckVscodeLocalWindowTitleFiltering()
@@ -10108,7 +10146,8 @@ internal sealed class FakeDesktopAppStatusController(DesktopAppStatus status) : 
 
 internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true,
     Exception? startFailure = null, bool addVisibleWindowOnStart = false,
-    IReadOnlyCollection<IntPtr>? initialWindowHandles = null)
+    IReadOnlyCollection<IntPtr>? initialWindowHandles = null,
+    Exception? windowCheckFailure = null, int windowCheckFailureNumber = 1)
     : IDesktopAppProcessController
 {
     private readonly List<IntPtr> _windowHandles = initialWindowHandles?.ToList()
@@ -10131,6 +10170,8 @@ internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bo
     public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app)
     {
         WindowCheckCount++;
+        if (windowCheckFailure is not null && WindowCheckCount == windowCheckFailureNumber)
+            throw windowCheckFailure;
         return _windowHandles.ToArray();
     }
 

@@ -51,6 +51,14 @@ public static class TaskHistoryDisplayPolicy
     /// <summary>把固定错误码转换成不含任务正文或本机路径的恢复指引。</summary>
     public static string FailureDetail(string? errorCode) => errorCode switch
     {
+        "APP_NOT_ALLOWLISTED" => "目标应用未登记在本机允许列表；小K没有启动、切换窗口或读取其界面。请检查应用设置后再决定是否允许。",
+        "APP_LAUNCH_PRECHECK_FAILED" => "启动前无法安全核验目标窗口；小K没有发出启动请求。稍后可重试，也可手动查看应用状态。",
+        "APP_LAUNCH_FAILED" => "未能启动允许列表中的目标应用；小K没有确认应用已打开。请检查本地程序是否存在及设置路径是否有效后重试。",
+        "APP_LAUNCH_TARGET_AMBIGUOUS" or "WINDOW_TARGET_AMBIGUOUS" =>
+            "发现多个匹配窗口；小K没有启动新窗口或切换焦点。请手动选择目标窗口后再提交。",
+        "WINDOW_ACTIVATION_FAILED" => "无法安全核验目标窗口；请手动确认当前前台和目标应用，再决定是否重新提交。",
+        "WINDOW_ACTIVATION_DENIED" => "Windows 未允许或未确认目标窗口切换；请手动核对前台窗口后再决定下一步。",
+        "APP_STATUS_UNAVAILABLE" => "无法安全读取允许列表应用的进程或窗口状态；没有读取标题或内容，也没有改变前台。稍后可重试或手动核对应用。",
         "FILE_RECYCLE_NOT_CONFIRMED" => "Windows 未确认回收站操作，且原文件仍在原位置。先检查回收站和原文件状态，再决定是否重新提交。",
         "ARCHIVE_OUTPUT_UNVERIFIABLE" => "压缩文件未能通过独立核验，没有发布到目标目录。请检查空间和目录权限后再重新提交。",
         "FOREGROUND_REQUIRED" => "该操作需要桌面前台；小K没有执行，也没有排队。你可以在方便时切到前台再重新提交。",

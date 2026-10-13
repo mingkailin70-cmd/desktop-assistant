@@ -201,6 +201,7 @@ public sealed partial class WindowsDesktopTools
         if (!proposal.Arguments.TryGetValue("app_id", out var appId) || !_apps.TryGetValue(appId, out var app))
             return new(false, "这个应用未在本机允许列表中。", "APP_NOT_ALLOWLISTED");
         IDisposable? launchHandle = null;
+        var startAttempted = false;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -231,6 +232,7 @@ public sealed partial class WindowsDesktopTools
                 start.ArgumentList.Add(app.WorkingDirectory);
             }
 
+            startAttempted = true;
             launchHandle = _appProcessController.Start(start);
             if (launchHandle is null)
                 return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但没有返回可核验的进程句柄。");
@@ -262,7 +264,14 @@ public sealed partial class WindowsDesktopTools
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or FileNotFoundException)
-        { return new(false, "应用启动失败；请检查本地路径设置。", "APP_LAUNCH_FAILED"); }
+        {
+            if (launchHandle is not null)
+                return LaunchOutcomeUncertain(app.Id, "启动请求已发出，但核验目标窗口时发生错误；请手动检查应用状态，小K不会自动重试。");
+            return startAttempted
+                ? new(false, "应用启动失败；请检查本地路径设置。", "APP_LAUNCH_FAILED")
+                : new(false, "启动前无法安全核验目标窗口；小K没有发出启动请求。请稍后重试或手动查看应用状态。",
+                    "APP_LAUNCH_PRECHECK_FAILED");
+        }
         finally { launchHandle?.Dispose(); }
     }
 
