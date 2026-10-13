@@ -498,7 +498,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         MoveWindowFromPointer(e, expandOnClick: !_expanded);
     }
 
-    private static bool IsInteractiveDragSource(object? source)
+    private bool IsInteractiveDragSource(object? source)
     {
         if (source is not DependencyObject current)
             return false;
@@ -506,8 +506,12 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         // Do not turn controls inside the task panel into drag handles.
         for (var depth = 0; current is not null && depth < 256; depth++)
         {
-            if (current is System.Windows.Controls.Primitives.ButtonBase
-                or System.Windows.Controls.Primitives.TextBoxBase
+            if (current is System.Windows.Controls.Primitives.ButtonBase button)
+                return PetWindowInteractionPolicy.ShouldTreatButtonAsInteractive(
+                    isPetBodyButton: ReferenceEquals(button, CompactPetButton),
+                    isExpanded: _expanded);
+
+            if (current is System.Windows.Controls.Primitives.TextBoxBase
                 or System.Windows.Controls.Primitives.RangeBase
                 or System.Windows.Controls.Primitives.ScrollBar
                 or System.Windows.Controls.Primitives.Thumb

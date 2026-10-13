@@ -318,8 +318,9 @@
                                        TextAlignment="Center"/>
                         </StackPanel>
                     </Border>
-                    <Button Grid.Row="1" Style="{StaticResource PetExpandButton}" Click="ShowPanel_Click"
-                            Focusable="True" AutomationProperties.Name="展开小K任务面板" ToolTip="展开任务面板">
+                    <Button x:Name="CompactPetButton" Grid.Row="1" Style="{StaticResource PetExpandButton}" Click="ShowPanel_Click"
+                            Focusable="True" AutomationProperties.Name="小K桌宠，按住并拖动可移动；单击展开任务面板"
+                            ToolTip="按住小K并拖动可自由移动；轻点展开任务面板">
                         <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Ellipse Width="262" Height="220" Margin="0,18,0,0" IsHitTestVisible="False">
                                 <Ellipse.Fill>

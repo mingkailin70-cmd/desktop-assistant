@@ -17,6 +17,9 @@ internal static class PetWindowDragProbe
     {
         if (!PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: true,
                 isOverResizeHandle: false, isInteractiveSource: false)
+            || !PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: true,
+                isOverResizeHandle: false, isInteractiveSource: PetWindowInteractionPolicy.ShouldTreatButtonAsInteractive(
+                    isPetBodyButton: true, isExpanded: false))
             || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: false, isPressed: true,
                 isOverResizeHandle: false, isInteractiveSource: false)
             || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: false,
@@ -25,6 +28,9 @@ internal static class PetWindowDragProbe
                 isOverResizeHandle: true, isInteractiveSource: false)
             || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: true,
                 isOverResizeHandle: false, isInteractiveSource: true)
+            || !PetWindowInteractionPolicy.ShouldTreatButtonAsInteractive(isPetBodyButton: false, isExpanded: false)
+            || PetWindowInteractionPolicy.ShouldTreatButtonAsInteractive(isPetBodyButton: true, isExpanded: false)
+            || !PetWindowInteractionPolicy.ShouldTreatButtonAsInteractive(isPetBodyButton: true, isExpanded: true)
             || PetWindowInteractionPolicy.GetCompletion(positionChanged: false, cancelled: false, expandOnClick: true)
                 != PetWindowMoveCompletion.Expand
             || PetWindowInteractionPolicy.GetCompletion(positionChanged: false, cancelled: false, expandOnClick: false)
@@ -47,6 +53,8 @@ internal static class PetWindowDragProbe
         if (!xaml.Contains("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
             || !xaml.Contains("ShowActivated=\"False\"", StringComparison.Ordinal)
             || !xaml.Contains("Cursor=\"SizeAll\"", StringComparison.Ordinal)
+            || !xaml.Contains("x:Name=\"CompactPetButton\"", StringComparison.Ordinal)
+            || !xaml.Contains("轻点展开任务面板", StringComparison.Ordinal)
             || !xaml.Contains("按住桌宠任意位置并移动鼠标", StringComparison.Ordinal)
             || !xaml.Contains("按住猫图或面板空白区域拖动可移动小K窗口", StringComparison.Ordinal)
             || !xaml.Contains("x:Name=\"PetResizeHandle\"", StringComparison.Ordinal))
@@ -56,6 +64,8 @@ internal static class PetWindowDragProbe
             || !code.Contains("PetWindowInteractionPolicy.ShouldStartMove(", StringComparison.Ordinal)
             || !code.Contains("MoveWindowFromPointer(e, expandOnClick: !_expanded)", StringComparison.Ordinal)
             || !code.Contains("IsInteractiveDragSource(e.OriginalSource)", StringComparison.Ordinal)
+            || !code.Contains("PetWindowInteractionPolicy.ShouldTreatButtonAsInteractive(", StringComparison.Ordinal)
+            || !code.Contains("ReferenceEquals(button, CompactPetButton)", StringComparison.Ordinal)
             || !code.Contains("System.Windows.Controls.Primitives.ButtonBase", StringComparison.Ordinal)
             || !code.Contains("System.Windows.Controls.Primitives.TextBoxBase", StringComparison.Ordinal)
             || !code.Contains("System.Windows.Controls.Primitives.Selector", StringComparison.Ordinal)
