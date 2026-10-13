@@ -69,6 +69,9 @@ internal static class SettingsWindowResilienceProbe
             var failLoginStartupRead = false;
             var failContactStyleLoad = false;
             var failPublisherInspection = true;
+            var failApprovalAuditRead = false;
+            var failCleanupPreview = false;
+            var clearLocalDataCalls = 0;
             Task ReplaceContactStyles(IEnumerable<ContactReplyStylePreference> _, CancellationToken __)
             {
                 replaceCalls++;
@@ -91,11 +94,17 @@ internal static class SettingsWindowResilienceProbe
             Task<string> CreateBackup(string path, CancellationToken _) => Task.FromResult(path);
             Task<string> RestoreBackup(string path, CancellationToken _) => Task.FromResult(path);
             Task<IReadOnlyList<ApprovalAuditRecord>> LoadApprovalAudit(int _, CancellationToken __) =>
-                Task.FromResult<IReadOnlyList<ApprovalAuditRecord>>([]);
-            Task<LocalDataCleanupPreview> GetCleanupPreview(CancellationToken _) =>
-                Task.FromResult<LocalDataCleanupPreview>(null!);
-            Task<LocalDataCleanupResult> ClearLocalData(LocalDataCleanupPreview _, CancellationToken __) =>
-                Task.FromResult<LocalDataCleanupResult>(null!);
+                failApprovalAuditRead
+                    ? Task.FromException<IReadOnlyList<ApprovalAuditRecord>>(new Exception("SYNTHETIC_PRIVATE_AUDIT_READ_ERROR"))
+                    : Task.FromResult<IReadOnlyList<ApprovalAuditRecord>>([]);
+            Task<LocalDataCleanupPreview> GetCleanupPreview(CancellationToken _) => failCleanupPreview
+                ? Task.FromException<LocalDataCleanupPreview>(new Exception("SYNTHETIC_PRIVATE_CLEANUP_PREVIEW_ERROR"))
+                : Task.FromResult<LocalDataCleanupPreview>(null!);
+            Task<LocalDataCleanupResult> ClearLocalData(LocalDataCleanupPreview _, CancellationToken __)
+            {
+                clearLocalDataCalls++;
+                return Task.FromResult<LocalDataCleanupResult>(null!);
+            }
 
             var notificationMonitor = new WindowsNotificationMonitor(dispatcher);
             var window = new SettingsWindow(settings, notificationMonitor, LoadContactStyles, ReplaceContactStyles,
@@ -287,6 +296,64 @@ internal static class SettingsWindowResilienceProbe
                 failures, "合成来源检查重试成功后，界面没有在4秒内恢复。");
             if (GetPrivateField<bool>(window, "_publisherInspectionFailed") || startSampleButton.IsEnabled)
                 failures.Add("来源检查成功后失败锁未清除，或无已核验候选时错误开放了样本采集。");
+
+            var auditHandler = typeof(SettingsWindow).GetMethod("ViewApprovalAudit_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var auditButton = window.FindName("ViewApprovalAuditButton") as Button;
+            var maintenanceStatus = window.FindName("DatabaseMaintenanceStatusText") as TextBlock;
+            if (auditHandler is null || auditButton is null || maintenanceStatus is null)
+            {
+                failures.Add("设置页没有找到审批审计查看处理器或维护状态控件。");
+                return;
+            }
+            failApprovalAuditRead = true;
+            dispatcher.Invoke(new Action(() => auditHandler.Invoke(window,
+                [auditButton, new RoutedEventArgs(Button.ClickEvent, auditButton)])));
+            PumpUntil(dispatcher, () => auditButton.IsEnabled
+                    && maintenanceStatus.Text == "审批审计记录无法读取或显示；没有修改记录，请稍后重试。",
+                failures, "合成审批审计读取异常后，按钮或固定提示没有在4秒内恢复。");
+            if (maintenanceStatus.Text.Contains("SYNTHETIC_PRIVATE_AUDIT_READ_ERROR", StringComparison.Ordinal))
+                failures.Add("审批审计读取异常详情泄漏到设置页。");
+
+            var clearLocalDataHandler = typeof(SettingsWindow).GetMethod("ClearLocalData_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var clearLocalDataButton = window.FindName("ClearLocalDataButton") as Button;
+            var createBackupButton = window.FindName("CreateDatabaseBackupButton") as Button;
+            var restoreBackupButton = window.FindName("RestoreDatabaseBackupButton") as Button;
+            if (clearLocalDataHandler is null || clearLocalDataButton is null
+                || createBackupButton is null || restoreBackupButton is null)
+            {
+                failures.Add("设置页没有找到本地历史清理处理器或数据库维护按钮。");
+                return;
+            }
+            failCleanupPreview = true;
+            dispatcher.Invoke(new Action(() => clearLocalDataHandler.Invoke(window,
+                [clearLocalDataButton, new RoutedEventArgs(Button.ClickEvent, clearLocalDataButton)])));
+            PumpUntil(dispatcher, () => clearLocalDataButton.IsEnabled && createBackupButton.IsEnabled
+                    && restoreBackupButton.IsEnabled && auditButton.IsEnabled
+                    && maintenanceStatus.Text.StartsWith("本地历史清理尚未开始", StringComparison.Ordinal),
+                failures, "合成清理预览异常后，维护按钮或固定提示没有在4秒内恢复。");
+            if (maintenanceStatus.Text.Contains("SYNTHETIC_PRIVATE_CLEANUP_PREVIEW_ERROR", StringComparison.Ordinal)
+                || clearLocalDataCalls != 0)
+                failures.Add("清理预览异常泄漏了详情，或在确认前触发了本地数据清理。");
+
+            var clearSamplesHandler = typeof(SettingsWindow).GetMethod("ClearSamples_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var clearSamplesButton = window.FindName("ClearSamplesButton") as Button;
+            var privacyStatus = window.FindName("PrivacyStatusText") as TextBlock;
+            var evaluationRoot = window.FindName("EvaluationRootBox") as TextBox;
+            if (clearSamplesHandler is null || clearSamplesButton is null || privacyStatus is null || evaluationRoot is null)
+            {
+                failures.Add("设置页没有找到评测样本清理处理器或状态控件。");
+                return;
+            }
+            evaluationRoot.Text = @"\\server\share";
+            dispatcher.Invoke(new Action(() => clearSamplesHandler.Invoke(window,
+                [clearSamplesButton, new RoutedEventArgs(Button.ClickEvent, clearSamplesButton)])));
+            PumpUntil(dispatcher, () => clearSamplesButton.IsEnabled
+                    && privacyStatus.Text == "评测样本清理尚未开始；目录验证或预览失败。请检查所选目录后重试。",
+                failures, "评测目录验证失败后，清理按钮或固定提示没有在4秒内恢复。");
+            evaluationRoot.Text = settings.EvaluationRoot;
         }
         catch (Exception exception)
         {

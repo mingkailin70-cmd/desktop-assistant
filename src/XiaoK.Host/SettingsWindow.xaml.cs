@@ -172,6 +172,9 @@ public partial class SettingsWindow : Window
         ContactStylesList.IsEnabled = enabled;
     }
 
+    private static bool IsNonFatalSettingsException(Exception exception) =>
+        exception is not OutOfMemoryException and not AccessViolationException;
+
     private async void CreateDatabaseBackup_Click(object sender, RoutedEventArgs e)
     {
         var initialDirectory = Path.GetDirectoryName(_activeDatabasePath)!;
@@ -195,10 +198,9 @@ public partial class SettingsWindow : Window
             var createdPath = await _createDatabaseBackup(backupPath, CancellationToken.None);
             DatabaseMaintenanceStatusText.Text = $"已创建包含任务状态、联系人偏好和审批审计的一致性备份：\n{createdPath}";
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
-            or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (IsNonFatalSettingsException(ex))
         {
-            DatabaseMaintenanceStatusText.Text = $"备份失败；未覆盖现有备份：{ex.Message}";
+            DatabaseMaintenanceStatusText.Text = "数据库备份失败；没有执行数据库恢复或清理。请检查目标目录权限和可用空间后重试。";
         }
         finally { SetDatabaseMaintenanceButtonsEnabled(true); }
     }
@@ -232,10 +234,12 @@ public partial class SettingsWindow : Window
         if (confirmation != MessageBoxResult.Yes) return;
 
         SetDatabaseMaintenanceButtonsEnabled(false);
+        var restoreCompleted = false;
         try
         {
             DatabaseMaintenanceStatusText.Text = "正在验证备份并创建当前数据库保护副本…";
             var recoveryPath = await _restoreDatabaseBackup(selectedPath, CancellationToken.None);
+            restoreCompleted = true;
             if (_contactStylesLoaded)
             {
                 try
@@ -244,18 +248,19 @@ public partial class SettingsWindow : Window
                     _contactReplyStyles.Clear();
                     foreach (var preference in _loadedContactReplyStyles) _contactReplyStyles.Add(preference);
                 }
-                catch (Exception refreshError) when (refreshError is IOException or InvalidDataException or InvalidOperationException)
+                catch (Exception refreshError) when (IsNonFatalSettingsException(refreshError))
                 {
-                    DatabaseMaintenanceStatusText.Text = $"数据库已恢复，保护副本在 {recoveryPath}；但偏好列表刷新失败，请重新打开设置核对：{refreshError.Message}";
+                    DatabaseMaintenanceStatusText.Text = $"数据库已恢复，保护副本保存在 {recoveryPath}；联系人偏好列表未能刷新，请关闭并重新打开设置页核对。";
                     return;
                 }
             }
             DatabaseMaintenanceStatusText.Text = $"数据库已恢复。恢复前的活动数据库保护副本保存在：\n{recoveryPath}\n没有执行或重放任何旧任务。";
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or SecurityException
-            or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (IsNonFatalSettingsException(ex))
         {
-            DatabaseMaintenanceStatusText.Text = $"恢复未完成：{ex.Message}";
+            DatabaseMaintenanceStatusText.Text = restoreCompleted
+                ? "数据库已恢复，但设置页后续状态未能完整刷新；请关闭并重新打开设置页核对。"
+                : "数据库恢复未能完成或确认；请重新打开设置页核对当前状态。若已生成保护副本，请保留该副本；不要自动重试。";
         }
         finally { SetDatabaseMaintenanceButtonsEnabled(true); }
     }
@@ -268,16 +273,16 @@ public partial class SettingsWindow : Window
             var records = await _getRecentApprovalAudit(100, CancellationToken.None);
             new ApprovalAuditWindow(records) { Owner = this }.ShowDialog();
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or SecurityException
-            or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (IsNonFatalSettingsException(ex))
         {
-            DatabaseMaintenanceStatusText.Text = $"无法读取审批审计记录：{ex.Message}";
+            DatabaseMaintenanceStatusText.Text = "审批审计记录无法读取或显示；没有修改记录，请稍后重试。";
         }
         finally { ViewApprovalAuditButton.IsEnabled = true; }
     }
 
     private async void ClearLocalData_Click(object sender, RoutedEventArgs e)
     {
+        var clearOperationStarted = false;
         SetDatabaseMaintenanceButtonsEnabled(false);
         try
         {
@@ -307,6 +312,7 @@ public partial class SettingsWindow : Window
             if (confirmation != MessageBoxResult.Yes) return;
 
             DatabaseMaintenanceStatusText.Text = "正在清除数据库记录并清理旧迁移副本…";
+            clearOperationStarted = true;
             var result = await _clearLocalData(preview, CancellationToken.None);
             _original = _original with { ContactReplyStyles = [] };
             if (_contactStylesLoaded)
@@ -319,9 +325,9 @@ public partial class SettingsWindow : Window
                     ContactStyleNameBox.Clear();
                     ContactStylesList.SelectedItem = null;
                 }
-                catch (Exception refreshError) when (refreshError is IOException or InvalidDataException or InvalidOperationException)
+                catch (Exception refreshError) when (IsNonFatalSettingsException(refreshError))
                 {
-                    DatabaseMaintenanceStatusText.Text = $"历史数据已清除，但联系人偏好列表刷新失败；请重新打开设置核对：{refreshError.Message}";
+                    DatabaseMaintenanceStatusText.Text = "本地历史数据已清理，但联系人偏好列表未能刷新；请关闭并重新打开设置页核对。";
                     return;
                 }
             }
@@ -342,10 +348,11 @@ public partial class SettingsWindow : Window
             status += "用户另存到其他位置的备份不会自动删除。";
             DatabaseMaintenanceStatusText.Text = status;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
-            or InvalidDataException or InvalidOperationException or NotSupportedException or System.Text.Json.JsonException)
+        catch (Exception ex) when (IsNonFatalSettingsException(ex))
         {
-            DatabaseMaintenanceStatusText.Text = $"没有完成本地历史清理：{ex.Message}";
+            DatabaseMaintenanceStatusText.Text = clearOperationStarted
+                ? "本地历史清理结果未能完整确认；数据可能已部分清除。请重新打开设置并查看当前记录与清理预览，再决定后续操作；不要自动重试。"
+                : "本地历史清理尚未开始；预览或验证失败，没有进入清理。请检查当前状态后重新预览。";
         }
         finally { SetDatabaseMaintenanceButtonsEnabled(true); }
     }
@@ -725,6 +732,7 @@ public partial class SettingsWindow : Window
 
     private async void ClearSamples_Click(object sender, RoutedEventArgs e)
     {
+        var deletionStarted = false;
         try
         {
             var dataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录");
@@ -755,12 +763,15 @@ public partial class SettingsWindow : Window
 
             ClearSamplesButton.IsEnabled = false;
             PrivacyStatusText.Text = "正在清理已确认的评测样本…";
+            deletionStarted = true;
             var deleted = await Task.Run(() => EvaluationSampleCleanup.DeleteIfUnchanged(preview));
             PrivacyStatusText.Text = $"已删除 {deleted} 个评测样本文件；忽略的目录、链接和只读文件仍保留。";
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (IsNonFatalSettingsException(ex))
         {
-            PrivacyStatusText.Text = ex.Message;
+            PrivacyStatusText.Text = deletionStarted
+                ? "评测样本清理结果未能完整确认；文件可能已部分删除。请重新检查所选目录后再决定是否重试。"
+                : "评测样本清理尚未开始；目录验证或预览失败。请检查所选目录后重试。";
         }
         finally
         {
