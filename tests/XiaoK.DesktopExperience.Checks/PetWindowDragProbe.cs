@@ -38,6 +38,60 @@ internal static class PetWindowDragProbe
                 minimumHorizontalDistance: 4, minimumVerticalDistance: 4))
             failures.Add("无效按下位置仍可启动拖动。");
 
+        var boundaryCases = new[]
+        {
+            (Name: "横向正方向阈值内", DeltaX: 3.999, DeltaY: 0d, Expected: false),
+            (Name: "横向正方向恰好达到阈值", DeltaX: 4d, DeltaY: 0d, Expected: true),
+            (Name: "横向负方向越过阈值", DeltaX: -4.001, DeltaY: 0d, Expected: true),
+            (Name: "纵向正方向恰好达到阈值", DeltaX: 0d, DeltaY: 4d, Expected: true),
+            (Name: "纵向负方向恰好达到阈值", DeltaX: 0d, DeltaY: -4d, Expected: true),
+            (Name: "两个方向都在阈值内", DeltaX: -3.999, DeltaY: 3.999, Expected: false),
+            (Name: "单轴达到阈值即可拖动", DeltaX: 3.999, DeltaY: -4d, Expected: true)
+        };
+        foreach (var boundaryCase in boundaryCases)
+        {
+            gesture.PointerDown(20, 30);
+            var started = gesture.TryStartDrag(20 + boundaryCase.DeltaX, 30 + boundaryCase.DeltaY,
+                leftButtonPressed: true, minimumHorizontalDistance: 4, minimumVerticalDistance: 4);
+            var ended = gesture.PointerUp();
+            if (started != boundaryCase.Expected || ended != boundaryCase.Expected)
+                failures.Add($"{boundaryCase.Name}的拖动启动或抬起状态不正确。");
+            if (gesture.TryStartDrag(30, 40, leftButtonPressed: true,
+                    minimumHorizontalDistance: 4, minimumVerticalDistance: 4))
+                failures.Add($"{boundaryCase.Name}在抬起后仍保留了拖动状态。");
+        }
+
+        var invalidThresholds = new[] { 0d, -4d, double.NaN, double.PositiveInfinity, double.NegativeInfinity };
+        foreach (var invalidThreshold in invalidThresholds)
+        {
+            gesture.PointerDown(0, 0);
+            if (gesture.TryStartDrag(3.999, 0, leftButtonPressed: true,
+                    minimumHorizontalDistance: invalidThreshold, minimumVerticalDistance: 4)
+                || !gesture.TryStartDrag(4, 0, leftButtonPressed: true,
+                    minimumHorizontalDistance: invalidThreshold, minimumVerticalDistance: 4)
+                || !gesture.PointerUp())
+                failures.Add("无效横向系统阈值未安全回退到默认值。");
+
+            gesture.PointerDown(0, 0);
+            if (gesture.TryStartDrag(0, -3.999, leftButtonPressed: true,
+                    minimumHorizontalDistance: 4, minimumVerticalDistance: invalidThreshold)
+                || !gesture.TryStartDrag(0, -4, leftButtonPressed: true,
+                    minimumHorizontalDistance: 4, minimumVerticalDistance: invalidThreshold)
+                || !gesture.PointerUp())
+                failures.Add("无效纵向系统阈值未安全回退到默认值。");
+        }
+
+        gesture.PointerDown(1, 1);
+        gesture.Reset();
+        if (gesture.TryStartDrag(10, 10, leftButtonPressed: true,
+                minimumHorizontalDistance: 4, minimumVerticalDistance: 4) || gesture.PointerUp())
+            failures.Add("显式重置后仍可从旧按下位置启动拖动。");
+
+        gesture.PointerDown(1, 1);
+        if (gesture.TryStartDrag(double.PositiveInfinity, 1, leftButtonPressed: true,
+                minimumHorizontalDistance: 4, minimumVerticalDistance: 4) || gesture.PointerUp())
+            failures.Add("无效移动坐标没有清除拖动手势状态。");
+
         var routingFailure = VerifyButtonPointerRouting();
         if (routingFailure is not null) failures.Add(routingFailure);
 
