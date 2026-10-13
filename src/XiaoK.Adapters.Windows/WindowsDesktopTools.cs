@@ -362,17 +362,24 @@ public sealed partial class WindowsDesktopTools
 
         var rootId = proposal.Arguments.GetValueOrDefault("root_id", "user-files");
         var roots = rootId.Equals("user-files", StringComparison.OrdinalIgnoreCase)
-            ? _searchRoots.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            ? _searchRoots.Values.Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(path => path, StringComparer.Ordinal).ToArray()
             : _searchRoots.TryGetValue(rootId, out var configuredRoot) ? [configuredRoot] : Array.Empty<string>();
         var existingRoots = roots.Where(Directory.Exists).ToArray();
         if (existingRoots.Length == 0)
             return new(false, "搜索目录未配置或不可用。", "SEARCH_ROOT_UNAVAILABLE");
 
         var safeRoots = new List<(string Path, FileIdentity Identity)>();
+        var skippedEntries = roots.Length - existingRoots.Length;
         foreach (var path in existingRoots)
         {
             if (!TryOpenOrdinaryPath(path, expectedDirectory: true, enumerateDirectory: false,
-                    out var rootHandle, out var canonicalPath, out var rootIdentity)) continue;
+                    out var rootHandle, out var canonicalPath, out var rootIdentity))
+            {
+                skippedEntries++;
+                continue;
+            }
             rootHandle.Dispose();
             if (safeRoots.All(root => !root.Path.Equals(canonicalPath, StringComparison.OrdinalIgnoreCase)))
                 safeRoots.Add((canonicalPath, rootIdentity));
@@ -382,48 +389,84 @@ public sealed partial class WindowsDesktopTools
 
         var matches = new List<string>(LocalFileSearchResultPolicy.MaximumResults);
         var scanned = 0;
+        var depthLimitReached = false;
         var queue = new Queue<(string Path, string Root, int Depth, FileIdentity? ExpectedIdentity)>();
-        foreach (var root in safeRoots) queue.Enqueue((root.Path, root.Path, 0, root.Identity));
+        foreach (var root in safeRoots.OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(item => item.Path, StringComparer.Ordinal))
+            queue.Enqueue((root.Path, root.Path, 0, root.Identity));
         while (queue.Count > 0 && scanned < LocalFileSearchResultPolicy.MaximumScannedEntries
             && matches.Count < LocalFileSearchResultPolicy.MaximumResults)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var (current, root, depth, expectedIdentity) = queue.Dequeue();
             if (!TryOpenOrdinaryPath(current, expectedDirectory: true, enumerateDirectory: true,
-                    out var directoryHandle, out var verifiedDirectory, out var directoryIdentity)) continue;
+                    out var directoryHandle, out var verifiedDirectory, out var directoryIdentity))
+            {
+                skippedEntries++;
+                continue;
+            }
             using (directoryHandle)
             {
                 if ((expectedIdentity.HasValue && expectedIdentity.Value != directoryIdentity)
-                    || !IsWithinRoot(verifiedDirectory, root)) continue;
+                    || !IsWithinRoot(verifiedDirectory, root))
+                {
+                    skippedEntries++;
+                    continue;
+                }
                 if (!TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity,
-                        LocalFileSearchResultPolicy.MaximumScannedEntries - scanned, out var entries)) continue;
+                        LocalFileSearchResultPolicy.MaximumScannedEntries - scanned, out var entries))
+                {
+                    skippedEntries++;
+                    continue;
+                }
 
-                foreach (var entry in entries)
+                foreach (var entry in entries.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(item => item.Name, StringComparer.Ordinal))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     scanned++;
-                    if ((entry.Attributes & (uint)FileAttributes.ReparsePoint) != 0) continue;
+                    if ((entry.Attributes & ((uint)FileAttributes.ReparsePoint | (uint)FileAttributes.Device)) != 0)
+                    {
+                        skippedEntries++;
+                        continue;
+                    }
 
                     var entryPath = Path.Combine(verifiedDirectory, entry.Name);
                     var isDirectory = (entry.Attributes & (uint)FileAttributes.Directory) != 0;
                     if (isDirectory)
                     {
-                        if (depth >= 5 || !TryOpenOrdinaryPath(entryPath, expectedDirectory: true,
-                                enumerateDirectory: false, out var childHandle, out var childPath, out var childIdentity)) continue;
+                        if (depth >= LocalFileSearchResultPolicy.MaximumDepth)
+                        {
+                            depthLimitReached = true;
+                            continue;
+                        }
+                        if (!TryOpenOrdinaryPath(entryPath, expectedDirectory: true,
+                                enumerateDirectory: false, out var childHandle, out var childPath, out var childIdentity))
+                        {
+                            skippedEntries++;
+                            continue;
+                        }
                         childHandle.Dispose();
                         if (childIdentity == entry.Identity && IsWithinRoot(childPath, root))
                             queue.Enqueue((childPath, root, depth + 1, childIdentity));
+                        else
+                            skippedEntries++;
                         continue;
                     }
 
-                    if ((entry.Attributes & (uint)FileAttributes.Device) != 0
-                        || !Path.GetFileName(entry.Name).Contains(query, StringComparison.OrdinalIgnoreCase)
-                        || !TryOpenOrdinaryPath(entryPath, expectedDirectory: false, enumerateDirectory: false,
-                            out var fileHandle, out var filePath, out var fileIdentity)) continue;
+                    if (!Path.GetFileName(entry.Name).Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!TryOpenOrdinaryPath(entryPath, expectedDirectory: false, enumerateDirectory: false,
+                            out var fileHandle, out var filePath, out var fileIdentity))
+                    {
+                        skippedEntries++;
+                        continue;
+                    }
                     using (fileHandle)
                     {
                         if (fileIdentity == entry.Identity && IsWithinRoot(filePath, root))
                             matches.Add(ToDisplayPath(filePath));
+                        else
+                            skippedEntries++;
                     }
 
                     if (matches.Count == LocalFileSearchResultPolicy.MaximumResults
@@ -433,8 +476,10 @@ public sealed partial class WindowsDesktopTools
         }
 
         var scanLimitReached = scanned >= LocalFileSearchResultPolicy.MaximumScannedEntries;
-        var summary = LocalFileSearchResultPolicy.CreateSummary(matches.Count, scanned, scanLimitReached);
-        var response = LocalFileSearchResultPolicy.CreateResponse(matches, scanned, scanLimitReached);
+        var summary = LocalFileSearchResultPolicy.CreateSummary(matches.Count, scanned, scanLimitReached,
+            skippedEntries, depthLimitReached);
+        var response = LocalFileSearchResultPolicy.CreateResponse(matches, scanned, scanLimitReached,
+            skippedEntries, depthLimitReached);
         return new(true, summary, Data: response);
     }
 

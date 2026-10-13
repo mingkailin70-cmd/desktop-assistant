@@ -7388,6 +7388,9 @@ static bool CheckFileSearchRejectsReparsePoints(string root, out string skipReas
             "文件搜索没有返回普通范围内的匹配文件。");
         Require(!resultData.Contains("external-query-secret.txt", StringComparison.Ordinal),
             "文件搜索通过目录联接返回了允许范围外的文件。");
+        Require(resultData.Contains("跳过", StringComparison.Ordinal)
+            && resultData.Contains("结果可能不完整", StringComparison.Ordinal),
+            "安全跳过目录联接后没有明确说明搜索结果可能不完整。");
 
         var linkedDesktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
             [new KeyValuePair<string, string>("user-files", linkedSearchRoot)]);
@@ -7567,6 +7570,19 @@ static void CheckFileSearchResultSummaryReportsLimits()
         LocalFileSearchResultPolicy.MaximumScannedEntries, scanLimitReached: true);
     Require(cappedScan.Contains("结果可能不完整", StringComparison.Ordinal),
         "达到扫描上限且已有结果时没有提示结果可能不完整。");
+
+    var skippedEmpty = LocalFileSearchResultPolicy.CreateSummary(0, 20, scanLimitReached: false,
+        skippedEntries: 2);
+    Require(skippedEmpty.Contains("没有找到匹配文件", StringComparison.Ordinal)
+        && skippedEmpty.Contains("跳过", StringComparison.Ordinal)
+        && skippedEmpty.Contains("结果可能不完整", StringComparison.Ordinal),
+        "有目录项因权限或并发变化跳过时，空结果仍被报告为完整搜索。");
+
+    var depthLimited = LocalFileSearchResultPolicy.CreateSummary(0, 6, scanLimitReached: false,
+        depthLimitReached: true);
+    Require(depthLimited.Contains("目录深度上限", StringComparison.Ordinal)
+        && depthLimited.Contains("结果可能不完整", StringComparison.Ordinal),
+        "达到目录深度上限时，结果没有标记为可能不完整。");
 }
 
 static async Task CheckFileSearchFailureAndCancellationAsync(string root)
@@ -7595,6 +7611,41 @@ static async Task CheckFileSearchFailureAndCancellationAsync(string root)
     try { await desktop.SearchFilesAsync(validProposal, cancellation.Token); }
     catch (OperationCanceledException) { cancelled = true; }
     Require(cancelled, "已经取消的文件搜索仍继续返回结果。");
+
+    var orderedRoot = Path.Combine(root, "file-search-stable-order");
+    Directory.CreateDirectory(orderedRoot);
+    File.WriteAllText(Path.Combine(orderedRoot, "z-match-sequence.txt"), "synthetic");
+    File.WriteAllText(Path.Combine(orderedRoot, "a-match-sequence.txt"), "synthetic");
+    var orderedDesktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+        [new KeyValuePair<string, string>("user-files", orderedRoot)]);
+    var orderedResult = await orderedDesktop.SearchFilesAsync(ToolBroker.Proposal("file.search.v1",
+        [new("query", "match-sequence"), new("root_id", "user-files")], "user-files",
+        ToolExpectedOutcome.MatchingFilesListed), CancellationToken.None);
+    var orderedData = orderedResult.Data ?? "";
+    Require(orderedResult.Success
+        && orderedData.IndexOf("a-match-sequence.txt", StringComparison.Ordinal)
+            < orderedData.IndexOf("z-match-sequence.txt", StringComparison.Ordinal),
+        "相同搜索输入没有按文件名返回稳定排序结果。");
+
+    var deepRoot = Path.Combine(root, "file-search-depth-limit");
+    var deepDirectory = deepRoot;
+    Directory.CreateDirectory(deepDirectory);
+    for (var depth = 0; depth <= LocalFileSearchResultPolicy.MaximumDepth; depth++)
+    {
+        deepDirectory = Path.Combine(deepDirectory, $"level-{depth + 1}");
+        Directory.CreateDirectory(deepDirectory);
+    }
+    File.WriteAllText(Path.Combine(deepDirectory, "depth-limit-sentinel.txt"), "synthetic");
+    var deepDesktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+        [new KeyValuePair<string, string>("user-files", deepRoot)]);
+    var deepResult = await deepDesktop.SearchFilesAsync(ToolBroker.Proposal("file.search.v1",
+        [new("query", "depth-limit-sentinel"), new("root_id", "user-files")], "user-files",
+        ToolExpectedOutcome.MatchingFilesListed), CancellationToken.None);
+    var deepData = deepResult.Data ?? "";
+    Require(deepResult.Success && !deepData.Contains("depth-limit-sentinel.txt", StringComparison.Ordinal)
+        && deepData.Contains("目录深度上限", StringComparison.Ordinal)
+        && deepData.Contains("结果可能不完整", StringComparison.Ordinal),
+        "文件搜索越过深度限制或把深层未检查目录报告为完整无命中。");
 }
 
 static async Task CheckFileContentSearchAsync(string root)
