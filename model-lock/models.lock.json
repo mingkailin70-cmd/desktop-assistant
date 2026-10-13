@@ -1239,6 +1239,93 @@
       "notes": "GitHub社区发布的Jev兼容本地决策模型，仅支持固定候选的概率选择，不生成自由文本，也不授予工具权限。上游标注英语并报告英文决策集；小K中文路由、校准、延迟与运行时兼容性均未评估。权重只作研究候选，不接生产ModelBroker或ToolBroker权限判断。当前锁定Q4_K_M单文件，CPU模型运行时尚未随本权重固定。",
       "localDirectory": "llm/jevos-v4-0.9b-q4km-decision-eval/95575aec49b6e90a30c94fef3d59b315dd060780",
       "requiredForP0": false
+    },
+    {
+      "id": "jevos-v4-0.9b-openvino-int8-decision-eval",
+      "role": "decision-candidate",
+      "source": "https://huggingface.co/feder-cr/jev",
+      "revision": "95575aec49b6e90a30c94fef3d59b315dd060780",
+      "format": "OpenVINO IR",
+      "quantization": "INT8",
+      "quantizer": "feder-cr jevos-v4 release",
+      "conversionRuntime": "GitHub feder-cr/jev release jevos-v4; Windows CPU/OpenVINO archive SHA-256 e70f03b008d10a35adbe8313f32238d233182c8eff5df75d9a5b3212834b271d; release commit f764b70be2fc7d1ac9ef0cfddc5ccc0a41db7965 has verified GitHub signature",
+      "files": [
+        {
+          "name": "model/model.json",
+          "upstreamReportedSizeBytes": 22,
+          "expectedUpstreamSha256": "42c7743a618b1d708b11c5ad1cd399cb45dfe088c6138939b30d74c5a806ae5e",
+          "localVerifiedSha256": "42c7743a618b1d708b11c5ad1cd399cb45dfe088c6138939b30d74c5a806ae5e"
+        },
+        {
+          "name": "model/openvino_model.bin",
+          "upstreamReportedSizeBytes": 683213388,
+          "expectedUpstreamSha256": "ad03ebff10d412b57898b283b37530f7a1ed121587314956b9946cdbb03c99bc",
+          "localVerifiedSha256": "ad03ebff10d412b57898b283b37530f7a1ed121587314956b9946cdbb03c99bc"
+        },
+        {
+          "name": "model/openvino_model.xml",
+          "upstreamReportedSizeBytes": 1124143,
+          "expectedUpstreamSha256": "59b4dfdfa5f8ebfd8c400d8a8b464b34db2ea2038665e78a71361a6b532e1e79",
+          "localVerifiedSha256": "59b4dfdfa5f8ebfd8c400d8a8b464b34db2ea2038665e78a71361a6b532e1e79"
+        },
+        {
+          "name": "model/tokenizer.gguf",
+          "upstreamReportedSizeBytes": 5122784,
+          "expectedUpstreamSha256": "9e15e73e12c6fe6eb9af58d15f6dbc7a8563331947232d0b10158aa8e9832949",
+          "localVerifiedSha256": "9e15e73e12c6fe6eb9af58d15f6dbc7a8563331947232d0b10158aa8e9832949"
+        },
+        {
+          "name": "model/tokenizer.json",
+          "upstreamReportedSizeBytes": 9894271,
+          "expectedUpstreamSha256": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81",
+          "localVerifiedSha256": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81"
+        }
+      ],
+      "license": "mit",
+      "status": "locally_evaluated",
+      "notes": "社区Jevos-v4受限选项决策模型；此OpenVINO INT8权重使用上游CPU运行时，与单独登记的Q4_K_M GGUF是不同格式候选。2026-10-13在synthetic-zh-xiaok-routing-holdout-v1的40条合成中文题上答对21题（52.5%），macro-F1 0.5060，多分类Brier 0.6314，5-bin ECE 0.1029；敏感升级仅1/8，动作前确认5/8。CPU双线程推理中位/p95为0.4490/0.4672秒，加载2.696秒，峰值工作集1,212.0 MiB。因安全关键类别错误较多，不接入生产路由、身份判断、授权或ToolBroker权限路径。题集由单人编写且不是真实通知，需独立盲审与真实端到端验收。",
+      "localDirectory": "llm/jevos-v4-0.9b-openvino-int8-decision-eval/95575aec49b6e90a30c94fef3d59b315dd060780",
+      "requiredForP0": false,
+      "evaluation": {
+        "suite": "synthetic-zh-xiaok-routing-holdout-v1",
+        "samples": 40,
+        "correct": 21,
+        "accuracy": 0.525,
+        "macroF1": 0.506,
+        "multiclassBrierMeanSumSquares": 0.6314,
+        "topProbabilityEceFiveBins": 0.1029,
+        "sensitiveEscalationCorrect": 1,
+        "sensitiveEscalationTotal": 8,
+        "confirmEffectCorrect": 5,
+        "confirmEffectTotal": 8,
+        "latencyMedianSeconds": 0.449,
+        "latencyP95Seconds": 0.4672,
+        "loadReadySeconds": 2.696,
+        "cpuThreads": 2,
+        "availableRamStartMiB": 11898,
+        "availableRamEndMiB": 10730,
+        "peakWorkingSetMiB": 1212.0,
+        "gpuUsed": false,
+        "perCaseOutputsSaved": false,
+        "evaluator": "tools/evaluate_jevos_v4_candidate.py",
+        "evaluatorSha256": "a9ba4eed0d5f31a48e46210b5726a22ef64a8dfcc64f26f8131b8fc576cf68bb",
+        "suiteSourceSha256": "a24e3835e9d97d4f12dc8deb66b522b875f184169b433b4f8ff40c5d30bdf103"
+      },
+      "runtime": {
+        "source": "https://github.com/feder-cr/jev/releases/tag/jevos-v4",
+        "releaseCommit": "f764b70be2fc7d1ac9ef0cfddc5ccc0a41db7965",
+        "archive": "jev-windows-x64.zip",
+        "archiveSizeBytes": 19864863,
+        "archiveSha256": "e70f03b008d10a35adbe8313f32238d233182c8eff5df75d9a5b3212834b271d",
+        "releaseChecksumManifestSha256": "0e973f260345e1b2c9145927f23a7c2c295e07642db09de0ce363c2c8fdef3ef",
+        "license": "MIT with bundled third-party license files",
+        "localDirectory": ".tools/runtimes/feder-cr-jev/jevos-v4",
+        "status": "downloaded_and_verified",
+        "archiveLocalSha256": "e70f03b008d10a35adbe8313f32238d233182c8eff5df75d9a5b3212834b271d",
+        "executableSha256": "36fa11f15b0effa8f392b9ee2ad30e126945dc0ec9357573dd2c8cabc9aaf751",
+        "signatureVerified": true,
+        "thirdPartyNoticesPath": ".tools/runtimes/feder-cr-jev/jevos-v4/jev/THIRD_PARTY_NOTICES.md"
+      }
     }
   ]
 }
