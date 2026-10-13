@@ -338,8 +338,11 @@ Require(true, "桌宠姿态过渡离屏WPF检查通过。");
 foreach (var failure in XiaoK.DesktopExperience.Checks.Pet3DRendererProbe.Run())
     Require(false, failure);
 Require(true, "三维桌宠四态渲染、透明边缘、不激活前台与高频切换检查通过。");
+foreach (var failure in XiaoK.DesktopExperience.Checks.PetWindowDragProbe.Run(repositoryDirectory!.FullName))
+    Require(false, failure);
+Require(true, "桌宠移动手势阈值、轻点展开和预览事件接线检查通过。");
 
-Console.WriteLine($"桌宠三维渲染/姿态切换/缩放保存/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复：{checks} 项通过。");
+Console.WriteLine($"桌宠三维渲染/姿态切换/移动与缩放/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {

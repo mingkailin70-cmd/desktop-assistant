@@ -259,9 +259,12 @@
             </ScrollViewer>
 
             <Border x:Name="PetView" Visibility="Collapsed" Background="Transparent" CornerRadius="30"
-                    BorderBrush="Transparent" BorderThickness="0" MouseLeftButtonDown="PetView_MouseLeftButtonDown"
+                    BorderBrush="Transparent" BorderThickness="0" Cursor="SizeAll"
+                    PreviewMouseLeftButtonDown="PetView_PreviewMouseLeftButtonDown"
+                    PreviewMouseMove="PetView_PreviewMouseMove"
+                    PreviewMouseLeftButtonUp="PetView_PreviewMouseLeftButtonUp"
                     PreviewMouseWheel="PetView_PreviewMouseWheel"
-                    ToolTip="单击展开任务面板；拖动可调整位置；右键打开菜单">
+                    ToolTip="按住拖动可移动；单击展开任务面板；右键打开菜单">
                 <Border.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="展开任务面板" Click="ShowPanel_Click"/>
@@ -391,7 +394,7 @@
                             </Border>
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="小K" FontSize="13" FontWeight="SemiBold" Foreground="#304236"/>
-                                <TextBlock Text="轻点聊天 · 右键调大小" FontSize="9" Foreground="#718571" Margin="0,1,0,0"/>
+                                <TextBlock Text="拖动移动 · 单击展开" FontSize="9" Foreground="#718571" Margin="0,1,0,0"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>

@@ -50,6 +50,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeStartPercent;
     private double _petResizeHorizontal;
     private double _petResizeVertical;
+    private readonly PetWindowDragGesture _petWindowDragGesture = new();
 
     public bool HasPendingActionConfirmationForTask(Guid taskId) =>
         _approvalInbox.HasPendingActionConfirmationForTask(taskId);
@@ -1019,20 +1020,43 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
     }
 
-    private void PetView_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void PetView_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed
-            && e.OriginalSource is FrameworkElement element
-            && element.Name is not ("PetStatusText" or "PetStatusDot"))
+        if (_expanded || e.ChangedButton != System.Windows.Input.MouseButton.Left
+            || e.ButtonState != System.Windows.Input.MouseButtonState.Pressed
+            || PetResizeHandle.IsMouseOver)
         {
-            try
-            {
-                DragMove();
-                FitWindowToMonitorWorkArea();
-                SaveWindowPosition();
-            }
-            catch (InvalidOperationException) { }
+            _petWindowDragGesture.Reset();
+            return;
         }
+
+        var point = e.GetPosition(this);
+        _petWindowDragGesture.PointerDown(point.X, point.Y);
+    }
+
+    private void PetView_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_expanded) return;
+
+        var point = e.GetPosition(this);
+        if (!_petWindowDragGesture.TryStartDrag(point.X, point.Y,
+                e.LeftButton == System.Windows.Input.MouseButtonState.Pressed,
+                SystemParameters.MinimumHorizontalDragDistance,
+                SystemParameters.MinimumVerticalDragDistance)) return;
+
+        e.Handled = true;
+        try { DragMove(); }
+        catch (InvalidOperationException) { }
+        finally
+        {
+            FitWindowToMonitorWorkArea();
+            SaveWindowPosition();
+        }
+    }
+
+    private void PetView_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (_petWindowDragGesture.PointerUp()) e.Handled = true;
     }
 
     private void PetView_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
@@ -1204,7 +1228,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         PetStatusText.Text = compactStatus;
         StatusText.ToolTip = status;
         PetStatusText.ToolTip = status;
-        PetView.ToolTip = $"{status} · 单击展开，右键调大小，Ctrl+滚轮缩放";
+        PetView.ToolTip = $"{status} · 拖动移动，单击展开，右键调大小，Ctrl+滚轮缩放";
         UpdatePetPose(status);
         var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)
             || status.Contains("未授予", StringComparison.Ordinal) || status.Contains("未能启动", StringComparison.Ordinal)
