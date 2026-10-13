@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="小K设置" Width="560" Height="740" MinWidth="520" MinHeight="650"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
-        Background="#F7F8FC" ShowInTaskbar="False" Loaded="SettingsWindow_Loaded" Closed="SettingsWindow_Closed">
+        Background="#F7F8FC" ShowInTaskbar="False" Loaded="SettingsWindow_Loaded"
+        Closing="SettingsWindow_Closing" Closed="SettingsWindow_Closed">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -17,7 +18,7 @@
                        Margin="0,5,0,0" TextWrapping="Wrap" Foreground="#68728A"/>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="SettingsFormScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <TextBlock Text="本地存储" FontSize="15" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,8"/>
                 <TextBlock Text="用户数据目录"/>
@@ -240,8 +241,8 @@
         <DockPanel Grid.Row="2" Margin="0,14,0,0">
             <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#A33A32" TextWrapping="Wrap"/>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="取消" IsCancel="True" MinWidth="80" Margin="0,0,8,0"/>
-                <Button Content="保存" IsDefault="True" MinWidth="90" Click="Save_Click"/>
+                <Button x:Name="CancelButton" Content="取消" IsCancel="True" MinWidth="80" Margin="0,0,8,0"/>
+                <Button x:Name="SaveButton" Content="保存" IsDefault="True" MinWidth="90" Click="Save_Click"/>
             </StackPanel>
         </DockPanel>
     </Grid>

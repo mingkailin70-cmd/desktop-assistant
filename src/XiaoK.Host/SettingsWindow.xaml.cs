@@ -1,6 +1,7 @@
-using System.IO;
+using System.ComponentModel;
 using System.Security;
 using System.Diagnostics;
+using System.IO;
 using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows;
@@ -34,6 +35,8 @@ public partial class SettingsWindow : Window
     private bool _startupWasEnabled;
     private bool _startupStateLoaded;
     private bool _contactStylesLoaded;
+    private bool _saveInProgress;
+    private bool _allowCloseAfterSave;
     private readonly ObservableCollection<ContactReplyStylePreference> _contactReplyStyles;
     private readonly ObservableCollection<AppSetting> _customApplications;
     private TimeSpan _previousCpuTime;
@@ -789,6 +792,7 @@ public partial class SettingsWindow : Window
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
+        if (_saveInProgress) return;
         if (!_startupStateLoaded)
         {
             StatusText.Text = "Windows 登录启动状态尚未确认；请等待状态读取完成后再保存。";
@@ -797,9 +801,11 @@ public partial class SettingsWindow : Window
 
         var startupRequested = StartupCheck.IsEnabled && StartupCheck.IsChecked == true;
         var startupChanged = StartupCheck.IsEnabled && startupRequested != _startupWasEnabled;
+        _saveInProgress = true;
 
         try
         {
+            SetSaveInProgress(true);
             var updated = _original with
             {
                 DataRoot = ValidateLocalDirectory(DataRootBox.Text, "用户数据目录"),
@@ -856,11 +862,10 @@ public partial class SettingsWindow : Window
                 {
                     var rollbackFailed = false;
                     try { await _replaceContactReplyStyles(_loadedContactReplyStyles, CancellationToken.None); }
-                    catch (Exception rollbackError)
+                    catch
                     {
                         rollbackFailed = true;
                         ContactStyleStatusText.Text = "设置文件保存失败，且联系人偏好回滚未完成；请勿继续编辑，先检查本机数据库备份。";
-                        StatusText.Text = rollbackError.Message;
                     }
                     if (!rollbackFailed)
                         ContactStyleStatusText.Text = "设置文件保存失败；联系人偏好已回滚到打开设置页时的内容。";
@@ -870,10 +875,10 @@ public partial class SettingsWindow : Window
 
             if (_contactStylesLoaded) _loadedContactReplyStyles = _contactReplyStyles.ToArray();
             if (startupChanged) _startupWasEnabled = startupRequested;
+            _allowCloseAfterSave = true;
             DialogResult = true;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
-            or InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
         {
             if (startupChanged)
             {
@@ -882,14 +887,37 @@ public partial class SettingsWindow : Window
                     var rollback = await LoginStartupRegistration.SetEnabledAsync(_startupWasEnabled);
                     StartupStatusText.Text = rollback.Status;
                 }
-                catch (Exception rollbackError)
+                catch
                 {
                     StartupStatusText.Text = "保存失败，且登录启动状态回滚未完成；请手动核对登录启动设置。";
-                    StatusText.Text = rollbackError.Message;
                 }
             }
-            StatusText.Text = ex.Message;
+            StatusText.Text = ex is ArgumentException or IOException or UnauthorizedAccessException or SecurityException
+                or InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.COMException
+                ? ex.Message
+                : "设置保存未能完成；请核对本机设置和数据库状态后重试。";
         }
+        finally
+        {
+            _saveInProgress = false;
+            _allowCloseAfterSave = false;
+            SetSaveInProgress(false);
+        }
+    }
+
+    private void SettingsWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (!_saveInProgress || _allowCloseAfterSave) return;
+        e.Cancel = true;
+        StatusText.Text = "设置正在保存；请等待保存完成后再关闭窗口。";
+    }
+
+    private void SetSaveInProgress(bool isSaving)
+    {
+        SettingsFormScrollViewer.IsEnabled = !isSaving;
+        SaveButton.IsEnabled = !isSaving;
+        CancelButton.IsEnabled = !isSaving;
+        if (isSaving) StatusText.Text = "正在保存设置…";
     }
 
     private static List<string> ParseAppIds(string value, string application)
