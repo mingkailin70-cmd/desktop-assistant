@@ -190,6 +190,8 @@ Require(TaskCategoryCatalog.TryGetLabel("app-ui-snapshot", out var uiSnapshotLab
     && uiSnapshotLabel == "只读界面检查", "任务中心没有显示只读界面检查类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-wait-enabled", out var uiWaitLabel)
     && uiWaitLabel == "等待界面控件状态", "任务中心没有显示UIA状态等待类别。");
+Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text", out var uiSetTextLabel)
+    && uiSetTextLabel == "应用界面文本填写", "任务中心没有显示应用界面文本填写类别。");
 Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.ExplicitUserInteraction)?.ErrorCode == "UNKNOWN_TOOL",
     "未知工具被放行。");
 Require(ToolInteractionPolicy.Check("file.search.v1", (ToolExecutionAccess)999)?.ErrorCode == "INVALID_EXECUTION_CONTEXT",

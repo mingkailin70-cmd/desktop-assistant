@@ -18,6 +18,10 @@ public static class TaskHistoryDisplayPolicy
     public static string TargetScope(string taskKind) => taskKind switch
     {
         "app" => "固定允许列表中的应用",
+        "app-status" => "允许列表应用的进程/可见窗口状态（不含标题或正文）",
+        "app-ui-snapshot" => "允许列表应用中唯一可见窗口的控件结构（只读）",
+        "app-ui-wait-enabled" => "允许列表应用中指定的唯一可见控件（只等待状态，不点击）",
+        "app-ui-set-text" => "允许列表应用中的唯一普通文本框（逐次确认完整文本）",
         "window" => "已打开且唯一匹配的允许列表窗口",
         "file" => "用户配置的本机搜索根",
         "file-copy" => "配置搜索根中的源文件与小K导出目录",
@@ -42,6 +46,10 @@ public static class TaskHistoryDisplayPolicy
     public static string ExecutionMode(string taskKind) => taskKind switch
     {
         "app" or "window" => "前台交互：可能打开或切换窗口并改变焦点",
+        "app-status" => "后台只读进程/窗口信息；不读标题或控件值，不改变前台",
+        "app-ui-snapshot" => "后台只读界面结构；不点击、不输入、不改变前台窗口",
+        "app-ui-wait-enabled" => "后台等待控件状态；不点击、不输入、不改变前台窗口",
+        "app-ui-set-text" => "后台写入唯一普通文本框；逐次确认完整文本，不模拟按键或改变前台",
         "file-delete" => "后台执行；任务中心逐项确认，文件目标变化时停止",
         "send" => "需要检查预览；当前未接入真实发送适配器",
         "code" => "后台隔离执行；补丁写回或命令需人工审批",
@@ -56,9 +64,18 @@ public static class TaskHistoryDisplayPolicy
         "APP_LAUNCH_FAILED" => "未能启动允许列表中的目标应用；小K没有确认应用已打开。请检查本地程序是否存在及设置路径是否有效后重试。",
         "APP_LAUNCH_TARGET_AMBIGUOUS" or "WINDOW_TARGET_AMBIGUOUS" =>
             "发现多个匹配窗口；小K没有启动新窗口或切换焦点。请手动选择目标窗口后再提交。",
+        "APP_WINDOW_AMBIGUOUS" =>
+            "目标应用有多个可见窗口；小K没有读取或修改界面。请手动确认唯一窗口后再提交。",
+        "APP_WINDOW_UNAVAILABLE" or "UIA_TARGET_CHANGED" =>
+            "目标窗口在检查过程中已关闭或变化；小K停止读取或写入，没有切换焦点。请确认应用状态后再提交。",
         "WINDOW_ACTIVATION_FAILED" => "无法安全核验目标窗口；请手动确认当前前台和目标应用，再决定是否重新提交。",
         "WINDOW_ACTIVATION_DENIED" => "Windows 未允许或未确认目标窗口切换；请手动核对前台窗口后再决定下一步。",
         "APP_STATUS_UNAVAILABLE" => "无法安全读取允许列表应用的进程或窗口状态；没有读取标题或内容，也没有改变前台。稍后可重试或手动核对应用。",
+        "UIA_AUTOMATION_ID_AMBIGUOUS" => "同一窗口中有多个相同控件标识；小K没有读取或写入。请指定唯一控件后再提交。",
+        "UIA_CONDITION_NOT_MET" => "等待期间没有找到唯一且已启用的目标控件；没有点击或填写。请检查应用界面后再提交。",
+        "UIA_TARGET_IN_USE" => "目标应用正处于前台；为避免干扰当前编辑，小K没有写入文本。稍后再提交。",
+        "UIA_FOREGROUND_CHANGED_BEFORE_SET" => "写入前检测到前台窗口变化；小K没有写入文本。请确认目标应用状态后再提交。",
+        "UIA_PROTECTED_APP_BLOCKED" => "该应用类型不允许使用通用后台填写；小K没有访问或修改界面。",
         "FILE_RECYCLE_NOT_CONFIRMED" => "Windows 未确认回收站操作，且原文件仍在原位置。先检查回收站和原文件状态，再决定是否重新提交。",
         "ARCHIVE_OUTPUT_UNVERIFIABLE" => "压缩文件未能通过独立核验，没有发布到目标目录。请检查空间和目录权限后再重新提交。",
         "FOREGROUND_REQUIRED" => "该操作需要桌面前台；小K没有执行，也没有排队。你可以在方便时切到前台再重新提交。",

@@ -4060,8 +4060,13 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(TaskHistoryDisplayPolicy.TargetScope("file-move").Contains("同卷目标目录", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("file-delete").Contains("回收站", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("file-summary").Contains("本地模型摘要", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("app-status").Contains("不含标题或正文", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-snapshot").Contains("只读", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-wait-enabled").Contains("不点击", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-text").Contains("逐次确认完整文本", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file-delete").Contains("任务中心逐项确认", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-text").Contains("不模拟按键或改变前台", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file").Contains("不改变前台窗口", StringComparison.Ordinal),
         "任务中心没有显示准确的固定目标范围或执行模式。");
@@ -4077,10 +4082,18 @@ static void CheckTaskHistoryDisplayPolicy()
         ("APP_LAUNCH_PRECHECK_FAILED", "没有发出启动请求"),
         ("APP_LAUNCH_FAILED", "检查本地程序是否存在"),
         ("APP_LAUNCH_TARGET_AMBIGUOUS", "没有启动新窗口或切换焦点"),
+        ("APP_WINDOW_AMBIGUOUS", "多个可见窗口"),
+        ("APP_WINDOW_UNAVAILABLE", "检查过程中已关闭或变化"),
         ("WINDOW_TARGET_AMBIGUOUS", "没有启动新窗口或切换焦点"),
         ("WINDOW_ACTIVATION_FAILED", "手动确认当前前台"),
         ("WINDOW_ACTIVATION_DENIED", "Windows 未允许或未确认"),
-        ("APP_STATUS_UNAVAILABLE", "没有读取标题或内容")
+        ("APP_STATUS_UNAVAILABLE", "没有读取标题或内容"),
+        ("UIA_TARGET_CHANGED", "检查过程中已关闭或变化"),
+        ("UIA_AUTOMATION_ID_AMBIGUOUS", "多个相同控件标识"),
+        ("UIA_CONDITION_NOT_MET", "没有点击或填写"),
+        ("UIA_TARGET_IN_USE", "没有写入文本"),
+        ("UIA_FOREGROUND_CHANGED_BEFORE_SET", "没有写入文本"),
+        ("UIA_PROTECTED_APP_BLOCKED", "没有访问或修改界面")
     };
     Require(applicationFailureGuidance.All(item =>
         {
