@@ -30,6 +30,8 @@ jobs:
           dotnet-version: 10.0.401
       - name: Build
         run: dotnet build XiaoK.sln --configuration Release
+      - name: App launch deadline and cancellation checks
+        run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-app-launch
       - name: Notification sample bounds checks
         run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-notification-sample-bounds
       - name: Code credential boundary checks
