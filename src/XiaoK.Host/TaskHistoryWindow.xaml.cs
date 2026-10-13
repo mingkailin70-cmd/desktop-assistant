@@ -51,8 +51,10 @@ public partial class TaskHistoryWindow : Window
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
-            await RefreshAsync();
-            RefreshStatus.Text = "取消结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试。";
+            var refreshed = await RefreshAsync();
+            RefreshStatus.Text = refreshed
+                ? "取消结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试。"
+                : "取消结果待核对；任务状态刷新失败，列表可能显示旧状态；请人工核对目标后再操作；小K不会自动重试。";
         }
         finally
         {
@@ -76,8 +78,10 @@ public partial class TaskHistoryWindow : Window
         }
         catch (Exception exception) when (IsNonFatal(exception))
         {
-            await RefreshAsync();
-            RefreshStatus.Text = "待办处理结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试或重放。";
+            var refreshed = await RefreshAsync();
+            RefreshStatus.Text = refreshed
+                ? "待办处理结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试或重放。"
+                : "待办处理结果待核对；任务状态刷新失败，列表可能显示旧状态；请人工核对目标后再操作；小K不会自动重试或重放。";
         }
     }
 
@@ -94,16 +98,16 @@ public partial class TaskHistoryWindow : Window
         _ = RefreshAsync();
     }
 
-    private async Task RefreshAsync()
+    private async Task<bool> RefreshAsync()
     {
-        if (_refreshInProgress || _lifetime.IsCancellationRequested) return;
+        if (_refreshInProgress || _lifetime.IsCancellationRequested) return false;
         _refreshInProgress = true;
         try
         {
             var history = await _loadHistory(_lifetime.Token);
-            if (_lifetime.IsCancellationRequested) return;
+            if (_lifetime.IsCancellationRequested) return false;
             var approvals = _loadApprovals();
-            if (_lifetime.IsCancellationRequested) return;
+            if (_lifetime.IsCancellationRequested) return false;
             ApprovalTab.Header = TaskHistoryDisplayPolicy.ApprovalTabHeader(approvals.Count);
 
             var currentHistory = HistoryList.ItemsSource as IEnumerable<TaskHistoryEntry>;
@@ -126,11 +130,13 @@ public partial class TaskHistoryWindow : Window
                 EmptyApprovalsText.Visibility = approvals.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             RefreshStatus.Text = $"已更新 {DateTime.Now:HH:mm:ss} · {history.Count} 项";
+            return true;
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { return false; }
         catch (Exception exception) when (IsNonFatal(exception))
         {
-            RefreshStatus.Text = "读取任务状态失败；上次显示的数据仍保留。";
+            RefreshStatus.Text = "读取任务状态失败；当前页面可能显示旧状态，请先核对后再操作。";
+            return false;
         }
         finally { _refreshInProgress = false; }
     }

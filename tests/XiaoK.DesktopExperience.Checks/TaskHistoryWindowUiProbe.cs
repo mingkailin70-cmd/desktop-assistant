@@ -42,13 +42,17 @@ internal static class TaskHistoryWindowUiProbe
             "合成当前步骤", "合成目标范围", "合成后台模式", "合成下一步");
         var currentSample = sample;
         var failCancellation = false;
+        var failHistoryLoad = false;
         ApprovalInboxEntry? activeApproval = null;
         var failApprovalResolution = false;
         var cancelCalls = 0;
         var approvalCalls = 0;
         Guid? cancelledTaskId = null;
-        Task<IReadOnlyList<TaskHistoryEntry>> LoadHistory(CancellationToken _) =>
-            Task.FromResult<IReadOnlyList<TaskHistoryEntry>>([currentSample]);
+        Task<IReadOnlyList<TaskHistoryEntry>> LoadHistory(CancellationToken _)
+        {
+            if (failHistoryLoad) throw new InvalidOperationException("LOAD_PRIVATE_PATH");
+            return Task.FromResult<IReadOnlyList<TaskHistoryEntry>>([currentSample]);
+        }
         IReadOnlyList<ApprovalInboxEntry> LoadApprovals() => activeApproval is null ? [] : [activeApproval];
         Task<bool> CancelTask(Guid taskId)
         {
@@ -155,13 +159,18 @@ internal static class TaskHistoryWindowUiProbe
                 item = historyList.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
                 cancelButton = item is null ? null : Descendants(item).OfType<Button>()
                     .FirstOrDefault(button => string.Equals(button.Content as string, "取消", StringComparison.Ordinal));
+                failHistoryLoad = true;
                 cancelButton?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cancelButton));
                 var refreshStatus = window.FindName("RefreshStatus") as TextBlock;
                 if (cancelCalls != 2 || cancelButton is null || refreshStatus is null
                     || !refreshStatus.Text.Contains("取消结果待核对", StringComparison.Ordinal)
-                    || refreshStatus.Text.Contains("CANCEL_PRIVATE_PATH", StringComparison.Ordinal))
-                    failures.Add("取消回调异常没有被限制在任务中心内，或异常细节泄露到界面。");
+                    || !refreshStatus.Text.Contains("刷新失败", StringComparison.Ordinal)
+                    || refreshStatus.Text.Contains("CANCEL_PRIVATE_PATH", StringComparison.Ordinal)
+                    || refreshStatus.Text.Contains("LOAD_PRIVATE_PATH", StringComparison.Ordinal)
+                    || refreshStatus.Text.Contains("状态已刷新", StringComparison.Ordinal))
+                    failures.Add("取消回调或状态刷新异常没有被诚实限制在任务中心内，或异常细节泄露到界面。");
 
+                failHistoryLoad = false;
                 activeApproval = new ApprovalInboxEntry(Guid.NewGuid(), ApprovalInboxKind.Confirmation,
                     "合成审批", "合成审批详情", DateTimeOffset.UtcNow, false, sample.TaskId);
                 failApprovalResolution = true;
@@ -177,6 +186,7 @@ internal static class TaskHistoryWindowUiProbe
                 approveButton?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
                 if (approvalCalls != 1 || approveButton is null || refreshStatus is null
                     || !refreshStatus.Text.Contains("待办处理结果待核对", StringComparison.Ordinal)
+                    || !refreshStatus.Text.Contains("状态已刷新", StringComparison.Ordinal)
                     || refreshStatus.Text.Contains("APPROVAL_PRIVATE_PATH", StringComparison.Ordinal))
                     failures.Add("审批回调异常没有被限制在任务中心内，或异常细节泄露到界面。");
 
