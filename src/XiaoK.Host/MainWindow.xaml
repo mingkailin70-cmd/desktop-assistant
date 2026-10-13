@@ -260,6 +260,7 @@
 
             <Border x:Name="PetView" Visibility="Collapsed" Background="Transparent" CornerRadius="30"
                     BorderBrush="Transparent" BorderThickness="0" Cursor="SizeAll"
+                    PreviewMouseLeftButtonDown="PetView_PreviewMouseLeftButtonDown"
                     PreviewMouseWheel="PetView_PreviewMouseWheel"
                     ToolTip="按住小K拖动可自由移动；松开后保存位置；单击展开任务面板；右键打开菜单">
                 <Border.ContextMenu>
@@ -397,22 +398,6 @@
                     </Border>
                 </Grid>
                 </Viewbox>
-                <Thumb x:Name="PetDragSurface" Background="Transparent" Focusable="False" Cursor="SizeAll"
-                       ContextMenu="{Binding ContextMenu, ElementName=PetView}"
-                       PreviewMouseLeftButtonDown="PetDragSurface_PreviewMouseLeftButtonDown"
-                       PreviewMouseLeftButtonUp="PetDragSurface_PreviewMouseLeftButtonUp"
-                       DragStarted="PetDragSurface_DragStarted"
-                       DragDelta="PetDragSurface_DragDelta"
-                       DragCompleted="PetDragSurface_DragCompleted"
-                       ToolTip="按住小K拖动可自由移动；单击展开任务面板"
-                       AutomationProperties.Name="小K桌宠，可拖动移动；单击展开任务面板"
-                       AutomationProperties.HelpText="按住角色并移动鼠标可移动桌宠，松开后保存位置">
-                    <Thumb.Template>
-                        <ControlTemplate TargetType="Thumb">
-                            <Border Background="{TemplateBinding Background}"/>
-                        </ControlTemplate>
-                    </Thumb.Template>
-                </Thumb>
                 <Thumb x:Name="PetResizeHandle" Width="22" Height="22" HorizontalAlignment="Right"
                        VerticalAlignment="Bottom" Margin="0,0,3,3" Cursor="SizeNWSE" Focusable="False"
                        ToolTip="拖动调整桌宠大小" AutomationProperties.Name="拖动调整桌宠大小"
