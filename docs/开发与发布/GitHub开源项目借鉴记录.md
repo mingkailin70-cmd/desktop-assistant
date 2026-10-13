@@ -44,15 +44,15 @@
 - **WeChatAuto：需要恢复客户端并走聊天搜索。** 项目按托盘唤起微信，再以`Ctrl+F`查联系人并发送；这会占用前台焦点，不适用于用户同时工作的后台发送。[GitHub项目](https://github.com/strong68/WeChatAuto)
 - **Persona Morph：具备窗口消息投递，但会短暂置前且读取本地库。** 作者README明确说明后台投递会“伪激活”微信，发消息时可能短暂置前约1秒，切会话约3–7秒，失败重试最长约15秒；项目还读取本地消息数据库和相关密钥。即使减少鼠标动作，也不能保证用户键入不被打断，并越过小K当前不读客户端数据库的边界。[GitHub项目及作者的实测/风险说明](https://github.com/Eifptaur/Eif-MAPT-PersonaMorph)
 - **wechatauto-replica：不满足隐私与焦点约束。** 项目读取SQLCipher加密的微信联系人/消息库，并以UIA与OCR混合驱动发送；其说明指出发送仍需要聚焦输入框和回车。项目也标注个人学习用途，不复用代码或数据库适配。[GitHub项目](https://github.com/jiatj/wechatapi)
-- **QQ官方机器人API：不是个人QQ代发通道。** 腾讯官方C2C接口目标为机器人事件给出的用户`openid`，请求成功回执里的ID也是机器人消息ID；官方发送文档注明主动推送自2025-04-21起不再提供，被动回复需关联先前机器人事件。它不能以用户当前个人QQ身份向好友K发送，也不适用于小K任意时刻代发。[腾讯官方Node SDK](https://github.com/tencent-connect/qqbot-nodejs)、[官方消息发送说明与当前限制](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
+- **QQ官方机器人API：有主动单聊能力，但不是个人QQ代发通道。** 现行腾讯文档支持QQ机器人C2C主动消息和符合条件的互动召回，发送目标为Bot专属的`user_openid`；被动回复可关联机器人事件。接口即使允许机器人主动联系用户，身份仍是机器人而不是用户当前个人QQ账号，不能满足给既有好友K发送的要求。[QQ Bot消息收发概述](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)、[发送单聊消息接口](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html)、[Bot专属OpenID说明](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html)
 - **R0结论：当前未找到同时满足个人账号、稳定K/L身份、不读数据库、不抢焦点和可核验回执的微信/QQ发送路径。** 不接入上述客户端操控或注入方案，不把QQ机器人身份冒充成个人QQ。继续保留显式消息预览/逐条确认；若没有满足约束的API，具体发送能力按不可用反馈用户，不伪称后台完成。
 - 本次只检查公开文档和仓库说明，未克隆、安装、启动这些项目，未打开或操作微信/QQ窗口，也没有发送消息。
 
-## 2026-10-13 腾讯QQ机器人发送能力时效复核
+## 2026-10-13 腾讯QQ Bot官方接口复核与旧结论更正
 
-复核腾讯维护的[QQ Bot官方消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)：页面提示主动推送能力自2025-04-21起不再提供；C2C接口以机器人事件取得的用户`openid`作为目标，并用`event_id`或`msg_id`关联被动回复，成功响应给出机器人消息ID及时间。故即使采用腾讯官方Node SDK，也仍是独立机器人身份和事件触发回复，不是用户个人QQ给既有好友K的发送能力。既有“主动/被动限制待核实”现由本次官方页面复核替代；此前记录的频道/主体开通条件不作为当前判断依据。
+前一版复核曾依据当时的官方GitHub文档记为“主动推送自2025-04-21起不再提供”。2026-10-13重新读取腾讯当前[消息收发概述](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)、[发送单聊消息接口](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html)、[API调用与唯一身份机制](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html)及[变更记录](https://bot.q.qq.com/wiki/develop/api-v2/changelog.html)，确认当前文档支持QQ机器人C2C主动消息，并列明用户主动与机器人对话后的30天互动召回；单聊发送使用`user_openid`，不同Bot对应不同用户OpenID。被动回复仍可使用事件的`event_id`或消息的`msg_id`。因此旧的“主动消息不再提供”已更正。
 
-本次只读取公开官方文档，没有创建机器人、申请凭证、接收或发送消息；此路线继续不接入小K。微信个人号没有找到可验证的受支持后台发送路径；企业微信API属于不同产品身份，不直接满足个人微信好友L的要求。
+这项更新仅说明QQ机器人的能力，不是个人账号API：发送方仍是机器人，接收目标为其Bot专属OpenID，不能以用户个人QQ身份向用户既有好友K发送。当前未创建机器人、申请凭证、接收或发送消息，也未接入该路线；R0个人账号发送闸门不变。微信个人号仍没有找到可验证的受支持后台发送路径；企业微信属于不同产品身份，不直接满足个人微信好友L的要求。
 
 ## 2026-10-12 sherpa-onnx KWS许可复核与候选锁定
 
