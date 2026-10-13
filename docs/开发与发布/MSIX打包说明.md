@@ -1,3 +1,11 @@
+## v0.1.134.0 桌宠自由移动输入轮询（2026-10-14）
+
+针对桌宠在不激活前台时不能稳定拖动的问题，移除短时`WH_MOUSE_LL`实现，改为宠物本体按下后启动16ms `DispatcherTimer`轮询光标位置与左键状态。该轮询只在按住期间运行；不使用全局钩子、`SetCapture`或模拟输入。拖动阈值、跨屏坐标、短按展开、右下角缩放、工作区边缘约束及位置持久化保留。构建0警告/错误，桌面体验109项和完整安全检查134项通过；真实鼠标拖动仍待实机验收。
+
+签名MSIX `artifacts\msix-validation\b2c9600fb003416ebaae7e914477f554\XiaoK-signed-validation.msix`为155,801,114字节，SHA-256 `2113EB813A21EAC2F0CB58E3A9F1E90F03859ECD06C75618AFD406ACD8EE2B82`；SignTool验签0警告、0错误。证书`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信，本次未改信任。安装器请求旧Host PID 12040正常退出，当前账户安装`MingKaiLin.XiaoK_0.1.134.0_neutral__g0ndt6g65c8pe`、状态`Ok`；启动后Host PID 59896响应正常、窗口可见且非前台。安装版/发布版Host DLL SHA-256均为`A5573277782F0E90075E7C3C1DF1453C321C3D55CF9EAC91A43794B9718439DB`，Windows适配器DLL SHA-256均为`9A4F4C5528610E18B1364CA4D7BF3479F0B71FA7576128AA51A556B5197741B6`。微信/QQ监听、唤醒词关闭且发布者列表为空，`llama-server`为0。
+
+立即回滚到签名`0.1.133.0`的包仍保留于`artifacts\msix-validation\899f512af9b34173a19967db000c0af1\XiaoK-signed-validation.msix`，大小155,802,860字节、SHA-256 `E1DAF32F9BA140ECE0A323084E4A89FD853A84F808B6DCCAB981DA4564D67302`。安装和窗口状态核验不证明真实鼠标拖动、轻点展开、缩放、多显示器或重启位置恢复通过。
+
 ## v0.1.133.0 目录枚举取消修复安装（2026-10-14）
 
 前一阶段在64KiB目录批次读取前后以及逐条解析期间响应取消，覆盖文件名搜索、内容搜索、目录归档和文件分类；512项合成目录在第64项主动取消并验证立即停止。固定SDK `10.0.401` Release全解及完整安全套件134项通过、0项跳过。使用锁定还原生成自包含`win-x64`发布输出，包含Microsoft.NETCore.App和Microsoft.WindowsDesktop.App `10.0.12`。

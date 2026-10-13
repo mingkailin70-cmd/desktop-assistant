@@ -9,7 +9,7 @@ internal static class PetWindowDragProbe
     {
         var failures = VerifyGestureState();
         VerifyCoordinateMapping(failures);
-        VerifyGlobalMouseMessageDecoding(failures);
+        VerifyMouseButtonPolling(failures);
         VerifyWindowInputWiring(repositoryRoot, failures);
         return failures;
     }
@@ -84,28 +84,22 @@ internal static class PetWindowDragProbe
             failures.Add("极端坐标溢出时仍允许移动桌宠窗口。");
     }
 
-    private static void VerifyGlobalMouseMessageDecoding(List<string> failures)
+    private static void VerifyMouseButtonPolling(List<string> failures)
     {
-        if (!PetGlobalMouseTracker.TryDecodeMouseMessage(0x0200, -1920, 175, out var move)
-            || move != new PetGlobalMouseEvent(PetGlobalMouseEventKind.PointerMoved, -1920, 175))
-            failures.Add("桌宠全局鼠标跟踪没有保留跨屏物理坐标。");
-
-        if (!PetGlobalMouseTracker.TryDecodeMouseMessage(0x0202, 2560, 1080, out var release)
-            || release != new PetGlobalMouseEvent(PetGlobalMouseEventKind.LeftButtonReleased, 2560, 1080))
-            failures.Add("桌宠全局鼠标跟踪没有识别左键释放坐标。");
-
-        if (PetGlobalMouseTracker.TryDecodeMouseMessage(0x020A, 100, 100, out _))
-            failures.Add("桌宠拖动钩子错误地把滚轮消息当作移动或释放。");
+        if (!PetWindowDragGesture.IsMouseButtonPressed(unchecked((short)0x8000))
+            || !PetWindowDragGesture.IsMouseButtonPressed(-1))
+            failures.Add("桌宠指针轮询没有识别鼠标左键的高位按下状态。");
+        if (PetWindowDragGesture.IsMouseButtonPressed(0)
+            || PetWindowDragGesture.IsMouseButtonPressed(1))
+            failures.Add("桌宠指针轮询把鼠标左键的低位历史标记误判为仍按下。");
     }
 
     private static void VerifyWindowInputWiring(string repositoryRoot, List<string> failures)
     {
         var xamlPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml");
         var codePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs");
-        var trackerPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "PetGlobalMouseTracker.cs");
         var xaml = File.ReadAllText(xamlPath);
         var code = File.ReadAllText(codePath);
-        var tracker = File.ReadAllText(trackerPath);
         if (!xaml.Contains("PreviewMouseLeftButtonDown=\"PetView_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
             || xaml.Contains("PreviewMouseMove=\"PetView_PreviewMouseMove\"", StringComparison.Ordinal)
             || xaml.Contains("PreviewMouseLeftButtonUp=\"PetView_PreviewMouseLeftButtonUp\"", StringComparison.Ordinal)
@@ -116,33 +110,27 @@ internal static class PetWindowDragProbe
         var dragEnd = code.IndexOf("private void PetView_PreviewMouseWheel", StringComparison.Ordinal);
         var dragCode = dragStart >= 0 && dragEnd > dragStart ? code[dragStart..dragEnd] : string.Empty;
         if (dragCode.Length == 0
-            || !dragCode.Contains("_petGlobalMouseTracker.TryStart()", StringComparison.Ordinal)
+            || !dragCode.Contains("_petPointerPollTimer.Start()", StringComparison.Ordinal)
             || !dragCode.Contains("GetCursorPos(out var cursor)", StringComparison.Ordinal)
-            || !dragCode.Contains("SetWindowPos(handle, IntPtr.Zero, left, top", StringComparison.Ordinal)
             || !dragCode.Contains("PetResizeHandle.IsMouseOver", StringComparison.Ordinal)
-            || !dragCode.Contains("FitWindowToMonitorWorkArea();", StringComparison.Ordinal)
-            || !dragCode.Contains("SaveWindowPosition();", StringComparison.Ordinal)
             || dragCode.Contains("SetCapture(", StringComparison.Ordinal)
             || dragCode.Contains("Mouse.Capture(", StringComparison.Ordinal)
             || dragCode.Contains("DragMove(", StringComparison.Ordinal))
-            failures.Add("桌宠没有建立按需的全局指针跟踪并按屏幕坐标移动，或未保留轻点/缩放/位置保存行为。");
+            failures.Add("桌宠没有在本体按下时启动轻量指针轮询，或事件区错误覆盖缩放手柄。");
 
-        var hookStart = tracker.IndexOf("private IntPtr HookProcedure", StringComparison.Ordinal);
-        var hookEnd = tracker.IndexOf("private void ReleaseHook", StringComparison.Ordinal);
-        var hook = hookStart >= 0 && hookEnd > hookStart ? tracker[hookStart..hookEnd] : string.Empty;
-        if (!tracker.Contains("SetWindowsHookEx(WhMouseLl", StringComparison.Ordinal)
-            || !tracker.Contains("UnhookWindowsHookEx(hookHandle)", StringComparison.Ordinal)
-            || !hook.Contains("CallNextHookEx(hookHandle, code, wParam, lParam)", StringComparison.Ordinal)
-            || !hook.Contains("TryDecodeMouseMessage(message", StringComparison.Ordinal)
-            || !hook.Contains("LeftButtonReleased?.Invoke", StringComparison.Ordinal)
-            || hook.Contains("SetWindowPos(", StringComparison.Ordinal)
-            || hook.Contains("SaveWindowPosition(", StringComparison.Ordinal)
-            || !code.Contains("DispatcherPriority.Input", StringComparison.Ordinal)
-            || !code.Contains("_petPointerDispatchScheduled", StringComparison.Ordinal)
-            || !code.Contains("_petGlobalMouseTracker.Stop();", StringComparison.Ordinal)
+        var pollStart = code.IndexOf("private void PetPointerPollTimer_Tick", StringComparison.Ordinal);
+        var pollEnd = code.IndexOf("private void TrackPetPointerMove", StringComparison.Ordinal);
+        var pollCode = pollStart >= 0 && pollEnd > pollStart ? code[pollStart..pollEnd] : string.Empty;
+        if (!pollCode.Contains("GetAsyncKeyState(VkLeftButton)", StringComparison.Ordinal)
+            || !pollCode.Contains("GetCursorPos(out var cursor)", StringComparison.Ordinal)
+            || !pollCode.Contains("TrackPetPointerMove(cursor.X, cursor.Y)", StringComparison.Ordinal)
+            || !pollCode.Contains("FinishPetPointerGesture(expandOnClick: true)", StringComparison.Ordinal)
+            || !code.Contains("_petPointerPollTimer.Stop();", StringComparison.Ordinal)
+            || code.Contains("SetWindowsHookEx(", StringComparison.Ordinal)
+            || code.Contains("CallNextHookEx(", StringComparison.Ordinal)
             || code.Contains("SetCapture(", StringComparison.Ordinal)
             || code.Contains("GetCapture()", StringComparison.Ordinal))
-            failures.Add("桌宠拖动没有使用短时全局鼠标跟踪、转发其他应用输入或在结束时释放钩子。");
+            failures.Add("桌宠按住期间的指针轮询、松开收尾或定时器清理不完整，或仍注册系统级鼠标钩子。");
 
         var windowHookStart = code.IndexOf("private IntPtr HotkeyHook", StringComparison.Ordinal);
         var windowHookEnd = code.IndexOf("private void RestoreFromTray", StringComparison.Ordinal);
@@ -151,13 +139,16 @@ internal static class PetWindowDragProbe
         if (!windowHook.Contains("msg == WmCancelMode", StringComparison.Ordinal))
             failures.Add("桌宠收到窗口取消输入消息时没有结束拖动。");
 
-        var releaseStart = code.IndexOf("private void OnPetGlobalLeftButtonReleased", StringComparison.Ordinal);
-        var releaseEnd = code.IndexOf("private void QueuePetPointerUpdate", StringComparison.Ordinal);
-        var releaseHandler = releaseStart >= 0 && releaseEnd > releaseStart
-            ? code[releaseStart..releaseEnd] : string.Empty;
-        if (!releaseHandler.Contains("TrackPetPointerMove(x, y);", StringComparison.Ordinal)
-            || !releaseHandler.Contains("QueuePetPointerUpdate(x, y, released: true);", StringComparison.Ordinal))
-            failures.Add("桌宠释放鼠标前没有先将窗口对齐到释放点，可能把抬起事件交给后方窗口。");
+        var finishStart = code.IndexOf("private void FinishPetPointerGesture", StringComparison.Ordinal);
+        var finishEnd = code.IndexOf("private void ReportPetWindowDragUnavailable", StringComparison.Ordinal);
+        var finishCode = finishStart >= 0 && finishEnd > finishStart
+            ? code[finishStart..finishEnd] : string.Empty;
+        if (!finishCode.Contains("_petPointerPollTimer.Stop();", StringComparison.Ordinal)
+            || !finishCode.Contains("FitWindowToMonitorWorkArea();", StringComparison.Ordinal)
+            || !finishCode.Contains("SaveWindowPosition();", StringComparison.Ordinal)
+            || !finishCode.Contains("if (expandOnClick) RestoreFromTray();", StringComparison.Ordinal)
+            || !code.Contains("Interval = TimeSpan.FromMilliseconds(16)", StringComparison.Ordinal))
+            failures.Add("桌宠释放时没有停止轮询、限制工作区、保存位置或保留轻点展开行为。");
 
         if (!windowHook.Contains("if (!_petPointerGestureActive)", StringComparison.Ordinal)
             || !windowHook.Contains("new Action(FitWindowToMonitorWorkArea)", StringComparison.Ordinal))
