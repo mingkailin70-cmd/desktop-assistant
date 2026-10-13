@@ -164,7 +164,7 @@ internal static class TaskHistoryWindowUiProbe
                 var refreshStatus = window.FindName("RefreshStatus") as TextBlock;
                 if (cancelCalls != 2 || cancelButton is null || refreshStatus is null
                     || !refreshStatus.Text.Contains("取消结果待核对", StringComparison.Ordinal)
-                    || !refreshStatus.Text.Contains("刷新失败", StringComparison.Ordinal)
+                    || !refreshStatus.Text.Contains("列表可能显示旧状态", StringComparison.Ordinal)
                     || refreshStatus.Text.Contains("CANCEL_PRIVATE_PATH", StringComparison.Ordinal)
                     || refreshStatus.Text.Contains("LOAD_PRIVATE_PATH", StringComparison.Ordinal)
                     || refreshStatus.Text.Contains("状态已刷新", StringComparison.Ordinal))

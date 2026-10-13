@@ -54,7 +54,7 @@ public partial class TaskHistoryWindow : Window
             var refreshed = await RefreshAsync();
             RefreshStatus.Text = refreshed
                 ? "取消结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试。"
-                : "取消结果待核对；任务状态刷新失败，列表可能显示旧状态；请人工核对目标后再操作；小K不会自动重试。";
+                : "取消结果待核对；任务状态尚未确认，列表可能显示旧状态；请人工核对目标后再操作；小K不会自动重试。";
         }
         finally
         {
@@ -81,7 +81,7 @@ public partial class TaskHistoryWindow : Window
             var refreshed = await RefreshAsync();
             RefreshStatus.Text = refreshed
                 ? "待办处理结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试或重放。"
-                : "待办处理结果待核对；任务状态刷新失败，列表可能显示旧状态；请人工核对目标后再操作；小K不会自动重试或重放。";
+                : "待办处理结果待核对；任务状态尚未确认，列表可能显示旧状态；请人工核对目标后再操作；小K不会自动重试或重放。";
         }
     }
 
