@@ -360,7 +360,7 @@
                             <Viewbox x:Name="PetEngineViewbox" Width="284" Height="284" Margin="0,6,0,0"
                                      Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
                                      RenderTransformOrigin="0.5,0.78"
-                                     AutomationProperties.Name="VPet Core驱动的小K银渐层桌宠"
+                                     AutomationProperties.Name="小K实时三维银渐层桌宠"
                                      Loaded="PetEngineViewbox_Loaded">
                                 <Viewbox.RenderTransform>
                                     <TransformGroup>

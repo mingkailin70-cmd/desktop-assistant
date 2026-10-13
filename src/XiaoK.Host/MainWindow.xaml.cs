@@ -39,7 +39,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private SoundPlayer? _soundPlayer;
     private readonly Queue<PrivateNoticeAnalysisResult> _pendingNoticeAnalyses = [];
     private readonly CancellationTokenSource _petRendererCancellation = new();
-    private VPetPortraitRuntime? _petRenderer;
+    private IPetRenderer? _petRenderer;
     private Task? _petRendererInitializationTask;
     private XiaoKPetPose? _currentPetPose;
     private string _currentStatus = "待命";
@@ -1240,11 +1240,23 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private async Task InitializePetRendererAsync()
     {
-        VPetPortraitRuntime? renderer = null;
+        IPetRenderer? renderer = null;
         try
         {
-            renderer = new VPetPortraitRuntime(Dispatcher, _runtime.CurrentSettings.DataRoot);
-            PetEngineHost.Content = renderer.View;
+            try
+            {
+                renderer = await ThreeDPetRenderer.CreateAsync(Dispatcher, _petRendererCancellation.Token);
+            }
+            catch (OperationCanceledException) when (_petRendererCancellation.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                renderer = new VPetPortraitRuntime(Dispatcher, _runtime.CurrentSettings.DataRoot);
+                PetEngineHost.Content = renderer.View;
+            }
+
             await renderer.InitializeAsync(_petRendererCancellation.Token);
             if (_exiting)
             {
@@ -1253,6 +1265,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                 return;
             }
 
+            PetEngineHost.Content = renderer.View;
             _petRenderer = renderer;
             renderer = null;
             PetSpriteFallback.Visibility = Visibility.Collapsed;
@@ -1268,7 +1281,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             PetEngineHost.Content = null;
             PetEngineViewbox.Opacity = 0;
             PetSpriteFallback.Visibility = Visibility.Visible;
-            if (!_exiting) SetStatus("VPet桌宠不可用，继续使用静态形象");
+            if (!_exiting) SetStatus("三维与VPet桌宠不可用，继续使用静态形象");
         }
         finally
         {

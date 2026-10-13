@@ -239,7 +239,12 @@ Require(taskCenterOpenStart.Contains("IsVisibleChanged += MainWindow_IsVisibleCh
     && taskCenterOpenStart.Contains("if (e.NewValue is true) EnsurePetRendererInitialization();", StringComparison.Ordinal)
     && taskCenterOpenStart.Contains("!IsVisible || Opacity <= 0 || !PetEngineViewbox.IsLoaded", StringComparison.Ordinal)
     && taskCenterOpenStart.Contains("IsVisibleChanged -= MainWindow_IsVisibleChanged;", StringComparison.Ordinal),
-    "启动隐藏或托盘驻留时不能初始化VPet；主窗体之后可见时才启动，并在关闭时解除监听。 ");
+    "启动隐藏或托盘驻留时不能初始化桌宠渲染器；主窗体之后可见时才启动，并在关闭时解除监听。 ");
+Require(taskCenterOpenStart.IndexOf("ThreeDPetRenderer.CreateAsync", StringComparison.Ordinal)
+        < taskCenterOpenStart.IndexOf("new VPetPortraitRuntime", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("PetEngineHost.Content = renderer.View", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("renderer?.Dispose();", StringComparison.Ordinal),
+    "正式Host应优先初始化三维桌宠，并保留VPet/静态形象回退及释放路径。 ");
 var petLoadedHandlerStart = taskCenterOpenStart.IndexOf("private void PetEngineViewbox_Loaded", StringComparison.Ordinal);
 var petLoadedHandlerEnd = taskCenterOpenStart.IndexOf("private void MainWindow_IsVisibleChanged", petLoadedHandlerStart, StringComparison.Ordinal);
 Require(petLoadedHandlerStart >= 0 && petLoadedHandlerEnd > petLoadedHandlerStart
@@ -314,8 +319,11 @@ Require(true, "任务中心离屏WPF检查通过。");
 foreach (var failure in XiaoK.DesktopExperience.Checks.PetPoseTransitionProbe.Run())
     Require(false, failure);
 Require(true, "桌宠姿态过渡离屏WPF检查通过。");
+foreach (var failure in XiaoK.DesktopExperience.Checks.Pet3DRendererProbe.Run())
+    Require(false, failure);
+Require(true, "三维桌宠四态渲染、透明边缘、不激活前台与高频切换检查通过。");
 
-Console.WriteLine($"桌宠姿态/轻量过渡/缩放保存/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定：{checks} 项通过。");
+Console.WriteLine($"桌宠三维渲染/姿态切换/缩放保存/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {

@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using LinePutScript;
 using VPet_Simulator.Core;
 using static VPet_Simulator.Core.GraphInfo;
+using XiaoK.Host.PetRendering;
 
 namespace XiaoK.PetRuntimePrototype;
 

@@ -2,8 +2,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using Color = System.Windows.Media.Color;
+using Point = System.Windows.Point;
 
-namespace XiaoK.PetRuntimePrototype;
+namespace XiaoK.Host.PetRendering;
 
 internal enum ThreeDPetPose
 {
@@ -13,10 +15,12 @@ internal enum ThreeDPetPose
     Executing
 }
 
-/// <summary>用WPF原生3D几何生成隔离用的银渐层猫形象，不读取外部模型或联网。</summary>
+/// <summary>用WPF原生3D几何生成小K银渐层姿态，不读取外部模型或联网。</summary>
 internal static class ThreeDPetScene
 {
-    public static Viewport3D Create(ThreeDPetPose pose)
+    public static Viewport3D Create(ThreeDPetPose pose) => CreateViewport(CreateModel(pose));
+
+    public static Model3DGroup CreateModel(ThreeDPetPose pose)
     {
         var scene = new Model3DGroup();
         scene.Children.Add(new AmbientLight(Color.FromRgb(116, 118, 122)));
@@ -28,7 +32,10 @@ internal static class ThreeDPetScene
         var white = CreateSolidMaterial(Color.FromRgb(249, 246, 242), 18);
         var pink = CreateSolidMaterial(Color.FromRgb(219, 112, 139), 4);
         var dark = CreateSolidMaterial(Color.FromRgb(38, 43, 57), 30);
-        var amber = CreateSolidMaterial(Color.FromRgb(193, 145, 73), 22);
+        var emerald = CreateSolidMaterial(Color.FromRgb(73, 160, 112), 26);
+        var stripe = CreateSolidMaterial(Color.FromRgb(91, 95, 103), 16);
+        var collar = CreateSolidMaterial(Color.FromRgb(109, 151, 124), 26);
+        var pendant = CreateSolidMaterial(Color.FromRgb(225, 205, 151), 34);
 
         AddTube(scene,
             [new Point3D(0.48, -0.36, -0.28), new Point3D(0.91, -0.22, -0.26), new Point3D(1.18, 0.06, -0.22), new Point3D(1.1, 0.48, -0.16), new Point3D(0.86, 0.62, -0.12)],
@@ -50,14 +57,26 @@ internal static class ThreeDPetScene
         AddSphere(scene, new Point3D(-0.52, -0.46, 0.601), new Vector3D(0.14, 0.09, 0.045), white);
         AddSphere(scene, new Point3D(0.34, -0.96, 0.535), new Vector3D(0.14, 0.09, 0.045), white);
 
+        var chestCenter = new Point3D(0, -0.32, 0.443);
+        var chestScale = new Vector3D(0.36, 0.52, 0.12);
+        // Follow the bib surface so the collar and pendant remain attached instead of floating.
+        AddTube(scene,
+            [FrontSurfacePoint(chestCenter, chestScale, -0.31, -0.42, 0.025),
+             FrontSurfacePoint(chestCenter, chestScale, -0.25, -0.53, 0.025),
+             FrontSurfacePoint(chestCenter, chestScale, 0, -0.61, 0.025),
+             FrontSurfacePoint(chestCenter, chestScale, 0.25, -0.53, 0.025),
+             FrontSurfacePoint(chestCenter, chestScale, 0.31, -0.42, 0.025)],
+            [0.035, 0.04, 0.042, 0.04, 0.035], 8, collar);
+        AddStar(scene, FrontSurfacePoint(chestCenter, chestScale, 0, -0.69, 0.035), 0.09, pendant);
+
         var head = new Model3DGroup();
         AddEar(head, -1, silver, pink);
         AddEar(head, 1, silver, pink);
         AddSphere(head, new Point3D(0, 0.9, 0.15), new Vector3D(0.77, 0.72, 0.57), silver);
-        AddSphere(head, new Point3D(-0.39, 0.65, 0.59), new Vector3D(0.34, 0.25, 0.18), white);
-        AddSphere(head, new Point3D(0.39, 0.65, 0.59), new Vector3D(0.34, 0.25, 0.18), white);
-        AddSphere(head, new Point3D(-0.275, 0.98, 0.691), new Vector3D(0.12, 0.165, 0.072), amber);
-        AddSphere(head, new Point3D(0.275, 0.98, 0.691), new Vector3D(0.12, 0.165, 0.072), amber);
+        AddSphere(head, new Point3D(-0.31, 0.65, 0.59), new Vector3D(0.28, 0.23, 0.16), white);
+        AddSphere(head, new Point3D(0.31, 0.65, 0.59), new Vector3D(0.28, 0.23, 0.16), white);
+        AddSphere(head, new Point3D(-0.275, 0.98, 0.691), new Vector3D(0.12, 0.165, 0.072), emerald);
+        AddSphere(head, new Point3D(0.275, 0.98, 0.691), new Vector3D(0.12, 0.165, 0.072), emerald);
         AddSphere(head, new Point3D(-0.26, 0.98, 0.75), new Vector3D(0.054, 0.118, 0.035), dark);
         AddSphere(head, new Point3D(0.29, 0.98, 0.75), new Vector3D(0.054, 0.118, 0.035), dark);
         AddSphere(head, new Point3D(-0.285, 1.05, 0.783), new Vector3D(0.027, 0.035, 0.018), white);
@@ -73,6 +92,43 @@ internal static class ThreeDPetScene
 
         AddWhisker(head, -1, 0.65, silverDark);
         AddWhisker(head, 1, 0.65, silverDark);
+
+        // Forehead M and cheek markings sit just above the fur surface to read at pet-window size.
+        var headCenter = new Point3D(0, 0.9, 0.15);
+        var headScale = new Vector3D(0.77, 0.72, 0.57);
+        AddTube(head,
+            [FrontSurfacePoint(headCenter, headScale, -0.42, 1.29, 0.022),
+             FrontSurfacePoint(headCenter, headScale, -0.25, 1.43, 0.022),
+             FrontSurfacePoint(headCenter, headScale, 0, 1.34, 0.022),
+             FrontSurfacePoint(headCenter, headScale, 0.25, 1.43, 0.022),
+             FrontSurfacePoint(headCenter, headScale, 0.42, 1.29, 0.022)],
+            [0.03, 0.028, 0.024, 0.028, 0.03], 7, stripe);
+        foreach (var side in new[] { -1, 1 })
+        {
+            AddTube(head,
+                [FrontSurfacePoint(headCenter, headScale, 0.56 * side, 0.93, 0.026),
+                 FrontSurfacePoint(headCenter, headScale, 0.64 * side, 0.92, 0.026),
+                 FrontSurfacePoint(headCenter, headScale, 0.70 * side, 0.88, 0.026)],
+                [0.028, 0.025, 0.016], 6, stripe);
+            AddTube(head,
+                [FrontSurfacePoint(headCenter, headScale, 0.56 * side, 0.82, 0.026),
+                 FrontSurfacePoint(headCenter, headScale, 0.65 * side, 0.81, 0.026),
+                 FrontSurfacePoint(headCenter, headScale, 0.71 * side, 0.78, 0.026)],
+                [0.026, 0.023, 0.015], 6, stripe);
+
+            var bodyCenter = new Point3D(0, -0.18, 0);
+            var bodyScale = new Vector3D(0.69, 0.9, 0.51);
+            AddTube(scene,
+                [FrontSurfacePoint(bodyCenter, bodyScale, 0.46 * side, 0.08, 0.018),
+                 FrontSurfacePoint(bodyCenter, bodyScale, 0.52 * side, -0.05, 0.018),
+                 FrontSurfacePoint(bodyCenter, bodyScale, 0.55 * side, -0.18, 0.018)],
+                [0.032, 0.03, 0.022], 6, stripe);
+            AddTube(scene,
+                [FrontSurfacePoint(bodyCenter, bodyScale, 0.49 * side, -0.24, 0.018),
+                 FrontSurfacePoint(bodyCenter, bodyScale, 0.53 * side, -0.34, 0.018),
+                 FrontSurfacePoint(bodyCenter, bodyScale, 0.52 * side, -0.44, 0.018)],
+                [0.028, 0.024, 0.017], 6, stripe);
+        }
         var headTilt = pose switch
         {
             ThreeDPetPose.Listening => -7.0,
@@ -107,11 +163,19 @@ internal static class ThreeDPetScene
             AddSphere(scene, new Point3D(-0.96, 0.39, 0.38), new Vector3D(0.04, 0.04, 0.035), gold);
         }
 
+        return scene;
+    }
+
+    public static Viewport3D CreateViewport(Model3DGroup scene)
+    {
+        ArgumentNullException.ThrowIfNull(scene);
         var viewport = new Viewport3D
         {
             Width = 512,
             Height = 512,
             ClipToBounds = true,
+            IsHitTestVisible = false,
+            Focusable = false,
             Camera = new PerspectiveCamera
             {
                 Position = new Point3D(0, 0.42, 7.1),
@@ -122,6 +186,37 @@ internal static class ThreeDPetScene
         };
         viewport.Children.Add(new ModelVisual3D { Content = scene });
         return viewport;
+    }
+
+    private static void AddStar(Model3DGroup group, Point3D center, double radius, Material material)
+    {
+        var mesh = new MeshGeometry3D();
+        mesh.Positions.Add(center);
+        mesh.Normals.Add(new Vector3D(0, 0, 1));
+        for (var index = 0; index < 10; index++)
+        {
+            var angle = -Math.PI / 2 + index * Math.PI / 5;
+            var pointRadius = index % 2 == 0 ? radius : radius * 0.46;
+            mesh.Positions.Add(new Point3D(center.X + Math.Cos(angle) * pointRadius,
+                center.Y + Math.Sin(angle) * pointRadius, center.Z));
+            mesh.Normals.Add(new Vector3D(0, 0, 1));
+        }
+        for (var index = 0; index < 10; index++)
+        {
+            mesh.TriangleIndices.Add(0);
+            mesh.TriangleIndices.Add(index + 1);
+            mesh.TriangleIndices.Add((index + 1) % 10 + 1);
+        }
+        group.Children.Add(new GeometryModel3D(mesh, material) { BackMaterial = material });
+    }
+
+    private static Point3D FrontSurfacePoint(Point3D center, Vector3D scale,
+        double x, double y, double lift)
+    {
+        var normalizedX = (x - center.X) / scale.X;
+        var normalizedY = (y - center.Y) / scale.Y;
+        var remaining = Math.Max(0, 1 - normalizedX * normalizedX - normalizedY * normalizedY);
+        return new Point3D(x, y, center.Z + scale.Z * Math.Sqrt(remaining) + lift);
     }
 
     private static void AddWhisker(Model3DGroup group, int side, double y, Material material)

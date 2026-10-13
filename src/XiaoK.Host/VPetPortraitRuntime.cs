@@ -15,7 +15,7 @@ internal enum XiaoKPetPose
 }
 
 /// <summary>以小K自有图像驱动 VPet Core；禁用宠物侧窗口动作与工具栏。</summary>
-internal sealed class VPetPortraitRuntime : IDisposable
+internal sealed class VPetPortraitRuntime : IPetRenderer
 {
     private readonly GraphCore _graph;
     private readonly Main _pet;
