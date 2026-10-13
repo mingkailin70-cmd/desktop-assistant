@@ -31,5 +31,7 @@ jobs:
         run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-notification-sample-bounds
       - name: Code credential boundary checks
         run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-code-credential-boundary
+      - name: File content search checks
+        run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-file-content-search
       - name: Desktop experience checks
         run: dotnet run --project tests/XiaoK.DesktopExperience.Checks --configuration Release --no-build --no-restore
