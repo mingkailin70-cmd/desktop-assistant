@@ -9,9 +9,11 @@ internal enum PetWindowMoveCompletion
 
 internal static class PetWindowInteractionPolicy
 {
-    public static PetWindowMoveCompletion GetCompletion(bool positionChanged, bool cancelled)
+    public static PetWindowMoveCompletion GetCompletion(bool positionChanged, bool cancelled, bool expandOnClick)
     {
         if (positionChanged) return PetWindowMoveCompletion.SavePosition;
-        return cancelled ? PetWindowMoveCompletion.Ignore : PetWindowMoveCompletion.Expand;
+        return cancelled || !expandOnClick
+            ? PetWindowMoveCompletion.Ignore
+            : PetWindowMoveCompletion.Expand;
     }
 }

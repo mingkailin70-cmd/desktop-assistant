@@ -503,11 +503,25 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             || PetResizeHandle.IsMouseOver)
             return;
 
+        MoveWindowFromPointer(e, expandOnClick: true);
+    }
+
+    private void ExpandedPetImage_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!_expanded || e.ChangedButton != System.Windows.Input.MouseButton.Left
+            || e.ButtonState != System.Windows.Input.MouseButtonState.Pressed)
+            return;
+
+        MoveWindowFromPointer(e, expandOnClick: false);
+    }
+
+    private void MoveWindowFromPointer(System.Windows.Input.MouseButtonEventArgs e, bool expandOnClick)
+    {
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero || !GetWindowRect(handle, out var origin))
         {
             e.Handled = true;
-            ReportPetWindowDragUnavailable();
+            ReportWindowDragUnavailable();
             return;
         }
 
@@ -522,7 +536,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
         catch (InvalidOperationException)
         {
-            ReportPetWindowDragUnavailable();
+            ReportWindowDragUnavailable();
             return;
         }
         finally
@@ -534,12 +548,12 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _petDragCancelled = false;
         if (!GetWindowRect(handle, out var current))
         {
-            ReportPetWindowDragUnavailable();
+            ReportWindowDragUnavailable();
             return;
         }
 
         var moved = origin.Left != current.Left || origin.Top != current.Top;
-        switch (PetWindowInteractionPolicy.GetCompletion(moved, cancelled))
+        switch (PetWindowInteractionPolicy.GetCompletion(moved, cancelled, expandOnClick))
         {
             case PetWindowMoveCompletion.SavePosition:
                 FitWindowToMonitorWorkArea();
@@ -1089,9 +1103,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
     }
 
-    private void ReportPetWindowDragUnavailable()
+    private void ReportWindowDragUnavailable()
     {
-        SetStatus("桌宠移动暂不可用");
+        SetStatus("窗口移动暂不可用");
     }
 
     private void PetScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)

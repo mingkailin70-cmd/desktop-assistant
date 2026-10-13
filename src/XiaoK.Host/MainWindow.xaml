@@ -183,10 +183,15 @@
                             <TextBlock Text="告诉我想做什么，我们一步一步完成。"
                                        FontSize="11" Foreground="#607565" Margin="0,5,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <Image Grid.Column="1" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
+                        <Image x:Name="ExpandedPetImage" Grid.Column="1"
+                               Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                Width="154" Height="154" Margin="0,-3,-3,-8" Stretch="Uniform"
-                               VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"
-                               AutomationProperties.Name="小K银渐层小猫三维角色">
+                               VerticalAlignment="Center" Cursor="SizeAll"
+                               PreviewMouseLeftButtonDown="ExpandedPetImage_PreviewMouseLeftButtonDown"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               AutomationProperties.Name="小K银渐层小猫三维角色"
+                               AutomationProperties.HelpText="按住猫图拖动可移动小K窗口"
+                               ToolTip="按住猫图拖动可移动小K窗口">
                             <Image.Effect>
                                 <DropShadowEffect Color="#607160" BlurRadius="13" ShadowDepth="3" Opacity="0.18"/>
                             </Image.Effect>
