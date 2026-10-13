@@ -100,11 +100,21 @@ internal static class SettingsWindowSaveProbe
                 return;
             }
 
-            dispatcher.Invoke(new Action(() => saveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, saveButton))));
+            var saveClickHandler = typeof(SettingsWindow).GetMethod("Save_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            if (saveClickHandler is null)
+            {
+                failures.Add("设置页没有找到保存事件处理器。");
+                return;
+            }
+            void InvokeSaveClick() => dispatcher.Invoke(new Action(() =>
+                saveClickHandler.Invoke(window, [saveButton, new RoutedEventArgs(Button.ClickEvent, saveButton)])));
+
+            InvokeSaveClick();
             if (replaceCalls != 1 || saveButton.IsEnabled || cancelButton.IsEnabled || form.IsEnabled)
                 failures.Add($"异步保存锁状态不符（联系人写入调用={replaceCalls}，保存/取消/表单仍启用={saveButton.IsEnabled}/{cancelButton.IsEnabled}/{form.IsEnabled}）。");
 
-            dispatcher.Invoke(new Action(() => saveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, saveButton))));
+            InvokeSaveClick();
             if (replaceCalls != 1)
                 failures.Add("保存等待期间的重复点击再次启动了联系人偏好写入。");
 
