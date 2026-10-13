@@ -7568,6 +7568,51 @@ static async Task CheckFileContentSearchAsync(string root)
     try { await desktop.SearchFileContentsAsync(proposal, cancellation.Token); }
     catch (OperationCanceledException) { cancelled = true; }
     Require(cancelled, "已取消的文件内容搜索仍继续读取文件。");
+
+    var resultCapRoot = Path.Combine(fixture, "content-result-cap");
+    Directory.CreateDirectory(resultCapRoot);
+    for (var index = 0; index < LocalFileContentSearchPolicy.MaximumResults + 2; index++)
+        await File.WriteAllTextAsync(Path.Combine(resultCapRoot, $"match-{index:D2}.txt"),
+            "CAP_SENTINEL\nadditional text", new UTF8Encoding(false));
+    var resultCapDesktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", resultCapRoot)]);
+    var resultCapProposal = LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：CAP_SENTINEL")
+        ?? throw new InvalidOperationException("结果上限压力搜索命令没有生成工具提案。");
+    var resultCap = await resultCapDesktop.SearchFileContentsAsync(resultCapProposal, CancellationToken.None);
+    var resultCapData = resultCap.Data ?? string.Empty;
+    var resultCapPaths = resultCapData.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+        .Where(line => line.Contains("match-", StringComparison.Ordinal)).ToArray();
+    Require(resultCap.Success && resultCapPaths.Length == LocalFileContentSearchPolicy.MaximumResults
+        && resultCapPaths[0].Contains("match-00.txt", StringComparison.Ordinal)
+        && resultCapPaths[^1].Contains("match-09.txt", StringComparison.Ordinal)
+        && !resultCapData.Contains("match-10.txt", StringComparison.Ordinal)
+        && !resultCapData.Contains("CAP_SENTINEL", StringComparison.Ordinal)
+        && resultCap.Summary.Contains("已达到 10 个结果上限", StringComparison.Ordinal)
+        && resultCap.Summary.Contains("结果可能不完整", StringComparison.Ordinal),
+        "内容搜索适配器未在10条结果处截断并明确提示结果可能不完整：" + resultCap.Summary);
+
+    var scanLimitRoot = Path.Combine(fixture, "content-scan-limit");
+    Directory.CreateDirectory(scanLimitRoot);
+    for (var index = 0; index < LocalFileContentSearchPolicy.MaximumScannedEntries + 1; index++)
+    {
+        using var entry = new FileStream(Path.Combine(scanLimitRoot, $"entry-{index:D5}.bin"),
+            FileMode.CreateNew, FileAccess.Write, FileShare.None);
+    }
+    var scanLimitDesktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", scanLimitRoot)]);
+    var scanLimitProposal = LocalFileContentSearchPolicy.CreateUserToolProposal("搜索文件内容：NO_MATCH_SENTINEL")
+        ?? throw new InvalidOperationException("目录项扫描上限压力搜索命令没有生成工具提案。");
+    var scanLimitResult = await scanLimitDesktop.SearchFileContentsAsync(scanLimitProposal, CancellationToken.None);
+    var scanLimitData = scanLimitResult.Data ?? string.Empty;
+    var expectedScanSummary = LocalFileContentSearchPolicy.CreateSummary(0,
+        LocalFileContentSearchPolicy.MaximumScannedEntries, 0, 0, incomplete: true,
+        scanLimitReached: true, byteLimitReached: false);
+    var expectedScanResponse = LocalFileContentSearchPolicy.CreateResponse([],
+        LocalFileContentSearchPolicy.MaximumScannedEntries, 0, 0, incomplete: true,
+        scanLimitReached: true, byteLimitReached: false);
+    Require(scanLimitResult.Success && scanLimitResult.Summary == expectedScanSummary
+        && scanLimitData == expectedScanResponse
+        && !scanLimitData.Contains("entry-", StringComparison.Ordinal)
+        && !scanLimitData.Contains("NO_MATCH_SENTINEL", StringComparison.Ordinal),
+        "5,000项目录压力搜索未在固定扫描上限停止并说明结果不完整：" + scanLimitResult.Summary);
 }
 
 static async Task CheckLocalDocumentSummaryPolicyAsync(ToolBroker broker, WindowsDesktopTools desktop,
