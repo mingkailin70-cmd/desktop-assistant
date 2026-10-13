@@ -68,6 +68,7 @@ internal static class SettingsWindowResilienceProbe
             var replaceCalls = 0;
             var failLoginStartupRead = false;
             var failContactStyleLoad = false;
+            var failPublisherInspection = true;
             Task ReplaceContactStyles(IEnumerable<ContactReplyStylePreference> _, CancellationToken __)
             {
                 replaceCalls++;
@@ -82,6 +83,11 @@ internal static class SettingsWindowResilienceProbe
                 failLoginStartupRead
                     ? Task.FromException<LoginStartupSnapshot>(new Exception("SYNTHETIC_PRIVATE_STARTUP_READ_ERROR"))
                     : Task.FromResult(new LoginStartupSnapshot(true, false, "合成启动状态"));
+            Task<string> RequestNotificationAccess() =>
+                Task.FromException<string>(new Exception("SYNTHETIC_PRIVATE_NOTIFICATION_PERMISSION_ERROR"));
+            Task<string> InspectNotificationPublishers() => failPublisherInspection
+                ? Task.FromException<string>(new Exception("SYNTHETIC_PRIVATE_PUBLISHER_INSPECTION_ERROR"))
+                : Task.FromResult("合成来源元数据检查完成。");
             Task<string> CreateBackup(string path, CancellationToken _) => Task.FromResult(path);
             Task<string> RestoreBackup(string path, CancellationToken _) => Task.FromResult(path);
             Task<IReadOnlyList<ApprovalAuditRecord>> LoadApprovalAudit(int _, CancellationToken __) =>
@@ -94,7 +100,8 @@ internal static class SettingsWindowResilienceProbe
             var notificationMonitor = new WindowsNotificationMonitor(dispatcher);
             var window = new SettingsWindow(settings, notificationMonitor, LoadContactStyles, ReplaceContactStyles,
                 Path.Combine(rootPath, "active.sqlite3"), CreateBackup, RestoreBackup,
-                LoadApprovalAudit, GetCleanupPreview, ClearLocalData, ReadLoginStartupState);
+                LoadApprovalAudit, GetCleanupPreview, ClearLocalData, ReadLoginStartupState,
+                RequestNotificationAccess, InspectNotificationPublishers);
             SetPrivateField(window, "_startupStateLoaded", true);
             SetPrivateField(window, "_contactStylesLoaded", true);
 
@@ -232,6 +239,54 @@ internal static class SettingsWindowResilienceProbe
             if (status.Text.Contains("SYNTHETIC_PRIVATE_STYLE_LOAD_ERROR", StringComparison.Ordinal)
                 || !status.Text.Contains("其他设置仍可继续保存", StringComparison.Ordinal))
                 failures.Add("联系人偏好加载异常没有转换为固定提示，或异常详情泄漏到设置页。");
+
+            var requestNotificationAccessHandler = typeof(SettingsWindow).GetMethod("RequestNotificationAccess_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var requestNotificationAccessButton = window.FindName("RequestNotificationAccessButton") as Button;
+            var notificationStatus = window.FindName("NotificationStatusText") as TextBlock;
+            if (requestNotificationAccessHandler is null || requestNotificationAccessButton is null || notificationStatus is null)
+            {
+                failures.Add("设置页没有找到通知权限请求处理器或状态控件。");
+                return;
+            }
+            dispatcher.Invoke(new Action(() => requestNotificationAccessHandler.Invoke(window,
+                [requestNotificationAccessButton, new RoutedEventArgs(Button.ClickEvent, requestNotificationAccessButton)])));
+            PumpUntil(dispatcher, () => requestNotificationAccessButton.IsEnabled
+                    && notificationStatus.Text == "无法请求 Windows 通知访问权限；请检查系统设置后重试。",
+                failures, "合成通知权限请求异常后，按钮或固定提示没有在4秒内恢复。");
+            if (notificationStatus.Text.Contains("SYNTHETIC_PRIVATE_NOTIFICATION_PERMISSION_ERROR", StringComparison.Ordinal))
+                failures.Add("通知权限请求异常详情泄漏到设置页。");
+
+            var inspectPublishersHandler = typeof(SettingsWindow).GetMethod("InspectNotificationPublishers_Click",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var inspectPublishersButton = window.FindName("InspectNotificationPublishersButton") as Button;
+            var publisherCandidates = window.FindName("NotificationPublisherCandidatesBox") as TextBox;
+            var samplePublisher = window.FindName("NotificationSamplePublisherBox") as ComboBox;
+            var startSampleButton = window.FindName("StartNotificationSampleCaptureButton") as Button;
+            if (inspectPublishersHandler is null || inspectPublishersButton is null || publisherCandidates is null
+                || samplePublisher is null || startSampleButton is null)
+            {
+                failures.Add("设置页没有找到通知来源检查处理器或样本状态控件。");
+                return;
+            }
+            dispatcher.Invoke(new Action(() => inspectPublishersHandler.Invoke(window,
+                [inspectPublishersButton, new RoutedEventArgs(Button.ClickEvent, inspectPublishersButton)])));
+            PumpUntil(dispatcher, () => inspectPublishersButton.IsEnabled
+                    && publisherCandidates.Text == "只读来源检查失败；未读取通知正文。请稍后重试。",
+                failures, "合成只读来源检查异常后，按钮或固定提示没有在4秒内恢复。");
+            if (publisherCandidates.Text.Contains("SYNTHETIC_PRIVATE_PUBLISHER_INSPECTION_ERROR", StringComparison.Ordinal)
+                || !GetPrivateField<bool>(window, "_publisherInspectionFailed") || samplePublisher.SelectedIndex != -1
+                || startSampleButton.IsEnabled)
+                failures.Add("来源检查异常后未清除候选/阻止样本采集，或异常详情泄漏到设置页。");
+
+            failPublisherInspection = false;
+            dispatcher.Invoke(new Action(() => inspectPublishersHandler.Invoke(window,
+                [inspectPublishersButton, new RoutedEventArgs(Button.ClickEvent, inspectPublishersButton)])));
+            PumpUntil(dispatcher, () => inspectPublishersButton.IsEnabled
+                    && publisherCandidates.Text == "合成来源元数据检查完成。",
+                failures, "合成来源检查重试成功后，界面没有在4秒内恢复。");
+            if (GetPrivateField<bool>(window, "_publisherInspectionFailed") || startSampleButton.IsEnabled)
+                failures.Add("来源检查成功后失败锁未清除，或无已核验候选时错误开放了样本采集。");
         }
         catch (Exception exception)
         {

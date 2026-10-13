@@ -38,6 +38,7 @@ public partial class SettingsWindow : Window
     private bool _contactStylesLoaded;
     private bool _saveInProgress;
     private bool _allowCloseAfterSave;
+    private bool _publisherInspectionFailed;
     private readonly ObservableCollection<ContactReplyStylePreference> _contactReplyStyles;
     private readonly ObservableCollection<AppSetting> _customApplications;
     private TimeSpan _previousCpuTime;
@@ -52,7 +53,9 @@ public partial class SettingsWindow : Window
         Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> getRecentApprovalAudit,
         Func<CancellationToken, Task<LocalDataCleanupPreview>> getLocalDataCleanupPreview,
         Func<LocalDataCleanupPreview, CancellationToken, Task<LocalDataCleanupResult>> clearLocalData,
-        Func<Task<LoginStartupSnapshot>>? readLoginStartup = null)
+        Func<Task<LoginStartupSnapshot>>? readLoginStartup = null,
+        Func<Task<string>>? requestNotificationAccess = null,
+        Func<Task<string>>? inspectNotificationPublishers = null)
     {
         InitializeComponent();
         _original = settings;
@@ -74,8 +77,8 @@ public partial class SettingsWindow : Window
         _getLocalDataCleanupPreview = getLocalDataCleanupPreview;
         _clearLocalData = clearLocalData;
         _readLoginStartup = readLoginStartup ?? LoginStartupRegistration.ReadAsync;
-        _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
-        _inspectNotificationPublishers = notificationMonitor.InspectRecentPublisherIdsAsync;
+        _requestNotificationAccess = requestNotificationAccess ?? notificationMonitor.RequestPermissionAsync;
+        _inspectNotificationPublishers = inspectNotificationPublishers ?? notificationMonitor.InspectRecentPublisherIdsAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
         _previousCpuSampleTimestamp = Stopwatch.GetTimestamp();
         DataRootBox.Text = settings.DataRoot;
@@ -496,10 +499,14 @@ public partial class SettingsWindow : Window
 
     private async void RequestNotificationAccess_Click(object sender, RoutedEventArgs e)
     {
-        RequestNotificationAccessButton.IsEnabled = false;
         try
         {
+            RequestNotificationAccessButton.IsEnabled = false;
             NotificationStatusText.Text = await _requestNotificationAccess();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
+        {
+            NotificationStatusText.Text = "无法请求 Windows 通知访问权限；请检查系统设置后重试。";
         }
         finally
         {
@@ -509,12 +516,22 @@ public partial class SettingsWindow : Window
 
     private async void InspectNotificationPublishers_Click(object sender, RoutedEventArgs e)
     {
-        InspectNotificationPublishersButton.IsEnabled = false;
-        NotificationPublisherCandidatesBox.Text = "正在读取应用来源元数据；不会读取通知正文……";
         try
         {
+            InspectNotificationPublishersButton.IsEnabled = false;
+            _publisherInspectionFailed = true;
+            NotificationSamplePublisherBox.SelectedIndex = -1;
+            StartNotificationSampleCaptureButton.IsEnabled = false;
+            NotificationPublisherCandidatesBox.Text = "正在读取应用来源元数据；不会读取通知正文……";
             NotificationPublisherCandidatesBox.Text = await _inspectNotificationPublishers();
+            _publisherInspectionFailed = false;
             RefreshNotificationSamplePublisherCandidates();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
+        {
+            _publisherInspectionFailed = true;
+            NotificationPublisherCandidatesBox.Text = "只读来源检查失败；未读取通知正文。请稍后重试。";
+            NotificationSamplePublisherBox.SelectedIndex = -1;
         }
         finally
         {
@@ -670,7 +687,8 @@ public partial class SettingsWindow : Window
         var selectedPublisher = NotificationSamplePublisherBox.SelectedItem as NotificationPublisherCandidateChoice;
         var hasSelectedPublisher = selectedPublisher is not null
             && string.Equals(selectedPublisher.ApplicationId, applicationId, StringComparison.OrdinalIgnoreCase);
-        StartNotificationSampleCaptureButton.IsEnabled = !active && !sessionExists && hasSelectedPublisher;
+        StartNotificationSampleCaptureButton.IsEnabled = !active && !sessionExists
+            && !_publisherInspectionFailed && hasSelectedPublisher;
         StopNotificationSampleCaptureButton.IsEnabled = active;
         ClearNotificationSamplesButton.IsEnabled = sessionExists;
         InspectNotificationPublishersButton.IsEnabled = !active;
