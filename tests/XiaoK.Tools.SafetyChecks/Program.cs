@@ -112,6 +112,24 @@ if (args.Length == 1 && args[0] == "--only-task-history-display-policy")
     Console.WriteLine("通过：任务历史不确定结果提供逐类核对指引，未知错误不泄漏且不会自动重试。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-task-history-checkpoints")
+{
+    var taskHistoryRoot = Path.Combine(Path.GetTempPath(), "XiaoK-TaskHistoryRecoveryProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(taskHistoryRoot);
+    try
+    {
+        await CheckSqliteV6ToV7CheckpointMigrationAsync(taskHistoryRoot);
+        CheckInterruptedTaskHistoryIsNotReplayed();
+        await CheckRetainedCodeTaskHistoryAsync(taskHistoryRoot);
+        await CheckCodeTaskHostSessionRoundTripAsync(taskHistoryRoot);
+        Console.WriteLine("通过：SQLite检查点迁移、跨Host会话中断分类和隔离编程历史恢复策略；未重启Host或执行动作。");
+    }
+    finally
+    {
+        if (Directory.Exists(taskHistoryRoot)) Directory.Delete(taskHistoryRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-window-activation")
 {
     await CheckWindowActivationOutcomesAsync();
