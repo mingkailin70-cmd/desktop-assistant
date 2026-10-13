@@ -4,8 +4,6 @@ using System.Media;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Media.Imaging;
@@ -508,7 +506,14 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         // Do not turn controls inside the task panel into drag handles.
         for (var depth = 0; current is not null && depth < 256; depth++)
         {
-            if (current is ButtonBase or TextBoxBase or Selector or RangeBase or ScrollBar or Thumb or ItemsControl or MenuItem)
+            if (current is System.Windows.Controls.Primitives.ButtonBase
+                or System.Windows.Controls.Primitives.TextBoxBase
+                or System.Windows.Controls.Primitives.RangeBase
+                or System.Windows.Controls.Primitives.ScrollBar
+                or System.Windows.Controls.Primitives.Thumb
+                or System.Windows.Controls.Selector
+                or System.Windows.Controls.ItemsControl
+                or System.Windows.Controls.MenuItem)
                 return true;
 
             if (current is Visual or Visual3D)
