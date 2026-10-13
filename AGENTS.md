@@ -2,6 +2,8 @@
 
 ## 持续有效的用户要求（更新至2026-10-14）
 
+2026-10-14 05:56补充：MeloTTS仍因训练语料来源/权利未核实而不得进入生产。新增固定社区候选`csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06`，revision `29953c80423f4c37918217808ecb308c1b9b7196`，ONNX上游SHA-256 `5511d651b7840c0a93a6bbfd4afd070a2c7f39ca1ec3ff2ecd73191519bbb852`，模型卡Apache-2.0，来源AISHELL-3；OpenSLR Apache-2.0标注与AISHELL提供方所述高校科研教育开放范围需核对。尚未下载/运行，本机散列、辅助文件、运行时兼容、性能和听感均未验证，只作隔离候选。24小时Host观察结束前不得运行TTS负载。详见`docs/产品与进度/实施计划与模型选型.md`和`docs/验收与评测/语音模型合成往返首测.md`。
+
 2026-10-14 04:00补充：CodeAgent源码凭证扫描新增 Hugging Face `hf_`、Docker Hub `dckr_pat_`/`dckr_oat_`及Azure DevOps `AZDO`令牌的有限合成格式覆盖；只验证人工构造值和近似普通值，没有读取真实凭证；当时改动尚未打包。该扫描器仍不是完整密钥检测。详情见`docs/产品与进度/开发进度与待办.md`与`docs/开发与发布/开发与仓库维护.md`。
 
 2026-10-14 04:13当前状态：签名MSIX `0.1.136.0`已安装并通过正常AppX入口启动，Host PID 70036，窗口可见且非前台；安装版/发布版`XiaoK.Host.dll` SHA-256均为`83476C107B75E156E2A8781D88414FAA8782B762F9ED800550EAB71F8BD959DA`，`XiaoK.Tools.dll`均为`978D4D0FE3A8681CFF7857CBDE8A48CDF0EC8E6CCD3584678F149C9673ADB10F`，Windows适配器散列也匹配。MSIX 155,801,834字节，SHA-256 `F83D982C149670A9F35510ABD2628D1B2B4667C6A0643F7496288F692A4790B1`，SignTool 0警告/0错误；证书信任未改。通知/唤醒关闭且发布者名单为空，`llama-server`为0。新版包含04:00登记的凭证规则；GitHub Actions Build `38459546232`成功。回滚包`0.1.135.0`位于`artifacts/msix-validation/70608c1a359f411da6ec9c411eea5fa3/XiaoK-signed-validation.msix`，SHA-256 `59E7B50101874A7D6E6FA91321D3279A3102384A8DAEC0DB7872A9C751B759A3`。真实拖动等桌面操作仍待用户现场验收；R0、六场景端到端和长期运行仍未通过。
