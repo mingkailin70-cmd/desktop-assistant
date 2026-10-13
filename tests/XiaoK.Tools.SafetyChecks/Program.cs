@@ -5211,6 +5211,10 @@ static async Task CheckLikelyCredentialIsNotSentAsync(string root)
     var syntheticCredentials = new[]
     {
         "AKIA" + new string('A', 16),
+        "hf_" + new string('h', 32),
+        "dckr_pat_" + new string('d', 24),
+        "dckr_oat_" + new string('o', 24),
+        new string('a', 76) + "AZDO" + new string('b', 4),
         "ghp_" + new string('g', 32),
         "glpat-" + new string('l', 30),
         "xoxb-" + new string('x', 24),
@@ -5237,10 +5241,15 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
     var unquotedApiKey = new string('m', 32);
     var bearerToken = new string('n', 32);
     var basicToken = new string('o', 32);
+    var ordinaryAzdoLike = new string('q', 76) + "AZDX" + new string('r', 4);
     var syntheticCredentials = new[]
     {
         "sk-" + new string('7', 32),
         "AKIA" + new string('A', 16),
+        "hf_" + new string('h', 32),
+        "dckr_pat_" + new string('d', 24),
+        "dckr_oat_" + new string('o', 24),
+        new string('a', 76) + "AZDO" + new string('b', 4),
         "ABSK" + new string('B', 110),
         "github_pat_" + new string('c', 32),
         "glpat-" + new string('d', 30),
@@ -5254,6 +5263,7 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
     var allSyntheticCredentials = syntheticCredentials.Concat([unquotedApiKey, bearerToken, basicToken]).ToArray();
     var original = "internal class Sample {\n"
         + string.Join("\n", syntheticCredentials.Select((secret, index) => $"    private const string Key{index} = \"{secret}\";"))
+        + $"\n    private const string OrdinaryValue = \"{ordinaryAzdoLike}\";\n    private const string ShortExample = \"hf_example\";\n"
         + $"\n    // api_key: {unquotedApiKey}\n    // Authorization: Bearer {bearerToken}\n    // Authorization: Basic {basicToken}\n"
         + "    private const string Placeholder = \"${API_KEY}\";\n"
         + "    // Authorization: Bearer example-token-placeholder-123456\n"
@@ -5271,6 +5281,8 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "含有可脱敏凭证的多行代码没有继续进行安全编辑。" + result.Summary);
     Require(inference.Prompts.All(prompt => allSyntheticCredentials.All(secret => !prompt.Contains(secret, StringComparison.Ordinal))
         && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)
+        && prompt.Contains(ordinaryAzdoLike, StringComparison.Ordinal)
+        && prompt.Contains("hf_example", StringComparison.Ordinal)
         && prompt.Contains("${API_KEY}", StringComparison.Ordinal)
         && prompt.Contains("example-token-placeholder-123456", StringComparison.Ordinal)),
         "原始凭证进入了本地模型提示，或没有显示脱敏占位符。");
