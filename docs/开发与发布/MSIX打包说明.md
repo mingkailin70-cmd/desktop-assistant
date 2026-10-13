@@ -1,3 +1,15 @@
+## v0.1.123.0 P2桌宠四态回退与短过渡动效（2026-10-13）
+
+将P2桌宠状态反馈源码安装到当前账户。固定仓库SDK `10.0.401` 使用锁定依赖生成自包含`win-x64`发布目录并完成MSIX封装；签名包`artifacts\msix-validation\1b5b1359ba734e10b5a090254f78b3e6\XiaoK-signed-validation.msix`，155,783,364字节，SHA-256 `9CDF1556F4D8BBA63B9ACD90EF44F78473BE8A8B018C93600A2F85074FCB8E26`。SignTool验签有效、0警告、0错误；使用此前已受信的证书`B96A02547ABA84523619E11EB7788AE9850A5C60`，没有变更证书信任。发布包包含Microsoft.NETCore.App与Microsoft.WindowsDesktop.App `10.0.12`。
+
+当前账户安装`MingKaiLin.XiaoK_0.1.123.0_neutral__g0ndt6g65c8pe`、状态`Ok`。安装版和自包含发布版`XiaoK.Host.dll` SHA-256均为`505FB07A0CBDE3D5996DDC86341FB1912AF325694BCA959DA4C7DEF9956032ED`。安装器未启动应用；安装后实读微信/QQ监控均为`false`、两个发布者AUMID列表为空、唤醒词为`false`，Host与llama-server进程均为0。此阶段只核验发布、签名、安装和文件身份，没有启动桌面窗口；普通桌面姿态渲染、透明合成、DPI/缩放及真实状态切换仍待实机验收。对应源码提交`568b7c7`的Release构建0警告/0错误、桌面体验检查103项通过；GitHub Actions [run 38340510511](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38340510511)成功。
+
+回滚包为已签名`0.1.122.0`：`artifacts\msix-validation\03d96841eb854e3fad8f7fd7bbad2b27\XiaoK-signed-validation.msix`，155,778,931字节，SHA-256 `A600D66B94EEF075B5535CE616B47A57B9E885DA48C34780D1789F609F84D467`。如需回滚，先运行`tools\uninstall_xiaok_msix.ps1`移除当前账户注册，再执行：
+
+```powershell
+.\tools\install_xiaok_msix.ps1 -PackagePath 'D:\Desktop\learn\siri\artifacts\msix-validation\03d96841eb854e3fad8f7fd7bbad2b27\XiaoK-signed-validation.msix' -Install
+```
+
 ## v0.1.122.0 R1任务历史恢复提示（2026-10-13）
 
 将R1源码中的不确定结果分类与恢复说明更新到当前账户安装版。固定仓库SDK `10.0.401` 使用锁定依赖完成 `win-x64` 自包含发布；MSIX清单版本为`0.1.122.0`。签名包`artifacts\msix-validation\03d96841eb854e3fad8f7fd7bbad2b27\XiaoK-signed-validation.msix`，155,778,931字节，SHA-256 `A600D66B94EEF075B5535CE616B47A57B9E885DA48C34780D1789F609F84D467`。SignTool验签有效、0警告、0错误；使用此前已受信的证书`B96A02547ABA84523619E11EB7788AE9850A5C60`，证书信任未改。
