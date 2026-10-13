@@ -102,7 +102,7 @@ internal static class SettingsWindowSaveProbe
 
             dispatcher.Invoke(new Action(() => saveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, saveButton))));
             if (replaceCalls != 1 || saveButton.IsEnabled || cancelButton.IsEnabled || form.IsEnabled)
-                failures.Add("异步保存期间未锁定单次保存入口、取消按钮和设置表单。");
+                failures.Add($"异步保存锁状态不符（联系人写入调用={replaceCalls}，保存/取消/表单仍启用={saveButton.IsEnabled}/{cancelButton.IsEnabled}/{form.IsEnabled}）。");
 
             dispatcher.Invoke(new Action(() => saveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, saveButton))));
             if (replaceCalls != 1)
