@@ -50,8 +50,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeStartPercent;
     private double _petResizeHorizontal;
     private double _petResizeVertical;
-    private readonly PetWindowDragGesture _petWindowDragGesture = new();
     private PetWindowDragOrigin? _petWindowDragOrigin;
+    private bool _petWindowDragStarted;
+    private bool _petWindowDragUnavailable;
+    private bool _petClickPending;
+    private int _petClickGestureId;
 
     public bool HasPendingActionConfirmationForTask(Guid taskId) =>
         _approvalInbox.HasPendingActionConfirmationForTask(taskId);
@@ -895,6 +898,11 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == WmMouseActivate && !_expanded)
+        {
+            handled = true;
+            return new IntPtr(MaNoActivate);
+        }
         if (App.RestoreMessageId != 0 && msg == (int)App.RestoreMessageId)
         {
             RestoreFromTray();
@@ -1021,62 +1029,53 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
     }
 
-    private void PetView_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void PetDragSurface_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (_expanded || e.ChangedButton != System.Windows.Input.MouseButton.Left
             || e.ButtonState != System.Windows.Input.MouseButtonState.Pressed
             || PetResizeHandle.IsMouseOver)
         {
-            _petWindowDragGesture.Reset();
+            _petClickPending = false;
             _petWindowDragOrigin = null;
             return;
         }
 
-        var point = e.GetPosition(this);
-        _petWindowDragGesture.PointerDown(point.X, point.Y);
+        _petClickGestureId++;
+        _petClickPending = true;
+        _petWindowDragStarted = false;
+        _petWindowDragUnavailable = false;
+        _petWindowDragOrigin = null;
         var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect))
-        {
-            _petWindowDragGesture.Reset();
-            _petWindowDragOrigin = null;
-            return;
-        }
+        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect)) return;
 
         _petWindowDragOrigin = new PetWindowDragOrigin(cursor.X, cursor.Y, rect.Left, rect.Top);
-        _ = System.Windows.Input.Mouse.Capture(PetView, System.Windows.Input.CaptureMode.SubTree);
     }
 
-    private void PetView_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    private void PetDragSurface_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
     {
-        if (_expanded || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed) return;
-
-        if (!_petWindowDragGesture.IsDragging)
+        if (_expanded) return;
+        _petWindowDragStarted = true;
+        if (_petWindowDragOrigin is null)
         {
-            var point = e.GetPosition(this);
-            if (!_petWindowDragGesture.TryStartDrag(point.X, point.Y, leftButtonPressed: true,
-                    SystemParameters.MinimumHorizontalDragDistance,
-                    SystemParameters.MinimumVerticalDragDistance)) return;
-
-            if (_petWindowDragOrigin is null)
-            {
-                _petWindowDragGesture.Reset();
-                return;
-            }
-
-            _ = System.Windows.Input.Mouse.Capture(PetView, System.Windows.Input.CaptureMode.SubTree);
+            ReportPetWindowDragUnavailable();
         }
-
         e.Handled = true;
-        MovePetWindowWithPointer();
     }
 
-    private void PetView_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void PetDragSurface_DragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
     {
-        var wasDragging = _petWindowDragGesture.PointerUp();
-        _petWindowDragOrigin = null;
-        if (ReferenceEquals(System.Windows.Input.Mouse.Captured, PetView))
-            _ = System.Windows.Input.Mouse.Capture(null);
+        if (!_petWindowDragStarted) return;
+        e.Handled = true;
+        if (_petWindowDragOrigin is null || _petWindowDragUnavailable) return;
+        if (!MovePetWindowWithPointer()) ReportPetWindowDragUnavailable();
+    }
 
+    private void PetDragSurface_DragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    {
+        var wasDragging = _petWindowDragStarted;
+        _petWindowDragStarted = false;
+        _petClickPending = false;
+        _petWindowDragOrigin = null;
         if (!wasDragging) return;
 
         e.Handled = true;
@@ -1084,25 +1083,35 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         SaveWindowPosition();
     }
 
-    private void PetView_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    private void PetDragSurface_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (!_petWindowDragGesture.IsDragging
-            || ReferenceEquals(System.Windows.Input.Mouse.Captured, PetView)) return;
-
-        _petWindowDragGesture.Reset();
-        _petWindowDragOrigin = null;
-        FitWindowToMonitorWorkArea();
-        SaveWindowPosition();
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left || !_petClickPending) return;
+        var gestureId = _petClickGestureId;
+        _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, new Action(() =>
+        {
+            if (gestureId != _petClickGestureId || !_petClickPending || _petWindowDragStarted) return;
+            _petClickPending = false;
+            _petWindowDragOrigin = null;
+            RestoreFromTray();
+        }));
     }
 
-    private void MovePetWindowWithPointer()
+    private bool MovePetWindowWithPointer()
     {
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero || _petWindowDragOrigin is not { } origin
             || !GetCursorPos(out var cursor)
-            || !origin.TryGetTargetPosition(cursor.X, cursor.Y, out var left, out var top)) return;
+            || !origin.TryGetTargetPosition(cursor.X, cursor.Y, out var left, out var top)) return false;
 
-        SetWindowPosition(handle, left, top);
+        return SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0,
+            SwpNoSize | SwpNoZOrder | SwpNoActivate);
+    }
+
+    private void ReportPetWindowDragUnavailable()
+    {
+        if (_petWindowDragUnavailable) return;
+        _petWindowDragUnavailable = true;
+        SetStatus("桌宠移动暂不可用");
     }
 
     private void PetView_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
@@ -1532,8 +1541,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     }
 
     private const int WmHotkey = 0x0312;
+    private const int WmMouseActivate = 0x0021;
     private const int WmDisplayChange = 0x007E;
     private const int WmDpiChanged = 0x02E0;
+    private const int MaNoActivate = 3;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint MonitorDefaultToNearest = 2;
