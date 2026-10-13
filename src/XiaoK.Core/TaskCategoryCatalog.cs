@@ -50,6 +50,9 @@ public static class TaskCategoryCatalog
         return false;
     }
 
-    public static string LabelOrConversation(string? category) =>
-        TryGetLabel(category, out var label) ? label : "本地对话";
+    public static string LabelOrConversation(string? category)
+    {
+        if (TryGetLabel(category, out var label)) return label;
+        return string.IsNullOrWhiteSpace(category) ? "本地对话" : "未分类任务";
+    }
 }
