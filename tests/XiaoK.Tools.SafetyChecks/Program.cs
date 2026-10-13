@@ -7599,6 +7599,25 @@ static async Task CheckFileContentSearchAsync(string root)
         oversized.SetLength(LocalFileContentSearchPolicy.MaximumFileBytes + 1L);
     await File.WriteAllTextAsync(Path.Combine(outside, "outside.txt"), "Needle outside-root", new UTF8Encoding(false));
 
+    var replacementTarget = Path.Combine(allowed, "replace-race.txt");
+    var replacementSource = Path.Combine(allowed, "replace-race.next");
+    await File.WriteAllTextAsync(replacementTarget, "ORIGINAL_GENERATION", new UTF8Encoding(false));
+    await File.WriteAllTextAsync(replacementSource, "REPLACED_GENERATION", new UTF8Encoding(false));
+    Require(WindowsDesktopTools.TryOpenOrdinaryFileForRead(replacementTarget, out var openedTarget,
+            out var openedCanonicalPath, out var openedIdentity, out var openedLength, out var openedWriteTime),
+        "文件替换竞态夹具无法打开普通目标文件。");
+    using (openedTarget)
+    {
+        Require(WindowsDesktopTools.IsPathStillSameOrdinaryFile(replacementTarget, openedCanonicalPath,
+                openedIdentity, openedLength, openedWriteTime),
+            "未变化的文件路径没有通过文件身份与快照复核。");
+        File.Replace(replacementSource, replacementTarget, destinationBackupFileName: null,
+            ignoreMetadataErrors: true);
+        Require(!WindowsDesktopTools.IsPathStillSameOrdinaryFile(replacementTarget, openedCanonicalPath,
+                openedIdentity, openedLength, openedWriteTime),
+            "路径被原子替换后仍被当作原文件接受，搜索可能返回过期位置。");
+    }
+
     var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowed)]);
     var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
     var proposal = LocalFileContentSearchPolicy.CreateUserToolProposal("在文件内容中搜索：Needle")

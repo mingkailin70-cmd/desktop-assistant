@@ -34,7 +34,7 @@ public sealed partial class WindowsDesktopTools
 
         cancellationToken.ThrowIfCancellationRequested();
         if (!TryOpenOrdinaryFileForRead(requestedPath, out var fileHandle, out var canonicalFile,
-                out _, out var fileLength, out var writeTime))
+                out var fileIdentity, out var fileLength, out var writeTime))
             return new(false, "文本文件不存在、不可读，或属于链接/特殊文件；没有读取内容。", "TEXT_FILE_UNAVAILABLE");
 
         using (fileHandle)
@@ -54,9 +54,12 @@ public sealed partial class WindowsDesktopTools
 
             if (isDocx)
             {
-                if (!TryReadStableDocxText(fileHandle, fileLength, writeTime, cancellationToken, out var docxText))
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!TryReadStableDocxText(fileHandle, fileLength, writeTime, cancellationToken, out var docxText)
+                    || !IsPathStillSameOrdinaryFile(requestedPath, canonicalFile, fileIdentity,
+                        fileLength, writeTime))
                     return new(false,
-                        "DOCX结构、主文档XML或读取状态不受支持；正文未提交给模型。",
+                        "DOCX结构、主文档XML、路径身份或读取状态不受支持；正文未提交给模型。",
                         "DOCX_UNSTABLE_OR_UNSUPPORTED");
 
                 return new(true,
@@ -68,9 +71,13 @@ public sealed partial class WindowsDesktopTools
             {
                 var pdfResult = await TryReadStablePdfTextAsync(fileHandle, fileLength, writeTime,
                     cancellationToken).ConfigureAwait(false);
-                if (!pdfResult.Success)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!pdfResult.Success
+                    || !IsPathStillSameOrdinaryFile(requestedPath, canonicalFile, fileIdentity,
+                        fileLength, writeTime))
                 {
-                    var message = pdfResult.ErrorCode switch
+                    var errorCode = pdfResult.Success ? "PDF_UNSTABLE_OR_UNSUPPORTED" : pdfResult.ErrorCode;
+                    var message = errorCode switch
                     {
                         "PDF_TOO_MANY_PAGES" => "PDF超过100页读取上限；没有把正文交给模型。",
                         "PDF_TEXT_TOO_LARGE" => "PDF提取文字超过64 Ki字符上限；没有把正文交给模型。",
@@ -79,7 +86,7 @@ public sealed partial class WindowsDesktopTools
                         "PDF_WORKER_FAILED" => "隔离PDF解析进程异常退出；正文未提交给模型。",
                         _ => "PDF结构不受支持、加密、读取期间发生变化，或无法提取文字；正文未提交给模型。"
                     };
-                    return new(false, message, pdfResult.ErrorCode);
+                    return new(false, message, errorCode);
                 }
 
                 return new(true,
@@ -87,7 +94,7 @@ public sealed partial class WindowsDesktopTools
                     Data: pdfResult.Text);
             }
 
-            if (!TryReadStableTextFile(fileHandle, fileLength, writeTime,
+            if (!TryReadStableTextFile(requestedPath, canonicalFile, fileIdentity, fileHandle, fileLength, writeTime,
                     LocalDocumentSummaryPolicy.MaximumFileBytes, cancellationToken,
                     out var text, out _, out var exceededBudget))
                 return new(false,
@@ -224,7 +231,8 @@ public sealed partial class WindowsDesktopTools
                         }
 
                         var permittedBytes = (int)Math.Min(LocalFileContentSearchPolicy.MaximumFileBytes, remainingBytes);
-                        if (!TryReadStableTextFile(fileHandle, fileLength, fileWriteTime, permittedBytes,
+                        if (!TryReadStableTextFile(entryPath, filePath, fileIdentity, fileHandle,
+                                fileLength, fileWriteTime, permittedBytes,
                                 cancellationToken, out var content, out var bytesReadForFile, out var exceededBudget))
                         {
                             bytesRead += Math.Min(bytesReadForFile, permittedBytes);
@@ -256,7 +264,8 @@ public sealed partial class WindowsDesktopTools
         return new(true, summary, Data: response);
     }
 
-    private static bool TryReadStableTextFile(SafeFileHandle handle, long expectedLength, long expectedWriteTime,
+    private static bool TryReadStableTextFile(string requestedPath, string expectedCanonicalPath,
+        FileIdentity expectedIdentity, SafeFileHandle handle, long expectedLength, long expectedWriteTime,
         int maximumBytes, CancellationToken cancellationToken, out string text, out long bytesRead,
         out bool exceededBudget)
     {
@@ -296,6 +305,13 @@ public sealed partial class WindowsDesktopTools
                 text = string.Empty;
                 return false;
             }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsPathStillSameOrdinaryFile(requestedPath, expectedCanonicalPath, expectedIdentity,
+                    expectedLength, expectedWriteTime))
+            {
+                text = string.Empty;
+                return false;
+            }
             return true;
         }
         catch (DecoderFallbackException)
@@ -310,6 +326,19 @@ public sealed partial class WindowsDesktopTools
             text = string.Empty;
             return false;
         }
+    }
+
+    internal static bool IsPathStillSameOrdinaryFile(string requestedPath, string expectedCanonicalPath,
+        FileIdentity expectedIdentity, long expectedLength, long expectedWriteTime)
+    {
+        if (!TryOpenOrdinaryFileForRead(requestedPath, out var currentHandle, out var currentCanonicalPath,
+                out var currentIdentity, out var currentLength, out var currentWriteTime)) return false;
+
+        using (currentHandle)
+            return currentIdentity == expectedIdentity
+                && currentCanonicalPath.Equals(expectedCanonicalPath, StringComparison.OrdinalIgnoreCase)
+                && currentLength == expectedLength
+                && currentWriteTime == expectedWriteTime;
     }
 
     private static bool TryDecodeStrictText(byte[] bytes, out string text)

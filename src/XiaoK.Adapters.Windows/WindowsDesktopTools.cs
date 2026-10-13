@@ -914,7 +914,7 @@ public sealed partial class WindowsDesktopTools
                 && currentPath.Equals(expectedPath, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool TryOpenOrdinaryFileForRead(string path, out SafeFileHandle handle, out string canonicalPath,
+    internal static bool TryOpenOrdinaryFileForRead(string path, out SafeFileHandle handle, out string canonicalPath,
         out FileIdentity identity, out long length, out long writeTime)
     {
         handle = new SafeFileHandle(IntPtr.Zero, ownsHandle: false);
@@ -1390,7 +1390,7 @@ public sealed partial class WindowsDesktopTools
         public ulong FileIdHigh;
     }
 
-    private readonly record struct FileIdentity(ulong VolumeSerialNumber, ulong FileIdLow, ulong FileIdHigh);
+    internal readonly record struct FileIdentity(ulong VolumeSerialNumber, ulong FileIdLow, ulong FileIdHigh);
     private sealed record EnumeratedEntry(string Name, uint Attributes, FileIdentity Identity);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
