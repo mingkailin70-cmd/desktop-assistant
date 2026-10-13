@@ -897,6 +897,30 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (_petPointerGestureActive)
+        {
+            if (msg == WmMouseMove)
+            {
+                TrackPetPointerMove((wParam.ToInt64() & MkLeftButton) != 0);
+                handled = true;
+                return IntPtr.Zero;
+            }
+
+            if (msg == WmLeftButtonUp)
+            {
+                FinishPetPointerGesture(expandOnClick: true);
+                handled = true;
+                return IntPtr.Zero;
+            }
+
+            if (msg is WmCaptureChanged or WmCancelMode)
+            {
+                FinishPetPointerGesture(expandOnClick: false);
+                handled = true;
+                return IntPtr.Zero;
+            }
+        }
+
         if (msg == WmMouseActivate && !_expanded)
         {
             handled = true;
@@ -1050,14 +1074,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             cursor.X, cursor.Y, originalRect.Left, originalRect.Top);
         _petWindowDragGesture.PointerDown(cursor.X, cursor.Y);
         _petPointerPositionChanged = false;
-        if (!System.Windows.Input.Mouse.Capture(PetView,
-                System.Windows.Input.CaptureMode.SubTree))
+        _ = SetCapture(handle);
+        if (GetCapture() != handle)
         {
             _petWindowDragGesture.Reset();
             _petWindowDragOrigin = null;
             ReportPetWindowDragUnavailable();
             e.Handled = true;
-            RestoreFromTray();
             return;
         }
 
@@ -1065,11 +1088,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         e.Handled = true;
     }
 
-    private void PetView_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    private void TrackPetPointerMove(bool leftButtonPressed)
     {
         if (!_petPointerGestureActive) return;
-        e.Handled = true;
-        if (e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+        if (!leftButtonPressed)
         {
             FinishPetPointerGesture(expandOnClick: true);
             return;
@@ -1104,18 +1126,6 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _petPointerPositionChanged = true;
     }
 
-    private void PetView_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != System.Windows.Input.MouseButton.Left || !_petPointerGestureActive) return;
-        e.Handled = true;
-        FinishPetPointerGesture(expandOnClick: true);
-    }
-
-    private void PetView_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        if (_petPointerGestureActive) FinishPetPointerGesture(expandOnClick: false);
-    }
-
     private void FinishPetPointerGesture(bool expandOnClick)
     {
         if (!_petPointerGestureActive) return;
@@ -1126,8 +1136,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _petPointerPositionChanged = false;
         _petPointerGestureActive = false;
 
-        if (ReferenceEquals(System.Windows.Input.Mouse.Captured, PetView))
-            System.Windows.Input.Mouse.Capture(null);
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero && GetCapture() == handle) _ = ReleaseCapture();
 
         if (wasDragging)
         {
@@ -1575,9 +1585,14 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private const int WmHotkey = 0x0312;
     private const int WmMouseActivate = 0x0021;
+    private const int WmMouseMove = 0x0200;
+    private const int WmLeftButtonUp = 0x0202;
+    private const int WmCaptureChanged = 0x0215;
+    private const int WmCancelMode = 0x001F;
     private const int WmDisplayChange = 0x007E;
     private const int WmDpiChanged = 0x02E0;
     private const int MaNoActivate = 3;
+    private const long MkLeftButton = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint MonitorDefaultToNearest = 2;
@@ -1627,6 +1642,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y,
         int width, int height, uint flags);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetCapture(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetCapture();
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hWnd);
 }

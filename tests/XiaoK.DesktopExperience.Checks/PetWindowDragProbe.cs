@@ -90,28 +90,36 @@ internal static class PetWindowDragProbe
         var xaml = File.ReadAllText(xamlPath);
         var code = File.ReadAllText(codePath);
         if (!xaml.Contains("PreviewMouseLeftButtonDown=\"PetView_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
-            || !xaml.Contains("PreviewMouseMove=\"PetView_PreviewMouseMove\"", StringComparison.Ordinal)
-            || !xaml.Contains("PreviewMouseLeftButtonUp=\"PetView_PreviewMouseLeftButtonUp\"", StringComparison.Ordinal)
-            || !xaml.Contains("LostMouseCapture=\"PetView_LostMouseCapture\"", StringComparison.Ordinal)
+            || xaml.Contains("PreviewMouseMove=\"PetView_PreviewMouseMove\"", StringComparison.Ordinal)
+            || xaml.Contains("PreviewMouseLeftButtonUp=\"PetView_PreviewMouseLeftButtonUp\"", StringComparison.Ordinal)
             || xaml.Contains("PetDragSurface", StringComparison.Ordinal))
-            failures.Add("桌宠按下、移动、抬起和失去捕获事件没有统一接到桌宠本体。");
+            failures.Add("桌宠按下事件未接到本体，或仍依赖WPF逐帧鼠标路由移动。");
 
         var dragStart = code.IndexOf("private void PetView_PreviewMouseLeftButtonDown", StringComparison.Ordinal);
         var dragEnd = code.IndexOf("private void PetView_PreviewMouseWheel", StringComparison.Ordinal);
         var dragCode = dragStart >= 0 && dragEnd > dragStart ? code[dragStart..dragEnd] : string.Empty;
         if (dragCode.Length == 0
-            || !dragCode.Contains("Mouse.Capture(PetView", StringComparison.Ordinal)
+            || !dragCode.Contains("SetCapture(handle)", StringComparison.Ordinal)
+            || !dragCode.Contains("GetCapture() != handle", StringComparison.Ordinal)
             || !dragCode.Contains("GetCursorPos(out var cursor)", StringComparison.Ordinal)
             || !dragCode.Contains("SetWindowPos(handle, IntPtr.Zero, left, top", StringComparison.Ordinal)
             || !dragCode.Contains("PetResizeHandle.IsMouseOver", StringComparison.Ordinal)
             || !dragCode.Contains("FitWindowToMonitorWorkArea();", StringComparison.Ordinal)
             || !dragCode.Contains("SaveWindowPosition();", StringComparison.Ordinal)
+            || dragCode.Contains("Mouse.Capture(", StringComparison.Ordinal)
             || dragCode.Contains("DragMove(", StringComparison.Ordinal))
-            failures.Add("桌宠没有使用捕获后的屏幕坐标直接移动，或未保留轻点/缩放/位置保存行为。");
+            failures.Add("桌宠没有建立原生鼠标捕获并按屏幕坐标移动，或未保留轻点/缩放/位置保存行为。");
 
         var hookStart = code.IndexOf("private IntPtr HotkeyHook", StringComparison.Ordinal);
         var hookEnd = code.IndexOf("private void RestoreFromTray", StringComparison.Ordinal);
         var hook = hookStart >= 0 && hookEnd > hookStart ? code[hookStart..hookEnd] : string.Empty;
+        if (!hook.Contains("msg == WmMouseMove", StringComparison.Ordinal)
+            || !hook.Contains("msg == WmLeftButtonUp", StringComparison.Ordinal)
+            || !hook.Contains("msg is WmCaptureChanged or WmCancelMode", StringComparison.Ordinal)
+            || !hook.Contains("TrackPetPointerMove((wParam.ToInt64() & MkLeftButton) != 0)", StringComparison.Ordinal)
+            || !code.Contains("GetCapture() == handle) _ = ReleaseCapture()", StringComparison.Ordinal))
+            failures.Add("桌宠拖动没有由窗口级原生消息持续跟踪，或捕获中断后没有清理。");
+
         if (!hook.Contains("if (!_petPointerGestureActive)", StringComparison.Ordinal)
             || !hook.Contains("new Action(FitWindowToMonitorWorkArea)", StringComparison.Ordinal))
             failures.Add("拖动跨屏触发DPI变化时可能被后台工作区校正打断。");
