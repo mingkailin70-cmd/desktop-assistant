@@ -317,7 +317,13 @@ foreach (var failure in XiaoK.DesktopExperience.Checks.TaskHistoryWindowUiProbe.
     Require(false, failure);
 Require(true, "任务中心离屏WPF检查通过。");
 foreach (var failure in XiaoK.DesktopExperience.Checks.SettingsWindowSaveProbe.Run())
+{
+    var annotationMessage = failure.Replace("%", "%25", StringComparison.Ordinal)
+        .Replace("\r", "%0D", StringComparison.Ordinal)
+        .Replace("\n", "%0A", StringComparison.Ordinal);
+    Console.WriteLine($"::error title=Settings save UI probe::{annotationMessage}");
     Require(false, failure);
+}
 Require(true, "设置页保存重入、失败恢复与关闭保护离屏WPF检查通过。");
 foreach (var failure in XiaoK.DesktopExperience.Checks.PetPoseTransitionProbe.Run())
     Require(false, failure);
