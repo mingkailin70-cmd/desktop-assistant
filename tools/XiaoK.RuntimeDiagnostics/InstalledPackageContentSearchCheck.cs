@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Xml.Linq;
 
 internal static class InstalledPackageContentSearchCheck
@@ -55,7 +56,7 @@ internal static class InstalledPackageContentSearchCheck
             var adapterAssembly = context.LoadFromAssemblyPath(Path.Combine(matchingLayout, AdapterAssemblyName));
             var coreAssembly = context.LoadFromAssemblyPath(Path.Combine(matchingLayout, CoreAssemblyName));
             Console.WriteLine($"装载验证包程序集：适配器={adapterAssembly.FullName}，Core={coreAssembly.FullName}");
-            var tools = CreateWindowsDesktopTools(adapterAssembly, fixtureRoot);
+            var tools = CreateWindowsDesktopTools(adapterAssembly, Path.Combine(fixtureRoot, "allowed"));
             var resultOne = await InvokeSearchAsync(adapterAssembly, coreAssembly, tools,
                 "Needle", "MatchingFileContentLocationsListed");
             var dataOne = ReadResultProperty(resultOne, "Data") ?? string.Empty;
@@ -101,16 +102,212 @@ internal static class InstalledPackageContentSearchCheck
         }
     }
 
-    private static object CreateWindowsDesktopTools(Assembly adapterAssembly, string fixtureRoot)
+    public static async Task<int> RunInstalledFileNameSearchAsync(string packageDirectory, string searchRootArgument,
+        string query, string expectedFileName)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine("已安装包文件名搜索检查只支持 Windows。");
+            return 2;
+        }
+
+        if (string.IsNullOrWhiteSpace(query) || query.Length > 120
+            || string.IsNullOrWhiteSpace(expectedFileName)
+            || !Path.GetFileName(expectedFileName).Equals(expectedFileName, StringComparison.Ordinal)
+            || expectedFileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            Console.Error.WriteLine("查询或预期文件名无效；没有执行搜索。");
+            return 2;
+        }
+
+        var packageRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(packageDirectory));
+        if (!Directory.Exists(packageRoot) || !IsExpectedInstalledPackage(packageRoot))
+        {
+            Console.Error.WriteLine("目标不是已安装的小K MSIX包目录；没有加载或执行程序集。");
+            return 2;
+        }
+
+        if (!TryResolveConfiguredSearchSubdirectory(searchRootArgument, out var searchRoot))
+        {
+            Console.Error.WriteLine("搜索目录不是本机设置中已配置搜索根的普通子目录；没有执行搜索。");
+            return 2;
+        }
+
+        var expectedPath = Path.Combine(searchRoot, expectedFileName);
+        if (!File.Exists(expectedPath)
+            || (File.GetAttributes(expectedPath) & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) != 0)
+        {
+            Console.Error.WriteLine("预期文件不是搜索目录根部的普通文件；没有执行搜索。");
+            return 2;
+        }
+
+        var adapterPath = Path.Combine(packageRoot, AdapterAssemblyName);
+        var corePath = Path.Combine(packageRoot, CoreAssemblyName);
+        var manifestPath = Path.Combine(packageRoot, "AppxManifest.xml");
+        if (!File.Exists(adapterPath) || !File.Exists(corePath) || !File.Exists(manifestPath)
+            || !ManifestMatches(manifestPath))
+        {
+            Console.Error.WriteLine("安装包身份或所需程序集不符合预期；未执行检查。");
+            return 2;
+        }
+
+        var installedAdapterHash = await HashFileAsync(adapterPath);
+        var installedCoreHash = await HashFileAsync(corePath);
+        var matchingLayout = await FindMatchingValidationLayoutAsync(manifestPath,
+            installedAdapterHash, installedCoreHash);
+        if (matchingLayout is null)
+        {
+            Console.Error.WriteLine("找不到身份、版本和适配器/Core散列均与已安装包一致的本地验证包副本；未执行检查。");
+            return 1;
+        }
+
+        var context = new InstalledPackageLoadContext(matchingLayout);
+        try
+        {
+            var adapterAssembly = context.LoadFromAssemblyPath(Path.Combine(matchingLayout, AdapterAssemblyName));
+            var coreAssembly = context.LoadFromAssemblyPath(Path.Combine(matchingLayout, CoreAssemblyName));
+            var tools = CreateWindowsDesktopTools(adapterAssembly, searchRoot);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var result = await InvokeFileNameSearchAsync(adapterAssembly, coreAssembly, tools, query);
+            clock.Stop();
+            var success = ReadResultProperty(result, "Success") == "True";
+            var data = ReadResultProperty(result, "Data") ?? string.Empty;
+            var hit = success && data.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .Any(line => string.Equals(line.Trim(), expectedPath, StringComparison.OrdinalIgnoreCase));
+
+            Console.WriteLine($"MSIX包版本：{ReadPackageVersion(manifestPath)}");
+            Console.WriteLine($"已安装/本地Windows文件适配器SHA-256：{installedAdapterHash}");
+            Console.WriteLine($"已安装/本地Core程序集SHA-256：{installedCoreHash}");
+            Console.WriteLine("程序集对照：身份、版本及SHA-256均与本地验证包副本相符。");
+            Console.WriteLine($"文件名搜索：{(hit ? "命中预期文件" : "未命中预期文件")}；耗时 {clock.Elapsed.TotalMilliseconds:F1} ms。");
+            Console.WriteLine("诊断仅输出命中状态与耗时，不显示搜索路径或内容；未启动Host。");
+            return hit ? 0 : 1;
+        }
+        finally { context.Unload(); }
+    }
+
+    private static object CreateWindowsDesktopTools(Assembly adapterAssembly, string searchRoot)
     {
         var desktopAppType = adapterAssembly.GetType("XiaoK.Adapters.Windows.DesktopApp", throwOnError: true)!;
         var windowsDesktopToolsType = adapterAssembly.GetType("XiaoK.Adapters.Windows.WindowsDesktopTools", throwOnError: true)!;
         var appCollection = Array.CreateInstance(desktopAppType, 0);
-        var roots = new[] { new KeyValuePair<string, string>("user-files", Path.Combine(fixtureRoot, "allowed")) };
+        var roots = new[] { new KeyValuePair<string, string>("user-files", searchRoot) };
         var constructor = windowsDesktopToolsType.GetConstructors()
             .SingleOrDefault(candidate => candidate.GetParameters().Length == 6)
             ?? throw new MissingMethodException("安装版WindowsDesktopTools构造签名发生变化。");
         return constructor.Invoke([appCollection, roots, null, null, null, null]);
+    }
+
+    private static async Task<object> InvokeFileNameSearchAsync(Assembly adapterAssembly, Assembly coreAssembly,
+        object tools, string query)
+    {
+        var proposalType = coreAssembly.GetType("XiaoK.Core.ToolProposal", throwOnError: true)!;
+        var proposalConstructor = proposalType.GetConstructors().Single();
+        var arguments = ImmutableDictionary.Create<string, string>(StringComparer.Ordinal)
+            .Add("query", query)
+            .Add("root_id", "user-files");
+        var preconditionType = coreAssembly.GetType("XiaoK.Core.ToolPrecondition", throwOnError: true)!;
+        var outcomeType = coreAssembly.GetType("XiaoK.Core.ToolExpectedOutcome", throwOnError: true)!;
+        var proposal = proposalConstructor.Invoke([
+            "file.search.v1", arguments, "user-files",
+            Enum.Parse(preconditionType, "ConfiguredSearchRoot"),
+            Enum.Parse(outcomeType, "MatchingFilesListed")]);
+        var method = adapterAssembly.GetType("XiaoK.Adapters.Windows.WindowsDesktopTools", throwOnError: true)!
+            .GetMethod("SearchFilesAsync", BindingFlags.Public | BindingFlags.Instance)
+            ?? throw new MissingMethodException("已安装文件名搜索入口不存在。");
+        var task = method.Invoke(tools, [proposal, CancellationToken.None]) as Task
+            ?? throw new InvalidOperationException("已安装文件名搜索入口没有返回Task。");
+        await task;
+        return task.GetType().GetProperty("Result")?.GetValue(task)
+            ?? throw new InvalidOperationException("已安装文件名搜索结果为空。");
+    }
+
+    private static bool TryResolveConfiguredSearchSubdirectory(string searchRootArgument, out string searchRoot)
+    {
+        searchRoot = string.Empty;
+        if (!Path.IsPathFullyQualified(searchRootArgument) || searchRootArgument.StartsWith("\\\\", StringComparison.Ordinal))
+            return false;
+
+        try
+        {
+            var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(searchRootArgument));
+            var volumeRoot = Path.GetPathRoot(fullPath);
+            if (volumeRoot is null || fullPath.Equals(Path.TrimEndingDirectorySeparator(volumeRoot), StringComparison.OrdinalIgnoreCase)
+                || !Directory.Exists(fullPath) || !HasNoReparsePointComponents(fullPath)) return false;
+
+            var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(localData)) return false;
+            var settingsPath = Path.Combine(localData, "Packages", "MingKaiLin.XiaoK_g0ndt6g65c8pe",
+                "LocalCache", "Local", "XiaoK", "settings.json");
+            if (!File.Exists(settingsPath) || (File.GetAttributes(settingsPath) & FileAttributes.ReparsePoint) != 0)
+                return false;
+
+            using var stream = new FileStream(settingsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length > 1_048_576) return false;
+            using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { MaxDepth = 16 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("searchRoots", out var configuredRoots)
+                || configuredRoots.ValueKind != JsonValueKind.Array) return false;
+
+            foreach (var entry in configuredRoots.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.Object
+                    || !entry.TryGetProperty("path", out var pathElement)
+                    || pathElement.ValueKind != JsonValueKind.String) continue;
+                var configuredPath = pathElement.GetString();
+                if (string.IsNullOrWhiteSpace(configuredPath) || !Path.IsPathFullyQualified(configuredPath)
+                    || configuredPath.StartsWith("\\\\", StringComparison.Ordinal)) continue;
+                var configuredRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(configuredPath));
+                if (!Directory.Exists(configuredRoot) || !HasNoReparsePointComponents(configuredRoot)) continue;
+                if (IsWithinRoot(fullPath, configuredRoot)
+                    && !fullPath.Equals(configuredRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    searchRoot = fullPath;
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
+            or ArgumentException or NotSupportedException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool HasNoReparsePointComponents(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var volumeRoot = Path.GetPathRoot(fullPath);
+        if (string.IsNullOrWhiteSpace(volumeRoot)) return false;
+        var current = Path.TrimEndingDirectorySeparator(volumeRoot);
+        try
+        {
+            if ((File.GetAttributes(volumeRoot) & FileAttributes.ReparsePoint) != 0) return false;
+            foreach (var component in fullPath[volumeRoot.Length..].Split(
+                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, component);
+                if (!Directory.Exists(current) || (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsWithinRoot(string path, string root)
+    {
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        var fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        var rootPrefix = Path.EndsInDirectorySeparator(fullRoot)
+            ? fullRoot
+            : fullRoot + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<object> InvokeSearchAsync(Assembly adapterAssembly, Assembly coreAssembly,
