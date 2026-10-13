@@ -1,3 +1,11 @@
+## v0.1.125.0 桌宠自由拖动修复与安装（2026-10-13）
+
+桌宠紧凑态任意区域拖动修复由源码提交`c41bdb1`完成，按钮事件路由合成探针由`14aebf3`补充；对应GitHub Actions [Build 38384158563](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38384158563)及[Build 38385993910](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38385993910)成功。修复通过预览按下/移动/抬起事件和Windows系统拖动阈值保留轻点展开，缩放手柄不触发移动，拖后坐标仍保存并限制在工作区。此前已完成固定SDK `10.0.401`自包含Release发布，包含`Microsoft.NETCore.App`和`Microsoft.WindowsDesktop.App 10.0.12`。签名包`artifacts\msix-validation\bd984f0568364c6d8c607cadc9a44f18\XiaoK-signed-validation.msix`大小155,798,068字节，SHA-256 `AD0AE214617A8D78862B885AA787833C7201C48C0644E2F7894EA5C39AB0BB1C`；SignTool验签成功、0警告、0错误。证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本阶段未修改信任。
+
+当前账户安装`MingKaiLin.XiaoK_0.1.125.0_neutral__g0ndt6g65c8pe`、状态`Ok`。安装版/发布版`XiaoK.Host.dll` SHA-256均为`182DECE9D0FD8DBABB5268BB7585FCDAB61AF6AED8C4EC5A6EA7A3CF65202EF4`。使用隔离`--diagnostics-profile`启动后，窗口可见、响应，启动前后前台句柄一致；未连接模型、未启用通知或麦克风。真实鼠标拖动与轻点展开目前等待用户在桌面实测确认，缩放手柄、多屏/DPI和重启位置记忆仍待验证。
+
+旧安装版`0.1.124.0`的24小时可见空闲观察原计划持续至2026-10-14 12:29，后因优先安装拖动修复而中止；监控脚本与Host进程已退出，但未生成最终报告，因此不计为长时运行通过。修复版长时观察尚未开始，应在本轮桌面交互验收后重新启动。保留的`0.1.124.0`签名回滚包位于`artifacts\msix-validation\c4db4f47ac394594b4396e4475806eb0\XiaoK-signed-validation.msix`，155,792,717字节、SHA-256 `B3111E9C86847E9FBF3C9B7C05E4E225446C750B361EB571859F0ECFD66FD8E2`；本次复核SignTool状态有效。安装版跨版本数据恢复和回滚操作本身尚未实测。此安装不是桌宠验收或首版交付通过的证据。
+
 ## v0.1.124.0 P2正式Host三维桌宠渲染器（2026-10-13）
 
 将WPF `Viewport3D`银渐层网格和四态冻结缓存接入正式Host，并安装到当前账户。为保留已有 `artifacts\publish\win-x64`输出，使用独立发布目录`artifacts\publish\pet3d-0.1.124.0-4c48113`；固定SDK `10.0.401`锁定还原与Release自包含发布，包含Microsoft.NETCore.App和Microsoft.WindowsDesktop.App `10.0.12`。签名MSIX `artifacts\msix-validation\c4db4f47ac394594b4396e4475806eb0\XiaoK-signed-validation.msix`，155,792,717字节，SHA-256 `B3111E9C86847E9FBF3C9B7C05E4E225446C750B361EB571859F0ECFD66FD8E2`；SignTool验签0警告、0错误，使用此前已受信证书`B96A02547ABA84523619E11EB7788AE9850A5C60`，未更改信任。安装状态`Ok`，安装版和发布版Host DLL SHA-256均为`AE374DA918E6F5A2D5ED779CB057E762A1CEA329A065DE369550EA966EE42E97`。上一版`0.1.123.0`回滚包仍保留：`artifacts\msix-validation\1b5b1359ba734e10b5a090254f78b3e6\XiaoK-signed-validation.msix`，155,783,364字节，SHA-256 `9CDF1556F4D8BBA63B9ACD90EF44F78473BE8A8B018C93600A2F85074FCB8E26`。
