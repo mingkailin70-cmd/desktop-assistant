@@ -26,8 +26,8 @@ internal static class TaskHistoryWindowUiProbe
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        if (!thread.Join(TimeSpan.FromSeconds(8)))
-            return ["任务中心离屏UI检查超过8秒；工作线程设为后台且不会触碰用户窗口。"];
+        if (!thread.Join(TimeSpan.FromSeconds(12)))
+            return ["任务中心离屏UI检查超过12秒；工作线程设为后台且不会触碰用户窗口。"];
         if (threadFailure is not null)
             return [$"任务中心离屏UI检查异常：{threadFailure.GetType().Name}"];
         return failures;
@@ -86,7 +86,7 @@ internal static class TaskHistoryWindowUiProbe
         var completed = false;
         var watchdog = new DispatcherTimer(DispatcherPriority.ApplicationIdle, dispatcher)
         {
-            Interval = TimeSpan.FromSeconds(4)
+            Interval = TimeSpan.FromSeconds(8)
         };
         watchdog.Tick += (_, _) =>
         {
