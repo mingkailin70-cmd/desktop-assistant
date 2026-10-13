@@ -1,3 +1,9 @@
+## v0.1.129.0 桌宠指针拖动复修与安装（2026-10-14）
+
+用户反馈已安装桌宠仍不能自由移动。复核发现`0.1.128.0`使用WPF `Window.DragMove()`，但仅通过源码探针确认事件接线，没有真实鼠标输入验收。本次改为桌宠本体预览事件捕获输入，按物理屏幕坐标逐帧移动，超过系统阈值才移动，轻点继续展开任务面板，缩放把手排除；移动调用保留`SWP_NOACTIVATE|SWP_NOZORDER`，拖动结束进行工作区约束并保存。
+
+固定SDK `10.0.401` Release全解决方案构建0警告/0错误，桌面体验109项、安全检查134项通过且0跳过。自包含签名包`artifacts\msix-validation\bddc3fcdc55b495ca0d73992ddcb4294\XiaoK-signed-validation.msix`大小155,800,367字节，SHA-256 `5145CC39DD6C2E7F75160DD469406A9075B4C89BE5BA8603D00AB392CF0989C1`；SignTool验签0警告、0错误，证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已受信，本次未改信任。安装器核验旧Host PID 46304并正常退出，随后安装`0.1.129.0`并启动，状态`Ok`，当前Host PID 57780；安装版/发布版`XiaoK.Host.dll` SHA-256均为`042C8F8DAA2B0D0F44CA4D003E179D89A5106C0240E5BCF381A23B887C9E10A1`。`llama-server`未运行。实际鼠标拖动、轻点展开、缩放和重启位置恢复仍待现场验收；本安装不等于首版桌宠验收通过。
+
 ## v0.1.125.0 桌宠自由拖动修复与安装（2026-10-13）
 
 桌宠紧凑态任意区域拖动修复由源码提交`c41bdb1`完成，按钮事件路由合成探针由`14aebf3`补充；对应GitHub Actions [Build 38384158563](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38384158563)及[Build 38385993910](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38385993910)成功。修复通过预览按下/移动/抬起事件和Windows系统拖动阈值保留轻点展开，缩放手柄不触发移动，拖后坐标仍保存并限制在工作区。此前已完成固定SDK `10.0.401`自包含Release发布，包含`Microsoft.NETCore.App`和`Microsoft.WindowsDesktop.App 10.0.12`。签名包`artifacts\msix-validation\bd984f0568364c6d8c607cadc9a44f18\XiaoK-signed-validation.msix`大小155,798,068字节，SHA-256 `AD0AE214617A8D78862B885AA787833C7201C48C0644E2F7894EA5C39AB0BB1C`；SignTool验签成功、0警告、0错误。证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本阶段未修改信任。

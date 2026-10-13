@@ -50,6 +50,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeStartPercent;
     private double _petResizeHorizontal;
     private double _petResizeVertical;
+    private readonly PetWindowDragGesture _petWindowDragGesture = new();
+    private PetWindowDragOrigin? _petWindowDragOrigin;
+    private bool _petPointerGestureActive;
+    private bool _petPointerPositionChanged;
 
     public bool HasPendingActionConfirmationForTask(Guid taskId) =>
         _approvalInbox.HasPendingActionConfirmationForTask(taskId);
@@ -915,8 +919,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
         else if (msg is WmDisplayChange or WmDpiChanged)
         {
-            _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
-                new Action(FitWindowToMonitorWorkArea));
+            if (!_petPointerGestureActive)
+                _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(FitWindowToMonitorWorkArea));
         }
         return IntPtr.Zero;
     }
@@ -1032,38 +1037,109 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             || PetResizeHandle.IsMouseOver) return;
 
         var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var originalRect))
+        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor)
+            || !GetWindowRect(handle, out var originalRect))
         {
             ReportPetWindowDragUnavailable();
+            e.Handled = true;
+            RestoreFromTray();
             return;
         }
 
+        _petWindowDragOrigin = new PetWindowDragOrigin(
+            cursor.X, cursor.Y, originalRect.Left, originalRect.Top);
+        _petWindowDragGesture.PointerDown(cursor.X, cursor.Y);
+        _petPointerPositionChanged = false;
+        if (!System.Windows.Input.Mouse.Capture(PetView,
+                System.Windows.Input.CaptureMode.SubTree))
+        {
+            _petWindowDragGesture.Reset();
+            _petWindowDragOrigin = null;
+            ReportPetWindowDragUnavailable();
+            e.Handled = true;
+            RestoreFromTray();
+            return;
+        }
+
+        _petPointerGestureActive = true;
         e.Handled = true;
-        try
+    }
+
+    private void PetView_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_petPointerGestureActive) return;
+        e.Handled = true;
+        if (e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
         {
-            DragMove();
+            FinishPetPointerGesture(expandOnClick: true);
+            return;
         }
-        catch (InvalidOperationException)
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor))
         {
             ReportPetWindowDragUnavailable();
-            RestoreFromTray();
+            FinishPetPointerGesture(expandOnClick: false);
             return;
         }
 
-        if (!GetWindowRect(handle, out var movedRect))
+        var dpiScale = GetEffectiveDpi(handle) / 96d;
+        if (!_petWindowDragGesture.IsDragging)
+            _petWindowDragGesture.TryStartDrag(cursor.X, cursor.Y,
+                leftButtonPressed: true,
+                minimumHorizontalDistance: SystemParameters.MinimumHorizontalDragDistance * dpiScale,
+                minimumVerticalDistance: SystemParameters.MinimumVerticalDragDistance * dpiScale);
+        if (!_petWindowDragGesture.IsDragging) return;
+
+        if (_petWindowDragOrigin is not { } origin
+            || !origin.TryGetTargetPosition(cursor.X, cursor.Y, out var left, out var top)
+            || !SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0,
+                SwpNoSize | SwpNoZOrder | SwpNoActivate))
         {
             ReportPetWindowDragUnavailable();
+            FinishPetPointerGesture(expandOnClick: false);
             return;
         }
 
-        if (movedRect.Left == originalRect.Left && movedRect.Top == originalRect.Top)
+        _petPointerPositionChanged = true;
+    }
+
+    private void PetView_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != System.Windows.Input.MouseButton.Left || !_petPointerGestureActive) return;
+        e.Handled = true;
+        FinishPetPointerGesture(expandOnClick: true);
+    }
+
+    private void PetView_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_petPointerGestureActive) FinishPetPointerGesture(expandOnClick: false);
+    }
+
+    private void FinishPetPointerGesture(bool expandOnClick)
+    {
+        if (!_petPointerGestureActive) return;
+
+        var wasDragging = _petWindowDragGesture.PointerUp();
+        var positionChanged = _petPointerPositionChanged;
+        _petWindowDragOrigin = null;
+        _petPointerPositionChanged = false;
+        _petPointerGestureActive = false;
+
+        if (ReferenceEquals(System.Windows.Input.Mouse.Captured, PetView))
+            System.Windows.Input.Mouse.Capture(null);
+
+        if (wasDragging)
         {
-            RestoreFromTray();
+            if (positionChanged)
+            {
+                FitWindowToMonitorWorkArea();
+                SaveWindowPosition();
+            }
             return;
         }
 
-        FitWindowToMonitorWorkArea();
-        SaveWindowPosition();
+        if (expandOnClick) RestoreFromTray();
     }
 
     private void ReportPetWindowDragUnavailable()
@@ -1519,6 +1595,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct MonitorInfo
     {
         public uint Size;
@@ -1532,6 +1615,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr MonitorFromRect(ref NativeRect rect, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
