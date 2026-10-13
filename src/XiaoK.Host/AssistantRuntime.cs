@@ -493,7 +493,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
                 ? "已向当前步骤发出安全停止请求；等待该步骤响应。若操作已经产生副作用，最终结果仍需核验。"
                 : _transientUserTaskResults.TryGetValue(record.Id, out var transientResult) ? transientResult
                 : record.ErrorCode == TaskHistoryRecoveryPolicy.ApprovalNotRestoredErrorCode
-                    ? "上次关闭时的审批待办不会跨进程恢复；小K没有自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
+                    ? "上次关闭时的审批待办不会跨进程恢复；小K不会自动继续或重放动作。请先核对相关应用或隔离工作区，再决定是否重新发起。"
                 : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedBeforeActionErrorCode
                     ? "小K在实际操作开始前退出；该任务没有执行。检查条件后可以重新提交。"
                 : record.ErrorCode == TaskHistoryRecoveryPolicy.HostRestartedErrorCode
