@@ -50,20 +50,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeStartPercent;
     private double _petResizeHorizontal;
     private double _petResizeVertical;
-    private readonly PetWindowDragGesture _petWindowDragGesture = new();
-    // Poll only while the user is dragging the pet; a temporary hook reports release because
-    // GetAsyncKeyState can return zero for this non-activating background window.
-    private readonly System.Windows.Threading.DispatcherTimer _petPointerPollTimer = new(
-        System.Windows.Threading.DispatcherPriority.Input)
-    {
-        Interval = TimeSpan.FromMilliseconds(16)
-    };
-    private readonly LowLevelMouseProc _petMouseReleaseHookProcedure;
-    private IntPtr _petMouseReleaseHook;
-    private PetWindowDragOrigin? _petWindowDragOrigin;
-    private bool _petPointerGestureActive;
-    private bool _petPointerPositionChanged;
-    private int _petPointerReleasePending;
+    private NativeRect? _petNativeMoveStartRect;
+    private bool _petNativePointerGestureActive;
+    private bool _petNativeMoveCancelled;
 
     public bool HasPendingActionConfirmationForTask(Guid taskId) =>
         _approvalInbox.HasPendingActionConfirmationForTask(taskId);
@@ -71,8 +60,6 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     public MainWindow()
     {
         InitializeComponent();
-        _petMouseReleaseHookProcedure = PetMouseReleaseHookCallback;
-        _petPointerPollTimer.Tick += PetPointerPollTimer_Tick;
         CancelButton.IsEnabled = false;
         _runtime = new AssistantRuntime(this);
         _approvalInbox.Changed += OnApprovalInboxChanged;
@@ -909,24 +896,84 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WmPetPointerReleased && _petPointerGestureActive)
+        if (msg == WmNcHitTest && !_expanded)
         {
-            Interlocked.Exchange(ref _petPointerReleasePending, 0);
-            if (GetCursorPos(out var releasedAt)) TrackPetPointerMove(releasedAt.X, releasedAt.Y);
-            else ReportPetWindowDragUnavailable();
-            FinishPetPointerGesture(expandOnClick: true);
             handled = true;
+            return new IntPtr(PetWindowInteractionPolicy.GetHitTest(
+                compact: true, resizeHandle: IsPetResizeHandleAtScreenPoint(lParam)));
+        }
+
+        if (msg == WmSetCursor && !_expanded
+            && unchecked((short)(lParam.ToInt64() & 0xffff)) == HtCaption)
+        {
+            var moveCursor = LoadCursor(IntPtr.Zero, new IntPtr(IdcSizeAll));
+            if (moveCursor != IntPtr.Zero)
+            {
+                SetCursor(moveCursor);
+                handled = true;
+                return new IntPtr(1);
+            }
+        }
+
+        if (msg == WmNcLButtonDown && !_expanded && wParam.ToInt32() == HtCaption)
+        {
+            _petNativePointerGestureActive = true;
+            _petNativeMoveCancelled = false;
+            _petNativeMoveStartRect = GetWindowRect(hwnd, out var origin) ? origin : null;
             return IntPtr.Zero;
         }
 
-        if (_petPointerGestureActive)
+        if (msg == WmEnterSizeMove && !_expanded && _petNativePointerGestureActive
+            && _petNativeMoveStartRect is null && GetWindowRect(hwnd, out var enteredAt))
         {
-            if (msg == WmCancelMode)
-            {
-                FinishPetPointerGesture(expandOnClick: false);
-                handled = true;
-                return IntPtr.Zero;
-            }
+            _petNativeMoveStartRect = enteredAt;
+        }
+
+        if (msg == WmExitSizeMove && _petNativePointerGestureActive)
+        {
+            var origin = _petNativeMoveStartRect;
+            var cancelled = _petNativeMoveCancelled;
+            _petNativePointerGestureActive = false;
+            _petNativeMoveStartRect = null;
+            _petNativeMoveCancelled = false;
+            if (origin is { } start)
+                _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,
+                    new Action(() => CompletePetNativeMove(start, cancelled)));
+            return IntPtr.Zero;
+        }
+
+        if (_petNativePointerGestureActive
+            && (msg == WmCancelMode || msg == WmKeyDown && wParam.ToInt32() == VkEscape))
+        {
+            _petNativeMoveCancelled = true;
+        }
+
+        if (msg == WmNcLButtonDblClk && !_expanded && wParam.ToInt32() == HtCaption)
+        {
+            _petNativePointerGestureActive = false;
+            _petNativeMoveStartRect = null;
+            _petNativeMoveCancelled = false;
+            handled = true;
+            _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,
+                new Action(RestoreFromTray));
+            return IntPtr.Zero;
+        }
+
+        if (msg == WmNcRButtonUp && !_expanded && wParam.ToInt32() == HtCaption)
+        {
+            handled = true;
+            _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input,
+                new Action(OpenPetContextMenu));
+            return IntPtr.Zero;
+        }
+
+        if (msg == WmMouseWheel && !_expanded
+            && (unchecked((ushort)(wParam.ToInt64() & 0xffff)) & MkControl) != 0)
+        {
+            var delta = unchecked((short)(wParam.ToInt64() >> 16));
+            if (delta != 0) SetPetScale(_petScalePercent + Math.Sign(delta) * 5, save: true);
+            handled = true;
+            return IntPtr.Zero;
         }
 
         if (msg == WmMouseActivate && !_expanded)
@@ -951,38 +998,63 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
         else if (msg is WmDisplayChange or WmDpiChanged)
         {
-            if (!_petPointerGestureActive)
+            if (!_petNativePointerGestureActive)
                 _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background,
                     new Action(FitWindowToMonitorWorkArea));
         }
         return IntPtr.Zero;
     }
 
-    private IntPtr PetMouseReleaseHookCallback(int code, IntPtr wParam, IntPtr lParam)
+    private bool IsPetResizeHandleAtScreenPoint(IntPtr lParam)
     {
-        if (code >= 0 && wParam.ToInt32() == WmLButtonUp && _petPointerGestureActive)
+        if (!PetResizeHandle.IsVisible || PetResizeHandle.ActualWidth <= 0 || PetResizeHandle.ActualHeight <= 0)
+            return false;
+
+        var packed = unchecked((int)lParam.ToInt64());
+        var screenPoint = new System.Windows.Point(unchecked((short)(packed & 0xffff)),
+            unchecked((short)((packed >> 16) & 0xffff)));
+        try
         {
-            Interlocked.Exchange(ref _petPointerReleasePending, 1);
-            var handle = _source?.Handle ?? IntPtr.Zero;
-            if (handle != IntPtr.Zero)
-                _ = PostMessage(handle, WmPetPointerReleased, IntPtr.Zero, IntPtr.Zero);
+            var point = PetView.PointFromScreen(screenPoint);
+            var handleOrigin = PetResizeHandle.TranslatePoint(new System.Windows.Point(0, 0), PetView);
+            return new Rect(handleOrigin, new System.Windows.Size(PetResizeHandle.ActualWidth, PetResizeHandle.ActualHeight))
+                .Contains(point);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private void CompletePetNativeMove(NativeRect origin, bool cancelled)
+    {
+        if (_exiting || _expanded) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var current))
+        {
+            ReportPetWindowDragUnavailable();
+            return;
         }
 
-        return CallNextHookEx(_petMouseReleaseHook, code, wParam, lParam);
+        var moved = origin.Left != current.Left || origin.Top != current.Top;
+        switch (PetWindowInteractionPolicy.GetCompletion(moved, cancelled))
+        {
+            case PetWindowMoveCompletion.SavePosition:
+                FitWindowToMonitorWorkArea();
+                SaveWindowPosition();
+                break;
+            case PetWindowMoveCompletion.Expand:
+                RestoreFromTray();
+                break;
+        }
     }
 
-    private bool TryInstallPetMouseReleaseHook()
+    private void OpenPetContextMenu()
     {
-        _petMouseReleaseHook = SetWindowsHookEx(
-            WhMouseLl, _petMouseReleaseHookProcedure, GetModuleHandle(null), 0);
-        return _petMouseReleaseHook != IntPtr.Zero;
-    }
-
-    private void RemovePetMouseReleaseHook()
-    {
-        var hook = _petMouseReleaseHook;
-        _petMouseReleaseHook = IntPtr.Zero;
-        if (hook != IntPtr.Zero) _ = UnhookWindowsHookEx(hook);
+        if (_expanded || _exiting || PetView.ContextMenu is not { } contextMenu) return;
+        contextMenu.PlacementTarget = PetView;
+        contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        contextMenu.IsOpen = true;
     }
 
     private void RestoreFromTray()
@@ -1089,133 +1161,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         }
     }
 
-    private void PetView_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (_expanded || e.ChangedButton != System.Windows.Input.MouseButton.Left
-            || e.ButtonState != System.Windows.Input.MouseButtonState.Pressed
-            || PetResizeHandle.IsMouseOver) return;
-
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor)
-            || !GetWindowRect(handle, out var originalRect))
-        {
-            ReportPetWindowDragUnavailable();
-            e.Handled = true;
-            return;
-        }
-
-        _petPointerGestureActive = true;
-        if (!TryInstallPetMouseReleaseHook())
-        {
-            _petPointerGestureActive = false;
-            ReportPetWindowDragUnavailable();
-            return;
-        }
-
-        _petWindowDragOrigin = new PetWindowDragOrigin(
-            cursor.X, cursor.Y, originalRect.Left, originalRect.Top);
-        _petWindowDragGesture.PointerDown(cursor.X, cursor.Y);
-        _petPointerPositionChanged = false;
-        Interlocked.Exchange(ref _petPointerReleasePending, 0);
-        _petPointerPollTimer.Start();
-        e.Handled = true;
-    }
-
-    private void PetPointerPollTimer_Tick(object? sender, EventArgs e)
-    {
-        if (!_petPointerGestureActive)
-        {
-            _petPointerPollTimer.Stop();
-            return;
-        }
-
-        if (!GetCursorPos(out var cursor))
-        {
-            ReportPetWindowDragUnavailable();
-            FinishPetPointerGesture(expandOnClick: false);
-            return;
-        }
-
-        if (Interlocked.Exchange(ref _petPointerReleasePending, 0) != 0)
-        {
-            if (GetCursorPos(out var releasedAt)) TrackPetPointerMove(releasedAt.X, releasedAt.Y);
-            else ReportPetWindowDragUnavailable();
-            FinishPetPointerGesture(expandOnClick: true);
-            return;
-        }
-
-        TrackPetPointerMove(cursor.X, cursor.Y);
-    }
-
-    private void TrackPetPointerMove(int cursorX, int cursorY)
-    {
-        if (!_petPointerGestureActive) return;
-
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero)
-        {
-            ReportPetWindowDragUnavailable();
-            FinishPetPointerGesture(expandOnClick: false);
-            return;
-        }
-
-        var dpiScale = GetEffectiveDpi(handle) / 96d;
-        if (!_petWindowDragGesture.IsDragging)
-            _petWindowDragGesture.TryStartDrag(cursorX, cursorY,
-                leftButtonPressed: true,
-                minimumHorizontalDistance: SystemParameters.MinimumHorizontalDragDistance * dpiScale,
-                minimumVerticalDistance: SystemParameters.MinimumVerticalDragDistance * dpiScale);
-        if (!_petWindowDragGesture.IsDragging) return;
-
-        if (_petWindowDragOrigin is not { } origin
-            || !origin.TryGetTargetPosition(cursorX, cursorY, out var left, out var top)
-            || !SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0,
-                SwpNoSize | SwpNoZOrder | SwpNoActivate))
-        {
-            ReportPetWindowDragUnavailable();
-            FinishPetPointerGesture(expandOnClick: false);
-            return;
-        }
-
-        _petPointerPositionChanged = true;
-    }
-
-    private void FinishPetPointerGesture(bool expandOnClick)
-    {
-        if (!_petPointerGestureActive) return;
-
-        var wasDragging = _petWindowDragGesture.PointerUp();
-        var positionChanged = _petPointerPositionChanged;
-        _petWindowDragOrigin = null;
-        _petPointerPositionChanged = false;
-        _petPointerGestureActive = false;
-        _petPointerPollTimer.Stop();
-        RemovePetMouseReleaseHook();
-        Interlocked.Exchange(ref _petPointerReleasePending, 0);
-
-        if (wasDragging)
-        {
-            if (positionChanged)
-            {
-                FitWindowToMonitorWorkArea();
-                SaveWindowPosition();
-            }
-            return;
-        }
-
-        if (expandOnClick) RestoreFromTray();
-    }
-
     private void ReportPetWindowDragUnavailable()
     {
         SetStatus("桌宠移动暂不可用");
-    }
-
-    private void PetView_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
-    {
-        if (_expanded || (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == 0) return;
-        SetPetScale(_petScalePercent + Math.Sign(e.Delta) * 5, save: true);
-        e.Handled = true;
     }
 
     private void PetScaleSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -1574,8 +1522,6 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (_petPointerGestureActive) FinishPetPointerGesture(expandOnClick: false);
-        else _petPointerPollTimer.Stop();
         if (!_exiting) { e.Cancel = true; Hide(); return; }
         if (!_shutdownComplete)
         {
@@ -1623,7 +1569,6 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         _runtime.PrivateNoticeAnalysisCompleted -= OnPrivateNoticeAnalysisCompleted;
         _runtime.UserTaskStateChanged -= OnUserTaskStateChanged;
         _approvalInbox.Changed -= OnApprovalInboxChanged;
-        _petPointerPollTimer.Stop();
         if (_source is not null)
         {
             if (_hotkeyRegistered) UnregisterHotKey(_source.Handle, 1901);
@@ -1642,21 +1587,29 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private const int WmHotkey = 0x0312;
     private const int WmMouseActivate = 0x0021;
+    private const int WmSetCursor = 0x0020;
+    private const int WmNcHitTest = 0x0084;
+    private const int WmNcLButtonDown = 0x00A1;
+    private const int WmNcLButtonDblClk = 0x00A3;
+    private const int WmNcRButtonUp = 0x00A5;
+    private const int WmMouseWheel = 0x020A;
+    private const int WmKeyDown = 0x0100;
     private const int WmCancelMode = 0x001F;
-    private const int WmLButtonUp = 0x0202;
-    private const int WmPetPointerReleased = 0x8000 + 0x71;
+    private const int WmEnterSizeMove = 0x0231;
+    private const int WmExitSizeMove = 0x0232;
     private const int WmDisplayChange = 0x007E;
     private const int WmDpiChanged = 0x02E0;
-    private const int WhMouseLl = 14;
     private const int MaNoActivate = 3;
+    private const int HtCaption = 2;
+    private const int VkEscape = 0x1B;
+    private const int IdcSizeAll = 32646;
+    private const ushort MkControl = 0x0008;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint MonitorDefaultToNearest = 2;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
-
-    private delegate IntPtr LowLevelMouseProc(int code, IntPtr wParam, IntPtr lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
@@ -1665,13 +1618,6 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         public int Top;
         public int Right;
         public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1688,21 +1634,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+    [DllImport("user32.dll", EntryPoint = "LoadCursorW", SetLastError = true)]
+    private static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr cursorName);
     [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out NativePoint point);
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc callback, IntPtr module, uint threadId);
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool UnhookWindowsHookEx(IntPtr hook);
-    [DllImport("user32.dll")]
-    private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr GetModuleHandle(string? moduleName);
+    private static extern IntPtr SetCursor(IntPtr cursor);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr MonitorFromRect(ref NativeRect rect, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
