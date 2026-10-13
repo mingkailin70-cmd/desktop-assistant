@@ -61,7 +61,7 @@ internal static class SettingsWindowSaveProbe
                 EvaluationRoot = CreateRoot("evaluations"),
                 CodeWorkspaceRoot = CreateRoot("workspace"),
                 Applications = [],
-                SearchRoots = []
+                SearchRoots = [new RootSetting("search-root-01", CreateRoot("search"))]
             };
 
             var replaceGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
