@@ -1,3 +1,11 @@
+## v0.1.136.0 CodeAgent凭证格式规则进入安装版（2026-10-14）
+
+把源码中 Hugging Face `hf_`、Docker Hub `dckr_pat_`/`dckr_oat_`与Azure DevOps `AZDO`有限格式脱敏规则纳入自包含安装包。安全套件仅使用合成令牌、近似普通值和占位符，提交`566fda7`对应GitHub Actions Build [38459546232](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38459546232)全流程成功：Release构建0警告/错误、安全检查134项、桌面体验109项通过。该扫描仍不覆盖所有秘密，也未用真实项目凭证验证。
+
+签名MSIX位于`artifacts\msix-validation\0d1ee5f741364a4c9614f47946871d57\XiaoK-signed-validation.msix`，155,801,834字节，SHA-256 `F83D982C149670A9F35510ABD2628D1B2B4667C6A0643F7496288F692A4790B1`；SignTool验签1个签名、0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本次未改信任。安装器请求旧Host PID 50904正常退出后安装当前用户`MingKaiLin.XiaoK_0.1.136.0_neutral__g0ndt6g65c8pe`、状态`Ok`；随后经正常AppX入口启动Host PID 70036，窗口可见且非前台。安装版/发布版`XiaoK.Host.dll` SHA-256均为`83476C107B75E156E2A8781D88414FAA8782B762F9ED800550EAB71F8BD959DA`，`XiaoK.Tools.dll`为`978D4D0FE3A8681CFF7857CBDE8A48CDF0EC8E6CCD3584678F149C9673ADB10F`，Windows适配器散列匹配。通知监听与唤醒词仍关闭、发布者名单为空，`llama-server`未运行。回滚包`0.1.135.0`位于`artifacts\msix-validation\70608c1a359f411da6ec9c411eea5fa3\XiaoK-signed-validation.msix`，SHA-256 `59E7B50101874A7D6E6FA91321D3279A3102384A8DAEC0DB7872A9C751B759A3`。
+
+安装和程序集身份核验不证明真实模型CodeAgent运行、真实项目AppContainer/网络边界、真实凭证检出或六场景端到端通过；当前桌宠拖动仍待真人鼠标验收。
+
 ## v0.1.135.0 桌宠非前台拖动释放检测修复（2026-10-14）
 
 桌宠保持`MA_NOACTIVATE`时，上一版轮询通过`GetAsyncKeyState(VK_LBUTTON)`判断鼠标是否仍按住；当前窗口不在前台时该API可能返回0，导致拖动手势提前结束。本版仅在桌宠按下期间安装`WH_MOUSE_LL`释放信号钩子；回调只投递窗口消息并调用`CallNextHookEx`，UI线程继续负责坐标轮询和`SetWindowPos`。释放、取消或窗口关闭即卸载钩子，不拦截或模拟输入。固定SDK Release全解构建0警告/错误，桌面体验109项通过。
