@@ -1,11 +1,14 @@
 <#
 .SYNOPSIS
-Requests a cooperative stop for one XiaoK visible-idle observation.
+Requests a cooperative stop for one XiaoK long-run observation.
 .DESCRIPTION
-Signals only the named event recorded by an active observation's control file. It never terminates a process.
-Control and request files are restricted to the repository's ignored .tools/stability directory.
+Signals only the named event recorded by an active observation's control file. It never terminates a process
+or stops an attached XiaoK Host. Control and request files are restricted to the repository's ignored .tools/stability directory.
 .EXAMPLE
 .\tools\request_xiaok_long_run_stop.ps1 -ControlFilePath .tools\stability\xiaok-visible-idle-<run-id>.control.json
+
+.EXAMPLE
+.\tools\request_xiaok_long_run_stop.ps1 -ControlFilePath .tools\stability\xiaok-attached-session-<run-id>.control.json
 #>
 [CmdletBinding()]
 param(
@@ -31,10 +34,11 @@ if (-not $fullControlPath.StartsWith($expectedParent, [StringComparison]::Ordina
 $controlFile = Get-Item -LiteralPath $fullControlPath -ErrorAction Stop
 if (($controlFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
     -not [string]::Equals($controlFile.DirectoryName, $stabilityDirectory, [StringComparison]::OrdinalIgnoreCase) -or
-    $controlFile.Name -notmatch '^xiaok-visible-idle-([0-9a-f]{32})\.control\.json$') {
+    $controlFile.Name -notmatch '^xiaok-(visible-idle|attached-session)-([0-9a-f]{32})\.control\.json$') {
     throw 'Control file path is not a valid long-run control file.'
 }
-$fileRunId = $Matches[1]
+$fileObservationMode = $Matches[1]
+$fileRunId = $Matches[2]
 
 $control = Get-Content -LiteralPath $fullControlPath -Raw | ConvertFrom-Json
 $monitorProcessId = 0
@@ -49,12 +53,34 @@ if ($control.schemaVersion -ne 1 -or $control.runId -cne $fileRunId -or
     throw 'Control file contents failed the run identity checks.'
 }
 
+$hostOwnedByMonitor = $true
+if ($control.PSObject.Properties.Name -contains 'hostOwnedByMonitor') {
+    if ($control.hostOwnedByMonitor -isnot [bool]) {
+        throw 'Control file ownership state is invalid.'
+    }
+    $hostOwnedByMonitor = $control.hostOwnedByMonitor
+}
+$controlObservationMode = 'visible-idle'
+if ($control.PSObject.Properties.Name -contains 'observationMode') {
+    if ($control.observationMode -isnot [string]) {
+        throw 'Control file observation mode is invalid.'
+    }
+    $controlObservationMode = $control.observationMode
+}
+if ($fileObservationMode -ne $controlObservationMode -or
+    $hostOwnedByMonitor -ne ($fileObservationMode -eq 'visible-idle')) {
+    throw 'Control file observation mode is invalid.'
+}
+
 foreach ($identity in @(
     @{ ProcessId = $monitorProcessId; StartedUtc = $control.monitorStartedUtc; Name = 'monitor' },
     @{ ProcessId = $hostProcessId; StartedUtc = $control.hostStartedUtc; Name = 'Host' }
 )) {
     $process = Get-Process -Id $identity.ProcessId -ErrorAction SilentlyContinue
-    if ($null -eq $process) { throw "The recorded $($identity.Name) process is no longer running." }
+    if ($null -eq $process) {
+        if ($identity.Name -eq 'Host' -and -not $hostOwnedByMonitor) { continue }
+        throw "The recorded $($identity.Name) process is no longer running."
+    }
     $expectedStartedUtc = [DateTimeOffset]::MinValue
     $hasExpectedStart = if ($identity.StartedUtc -is [datetime]) {
         $expectedStartedUtc = [DateTimeOffset]([datetime]$identity.StartedUtc)
@@ -74,6 +100,8 @@ $event = [Threading.EventWaitHandle]::OpenExisting([string]$control.stopEventNam
 $request = [ordered]@{
     schemaVersion = 1
     runId = $fileRunId
+    observationMode = $fileObservationMode
+    hostOwnedByMonitor = $hostOwnedByMonitor
     monitorProcessId = $monitorProcessId
     hostProcessId = $hostProcessId
     requestedUtc = [datetime]::UtcNow.ToString('o')

@@ -1,16 +1,21 @@
 <#
 .SYNOPSIS
-Measures a visible idle run of one explicitly selected installed XiaoK MSIX.
+Measures a visible idle run or observes one already-running installed XiaoK MSIX.
 .DESCRIPTION
-Refuses to attach to an existing Host, starts the selected package with an isolated diagnostics profile,
+By default, refuses to attach to an existing Host, starts the selected package with an isolated diagnostics profile,
 checks that launch does not change the foreground window, samples process/system resource counters, and
-requests the app's registered graceful shutdown when the observation ends. It never force-kills the Host.
+requests the app's registered graceful shutdown when the observation ends. The optional attached-session mode
+samples one exact installed Host without launching, stopping, or changing it; it records only aggregate counters,
+visibility/responsiveness, and package hashes. It never force-kills a Host.
 The diagnostics profile uses temporary data/model/voice roots and disables notification monitoring and wake word.
-Only aggregate counters and package hashes are written under the repository's ignored .tools/stability folder.
+Reports and controls are written under the repository's ignored .tools/stability folder.
 The script publishes an ignored control-file path; request a graceful partial report with
 tools/request_xiaok_long_run_stop.ps1 -ControlFilePath <path>. The request never terminates a process.
 .EXAMPLE
 .\tools\measure_xiaok_long_run.ps1 -DurationMinutes 1440 -ExpectedVersion 0.1.125.0
+
+.EXAMPLE
+.\tools\measure_xiaok_long_run.ps1 -DurationMinutes 1440 -ExpectedVersion 0.1.137.0 -AttachToExistingHost
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +28,9 @@ param(
     [string] $ExpectedVersion,
 
     [ValidateRange(15, 600)]
-    [int] $SampleIntervalSeconds = 60
+    [int] $SampleIntervalSeconds = 60,
+
+    [switch] $AttachToExistingHost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,11 +129,6 @@ if ($package.Count -ne 1) {
     throw "Expected one installed XiaoK MSIX version $ExpectedVersion with status Ok; found $($package.Count)."
 }
 
-$existingHosts = @(Get-Process -Name 'XiaoK.Host' -ErrorAction SilentlyContinue)
-if ($existingHosts.Count -ne 0) {
-    throw "A XiaoK.Host process is already running; refusing to attach or activate it."
-}
-
 $hostExecutable = Join-Path $package[0].InstallLocation 'XiaoK.Host.exe'
 $hostLibrary = Join-Path $package[0].InstallLocation 'XiaoK.Host.dll'
 if (-not (Test-Path -LiteralPath $hostExecutable -PathType Leaf) -or
@@ -134,14 +136,37 @@ if (-not (Test-Path -LiteralPath $hostExecutable -PathType Leaf) -or
     throw 'The installed Host executable or library is missing.'
 }
 
+$existingHosts = @(Get-Process -Name 'XiaoK.Host' -ErrorAction SilentlyContinue)
+$attachedHost = $null
+if ($AttachToExistingHost) {
+    $matchingHosts = @(
+        $existingHosts | Where-Object {
+            $_.Path -and [string]::Equals(
+                [IO.Path]::GetFullPath($_.Path),
+                [IO.Path]::GetFullPath($hostExecutable),
+                [StringComparison]::OrdinalIgnoreCase)
+        }
+    )
+    if ($existingHosts.Count -ne 1 -or $matchingHosts.Count -ne 1) {
+        throw "Attached-session mode requires exactly one Host from the selected MSIX; found $($existingHosts.Count) Host processes and $($matchingHosts.Count) matching the package."
+    }
+    $attachedHost = $matchingHosts[0]
+}
+elseif ($existingHosts.Count -ne 0) {
+    throw "A XiaoK.Host process is already running; refusing to attach or activate it."
+}
+
 $executableHash = (Get-FileHash -LiteralPath $hostExecutable -Algorithm SHA256).Hash
 $libraryHash = (Get-FileHash -LiteralPath $hostLibrary -Algorithm SHA256).Hash
 $reportDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) '.tools\stability'
 New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
 $runId = [guid]::NewGuid().ToString('N')
-$reportPath = Join-Path $reportDirectory ('xiaok-visible-idle-{0}-{1}.json' -f $ExpectedVersion, $runId)
-$controlFilePath = Join-Path $reportDirectory "xiaok-visible-idle-$runId.control.json"
-$stopRequestPath = Join-Path $reportDirectory "xiaok-visible-idle-$runId.stop.json"
+$hostOwnedByMonitor = -not [bool]$AttachToExistingHost
+$observationMode = if ($hostOwnedByMonitor) { 'visible-idle' } else { 'attached-session' }
+$runFilePrefix = "xiaok-$observationMode"
+$reportPath = Join-Path $reportDirectory ('{0}-{1}-{2}.json' -f $runFilePrefix, $ExpectedVersion, $runId)
+$controlFilePath = Join-Path $reportDirectory "$runFilePrefix-$runId.control.json"
+$stopRequestPath = Join-Path $reportDirectory "$runFilePrefix-$runId.stop.json"
 $stopEventName = "Local\XiaoKLongRun_$runId"
 $createdStopEvent = $false
 $stopEvent = [Threading.EventWaitHandle]::new(
@@ -151,19 +176,39 @@ if (-not $createdStopEvent) {
     throw 'Could not create a unique long-run stop event.'
 }
 $monitorProcess = Get-Process -Id $PID
-$foregroundBeforeLaunch = [XiaoKLongRunNativeMethods]::GetForegroundWindow()
+$foregroundBeforeLaunch = if ($hostOwnedByMonitor) {
+    [XiaoKLongRunNativeMethods]::GetForegroundWindow()
+}
+else {
+    [IntPtr]::Zero
+}
 $startedUtc = [datetime]::UtcNow
 $launched = $null
-$hostProcessId = 0
+$hostProcessId = if ($null -ne $attachedHost) { $attachedHost.Id } else { 0 }
+$hostStartedUtc = $null
 try {
-    $launched = Start-Process -FilePath $hostExecutable -ArgumentList '--diagnostics-profile' -PassThru
-    $hostProcessId = $launched.Id
-    $hostStartedUtc = $launched.StartTime.ToUniversalTime().ToString('o')
+    if ($hostOwnedByMonitor) {
+        $launched = Start-Process -FilePath $hostExecutable -ArgumentList '--diagnostics-profile' -PassThru
+        $hostProcessId = $launched.Id
+        $hostStartedUtc = $launched.StartTime.ToUniversalTime().ToString('o')
+    }
+    else {
+        $attachedHost.Refresh()
+        if (-not [string]::Equals(
+                [IO.Path]::GetFullPath($attachedHost.Path),
+                [IO.Path]::GetFullPath($hostExecutable),
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The attached Host executable changed before observation setup.'
+        }
+        $hostStartedUtc = $attachedHost.StartTime.ToUniversalTime().ToString('o')
+    }
     $monitorStartedUtc = $monitorProcess.StartTime.ToUniversalTime().ToString('o')
     $control = [ordered]@{
         schemaVersion = 1
         runId = $runId
         state = 'running'
+        observationMode = $observationMode
+        hostOwnedByMonitor = $hostOwnedByMonitor
         monitorProcessId = $PID
         monitorStartedUtc = $monitorStartedUtc
         hostProcessId = $hostProcessId
@@ -173,7 +218,7 @@ try {
     $control | ConvertTo-Json -Compress | Set-Content -LiteralPath $controlFilePath -Encoding UTF8
 }
 catch {
-    if ($null -ne $launched) {
+    if ($hostOwnedByMonitor -and $null -ne $launched) {
         [void][XiaoKLongRunNativeMethods]::RequestShutdownForProcess([uint32]$hostProcessId)
         $cleanupClock = [System.Diagnostics.Stopwatch]::StartNew()
         while ($cleanupClock.Elapsed.TotalSeconds -lt 15 -and
@@ -188,7 +233,7 @@ catch {
 Write-Output "controlFile=$controlFilePath"
 $process = $null
 $mainWindow = [IntPtr]::Zero
-$launchForegroundUnchanged = $false
+$launchForegroundUnchanged = if ($hostOwnedByMonitor) { $false } else { $null }
 $outcome = 'startup_timeout'
 $errorKind = $null
 $stopRequestObserved = $false
@@ -196,46 +241,87 @@ $stopRequestedUtc = $null
 $clock = [System.Diagnostics.Stopwatch]::StartNew()
 $startupClock = [System.Diagnostics.Stopwatch]::StartNew()
 
-while ($startupClock.Elapsed.TotalSeconds -lt 45) {
+if (-not $hostOwnedByMonitor) {
     if ($stopEvent.WaitOne(0)) {
         $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
             -MonitorProcessId $PID -HostProcessId $hostProcessId
         $stopRequestObserved = $true
         $stopRequestedUtc = $stopState.RequestedUtc
         $outcome = if ($stopState.Valid) { 'interrupted_during_startup' } else { 'invalid_stop_request' }
-        break
     }
-    try {
-        $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
-        if ($null -eq $process) {
-            $outcome = 'process_exited_during_startup'
-            break
-        }
-
-        $process.Refresh()
-        if ($process.Path -and [string]::Equals(
-                [IO.Path]::GetFullPath($process.Path),
-                [IO.Path]::GetFullPath($hostExecutable),
-                [StringComparison]::OrdinalIgnoreCase) -and
-            $process.MainWindowHandle -ne [IntPtr]::Zero -and
-            [XiaoKLongRunNativeMethods]::IsWindowVisible($process.MainWindowHandle)) {
-            $mainWindow = $process.MainWindowHandle
-            $launchForegroundUnchanged = ([XiaoKLongRunNativeMethods]::GetForegroundWindow() -eq $foregroundBeforeLaunch)
-            if ($launchForegroundUnchanged -and $process.Responding) {
-                $outcome = 'completed_duration'
+    else {
+        try {
+            $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
+            if ($null -eq $process) {
+                $outcome = 'process_exited_during_startup'
             }
             else {
-                $outcome = 'foreground_changed_at_launch'
+                $process.Refresh()
+                $processStartedUtc = $process.StartTime.ToUniversalTime().ToString('o')
+                if (-not $process.Path -or -not [string]::Equals(
+                        [IO.Path]::GetFullPath($process.Path),
+                        [IO.Path]::GetFullPath($hostExecutable),
+                        [StringComparison]::OrdinalIgnoreCase) -or
+                    $processStartedUtc -cne $hostStartedUtc) {
+                    $outcome = 'process_identity_changed'
+                }
+                elseif (-not $process.Responding) {
+                    $outcome = 'unresponsive_at_start'
+                }
+                else {
+                    $mainWindow = $process.MainWindowHandle
+                    $outcome = 'completed_duration'
+                }
             }
-            break
+        }
+        catch {
+            $outcome = 'startup_error'
+            $errorKind = $_.Exception.GetType().Name
         }
     }
-    catch {
-        $outcome = 'startup_error'
-        $errorKind = $_.Exception.GetType().Name
-        break
+}
+else {
+    while ($startupClock.Elapsed.TotalSeconds -lt 45) {
+        if ($stopEvent.WaitOne(0)) {
+            $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
+                -MonitorProcessId $PID -HostProcessId $hostProcessId
+            $stopRequestObserved = $true
+            $stopRequestedUtc = $stopState.RequestedUtc
+            $outcome = if ($stopState.Valid) { 'interrupted_during_startup' } else { 'invalid_stop_request' }
+            break
+        }
+        try {
+            $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
+            if ($null -eq $process) {
+                $outcome = 'process_exited_during_startup'
+                break
+            }
+
+            $process.Refresh()
+            if ($process.Path -and [string]::Equals(
+                    [IO.Path]::GetFullPath($process.Path),
+                    [IO.Path]::GetFullPath($hostExecutable),
+                    [StringComparison]::OrdinalIgnoreCase) -and
+                $process.MainWindowHandle -ne [IntPtr]::Zero -and
+                [XiaoKLongRunNativeMethods]::IsWindowVisible($process.MainWindowHandle)) {
+                $mainWindow = $process.MainWindowHandle
+                $launchForegroundUnchanged = ([XiaoKLongRunNativeMethods]::GetForegroundWindow() -eq $foregroundBeforeLaunch)
+                if ($launchForegroundUnchanged -and $process.Responding) {
+                    $outcome = 'completed_duration'
+                }
+                else {
+                    $outcome = 'foreground_changed_at_launch'
+                }
+                break
+            }
+        }
+        catch {
+            $outcome = 'startup_error'
+            $errorKind = $_.Exception.GetType().Name
+            break
+        }
+        Start-Sleep -Seconds 1
     }
-    Start-Sleep -Seconds 1
 }
 
 if ($outcome -ne 'completed_duration') {
@@ -264,8 +350,9 @@ $foregroundWindowWasHost = $false
 $sampleGapCount = 0
 $maximumSampleGapSeconds = 0.0
 $previousSampleUtc = $null
-$shutdownPosted = $false
-$shutdownExited = $false
+$shutdownPosted = $null
+$shutdownExited = $null
+$hostStillRunningAtMonitorExit = $false
 $exitCode = $null
 
 try {
@@ -297,10 +384,12 @@ try {
             }
 
             $process.Refresh()
+            $processStartedUtc = $process.StartTime.ToUniversalTime().ToString('o')
             if (-not $process.Path -or -not [string]::Equals(
                     [IO.Path]::GetFullPath($process.Path),
                     [IO.Path]::GetFullPath($hostExecutable),
-                    [StringComparison]::OrdinalIgnoreCase)) {
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                $processStartedUtc -cne $hostStartedUtc) {
                 $outcome = 'process_identity_changed'
                 break
             }
@@ -312,8 +401,11 @@ try {
             $previousSampleUtc = $sampleUtc
             $sampleCount++
 
-            if ([XiaoKLongRunNativeMethods]::IsWindowVisible($mainWindow)) { $visibleSampleCount++ }
-            if ([XiaoKLongRunNativeMethods]::GetForegroundWindow() -eq $mainWindow) {
+            $mainWindow = $process.MainWindowHandle
+            if ($mainWindow -ne [IntPtr]::Zero -and
+                [XiaoKLongRunNativeMethods]::IsWindowVisible($mainWindow)) { $visibleSampleCount++ }
+            if ($mainWindow -ne [IntPtr]::Zero -and
+                [XiaoKLongRunNativeMethods]::GetForegroundWindow() -eq $mainWindow) {
                 $foregroundWindowWasHost = $true
             }
 
@@ -431,22 +523,38 @@ finally {
     catch { }
 
     $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
-    if ($null -ne $process) {
-        $shutdownPosted = ([XiaoKLongRunNativeMethods]::RequestShutdownForProcess([uint32]$hostProcessId) -gt 0)
-        $shutdownClock = [System.Diagnostics.Stopwatch]::StartNew()
-        while ($shutdownClock.Elapsed.TotalSeconds -lt 15 -and
-            (Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue)) {
-            Start-Sleep -Milliseconds 500
+    if ($hostOwnedByMonitor) {
+        if ($null -ne $process) {
+            $shutdownPosted = ([XiaoKLongRunNativeMethods]::RequestShutdownForProcess([uint32]$hostProcessId) -gt 0)
+            $shutdownClock = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($shutdownClock.Elapsed.TotalSeconds -lt 15 -and
+                (Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue)) {
+                Start-Sleep -Milliseconds 500
+            }
+            $shutdownExited = ($null -eq (Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue))
+            if (-not $shutdownExited -and $outcome -eq 'completed_duration') { $outcome = 'shutdown_timeout' }
         }
-        $shutdownExited = ($null -eq (Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue))
-        if (-not $shutdownExited -and $outcome -eq 'completed_duration') { $outcome = 'shutdown_timeout' }
+        else {
+            $shutdownExited = $true
+        }
     }
-    elseif ($null -eq $process) {
-        $shutdownExited = $true
+    else {
+        if ($null -ne $process) {
+            $process.Refresh()
+            $processStartedUtc = $process.StartTime.ToUniversalTime().ToString('o')
+            $hostStillRunningAtMonitorExit = [bool]($process.Path -and [string]::Equals(
+                [IO.Path]::GetFullPath($process.Path),
+                [IO.Path]::GetFullPath($hostExecutable),
+                [StringComparison]::OrdinalIgnoreCase) -and
+                $processStartedUtc -ceq $hostStartedUtc)
+        }
+        if (-not $hostStillRunningAtMonitorExit -and $outcome -eq 'completed_duration') {
+            $outcome = 'attached_host_exited_at_end'
+        }
     }
 
     $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
-    if ($null -eq $process) {
+    if ($hostOwnedByMonitor -and $null -eq $process -and $null -ne $launched) {
         try {
             $launched.Refresh()
             if ($launched.HasExited) { $exitCode = $launched.ExitCode }
@@ -458,7 +566,7 @@ finally {
 
 if ($outcome -eq 'completed_duration') {
     if ($sampleGapCount -gt 0 -or $sampleCount -lt $expectedSampleCount -or
-        $visibleSampleCount -lt $sampleCount) {
+        ($hostOwnedByMonitor -and $visibleSampleCount -lt $sampleCount)) {
         $outcome = 'incomplete_observation'
     }
     elseif ($responsiveSampleCount -lt $sampleCount) {
@@ -478,6 +586,8 @@ if ($null -ne $cpuAtStartSeconds -and $null -ne $cpuAtEndSeconds -and $clock.Ela
 
 $report = [ordered]@{
     packageVersion = $ExpectedVersion
+    observationMode = $observationMode
+    hostLaunchedByMonitor = $hostOwnedByMonitor
     hostExecutableSha256 = $executableHash
     hostDllSha256 = $libraryHash
     durationRequestedMinutes = $DurationMinutes
@@ -491,6 +601,8 @@ $report = [ordered]@{
     stopRequestedUtc = $stopRequestedUtc
     monitorErrorType = $errorKind
     processId = $hostProcessId
+    hostStartedUtc = $hostStartedUtc
+    hostStillRunningAtMonitorExit = $hostStillRunningAtMonitorExit
     processExitedNormallyAfterShutdownRequest = $shutdownExited
     shutdownMessagePosted = $shutdownPosted
     exitCode = $exitCode
@@ -521,4 +633,10 @@ Remove-Item -LiteralPath $controlFilePath, $stopRequestPath -Force -ErrorAction 
 Write-Output $json
 Write-Output "reportPath=$reportPath"
 
-if ($outcome -ne 'completed_duration' -or -not $shutdownExited) { exit 1 }
+$monitorSucceeded = if ($hostOwnedByMonitor) {
+    $outcome -eq 'completed_duration' -and $shutdownExited
+}
+else {
+    $outcome -eq 'completed_duration' -and $hostStillRunningAtMonitorExit
+}
+if (-not $monitorSucceeded) { exit 1 }
