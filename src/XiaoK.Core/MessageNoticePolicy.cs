@@ -108,7 +108,7 @@ public sealed class MessageNoticePolicy
 
         if (string.IsNullOrWhiteSpace(visibleBody))
             return new(true, false, "通知没有正文。请手动打开对应会话；小K不会切换窗口。", notice);
-        if (visibleBody.Length > 20_000)
+        if (visibleBody.Length > VisibleNotificationTextPolicy.MaximumCharacters)
             return new(true, false, "通知正文超过本地处理长度上限，已跳过自动分析。", notice with { Body = null });
         notice = notice with { Body = visibleBody };
 
@@ -148,4 +148,39 @@ public sealed class MessageNoticePolicy
     private static bool IsUsableConversationIdentifier(string? value) => LimitMetadata(value, 256) is not null;
 
     private static string HashKey(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+}
+
+/// <summary>Bounds visible toast text aggregation before the full body is copied into one string.</summary>
+public static class VisibleNotificationTextPolicy
+{
+    public const int MaximumCharacters = 20_000;
+    public const int MaximumTextElements = 256;
+    private static readonly string OversizedMarker = new('\0', MaximumCharacters + 1);
+
+    public static string JoinBounded(IEnumerable<string?> textElements)
+    {
+        ArgumentNullException.ThrowIfNull(textElements);
+        var builder = new StringBuilder(Math.Min(MaximumCharacters, 512));
+        var elementCount = 0;
+        foreach (var text in textElements)
+        {
+            if (elementCount >= MaximumTextElements) return OversizedMarker;
+
+            if (elementCount > 0)
+            {
+                if (builder.Length + Environment.NewLine.Length > MaximumCharacters) return OversizedMarker;
+                builder.Append(Environment.NewLine);
+            }
+
+            if (text is not null)
+            {
+                if (text.Length > MaximumCharacters - builder.Length) return OversizedMarker;
+                builder.Append(text);
+            }
+
+            elementCount++;
+        }
+
+        return builder.ToString();
+    }
 }

@@ -94,9 +94,10 @@ if (args.Length == 1 && args[0] == "--only-notification-sample-bounds")
 {
     CheckNotificationEventQueueIsBoundedAndDeduplicated();
     CheckNotificationSampleTextProjectionIsBounded();
+    CheckVisibleNotificationTextAggregationIsBounded();
     CheckNotificationSampleKeyTrackingIsBounded();
     CheckNotificationSampleRetentionIsBounded(FindRepositoryRoot());
-    Console.WriteLine("通过：通知样本队列、文本、去重键及保留时限均有界，超限路径失败关闭。");
+    Console.WriteLine("通过：通知队列、样本文本、正文聚合、去重键和保留时限均有界，超限路径失败关闭。");
     return;
 }
 if (args.Length == 1 && args[0] == "--only-ui-text-write-policy")
@@ -875,6 +876,9 @@ try
 
     CheckNotificationSampleTextProjectionIsBounded();
     passed.Add("通知样本文本在枚举时即限制元素数、字符数并清除控制字符");
+
+    CheckVisibleNotificationTextAggregationIsBounded();
+    passed.Add("可见正文聚合限制元素数和总字符数，超限后停止枚举且不复制正文");
 
     CheckNotificationSampleKeyTrackingIsBounded();
     passed.Add("通知样本基线键和已见键去重集合有容量上限");
@@ -5447,6 +5451,39 @@ static void CheckNotificationSampleTextProjectionIsBounded()
         && many.Truncated
         && enumerated == NotificationSampleTextPolicy.MaximumTextElements + 1,
         "超量通知文本元素在检测截断后仍继续枚举或被完整复制。");
+}
+
+static void CheckVisibleNotificationTextAggregationIsBounded()
+{
+    var exactLimit = new string('x', VisibleNotificationTextPolicy.MaximumCharacters);
+    Require(VisibleNotificationTextPolicy.JoinBounded([exactLimit]) == exactLimit,
+        "可见通知正文恰好达到上限时被错误拒绝或截断。");
+
+    var separator = Environment.NewLine;
+    var exactCombinedLimit = new string('x', VisibleNotificationTextPolicy.MaximumCharacters - separator.Length);
+    Require(VisibleNotificationTextPolicy.JoinBounded([exactCombinedLimit, ""]) == exactCombinedLimit + separator,
+        "可见通知正文的分隔符未计入总长度边界。");
+
+    var oversized = VisibleNotificationTextPolicy.JoinBounded([exactLimit + "x"]);
+    Require(oversized.Length == VisibleNotificationTextPolicy.MaximumCharacters + 1
+        && oversized.All(character => character == '\0'),
+        "超长通知正文没有被固定大小的无内容标记替换。");
+
+    var enumerated = 0;
+    IEnumerable<string?> ManyElements()
+    {
+        for (var index = 0; index < 10_000; index++)
+        {
+            enumerated++;
+            yield return string.Empty;
+        }
+    }
+
+    var many = VisibleNotificationTextPolicy.JoinBounded(ManyElements());
+    Require(many.Length == VisibleNotificationTextPolicy.MaximumCharacters + 1
+        && enumerated == VisibleNotificationTextPolicy.MaximumTextElements + 1
+        && ReferenceEquals(oversized, many),
+        "通知文本元素超过上限后仍继续枚举或聚合。");
 }
 
 static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)

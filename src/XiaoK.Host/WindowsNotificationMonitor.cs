@@ -531,7 +531,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         var binding = notification.Notification.Visual.GetBinding(KnownNotificationBindings.ToastGeneric);
         if (binding is null) return null;
         var elements = binding.GetTextElements();
-        return string.Join(Environment.NewLine, elements.Skip(1).Select(element => element.Text));
+        return VisibleNotificationTextPolicy.JoinBounded(elements.Skip(1).Select(element => element.Text));
     }
 
     internal static bool IsUnlockedInputDesktop()
