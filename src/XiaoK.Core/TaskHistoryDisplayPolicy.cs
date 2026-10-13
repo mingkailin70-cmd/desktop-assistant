@@ -86,6 +86,7 @@ public static class TaskHistoryDisplayPolicy
             or "PPTX_CREATE_OUTCOME_UNCERTAIN" or "XLSX_CREATE_OUTCOME_UNCERTAIN" =>
             "文件可能已创建，但独立核验未完成。先检查导出目录中的目标文件，再决定是否重新提交；小K不会自动重试。",
         "CODE_PATCH_OUTCOME_UNCERTAIN" => "补丁应用结果无法确认。先检查隔离工作区和补丁状态，再决定下一步；小K不会自动重放。",
+        "UIA_VALUE_VERIFY_FAILED" => "目标应用中的文本写入结果无法确认。先检查相关文本是否已完整或部分更新，再决定是否重新操作；小K不会自动重试。",
         _ => "操作结果无法确认，可能已经产生副作用。先核对相关应用、文件或隔离工作区的实际状态，再决定下一步；小K不会自动重试。"
     };
 

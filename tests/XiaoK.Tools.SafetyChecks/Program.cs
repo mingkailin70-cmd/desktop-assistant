@@ -106,6 +106,12 @@ if (args.Length == 1 && args[0] == "--only-ui-text-write-policy")
     Console.WriteLine("通过：UIA文本写入要求精确目标、后台目标空闲和逐条确认；拒绝聊天/浏览器应用并尊重取消。 ");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-task-history-display-policy")
+{
+    CheckTaskHistoryDisplayPolicy();
+    Console.WriteLine("通过：任务历史不确定结果提供逐类核对指引，未知错误不泄漏且不会自动重试。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-window-activation")
 {
     await CheckWindowActivationOutcomesAsync();
@@ -4060,7 +4066,8 @@ static void CheckTaskHistoryDisplayPolicy()
         ("DOCX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
         ("PPTX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
         ("XLSX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
-        ("CODE_PATCH_OUTCOME_UNCERTAIN", "隔离工作区和补丁状态")
+        ("CODE_PATCH_OUTCOME_UNCERTAIN", "隔离工作区和补丁状态"),
+        ("UIA_VALUE_VERIFY_FAILED", "目标应用中的文本写入结果无法确认")
     };
     Require(uncertainOutcomeGuidance.All(item =>
         {
