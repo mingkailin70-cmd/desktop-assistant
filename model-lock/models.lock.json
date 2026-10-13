@@ -1217,6 +1217,28 @@
           "Visual Studio build reports MSB8027 for source files with the same basename; the candidate runtime is not cleared for distribution until this warning is resolved."
         ]
       }
+    },
+    {
+      "id": "jevos-v4-0.9b-q4km-decision-eval",
+      "role": "decision-candidate",
+      "source": "https://huggingface.co/feder-cr/jev",
+      "revision": "95575aec49b6e90a30c94fef3d59b315dd060780",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "feder-cr jevos-v4 release",
+      "files": [
+        {
+          "name": "jevos-v4-q4_k_m.gguf",
+          "upstreamReportedSizeBytes": 619289312,
+          "expectedUpstreamSha256": "6303272b640dfd97f37b2a204ead7915cc799b09de18a6a9d1c7659c94ce53a0",
+          "localVerifiedSha256": "6303272b640dfd97f37b2a204ead7915cc799b09de18a6a9d1c7659c94ce53a0"
+        }
+      ],
+      "license": "mit",
+      "status": "downloaded_and_verified",
+      "notes": "GitHub社区发布的Jev兼容本地决策模型，仅支持固定候选的概率选择，不生成自由文本，也不授予工具权限。上游标注英语并报告英文决策集；小K中文路由、校准、延迟与运行时兼容性均未评估。权重只作研究候选，不接生产ModelBroker或ToolBroker权限判断。当前锁定Q4_K_M单文件，CPU模型运行时尚未随本权重固定。",
+      "localDirectory": "llm/jevos-v4-0.9b-q4km-decision-eval/95575aec49b6e90a30c94fef3d59b315dd060780",
+      "requiredForP0": false
     }
   ]
 }
