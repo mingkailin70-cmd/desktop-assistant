@@ -3,6 +3,35 @@ using XiaoK.Core;
 namespace XiaoK.Adapters.Windows;
 
 public enum NotificationIdEnqueueResult { Added, AlreadyTracked, CapacityReached }
+public enum NotificationKeyTrackResult { Added, AlreadyTracked, CapacityReached }
+
+/// <summary>Bounded set for notification deduplication keys; callers must stop processing on capacity.</summary>
+public sealed class BoundedNotificationKeySet
+{
+    private readonly int _capacity;
+    private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
+
+    public BoundedNotificationKeySet(int capacity)
+    {
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        _capacity = capacity;
+    }
+
+    public int Count => _keys.Count;
+
+    public bool Contains(string key) => _keys.Contains(key);
+
+    public NotificationKeyTrackResult TryAdd(string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        if (_keys.Contains(key)) return NotificationKeyTrackResult.AlreadyTracked;
+        if (_keys.Count >= _capacity) return NotificationKeyTrackResult.CapacityReached;
+        _keys.Add(key);
+        return NotificationKeyTrackResult.Added;
+    }
+
+    public void Clear() => _keys.Clear();
+}
 
 /// <summary>Bounded single-dispatcher queue that retains only Windows notification IDs, never toast content.</summary>
 public sealed class BoundedNotificationIdQueue

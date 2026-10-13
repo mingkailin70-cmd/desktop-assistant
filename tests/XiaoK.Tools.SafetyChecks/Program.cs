@@ -90,6 +90,15 @@ if (args.Length == 1 && args[0] == "--only-tool-proposal-preconditions")
     Console.WriteLine("通过：ToolBroker 拒绝缺失或错配的固定前置条件与预期结果。");
     return;
 }
+if (args.Length == 1 && args[0] == "--only-notification-sample-bounds")
+{
+    CheckNotificationEventQueueIsBoundedAndDeduplicated();
+    CheckNotificationSampleTextProjectionIsBounded();
+    CheckNotificationSampleKeyTrackingIsBounded();
+    CheckNotificationSampleRetentionIsBounded(FindRepositoryRoot());
+    Console.WriteLine("通过：通知样本队列、文本、去重键及保留时限均有界，超限路径失败关闭。");
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-ui-text-write-policy")
 {
     await CheckUiTextWritePolicyAsync();
@@ -851,8 +860,11 @@ try
     CheckNotificationSampleTextProjectionIsBounded();
     passed.Add("通知样本文本在枚举时即限制元素数、字符数并清除控制字符");
 
+    CheckNotificationSampleKeyTrackingIsBounded();
+    passed.Add("通知样本基线键和已见键去重集合有容量上限");
+
     CheckNotificationSampleRetentionIsBounded(FindRepositoryRoot());
-    passed.Add("通知样本最多内存保留15分钟；停止后保留清理计时，并每2秒检查锁屏/权限状态");
+    passed.Add("通知样本队列、正文、跟踪键与15分钟保留时间均有界，超限停止采集");
 
     CheckPackagedAndDesktopAppUserModelIds();
     passed.Add("通知 allowlist 接受已核实的 MSIX 与经典桌面应用 AUMID，并拒绝空白、控制字符和超长值");
@@ -5415,8 +5427,11 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
     var capturePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "NotificationFormatSampleCapture.cs");
     var capture = File.ReadAllText(capturePath);
     Require(capture.Contains("private static readonly TimeSpan MaximumDuration = TimeSpan.FromMinutes(15);", StringComparison.Ordinal)
-        && capture.Contains("private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);", StringComparison.Ordinal),
-        "通知样本保留期限或锁屏/权限轮询间隔不符合隐私约束。");
+        && capture.Contains("private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);", StringComparison.Ordinal)
+        && capture.Contains("private const int MaximumTrackedNotificationKeys = 4096;", StringComparison.Ordinal)
+        && capture.Contains("private readonly BoundedNotificationKeySet _baselineKeys = new(MaximumTrackedNotificationKeys);", StringComparison.Ordinal)
+        && capture.Contains("private readonly BoundedNotificationKeySet _seenKeys = new(MaximumTrackedNotificationKeys);", StringComparison.Ordinal),
+        "通知样本保留期限、跟踪键容量或锁屏/权限轮询间隔不符合隐私约束。");
 
     var stopStart = capture.IndexOf("public void Stop(", StringComparison.Ordinal);
     var stopEnd = stopStart < 0 ? -1 : capture.IndexOf("public void Clear()", stopStart, StringComparison.Ordinal);
@@ -5452,10 +5467,38 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
     var addedStart = capture.IndexOf("private async Task ProcessAddedAsync(", StringComparison.Ordinal);
     var addedEnd = addedStart < 0 ? -1 : capture.IndexOf("private static bool IsRecoverable", addedStart, StringComparison.Ordinal);
     var added = addedStart >= 0 && addedEnd > addedStart ? capture[addedStart..addedEnd] : string.Empty;
-    var futureTimestampCheck = added.IndexOf("notification.CreationTime > DateTimeOffset.UtcNow", StringComparison.Ordinal);
+    var seenKeyLimit = added.IndexOf("NotificationKeyTrackResult.CapacityReached", StringComparison.Ordinal);
     var sampleBodyRead = added.IndexOf("ReadVisibleTextElements(notification)", StringComparison.Ordinal);
+    Require(seenKeyLimit >= 0 && sampleBodyRead > seenKeyLimit,
+        "已见通知键超限时没有停止样本采集。");
+    var startStart = capture.IndexOf("public async Task<string> StartAsync()", StringComparison.Ordinal);
+    var startEnd = startStart < 0 ? -1 : capture.IndexOf("public void Stop(", startStart, StringComparison.Ordinal);
+    var start = startStart >= 0 && startEnd > startStart ? capture[startStart..startEnd] : string.Empty;
+    var baselineKeyLimit = start.IndexOf("NotificationKeyTrackResult.CapacityReached", StringComparison.Ordinal);
+    var baselineReady = start.IndexOf("_baselineReady = true", StringComparison.Ordinal);
+    Require(baselineKeyLimit >= 0 && baselineReady > baselineKeyLimit,
+        "建立通知基线时超过键上限后仍会启动采集会话。");
+    var futureTimestampCheck = added.IndexOf("notification.CreationTime > DateTimeOffset.UtcNow", StringComparison.Ordinal);
     Require(futureTimestampCheck >= 0 && sampleBodyRead > futureTimestampCheck,
         "时间戳晚于本机时间的通知没有在用户同意的一次性样本正文读取前被跳过。");
+}
+
+static void CheckNotificationSampleKeyTrackingIsBounded()
+{
+    var keys = new BoundedNotificationKeySet(capacity: 64);
+    for (var index = 0; index < 10_000; index++)
+    {
+        var result = keys.TryAdd("notification-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Require(result == (index < 64 ? NotificationKeyTrackResult.Added : NotificationKeyTrackResult.CapacityReached),
+            "通知样本去重键集合未在容量边界停止接收新键。");
+        Require(keys.Count <= 64, "通知样本去重键集合超过配置容量。");
+    }
+
+    Require(keys.TryAdd("notification-0") == NotificationKeyTrackResult.AlreadyTracked,
+        "达到容量后，已见通知键没有继续保持去重。");
+    keys.Clear();
+    Require(keys.Count == 0 && keys.TryAdd("after-clear") == NotificationKeyTrackResult.Added,
+        "清除通知样本键后无法开始新的有界跟踪会话。");
 }
 
 static void CheckStartupWindowVisibilityPolicy()

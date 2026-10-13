@@ -22,6 +22,7 @@ internal sealed record NotificationFormatSample(
 internal sealed class NotificationFormatSampleCapture : IDisposable
 {
     public const int MaximumSamples = 30;
+    private const int MaximumTrackedNotificationKeys = 4096;
     private static readonly TimeSpan MaximumDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);
 
@@ -31,8 +32,8 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
     private readonly string _publisherAppUserModelId;
     private readonly string _publisherDisplayName;
     private DateTimeOffset _startedAtUtc;
-    private readonly HashSet<string> _baselineKeys = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _seenKeys = new(StringComparer.Ordinal);
+    private readonly BoundedNotificationKeySet _baselineKeys = new(MaximumTrackedNotificationKeys);
+    private readonly BoundedNotificationKeySet _seenKeys = new(MaximumTrackedNotificationKeys);
     private readonly BoundedNotificationIdQueue _pendingIds = new(128);
     private readonly List<NotificationFormatSample> _samples = [];
     private readonly CancellationTokenSource _timeoutCancellation = new();
@@ -80,7 +81,14 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                 var sourceAppId = notification.AppInfo.AppUserModelId;
                 if (!string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase)) continue;
                 if (NotificationStartupBaselinePolicy.ShouldAddToBaseline(notification.CreationTime, _startedAtUtc))
-                    _baselineKeys.Add(CreateKey(sourceAppId, notification.Id, notification.CreationTime));
+                {
+                    var result = _baselineKeys.TryAdd(CreateKey(sourceAppId, notification.Id, notification.CreationTime));
+                    if (result == NotificationKeyTrackResult.CapacityReached)
+                    {
+                        Stop("所选来源的现存通知超过安全跟踪上限；本轮核验已停止，未读取正文。", clearSamples: true);
+                        return Status;
+                    }
+                }
                 else
                     QueueAdded(notification.Id);
                 if (!IsActive) return Status;
@@ -202,7 +210,18 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                 var sourceAppId = notification.AppInfo.AppUserModelId;
                 if (!string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase)) continue;
                 var key = CreateKey(sourceAppId, notification.Id, notification.CreationTime);
-                if (_baselineKeys.Contains(key) || !_seenKeys.Add(key)) continue;
+                if (_baselineKeys.Contains(key)) continue;
+                var trackingResult = _seenKeys.TryAdd(key);
+                if (trackingResult == NotificationKeyTrackResult.AlreadyTracked) continue;
+                if (trackingResult == NotificationKeyTrackResult.CapacityReached)
+                {
+                    var hasSamples = _samples.Count > 0;
+                    Stop(hasSamples
+                            ? "本轮唯一通知数量达到安全跟踪上限；采集已停止，已有样本仍按15分钟时限清除。"
+                            : "本轮唯一通知数量达到安全跟踪上限；采集已停止，没有保留通知正文。",
+                        clearSamples: !hasSamples);
+                    return;
+                }
                 if (notification.CreationTime < _startedAtUtc) continue;
                 if (notification.CreationTime > DateTimeOffset.UtcNow)
                 {
