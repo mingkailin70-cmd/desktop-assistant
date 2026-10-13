@@ -1,3 +1,11 @@
+## v0.1.135.0 桌宠非前台拖动释放检测修复（2026-10-14）
+
+桌宠保持`MA_NOACTIVATE`时，上一版轮询通过`GetAsyncKeyState(VK_LBUTTON)`判断鼠标是否仍按住；当前窗口不在前台时该API可能返回0，导致拖动手势提前结束。本版仅在桌宠按下期间安装`WH_MOUSE_LL`释放信号钩子；回调只投递窗口消息并调用`CallNextHookEx`，UI线程继续负责坐标轮询和`SetWindowPos`。释放、取消或窗口关闭即卸载钩子，不拦截或模拟输入。固定SDK Release全解构建0警告/错误，桌面体验109项通过。
+
+签名MSIX `artifacts\msix-validation\70608c1a359f411da6ec9c411eea5fa3\XiaoK-signed-validation.msix`大小155,801,926字节，SHA-256 `59E7B50101874A7D6E6FA91321D3279A3102384A8DAEC0DB7872A9C751B759A3`；SignTool验签0警告、0错误。证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已受信，本次没有修改信任。安装器请求旧Host PID 59896正常退出后安装`0.1.135.0`，状态`Ok`；从AppX入口启动Host PID 50904，窗口可见且不是前台。安装版/发布版Host SHA-256均为`9242712B58C1C5C18BFDFBD98DC31872CBF67F5BE1C534F213EE7E9A13A1BAC3`，适配器散列匹配。通知/唤醒配置关闭、发布者名单为空，`llama-server`为0。立即回滚包`0.1.134.0`保留在`artifacts\msix-validation\b2c9600fb003416ebaae7e914477f554\XiaoK-signed-validation.msix`，SHA-256 `2113EB813A21EAC2F0CB58E3A9F1E90F03859ECD06C75618AFD406ACD8EE2B82`。
+
+当前没有原生桌面鼠标输入接口；真实拖动、轻点展开、缩放、跨屏和重启恢复仍待现场验收，不能以源码/合成检查代替。
+
 ## v0.1.134.0 桌宠自由移动输入轮询（2026-10-14）
 
 针对桌宠在不激活前台时不能稳定拖动的问题，移除短时`WH_MOUSE_LL`实现，改为宠物本体按下后启动16ms `DispatcherTimer`轮询光标位置与左键状态。该轮询只在按住期间运行；不使用全局钩子、`SetCapture`或模拟输入。拖动阈值、跨屏坐标、短按展开、右下角缩放、工作区边缘约束及位置持久化保留。构建0警告/错误，桌面体验109项和完整安全检查134项通过；真实鼠标拖动仍待实机验收。

@@ -9,7 +9,6 @@ internal static class PetWindowDragProbe
     {
         var failures = VerifyGestureState();
         VerifyCoordinateMapping(failures);
-        VerifyMouseButtonPolling(failures);
         VerifyWindowInputWiring(repositoryRoot, failures);
         return failures;
     }
@@ -84,16 +83,6 @@ internal static class PetWindowDragProbe
             failures.Add("极端坐标溢出时仍允许移动桌宠窗口。");
     }
 
-    private static void VerifyMouseButtonPolling(List<string> failures)
-    {
-        if (!PetWindowDragGesture.IsMouseButtonPressed(unchecked((short)0x8000))
-            || !PetWindowDragGesture.IsMouseButtonPressed(-1))
-            failures.Add("桌宠指针轮询没有识别鼠标左键的高位按下状态。");
-        if (PetWindowDragGesture.IsMouseButtonPressed(0)
-            || PetWindowDragGesture.IsMouseButtonPressed(1))
-            failures.Add("桌宠指针轮询把鼠标左键的低位历史标记误判为仍按下。");
-    }
-
     private static void VerifyWindowInputWiring(string repositoryRoot, List<string> failures)
     {
         var xamlPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml");
@@ -110,6 +99,7 @@ internal static class PetWindowDragProbe
         var dragEnd = code.IndexOf("private void PetView_PreviewMouseWheel", StringComparison.Ordinal);
         var dragCode = dragStart >= 0 && dragEnd > dragStart ? code[dragStart..dragEnd] : string.Empty;
         if (dragCode.Length == 0
+            || !dragCode.Contains("TryInstallPetMouseReleaseHook()", StringComparison.Ordinal)
             || !dragCode.Contains("_petPointerPollTimer.Start()", StringComparison.Ordinal)
             || !dragCode.Contains("GetCursorPos(out var cursor)", StringComparison.Ordinal)
             || !dragCode.Contains("PetResizeHandle.IsMouseOver", StringComparison.Ordinal)
@@ -121,23 +111,34 @@ internal static class PetWindowDragProbe
         var pollStart = code.IndexOf("private void PetPointerPollTimer_Tick", StringComparison.Ordinal);
         var pollEnd = code.IndexOf("private void TrackPetPointerMove", StringComparison.Ordinal);
         var pollCode = pollStart >= 0 && pollEnd > pollStart ? code[pollStart..pollEnd] : string.Empty;
-        if (!pollCode.Contains("GetAsyncKeyState(VkLeftButton)", StringComparison.Ordinal)
+        if (pollCode.Contains("GetAsyncKeyState(", StringComparison.Ordinal)
             || !pollCode.Contains("GetCursorPos(out var cursor)", StringComparison.Ordinal)
             || !pollCode.Contains("TrackPetPointerMove(cursor.X, cursor.Y)", StringComparison.Ordinal)
-            || !pollCode.Contains("FinishPetPointerGesture(expandOnClick: true)", StringComparison.Ordinal)
+            || !pollCode.Contains("_petPointerReleasePending", StringComparison.Ordinal)
             || !code.Contains("_petPointerPollTimer.Stop();", StringComparison.Ordinal)
-            || code.Contains("SetWindowsHookEx(", StringComparison.Ordinal)
-            || code.Contains("CallNextHookEx(", StringComparison.Ordinal)
             || code.Contains("SetCapture(", StringComparison.Ordinal)
             || code.Contains("GetCapture()", StringComparison.Ordinal))
-            failures.Add("桌宠按住期间的指针轮询、松开收尾或定时器清理不完整，或仍注册系统级鼠标钩子。");
+            failures.Add("桌宠指针轮询依赖前台键状态、缺少释放信号，或没有清理轮询状态。");
+
+        var releaseStart = code.IndexOf("private IntPtr PetMouseReleaseHookCallback", StringComparison.Ordinal);
+        var releaseEnd = code.IndexOf("private bool TryInstallPetMouseReleaseHook", StringComparison.Ordinal);
+        var releaseCode = releaseStart >= 0 && releaseEnd > releaseStart
+            ? code[releaseStart..releaseEnd] : string.Empty;
+        if (!releaseCode.Contains("wParam.ToInt32() == WmLButtonUp", StringComparison.Ordinal)
+            || !releaseCode.Contains("PostMessage(handle, WmPetPointerReleased", StringComparison.Ordinal)
+            || !releaseCode.Contains("CallNextHookEx(", StringComparison.Ordinal)
+            || releaseCode.Contains("SetWindowPos(", StringComparison.Ordinal)
+            || releaseCode.Contains("Dispatcher", StringComparison.Ordinal)
+            || !code.Contains("UnhookWindowsHookEx(hook)", StringComparison.Ordinal))
+            failures.Add("桌宠释放监听没有快速投递松开事件、继续钩子链或在手势结束后卸载。");
 
         var windowHookStart = code.IndexOf("private IntPtr HotkeyHook", StringComparison.Ordinal);
         var windowHookEnd = code.IndexOf("private void RestoreFromTray", StringComparison.Ordinal);
         var windowHook = windowHookStart >= 0 && windowHookEnd > windowHookStart
             ? code[windowHookStart..windowHookEnd] : string.Empty;
-        if (!windowHook.Contains("msg == WmCancelMode", StringComparison.Ordinal))
-            failures.Add("桌宠收到窗口取消输入消息时没有结束拖动。");
+        if (!windowHook.Contains("msg == WmCancelMode", StringComparison.Ordinal)
+            || !windowHook.Contains("msg == WmPetPointerReleased", StringComparison.Ordinal))
+            failures.Add("桌宠收到鼠标释放或窗口取消输入消息时没有结束拖动。");
 
         var finishStart = code.IndexOf("private void FinishPetPointerGesture", StringComparison.Ordinal);
         var finishEnd = code.IndexOf("private void ReportPetWindowDragUnavailable", StringComparison.Ordinal);

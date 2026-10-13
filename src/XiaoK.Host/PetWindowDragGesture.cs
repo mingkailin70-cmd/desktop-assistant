@@ -7,8 +7,6 @@ internal sealed class PetWindowDragGesture
 
     public bool IsDragging { get; private set; }
 
-    internal static bool IsMouseButtonPressed(short keyState) => keyState < 0;
-
     public void PointerDown(int x, int y)
     {
         IsDragging = false;
