@@ -112,7 +112,15 @@ internal static class SettingsWindowSaveProbe
 
             InvokeSaveClick();
             if (replaceCalls != 1 || saveButton.IsEnabled || cancelButton.IsEnabled || form.IsEnabled)
-                failures.Add($"异步保存锁状态不符（联系人写入调用={replaceCalls}，保存/取消/表单仍启用={saveButton.IsEnabled}/{cancelButton.IsEnabled}/{form.IsEnabled}）。");
+            {
+                var statusCategory = status.Text == "正在保存设置…" ? "saving"
+                    : status.Text.Contains("启动状态尚未确认", StringComparison.Ordinal) ? "startup-wait"
+                    : status.Text.Contains("目录", StringComparison.Ordinal)
+                        || status.Text.Contains("路径", StringComparison.Ordinal)
+                        || status.Text.Contains("地址", StringComparison.Ordinal) ? "validation"
+                    : "other";
+                failures.Add($"异步保存锁状态不符（联系人写入调用={replaceCalls}，保存/取消/表单仍启用={saveButton.IsEnabled}/{cancelButton.IsEnabled}/{form.IsEnabled}，启动状态已加载={GetPrivateField<bool>(window, "_startupStateLoaded")}，联系人偏好已加载={GetPrivateField<bool>(window, "_contactStylesLoaded")}，提示类别={statusCategory}）。");
+            }
 
             InvokeSaveClick();
             if (replaceCalls != 1)
