@@ -7646,6 +7646,35 @@ static async Task CheckFileSearchFailureAndCancellationAsync(string root)
         && deepData.Contains("目录深度上限", StringComparison.Ordinal)
         && deepData.Contains("结果可能不完整", StringComparison.Ordinal),
         "文件搜索越过深度限制或把深层未检查目录报告为完整无命中。");
+
+    var inFlightRoot = Path.Combine(root, "file-search-in-flight-cancellation");
+    Directory.CreateDirectory(inFlightRoot);
+    for (var index = 0; index < 512; index++)
+        File.WriteAllText(Path.Combine(inFlightRoot, $"entry-{index:D4}.txt"), "synthetic");
+
+    using var inFlightCancellation = new CancellationTokenSource();
+    var observedEntries = 0;
+    var inFlightDesktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+        [new KeyValuePair<string, string>("user-files", inFlightRoot)],
+        appProcessController: null, windowController: null, appLaunchTimeout: null, exportRoot: null,
+        searchEntryObserver: () =>
+        {
+            if (Interlocked.Increment(ref observedEntries) == 64)
+                inFlightCancellation.Cancel();
+        });
+    var inFlightCancelled = false;
+    try
+    {
+        await inFlightDesktop.SearchFilesAsync(ToolBroker.Proposal("file.search.v1",
+            [new("query", "not-present"), new("root_id", "user-files")], "user-files",
+            ToolExpectedOutcome.MatchingFilesListed), inFlightCancellation.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        inFlightCancelled = true;
+    }
+    Require(inFlightCancelled && observedEntries == 64,
+        $"文件搜索没有在解析目录批次时及时响应取消：cancelled={inFlightCancelled}, parsed={observedEntries}。");
 }
 
 static async Task CheckFileContentSearchAsync(string root)

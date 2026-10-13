@@ -162,7 +162,8 @@ public sealed partial class WindowsDesktopTools
                     continue;
                 }
                 var remaining = LocalFileContentSearchPolicy.MaximumScannedEntries - scanned;
-                if (!TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity, remaining, out var entries))
+                if (!TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity, remaining,
+                        cancellationToken, searchEntryObserver: null, out var entries))
                 {
                     skippedEntries++;
                     continue;

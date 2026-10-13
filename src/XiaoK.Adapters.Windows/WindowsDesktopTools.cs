@@ -79,11 +79,20 @@ public sealed partial class WindowsDesktopTools
     private readonly IDesktopAppProcessController _appProcessController;
     private readonly IDesktopWindowController _windowController;
     private readonly TimeSpan _appLaunchTimeout;
+    private readonly Action? _searchEntryObserver;
 
     public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
         IDesktopAppProcessController? appProcessController = null, IDesktopWindowController? windowController = null,
         TimeSpan? appLaunchTimeout = null, string? exportRoot = null)
+        : this(apps, searchRoots, appProcessController, windowController, appLaunchTimeout, exportRoot, null)
     {
+    }
+
+    internal WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
+        IDesktopAppProcessController? appProcessController, IDesktopWindowController? windowController,
+        TimeSpan? appLaunchTimeout, string? exportRoot, Action? searchEntryObserver)
+    {
+        _searchEntryObserver = searchEntryObserver;
         _appProcessController = appProcessController ?? new SystemDesktopAppProcessController();
         _windowController = windowController ?? new SystemDesktopWindowController();
         _appLaunchTimeout = appLaunchTimeout ?? TimeSpan.FromSeconds(8);
@@ -357,6 +366,7 @@ public sealed partial class WindowsDesktopTools
 
     private ToolResult SearchFiles(ToolProposal proposal, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!proposal.Arguments.TryGetValue("query", out var query) || string.IsNullOrWhiteSpace(query) || query.Length > 120)
             return new(false, "请输入 1–120 个字符的文件名或关键词。", "INVALID_QUERY");
 
@@ -374,6 +384,7 @@ public sealed partial class WindowsDesktopTools
         var skippedEntries = roots.Length - existingRoots.Length;
         foreach (var path in existingRoots)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!TryOpenOrdinaryPath(path, expectedDirectory: true, enumerateDirectory: false,
                     out var rootHandle, out var canonicalPath, out var rootIdentity))
             {
@@ -414,7 +425,8 @@ public sealed partial class WindowsDesktopTools
                     continue;
                 }
                 if (!TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity,
-                        LocalFileSearchResultPolicy.MaximumScannedEntries - scanned, out var entries))
+                        LocalFileSearchResultPolicy.MaximumScannedEntries - scanned, cancellationToken,
+                        _searchEntryObserver, out var entries))
                 {
                     skippedEntries++;
                     continue;
@@ -1110,7 +1122,8 @@ public sealed partial class WindowsDesktopTools
         }
     }
 
-    private static bool TryEnumerateDirectoryEntries(SafeFileHandle directoryHandle, FileIdentity parentIdentity, int maximumEntries,
+    private static bool TryEnumerateDirectoryEntries(SafeFileHandle directoryHandle, FileIdentity parentIdentity,
+        int maximumEntries, CancellationToken cancellationToken, Action? searchEntryObserver,
         out IReadOnlyList<EnumeratedEntry> entries)
     {
         const int BufferSize = 64 * 1024;
@@ -1124,6 +1137,8 @@ public sealed partial class WindowsDesktopTools
         {
             while (result.Count < maximumEntries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                // The native query is synchronous; cancellation is observed as soon as it returns and while records are parsed.
                 if (!GetFileInformationByHandleEx(directoryHandle, FileInformationClassIdExtendedDirectoryInfo,
                         buffer, (uint)BufferSize))
                 {
@@ -1136,11 +1151,13 @@ public sealed partial class WindowsDesktopTools
                     entries = [];
                     return false;
                 }
+                cancellationToken.ThrowIfCancellationRequested();
 
                 var offset = 0;
                 var foundEntry = false;
                 while (true)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (offset < 0 || offset > BufferSize - FileNameOffset)
                     {
                         entries = [];
@@ -1170,6 +1187,8 @@ public sealed partial class WindowsDesktopTools
                     {
                         result.Add(new EnumeratedEntry(name, header.FileAttributes,
                             new FileIdentity(parentIdentity.VolumeSerialNumber, header.FileIdLow, header.FileIdHigh)));
+                        searchEntryObserver?.Invoke();
+                        cancellationToken.ThrowIfCancellationRequested();
                         foundEntry = true;
                         if (result.Count >= maximumEntries) break;
                     }

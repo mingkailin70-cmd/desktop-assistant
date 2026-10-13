@@ -259,7 +259,7 @@ public sealed partial class WindowsDesktopTools
                 foundDirectories.Add(new ArchiveDirectorySnapshot(canonicalDirectory, directoryIdentity));
                 var remaining = LocalDirectoryArchivePolicy.MaximumScannedEntries - scannedEntries;
                 if (remaining <= 0 || !TryEnumerateDirectoryEntries(directoryHandle, directoryIdentity,
-                        remaining + 1, out var entries))
+                        remaining + 1, cancellationToken, searchEntryObserver: null, out var entries))
                 {
                     failure = new(false, "无法完整安全地枚举源文件夹；没有压缩。", "ARCHIVE_DIRECTORY_ENUMERATION_FAILED");
                     return false;
