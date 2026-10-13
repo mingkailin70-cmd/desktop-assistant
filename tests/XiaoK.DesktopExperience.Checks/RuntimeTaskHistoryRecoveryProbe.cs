@@ -11,6 +11,7 @@ internal static class RuntimeTaskHistoryRecoveryProbe
     public static async Task RunAsync()
     {
         var profileRoot = Path.Combine(Path.GetTempPath(), "XiaoK-Diagnostics-" + Guid.NewGuid().ToString("N"));
+        var stage = "diagnostic profile initialization";
         try
         {
             XiaoKSettings.EnableDiagnosticsProfile(profileRoot);
@@ -22,6 +23,7 @@ internal static class RuntimeTaskHistoryRecoveryProbe
                 && !settings.WakeWordEnabled,
                 "Runtime历史恢复探针没有限制在隔离诊断目录，或意外启用了通知/唤醒监听。");
 
+            stage = "SQLite seed creation";
             var databasePath = Path.Combine(settings.DataRoot, "tasks.sqlite3");
             var store = new SqliteTaskStore(databasePath);
             var oldHostSessionId = Guid.NewGuid();
@@ -48,6 +50,7 @@ internal static class RuntimeTaskHistoryRecoveryProbe
             };
             foreach (var record in records) await store.SaveAsync(record, CancellationToken.None);
 
+            stage = "isolated code task fixture creation";
             var codeTaskId = $"{now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
             var codeTaskRoot = Path.Combine(settings.CodeWorkspaceRoot, codeTaskId);
             var codeWorkspace = Path.Combine(codeTaskRoot, "workspace");
@@ -64,6 +67,7 @@ internal static class RuntimeTaskHistoryRecoveryProbe
                     privateBody = privateSentinel
                 }));
 
+            stage = "runtime construction and history projection";
             await using (var runtime = new AssistantRuntime(new RejectAllApprovals()))
             {
                 Require(runtime.ModelStatus.StartsWith("诊断模式", StringComparison.Ordinal)
@@ -103,12 +107,21 @@ internal static class RuntimeTaskHistoryRecoveryProbe
                     "生产Runtime泄漏了历史哨兵内容，或3秒轮询重复读取改变了恢复投影。");
             }
 
+            stage = "persisted snapshot verification";
             var persisted = await store.GetRecentAsync(20, CancellationToken.None);
             var persistedById = persisted.ToDictionary(record => record.Id);
             Require(records.All(record => persistedById[record.Id].Status == record.Status
                 && persistedById[record.Id].CheckpointStage == record.CheckpointStage
                 && persistedById[record.Id].Result is null),
                 "任务中心只读恢复改变了持久化状态，或任务结果正文进入SQLite。");
+        }
+        catch (Exception exception)
+        {
+            var detail = exception is InvalidOperationException
+                ? " " + exception.Message.Replace(profileRoot, "<isolated-profile>", StringComparison.OrdinalIgnoreCase)
+                : string.Empty;
+            Console.Error.WriteLine($"::error title=Runtime task history recovery::{stage}: {exception.GetType().Name}{detail}");
+            throw;
         }
         finally
         {
