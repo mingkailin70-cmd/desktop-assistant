@@ -38,6 +38,9 @@ internal static class PetWindowDragProbe
                 minimumHorizontalDistance: 4, minimumVerticalDistance: 4))
             failures.Add("无效按下位置仍可启动拖动。");
 
+        var routingFailure = VerifyButtonPointerRouting();
+        if (routingFailure is not null) failures.Add(routingFailure);
+
         var xamlPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml");
         var codePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs");
         var xaml = File.ReadAllText(xamlPath);
@@ -54,5 +57,53 @@ internal static class PetWindowDragProbe
             failures.Add("拖动阈值、轻点保留或缩放手柄排除逻辑没有接入窗口事件。");
 
         return failures;
+    }
+
+    private static string? VerifyButtonPointerRouting()
+    {
+        var previewReachedParent = false;
+        var bubbleReachedParent = false;
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var parent = new System.Windows.Controls.Border();
+                var button = new System.Windows.Controls.Button();
+                parent.Child = button;
+                parent.PreviewMouseLeftButtonDown += (_, e) =>
+                    previewReachedParent |= e.ChangedButton == System.Windows.Input.MouseButton.Left;
+                parent.MouseLeftButtonDown += (_, _) => bubbleReachedParent = true;
+
+                button.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                    System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount,
+                    System.Windows.Input.MouseButton.Left)
+                {
+                    RoutedEvent = System.Windows.Input.Mouse.PreviewMouseDownEvent
+                });
+                button.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
+                    System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount,
+                    System.Windows.Input.MouseButton.Left)
+                {
+                    RoutedEvent = System.Windows.Input.Mouse.MouseDownEvent
+                });
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        })
+        {
+            IsBackground = true
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        if (!thread.Join(TimeSpan.FromSeconds(5)))
+            return "WPF按钮事件路由检查超时。";
+        if (failure is not null)
+            return $"WPF按钮事件路由检查失败：{failure.GetType().Name}。";
+        return previewReachedParent && !bubbleReachedParent
+            ? null
+            : "按钮处理鼠标按下后，桌宠父容器没有先收到预览事件或仍收到冒泡事件。";
     }
 }
