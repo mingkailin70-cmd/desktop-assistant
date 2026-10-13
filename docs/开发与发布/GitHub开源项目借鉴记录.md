@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-13 社区微调：Qwen3.5-4B Code-Forged来源暂停
+
+发布者`continuum-ai`提供Qwen3.5-4B社区代码微调及GGUF量化；模型卡链接到CambrianTech的Forge方法仓库。固定微调revision `253e71ab588a5c02882a77f21c6520b8f9f2acd8`的README/结果JSON写明训练数据是WikiText-2，而发布者目录与Forge论文把模型描述为基于CodeFeedback 156K；当前资料没有解释此数据来源差异，也未证明GGUF量化所用母权重对应哪个微调revision。权重和GGUF页面声明Apache-2.0；CodeFeedback数据页声明Apache-2.0，但这不能证明该固定权重的真实训练流水线或数据权利。固定GGUF revision `4bba82f69d1b5166b9e2a5b093fe93505acddda3`中的Q4_K_M文件为2.71 GB、Hub SHA-256 `15c8ebc22ac16e3e922041f25d285f8a322e228196de0e9b12592b8bf8b7646e`。README自带样例含复述提示的输出，困惑度为发布者自报指标，不能替代小K任务集。虽权重页声称面向llama.cpp，Windows锁定运行时b11259兼容性仍未知。
+
+**处置：暂停候选，不下载、不运行、不接生产。** 待训练数据来源/许可与权重对应关系澄清后，再做本机权重散列及兼容性预检；只有通过后才使用固定40题任务集评估。来源：[固定版微调模型卡](https://huggingface.co/continuum-ai/qwen3.5-4b-code-forged/tree/253e71ab588a5c02882a77f21c6520b8f9f2acd8)、[固定GGUF文件](https://huggingface.co/continuum-ai/qwen3.5-4b-code-forged-GGUF/blob/4bba82f69d1b5166b9e2a5b093fe93505acddda3/qwen3.5-4b-code-forged-Q4_K_M.gguf)、[Forge GitHub仓库](https://github.com/CambrianTech/sentinel-ai)。本轮只读网页筛查，无权重下载、模型运行或本机设置变化。
+
 ## 2026-10-13 GitHub社区权重：TernaryQuench Qwen3.8-27B
 
 - GitHub项目[penk/ternary-quench](https://github.com/penk/ternary-quench)公开了三值量化训练、导出和评测流程；可运行权重实际托管在[Hugging Face](https://huggingface.co/penkia/TernaryQuench-Qwen3.8-27B-GGUF)，这说明GitHub项目可以作为权重发现与来源追溯入口，但不把GitHub源码仓库误称为大文件托管位置。模型卡标Apache-2.0，底模Qwen3.8-27B也标Apache-2.0。
