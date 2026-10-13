@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="小K" Height="650" Width="500" MinHeight="372" MinWidth="300"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="False"
-        ResizeMode="CanResizeWithGrip" ShowInTaskbar="True" SizeChanged="Window_SizeChanged">
+        ResizeMode="CanResizeWithGrip" ShowInTaskbar="True" ShowActivated="False"
+        SizeChanged="Window_SizeChanged">
     <Window.Resources>
         <LinearGradientBrush x:Key="PanelSurfaceBrush" StartPoint="0,0" EndPoint="1,1">
             <GradientStop Color="#FCFCF8" Offset="0"/>
@@ -260,6 +261,7 @@
 
             <Border x:Name="PetView" Visibility="Collapsed" Background="Transparent" CornerRadius="30"
                     BorderBrush="Transparent" BorderThickness="0" Cursor="SizeAll"
+                    PreviewMouseLeftButtonDown="PetView_PreviewMouseLeftButtonDown"
                     AutomationProperties.Name="小K桌宠，可按住任意位置拖动；单击展开任务面板"
                     AutomationProperties.HelpText="按住桌宠任意位置并移动鼠标，松开后保存位置；右下角手柄用于缩放"
                     ToolTip="按住桌宠任意位置拖动，松开后保存位置；单击展开任务面板；右键打开菜单">

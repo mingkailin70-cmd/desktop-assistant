@@ -1,3 +1,19 @@
+## v0.1.139.0 桌宠拖动允许用户输入正常激活（2026-10-14）
+
+历史实现已经调用WPF `Window.DragMove()`，但紧凑态仍通过`WM_MOUSEACTIVATE/MA_NOACTIVATE`拒绝用户点击激活。本版保留桌宠任意可见位置的`DragMove()`入口，移除该人工输入拦截，并设置`ShowActivated=false`只抑制程序首次显示时的激活；用户主动拖动时窗口按普通桌面行为处理。工作区约束、拖动后位置保存、短按展开与缩放手柄排除保留。Release全解构建0警告/错误，安全检查134项通过/0跳过，桌面体验109项通过。
+
+自包含签名MSIX位于`artifacts\\msix-validation\\7a88fa4ec5b74c86950a57a4741c8d97\\XiaoK-signed-validation.msix`，155,799,189字节，SHA-256 `35BA312C9C876D15A052DE8267A9D1952F8C4928A30AD30C18081F6C318F724A`；SignTool验签0警告、0错误。证书`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已受信，本次未修改信任。安装器请求Host PID 19120正常退出；当前用户安装`0.1.139.0`、状态`Ok`，经正常AppX入口启动Host PID 18660，窗口可见且非前台。安装版/发布版Host DLL SHA-256均为`C01CDFA1F93C39B9D766459A13D237D3E2A70E86BD264FF7D2C13905A52D4BBD`。即时回滚包`0.1.138.0`在`artifacts\\msix-validation\\915a3ff5c40f479e9ed3510f6f285f5c\\XiaoK-signed-validation.msix`，SHA-256 `DD53EC8142808A58E2419344829FBB25EE8D396230171C985F08F22A945B79F6`。
+
+自动化检查不能发送真实桌面鼠标输入，因此安装版拖动、轻点展开、缩放、多屏和位置重启恢复仍待真人验收；不能把代码检查、合成测试或成功安装当成实际交互通过。
+
+## v0.1.138.0 桌宠拖动改用WPF标准窗口移动（2026-10-14）
+
+针对用户再次反馈桌宠无法自由移动，将紧凑桌宠`PetView`改为在预览左键按下时对缩放手柄以外的任意可见区域调用WPF `Window.DragMove()`；由系统移动循环跟随鼠标，松开后根据位置变化保存或按短按展开。保留非激活窗口和工作区约束；移除自定义`WM_NCHITTEST/HTCAPTION`移动路径。固定SDK `10.0.401` Release全解构建0警告、0错误；安全检查134项通过、0跳过；桌面体验109项通过。
+
+自包含发布包含.NET及Windows Desktop `10.0.12`，673个载荷文件。签名MSIX位于`artifacts\msix-validation\915a3ff5c40f479e9ed3510f6f285f5c\XiaoK-signed-validation.msix`，155,799,237字节，SHA-256 `DD53EC8142808A58E2419344829FBB25EE8D396230171C985F08F22A945B79F6`；SignTool验签0警告、0错误。签名证书`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已受信，本次未改信任。安装器请求旧Host PID 65452正常退出；当前用户安装`0.1.138.0`、状态`Ok`，正常AppX入口启动新Host PID 19120，窗口可见且非前台。安装版/发布版Host DLL SHA-256均为`0073AF608003E587DADB88A74850990A2368F79ED552D53835850343694D33A2`。回滚包`0.1.137.0`位于`artifacts\msix-validation\3463208ce2fb47df8eafafbbd341eaed\XiaoK-signed-validation.msix`，SHA-256 `89B12166AE98BD490A5389E874E81183470AFD115290F178109617AF63C18A59`。
+
+自动化环境没有真实鼠标输入，因此新安装版真实拖动、轻点展开、缩放、多屏和位置重启恢复仍待现场验收；构建、合成检查和安装均不等于交互验收通过。
+
 ## v0.1.136.0 CodeAgent凭证格式规则进入安装版（2026-10-14）
 
 把源码中 Hugging Face `hf_`、Docker Hub `dckr_pat_`/`dckr_oat_`与Azure DevOps `AZDO`有限格式脱敏规则纳入自包含安装包。安全套件仅使用合成令牌、近似普通值和占位符，提交`566fda7`对应GitHub Actions Build [38459546232](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38459546232)全流程成功：Release构建0警告/错误、安全检查134项、桌面体验109项通过。该扫描仍不覆盖所有秘密，也未用真实项目凭证验证。

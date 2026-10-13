@@ -7,22 +7,9 @@ internal static class PetWindowDragProbe
 {
     public static IReadOnlyList<string> Run(string repositoryRoot)
     {
-        var failures = VerifyHitTestPolicy();
-        VerifyCompletionPolicy(failures);
-        VerifyNativeWindowInputWiring(repositoryRoot, failures);
-        return failures;
-    }
-
-    private static List<string> VerifyHitTestPolicy()
-    {
         var failures = new List<string>();
-        if (PetWindowInteractionPolicy.GetHitTest(compact: true, resizeHandle: false)
-                != PetWindowInteractionPolicy.HtCaption
-            || PetWindowInteractionPolicy.GetHitTest(compact: true, resizeHandle: true)
-                != PetWindowInteractionPolicy.HtClient
-            || PetWindowInteractionPolicy.GetHitTest(compact: false, resizeHandle: false)
-                != PetWindowInteractionPolicy.HtClient)
-            failures.Add("紧凑桌宠没有把本体交给系统窗口拖动，或缩放手柄未保留客户端输入。");
+        VerifyCompletionPolicy(failures);
+        VerifyDragMoveInputWiring(repositoryRoot, failures);
         return failures;
     }
 
@@ -39,40 +26,35 @@ internal static class PetWindowDragProbe
             failures.Add("系统移动结束后没有正确区分单击、移动和取消。");
     }
 
-    private static void VerifyNativeWindowInputWiring(string repositoryRoot, List<string> failures)
+    private static void VerifyDragMoveInputWiring(string repositoryRoot, List<string> failures)
     {
         var xamlPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml");
         var codePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs");
         var xaml = File.ReadAllText(xamlPath);
         var code = File.ReadAllText(codePath);
-        if (xaml.Contains("PreviewMouseLeftButtonDown=\"PetView_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
-            || xaml.Contains("PreviewMouseWheel=\"PetView_PreviewMouseWheel\"", StringComparison.Ordinal)
+        if (!xaml.Contains("PreviewMouseLeftButtonDown=\"PetView_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
+            || !xaml.Contains("ShowActivated=\"False\"", StringComparison.Ordinal)
             || !xaml.Contains("Cursor=\"SizeAll\"", StringComparison.Ordinal)
             || !xaml.Contains("x:Name=\"PetResizeHandle\"", StringComparison.Ordinal))
-            failures.Add("桌宠没有使用统一的系统拖动区域，或自定义缩放手柄已丢失。");
+            failures.Add("桌宠拖动入口、启动时不激活或独立缩放手柄接线不完整。");
 
-        if (!code.Contains("msg == WmNcHitTest && !_expanded", StringComparison.Ordinal)
-            || !code.Contains("PetWindowInteractionPolicy.GetHitTest", StringComparison.Ordinal)
-            || !code.Contains("msg == WmSetCursor", StringComparison.Ordinal)
-            || !code.Contains("SetCursor(moveCursor)", StringComparison.Ordinal)
-            || !code.Contains("msg == WmEnterSizeMove", StringComparison.Ordinal)
-            || !code.Contains("msg == WmExitSizeMove", StringComparison.Ordinal)
-            || !code.Contains("msg == WmMouseActivate && !_expanded", StringComparison.Ordinal)
-            || !code.Contains("return new IntPtr(MaNoActivate)", StringComparison.Ordinal)
-            || !code.Contains("CompletePetNativeMove(start, cancelled)", StringComparison.Ordinal)
+        if (!code.Contains("private void PetView_PreviewMouseLeftButtonDown", StringComparison.Ordinal)
+            || !code.Contains("DragMove();", StringComparison.Ordinal)
+            || !code.Contains("PetResizeHandle.IsMouseOver", StringComparison.Ordinal)
+            || !code.Contains("_petDragGestureActive = true", StringComparison.Ordinal)
+            || !code.Contains("PetWindowInteractionPolicy.GetCompletion(moved, cancelled)", StringComparison.Ordinal)
             || !code.Contains("FitWindowToMonitorWorkArea();", StringComparison.Ordinal)
             || !code.Contains("SaveWindowPosition();", StringComparison.Ordinal)
-            || !code.Contains("new Action(RestoreFromTray)", StringComparison.Ordinal)
-            || !code.Contains("new Action(OpenPetContextMenu)", StringComparison.Ordinal))
-            failures.Add("原生移动循环、非激活点击、轻点展开、右键菜单或位置保存接线不完整。");
+            || !code.Contains("case PetWindowMoveCompletion.Expand:", StringComparison.Ordinal))
+            failures.Add("任意位置拖动、缩放排除、短按展开或位置保存接线不完整。");
 
-        var obsoleteInput = new[]
+        var obsoleteNativeMove = new[]
         {
-            "SetWindowsHookEx(", "UnhookWindowsHookEx(", "DispatcherTimer",
-            "GetAsyncKeyState(", "_petPointerPollTimer", "PetWindowDragOrigin",
-            "PetWindowDragGesture"
+            "WmNcHitTest", "WmNcLButtonDown", "WmEnterSizeMove", "WmExitSizeMove",
+            "WmMouseActivate", "MaNoActivate", "SetWindowsHookEx(",
+            "GetAsyncKeyState(", "_petPointerPollTimer"
         };
-        if (obsoleteInput.Any(marker => code.Contains(marker, StringComparison.Ordinal)))
-            failures.Add("桌宠仍依赖全局鼠标钩子、轮询或手工坐标拖动链路。");
+        if (obsoleteNativeMove.Any(marker => code.Contains(marker, StringComparison.Ordinal)))
+            failures.Add("桌宠拖动仍抑制用户明确点击激活，或依赖旧的自定义Win32命中/钩子路径。");
     }
 }
