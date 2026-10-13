@@ -6,6 +6,8 @@
 
 回滚到签名`0.1.132.0`的包仍保留于`artifacts\msix-validation\770302b574fc4883a8bd06a85b63a5f6\XiaoK-signed-validation.msix`，大小155,802,592字节、SHA-256 `8D33CD6B6A082DABB52255D62F49307D62BDE880DFF901A7F242134FD8C9B1CA`。安装/启动和程序集散列匹配不证明任务中心真实搜索或取消操作、实际鼠标手势、R0消息闭环或首版端到端验收通过。
 
+安装版只读文件名搜索诊断在已配置的`src\XiaoK.Host`子目录命中`Package.appxmanifest`，用时90.6 ms；适配器/Core散列与本地同身份验证包匹配。诊断不输出路径或正文，不启动Host，未改设置。此命中只验证一个已授权子目录的正常路径；实际任务UI、取消、真实大目录和首版端到端仍待。提交`e8a4a13`的GitHub Actions [Build 38449084884](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38449084884)全步骤成功。
+
 ## v0.1.131.0 桌宠自由拖动使用原生窗口捕获（2026-10-14）
 
 针对用户仍无法自由移动的反馈，将桌宠紧凑态拖动从WPF子树鼠标捕获/预览事件路由改为Win32 `SetCapture(hwnd)`，并在Host窗口消息钩子中跟踪`WM_MOUSEMOVE`与`WM_LBUTTONUP`。超过系统拖动阈值后按屏幕物理指针增量调用`SetWindowPos(SWP_NOACTIVATE|SWP_NOZORDER)`；鼠标移出桌宠范围后继续收到移动/松开，捕获变化或取消时保存已完成的移动。阈值内短按仍展开，右下角缩放把手继续独立处理，拖动结束限制在显示器工作区并持久化位置。对旧WPF捕获链路容易丢失窗口级移动消息的判断来自源码结构，尚无本会话真实鼠标复现。
