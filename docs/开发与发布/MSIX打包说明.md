@@ -1,3 +1,11 @@
+## v0.1.133.0 目录枚举取消修复安装（2026-10-14）
+
+前一阶段在64KiB目录批次读取前后以及逐条解析期间响应取消，覆盖文件名搜索、内容搜索、目录归档和文件分类；512项合成目录在第64项主动取消并验证立即停止。固定SDK `10.0.401` Release全解及完整安全套件134项通过、0项跳过。使用锁定还原生成自包含`win-x64`发布输出，包含Microsoft.NETCore.App和Microsoft.WindowsDesktop.App `10.0.12`。
+
+签名MSIX `artifacts\msix-validation\899f512af9b34173a19967db000c0af1\XiaoK-signed-validation.msix`为155,802,860字节，SHA-256 `E1DAF32F9BA140ECE0A323084E4A89FD853A84F808B6DCCAB981DA4564D67302`；SignTool验签0警告、0错误。证书`B96A02547ABA84523619E11EB7788AE9850A5C60`已受信，本次未改信任。安装器核验并请求旧Host PID 31368正常退出，当前账户安装`MingKaiLin.XiaoK_0.1.133.0_neutral__g0ndt6g65c8pe`、状态`Ok`。正常AppX启动后Host PID 12040，窗口可见且不是前台窗口；安装版/发布版Host DLL SHA-256均为`C3F28E1EA7248C6676B0C5E9885C72E2C8B96E0422FA417A18BCB0D4E91E8560`，Windows适配器DLL SHA-256均为`91DAFEEAEC5FF403CB3134D39903221E0CF4B614964B6E82123FCEA5674A63D3`。安装前只读核验微信/QQ监听、唤醒词关闭且发布者列表为空；`llama-server`为0。
+
+回滚到签名`0.1.132.0`的包仍保留于`artifacts\msix-validation\770302b574fc4883a8bd06a85b63a5f6\XiaoK-signed-validation.msix`，大小155,802,592字节、SHA-256 `8D33CD6B6A082DABB52255D62F49307D62BDE880DFF901A7F242134FD8C9B1CA`。安装/启动和程序集散列匹配不证明任务中心真实搜索或取消操作、实际鼠标手势、R0消息闭环或首版端到端验收通过。
+
 ## v0.1.131.0 桌宠自由拖动使用原生窗口捕获（2026-10-14）
 
 针对用户仍无法自由移动的反馈，将桌宠紧凑态拖动从WPF子树鼠标捕获/预览事件路由改为Win32 `SetCapture(hwnd)`，并在Host窗口消息钩子中跟踪`WM_MOUSEMOVE`与`WM_LBUTTONUP`。超过系统拖动阈值后按屏幕物理指针增量调用`SetWindowPos(SWP_NOACTIVATE|SWP_NOZORDER)`；鼠标移出桌宠范围后继续收到移动/松开，捕获变化或取消时保存已完成的移动。阈值内短按仍展开，右下角缩放把手继续独立处理，拖动结束限制在显示器工作区并持久化位置。对旧WPF捕获链路容易丢失窗口级移动消息的判断来自源码结构，尚无本会话真实鼠标复现。
