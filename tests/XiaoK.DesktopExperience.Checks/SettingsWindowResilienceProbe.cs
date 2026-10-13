@@ -10,9 +10,9 @@ using XiaoK.Host;
 
 namespace XiaoK.DesktopExperience.Checks;
 
-internal static class SettingsWindowSaveProbe
+internal static class SettingsWindowResilienceProbe
 {
-    private const string TemporaryDirectoryPrefix = "XiaoK-SettingsSaveProbe-";
+    private const string TemporaryDirectoryPrefix = "XiaoK-SettingsResilienceProbe-";
 
     public static IReadOnlyList<string> Run()
     {
@@ -25,14 +25,14 @@ internal static class SettingsWindowSaveProbe
         })
         {
             IsBackground = true,
-            Name = "XiaoK settings save offscreen UI check"
+            Name = "XiaoK settings resilience offscreen UI check"
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         if (!thread.Join(TimeSpan.FromSeconds(12)))
-            return ["设置页保存离屏UI检查超过12秒；工作线程设为后台且不会触碰用户窗口。"];
+            return ["设置页异步恢复离屏UI检查超过12秒；工作线程设为后台且不会触碰用户窗口。"];
         if (threadFailure is not null)
-            return [$"设置页保存离屏UI检查异常：{threadFailure.GetType().Name}"];
+            return [$"设置页异步恢复离屏UI检查异常：{threadFailure.GetType().Name}"];
         return failures;
     }
 
@@ -66,6 +66,8 @@ internal static class SettingsWindowSaveProbe
 
             var replaceGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var replaceCalls = 0;
+            var failLoginStartupRead = false;
+            var failContactStyleLoad = false;
             Task ReplaceContactStyles(IEnumerable<ContactReplyStylePreference> _, CancellationToken __)
             {
                 replaceCalls++;
@@ -73,7 +75,13 @@ internal static class SettingsWindowSaveProbe
             }
 
             Task<IReadOnlyList<ContactReplyStylePreference>> LoadContactStyles(CancellationToken _) =>
-                Task.FromResult<IReadOnlyList<ContactReplyStylePreference>>([]);
+                failContactStyleLoad
+                    ? Task.FromException<IReadOnlyList<ContactReplyStylePreference>>(new Exception("SYNTHETIC_PRIVATE_STYLE_LOAD_ERROR"))
+                    : Task.FromResult<IReadOnlyList<ContactReplyStylePreference>>([]);
+            Task<LoginStartupSnapshot> ReadLoginStartupState() =>
+                failLoginStartupRead
+                    ? Task.FromException<LoginStartupSnapshot>(new Exception("SYNTHETIC_PRIVATE_STARTUP_READ_ERROR"))
+                    : Task.FromResult(new LoginStartupSnapshot(true, false, "合成启动状态"));
             Task<string> CreateBackup(string path, CancellationToken _) => Task.FromResult(path);
             Task<string> RestoreBackup(string path, CancellationToken _) => Task.FromResult(path);
             Task<IReadOnlyList<ApprovalAuditRecord>> LoadApprovalAudit(int _, CancellationToken __) =>
@@ -86,7 +94,7 @@ internal static class SettingsWindowSaveProbe
             var notificationMonitor = new WindowsNotificationMonitor(dispatcher);
             var window = new SettingsWindow(settings, notificationMonitor, LoadContactStyles, ReplaceContactStyles,
                 Path.Combine(rootPath, "active.sqlite3"), CreateBackup, RestoreBackup,
-                LoadApprovalAudit, GetCleanupPreview, ClearLocalData);
+                LoadApprovalAudit, GetCleanupPreview, ClearLocalData, ReadLoginStartupState);
             SetPrivateField(window, "_startupStateLoaded", true);
             SetPrivateField(window, "_contactStylesLoaded", true);
 
@@ -148,7 +156,8 @@ internal static class SettingsWindowSaveProbe
             }
 
             replaceGate.SetException(new Exception("SYNTHETIC_PRIVATE_SAVE_ERROR"));
-            PumpUntilSaveFinishes(dispatcher, window, failures);
+            PumpUntil(dispatcher, () => !GetPrivateField<bool>(window, "_saveInProgress"), failures,
+                "合成保存异常后，设置页异步收尾没有在4秒内结束。");
             if (!saveButton.IsEnabled || !cancelButton.IsEnabled || !form.IsEnabled)
                 failures.Add("保存失败后设置控件没有恢复可用状态。");
             if (GetPrivateField<bool>(window, "_saveInProgress"))
@@ -162,10 +171,71 @@ internal static class SettingsWindowSaveProbe
                 dispatcher.Invoke(new Action(() => closingHandler.Invoke(window, [window, idleClose])));
             if (idleClose.Cancel)
                 failures.Add("保存完成后关闭保护仍处于锁定状态。");
+
+            failLoginStartupRead = true;
+            failContactStyleLoad = false;
+            SetPrivateField(window, "_startupStateLoaded", false);
+            SetPrivateField(window, "_contactStylesLoaded", false);
+            var loadHandler = typeof(SettingsWindow).GetMethod("SettingsWindow_Loaded",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var startupStatus = window.FindName("StartupStatusText") as TextBlock;
+            var startupCheck = window.FindName("StartupCheck") as CheckBox;
+            var setContactControls = typeof(SettingsWindow).GetMethod("SetContactStyleControlsEnabled",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var contactStatus = window.FindName("ContactStyleStatusText") as TextBlock;
+            var contactName = window.FindName("ContactStyleNameBox") as TextBox;
+            var contactStyle = window.FindName("ContactStyleBox") as ComboBox;
+            var addStyleButton = window.FindName("AddContactStyleButton") as Button;
+            var removeStyleButton = window.FindName("RemoveContactStyleButton") as Button;
+            var contactStyles = window.FindName("ContactStylesList") as ListBox;
+            if (loadHandler is null || setContactControls is null || startupStatus is null || startupCheck is null
+                || contactStatus is null || contactName is null || contactStyle is null
+                || addStyleButton is null || removeStyleButton is null || contactStyles is null)
+            {
+                failures.Add("设置页没有找到初始化处理器或联系人风格状态控件。");
+                return;
+            }
+
+            startupCheck.IsEnabled = true;
+            dispatcher.Invoke(new Action(() => loadHandler.Invoke(window,
+                [window, new RoutedEventArgs(FrameworkElement.LoadedEvent, window)])));
+            PumpUntil(dispatcher, () => GetPrivateField<bool>(window, "_contactStylesLoaded"), failures,
+                "合成登录启动状态读取异常后，设置页未完成后续联系人偏好加载。");
+            if (GetPrivateField<bool>(window, "_startupStateLoaded") || startupCheck.IsEnabled
+                || !startupStatus.Text.Contains("无法读取 Windows 登录启动状态", StringComparison.Ordinal)
+                || !status.Text.Contains("重新打开设置页后重试", StringComparison.Ordinal)
+                || status.Text.Contains("SYNTHETIC_PRIVATE_STARTUP_READ_ERROR", StringComparison.Ordinal))
+                failures.Add("登录启动状态读取异常未安全停用该选项，或异常详情泄漏到设置页。");
+            if (!contactName.IsEnabled || !contactStyle.IsEnabled || !addStyleButton.IsEnabled
+                || !removeStyleButton.IsEnabled || !contactStyles.IsEnabled)
+                failures.Add("登录启动状态读取失败后，独立的联系人偏好加载未正常完成。");
+
+            failLoginStartupRead = false;
+            failContactStyleLoad = true;
+            SetPrivateField(window, "_startupStateLoaded", false);
+            SetPrivateField(window, "_contactStylesLoaded", false);
+            startupCheck.IsEnabled = true;
+            dispatcher.Invoke(new Action(() => setContactControls.Invoke(window, [true])));
+            if (!contactName.IsEnabled || !contactStyle.IsEnabled || !addStyleButton.IsEnabled
+                || !removeStyleButton.IsEnabled || !contactStyles.IsEnabled)
+                failures.Add("联系人偏好加载异常探针的表单预置状态未能启用。");
+
+            dispatcher.Invoke(new Action(() => loadHandler.Invoke(window,
+                [window, new RoutedEventArgs(FrameworkElement.LoadedEvent, window)])));
+            PumpUntil(dispatcher, () => GetPrivateField<bool>(window, "_startupStateLoaded")
+                    && string.Equals(contactStatus.Text,
+                        "无法读取 SQLite 联系人偏好；为避免覆盖现有数据，此区域已停用。", StringComparison.Ordinal),
+                failures, "合成SQLite加载异常后，设置页初始化没有在4秒内结束。");
+            if (GetPrivateField<bool>(window, "_contactStylesLoaded") || contactName.IsEnabled
+                || contactStyle.IsEnabled || addStyleButton.IsEnabled || removeStyleButton.IsEnabled || contactStyles.IsEnabled)
+                failures.Add("联系人偏好读取失败后，编辑控件未保持失败关闭。");
+            if (status.Text.Contains("SYNTHETIC_PRIVATE_STYLE_LOAD_ERROR", StringComparison.Ordinal)
+                || !status.Text.Contains("其他设置仍可继续保存", StringComparison.Ordinal))
+                failures.Add("联系人偏好加载异常没有转换为固定提示，或异常详情泄漏到设置页。");
         }
         catch (Exception exception)
         {
-            failures.Add($"设置页保存探针异常：{exception.GetType().Name}");
+            failures.Add($"设置页异步恢复探针异常：{exception.GetType().Name}");
         }
         finally
         {
@@ -182,7 +252,8 @@ internal static class SettingsWindowSaveProbe
         }
     }
 
-    private static void PumpUntilSaveFinishes(Dispatcher dispatcher, SettingsWindow window, List<string> failures)
+    private static void PumpUntil(Dispatcher dispatcher, Func<bool> isComplete, List<string> failures,
+        string timeoutMessage)
     {
         var frame = new DispatcherFrame();
         var started = Stopwatch.GetTimestamp();
@@ -193,7 +264,7 @@ internal static class SettingsWindowSaveProbe
         };
         poll.Tick += (_, _) =>
         {
-            if (!GetPrivateField<bool>(window, "_saveInProgress"))
+            if (isComplete())
             {
                 finished = true;
                 poll.Stop();
@@ -206,7 +277,7 @@ internal static class SettingsWindowSaveProbe
         };
         poll.Start();
         Dispatcher.PushFrame(frame);
-        if (!finished) failures.Add("合成保存异常后，设置页异步收尾没有在4秒内结束。");
+        if (!finished) failures.Add(timeoutMessage);
     }
 
     private static void SetPrivateField(object target, string name, object value) =>

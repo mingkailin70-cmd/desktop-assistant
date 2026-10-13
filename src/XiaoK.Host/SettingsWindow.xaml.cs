@@ -30,6 +30,7 @@ public partial class SettingsWindow : Window
     private readonly Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> _getRecentApprovalAudit;
     private readonly Func<CancellationToken, Task<LocalDataCleanupPreview>> _getLocalDataCleanupPreview;
     private readonly Func<LocalDataCleanupPreview, CancellationToken, Task<LocalDataCleanupResult>> _clearLocalData;
+    private readonly Func<Task<LoginStartupSnapshot>> _readLoginStartup;
     private readonly string _activeDatabasePath;
     private IReadOnlyList<ContactReplyStylePreference> _loadedContactReplyStyles = [];
     private bool _startupWasEnabled;
@@ -50,7 +51,8 @@ public partial class SettingsWindow : Window
         Func<string, CancellationToken, Task<string>> restoreDatabaseBackup,
         Func<int, CancellationToken, Task<IReadOnlyList<ApprovalAuditRecord>>> getRecentApprovalAudit,
         Func<CancellationToken, Task<LocalDataCleanupPreview>> getLocalDataCleanupPreview,
-        Func<LocalDataCleanupPreview, CancellationToken, Task<LocalDataCleanupResult>> clearLocalData)
+        Func<LocalDataCleanupPreview, CancellationToken, Task<LocalDataCleanupResult>> clearLocalData,
+        Func<Task<LoginStartupSnapshot>>? readLoginStartup = null)
     {
         InitializeComponent();
         _original = settings;
@@ -71,6 +73,7 @@ public partial class SettingsWindow : Window
         _getRecentApprovalAudit = getRecentApprovalAudit;
         _getLocalDataCleanupPreview = getLocalDataCleanupPreview;
         _clearLocalData = clearLocalData;
+        _readLoginStartup = readLoginStartup ?? LoginStartupRegistration.ReadAsync;
         _requestNotificationAccess = notificationMonitor.RequestPermissionAsync;
         _inspectNotificationPublishers = notificationMonitor.InspectRecentPublisherIdsAsync;
         using (var process = Process.GetCurrentProcess()) _previousCpuTime = process.TotalProcessorTime;
@@ -123,21 +126,20 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            var startup = await LoginStartupRegistration.ReadAsync();
+            var startup = await _readLoginStartup();
             _startupWasEnabled = startup.IsEnabled;
             _startupStateLoaded = true;
             StartupCheck.IsChecked = startup.IsEnabled;
             StartupCheck.IsEnabled = startup.IsSupported;
             StartupStatusText.Text = startup.Status;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or SecurityException
-            or System.Runtime.InteropServices.COMException or NotSupportedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
         {
             _startupStateLoaded = false;
             StartupCheck.IsChecked = false;
             StartupCheck.IsEnabled = false;
             StartupStatusText.Text = "无法读取 Windows 登录启动状态；为避免误改系统设置，此项已停用。";
-            StatusText.Text = ex.Message;
+            StatusText.Text = "无法确认 Windows 登录启动状态；设置尚未保存，请重新打开设置页后重试。";
         }
 
         try
@@ -149,13 +151,12 @@ public partial class SettingsWindow : Window
             SetContactStyleControlsEnabled(true);
             ContactStyleStatusText.Text = "联系人偏好已从本机 SQLite 加载；更改后点击底部“保存”生效。";
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException or SecurityException
-            or InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (ex is not OutOfMemoryException and not AccessViolationException)
         {
             _contactStylesLoaded = false;
             SetContactStyleControlsEnabled(false);
             ContactStyleStatusText.Text = "无法读取 SQLite 联系人偏好；为避免覆盖现有数据，此区域已停用。";
-            StatusText.Text = ex.Message;
+            StatusText.Text = "联系人回复风格暂不可用；其他设置仍可继续保存。";
         }
     }
 
