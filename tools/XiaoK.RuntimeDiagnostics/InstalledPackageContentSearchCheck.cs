@@ -186,6 +186,127 @@ internal static class InstalledPackageContentSearchCheck
         finally { context.Unload(); }
     }
 
+    public static async Task<int> RunInstalledDirectorySearchAsync(string packageDirectory, string searchRootArgument,
+        string query, string expectedFileName)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.Error.WriteLine("已安装包目录内容搜索检查只支持 Windows。没有访问文件内容。");
+            return 2;
+        }
+
+        if (string.IsNullOrWhiteSpace(query) || query.Length > 120 || query.Any(char.IsControl)
+            || string.IsNullOrWhiteSpace(expectedFileName)
+            || expectedFileName is "." or ".."
+            || !Path.GetFileName(expectedFileName).Equals(expectedFileName, StringComparison.Ordinal)
+            || expectedFileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            Console.Error.WriteLine("搜索参数无效；没有执行搜索或打印参数。");
+            return 2;
+        }
+
+        var packageRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(packageDirectory));
+        if (!Directory.Exists(packageRoot) || !IsExpectedInstalledPackage(packageRoot))
+        {
+            Console.Error.WriteLine("目标不是已安装的小K MSIX包目录；没有加载或执行程序集。");
+            return 2;
+        }
+
+        if (!TryResolveConfiguredSearchSubdirectory(searchRootArgument, out var searchRoot))
+        {
+            Console.Error.WriteLine("搜索目录不是本机设置中已配置搜索根的普通子目录；没有执行搜索。");
+            return 2;
+        }
+
+        var expectedPath = Path.Combine(searchRoot, expectedFileName);
+        if (!File.Exists(expectedPath)
+            || (File.GetAttributes(expectedPath) & (FileAttributes.Directory | FileAttributes.ReparsePoint | FileAttributes.Device)) != 0)
+        {
+            Console.Error.WriteLine("预期文件不是搜索目录根部的普通文件；没有执行搜索。");
+            return 2;
+        }
+
+        var adapterPath = Path.Combine(packageRoot, AdapterAssemblyName);
+        var corePath = Path.Combine(packageRoot, CoreAssemblyName);
+        var manifestPath = Path.Combine(packageRoot, "AppxManifest.xml");
+        if (!File.Exists(adapterPath) || !File.Exists(corePath) || !File.Exists(manifestPath)
+            || !ManifestMatches(manifestPath))
+        {
+            Console.Error.WriteLine("安装包身份或所需程序集不符合预期；未执行搜索。");
+            return 2;
+        }
+
+        var installedAdapterHash = await HashFileAsync(adapterPath);
+        var installedCoreHash = await HashFileAsync(corePath);
+        var matchingLayout = await FindMatchingValidationLayoutAsync(manifestPath,
+            installedAdapterHash, installedCoreHash);
+        if (matchingLayout is null)
+        {
+            Console.Error.WriteLine("找不到与已安装包身份、版本和程序集散列一致的本地验证副本；未执行搜索。");
+            return 1;
+        }
+
+        var context = new InstalledPackageLoadContext(matchingLayout);
+        try
+        {
+            var adapterAssembly = context.LoadFromAssemblyPath(Path.Combine(matchingLayout, AdapterAssemblyName));
+            var coreAssembly = context.LoadFromAssemblyPath(Path.Combine(matchingLayout, CoreAssemblyName));
+            var tools = CreateWindowsDesktopTools(adapterAssembly, searchRoot);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var result = await InvokeSearchAsync(adapterAssembly, coreAssembly, tools,
+                query, "MatchingFileContentLocationsListed");
+            clock.Stop();
+
+            var success = ReadResultProperty(result, "Success") == "True";
+            var data = ReadResultProperty(result, "Data") ?? string.Empty;
+            var resultLines = data.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            var locationLines = resultLines.Skip(1).ToArray();
+            var expectedLocationReported = locationLines.Any(line =>
+                line.StartsWith(expectedPath + ": 第", StringComparison.OrdinalIgnoreCase));
+            var summaryWithheldSearchTerm = resultLines.Length > 0
+                && !resultLines[0].Contains(query, StringComparison.OrdinalIgnoreCase);
+            var resultContainsOnlyScopedLocations = locationLines.All(line =>
+                IsScopedLocationMetadataLine(line, searchRoot));
+            var hit = success && expectedLocationReported
+                && summaryWithheldSearchTerm && resultContainsOnlyScopedLocations;
+
+            Console.WriteLine($"MSIX包版本：{ReadPackageVersion(manifestPath)}");
+            Console.WriteLine($"已安装/本地Windows文件适配器SHA-256：{installedAdapterHash}");
+            Console.WriteLine($"已安装/本地Core程序集SHA-256：{installedCoreHash}");
+            Console.WriteLine("程序集对照：身份、版本及SHA-256均与本地验证包副本相符。");
+            Console.WriteLine($"已配置项目子目录内容搜索：适配器成功={success}、预期文件位置={expectedLocationReported}、摘要未回显搜索词={summaryWithheldSearchTerm}、结果仅含范围内路径与行号={resultContainsOnlyScopedLocations}；{(hit ? "通过" : "未通过")}，耗时 {clock.Elapsed.TotalMilliseconds:F1} ms。");
+            Console.WriteLine("诊断未启动Host；控制台不输出搜索目录、搜索词、匹配路径、行号或文件正文。");
+            return hit ? 0 : 1;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Console.Error.WriteLine("内容搜索诊断失败；为避免泄露本机路径或文件信息，已隐藏异常详情。");
+            return 1;
+        }
+        finally { context.Unload(); }
+    }
+
+    private static bool IsScopedLocationMetadataLine(string line, string searchRoot)
+    {
+        var marker = line.LastIndexOf(": 第", StringComparison.Ordinal);
+        if (marker <= 0) return false;
+
+        var path = line[..marker];
+        if (!Path.IsPathFullyQualified(path) || !IsWithinRoot(path, searchRoot)) return false;
+
+        var locations = line[(marker + 3)..];
+        const string truncatedSuffix = "等（行号列表已截断）";
+        if (locations.EndsWith(truncatedSuffix, StringComparison.Ordinal))
+            locations = locations[..^truncatedSuffix.Length];
+        if (!locations.EndsWith("行", StringComparison.Ordinal)) return false;
+
+        var numbers = locations[..^1];
+        return numbers.Split('、', StringSplitOptions.None).All(number =>
+            int.TryParse(number, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var lineNumber)
+            && lineNumber > 0);
+    }
+
     private static object CreateWindowsDesktopTools(Assembly adapterAssembly, string searchRoot)
     {
         var desktopAppType = adapterAssembly.GetType("XiaoK.Adapters.Windows.DesktopApp", throwOnError: true)!;
