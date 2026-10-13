@@ -54,6 +54,13 @@ if (args.Length == 1 && args[0] == "--only-uia-readonly-probe")
     return;
 }
 
+if (args.Length == 1 && args[0] == "--only-runtime-task-history-recovery")
+{
+    await RuntimeTaskHistoryRecoveryProbe.RunAsync();
+    Console.WriteLine("通过：生产AssistantRuntime从隔离SQLite恢复任务历史；旧动作与审批只显示核对状态，不入队或重放。");
+    return;
+}
+
 var checks = 0;
 void Require(bool passed, string message)
 {

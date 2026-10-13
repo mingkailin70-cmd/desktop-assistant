@@ -37,5 +37,7 @@ jobs:
         run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-task-history-display-policy
       - name: Task history checkpoint and restart recovery checks
         run: dotnet run --project tests/XiaoK.Tools.SafetyChecks --configuration Release --no-build --no-restore -- --only-task-history-checkpoints
+      - name: Runtime task history recovery checks
+        run: dotnet run --project tests/XiaoK.DesktopExperience.Checks --configuration Release --no-build --no-restore -- --only-runtime-task-history-recovery
       - name: Desktop experience checks
         run: dotnet run --project tests/XiaoK.DesktopExperience.Checks --configuration Release --no-build --no-restore
