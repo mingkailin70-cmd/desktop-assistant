@@ -5127,11 +5127,9 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "npm_" + new string('g', 36),
         "sk_live_" + new string('h', 24),
         "eyJ" + new string('i', 16) + "." + new string('j', 16) + "." + new string('k', 16),
-        "redis://user:" + new string('p', 24) + "@cache.example.invalid/0",
-        unquotedApiKey,
-        bearerToken,
-        basicToken
+        "redis://user:" + new string('p', 24) + "@cache.example.invalid/0"
     };
+    var allSyntheticCredentials = syntheticCredentials.Concat([unquotedApiKey, bearerToken, basicToken]).ToArray();
     var original = "internal class Sample {\n"
         + string.Join("\n", syntheticCredentials.Select((secret, index) => $"    private const string Key{index} = \"{secret}\";"))
         + $"\n    // api_key: {unquotedApiKey}\n    // Authorization: Bearer {bearerToken}\n    // Authorization: Basic {basicToken}\n"
@@ -5149,7 +5147,7 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
 
     Require(result.Success && result.FinalState == TaskLifecycleState.AwaitingApproval && inference.CallCount == 1,
         "含有可脱敏凭证的多行代码没有继续进行安全编辑。" + result.Summary);
-    Require(inference.Prompts.All(prompt => syntheticCredentials.All(secret => !prompt.Contains(secret, StringComparison.Ordinal))
+    Require(inference.Prompts.All(prompt => allSyntheticCredentials.All(secret => !prompt.Contains(secret, StringComparison.Ordinal))
         && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)
         && prompt.Contains("${API_KEY}", StringComparison.Ordinal)
         && prompt.Contains("example-token-placeholder-123456", StringComparison.Ordinal)),
@@ -5158,7 +5156,7 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "凭证脱敏期间修改了原项目。");
     var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
     var updated = File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs"));
-    Require(syntheticCredentials.All(secret => updated.Contains(secret, StringComparison.Ordinal))
+    Require(allSyntheticCredentials.All(secret => updated.Contains(secret, StringComparison.Ordinal))
         && updated.Contains("int value = 2;", StringComparison.Ordinal),
         "精确编辑没有保留隔离快照中的原始凭证字节内容。");
 }
