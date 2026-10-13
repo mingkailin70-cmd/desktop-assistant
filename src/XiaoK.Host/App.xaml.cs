@@ -43,6 +43,12 @@ public partial class App : System.Windows.Application
             Shutdown();
             return;
         }
+        if (e.Args.Length > 0 && string.Equals(e.Args[0], "--kws-worker", StringComparison.Ordinal))
+        {
+            Environment.ExitCode = await SherpaKwsWorkerEntryPoint.RunAsync(e.Args);
+            Shutdown();
+            return;
+        }
 
         if (e.Args.Contains("--notification-source-diagnostic", StringComparer.OrdinalIgnoreCase))
         {

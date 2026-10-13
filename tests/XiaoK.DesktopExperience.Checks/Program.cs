@@ -347,8 +347,11 @@ Require(true, "三维桌宠四态渲染、透明边缘、不激活前台与高�
 foreach (var failure in XiaoK.DesktopExperience.Checks.PetWindowDragProbe.Run(repositoryDirectory!.FullName))
     Require(false, failure);
 Require(true, "桌宠移动手势阈值、轻点展开和预览事件接线检查通过。");
+foreach (var failure in XiaoK.DesktopExperience.Checks.SherpaKwsWorkerIsolationProbe.Run(repositoryDirectory!.FullName))
+    Require(false, failure);
+Require(true, "Sherpa KWS隔离worker帧边界、关键词白名单、作业回收与先停麦后停进程检查通过。");
 
-Console.WriteLine($"桌宠三维渲染/姿态切换/移动与缩放/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复：{checks} 项通过。");
+Console.WriteLine($"桌宠三维渲染/姿态切换/移动与缩放/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复/Sherpa KWS worker隔离：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {

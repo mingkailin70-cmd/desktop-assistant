@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -18,12 +19,11 @@ namespace XiaoK.Host;
 
 /// <summary>
 /// Experimental local KWS listener. AudioGraph owns microphone capture; its callback only copies
-/// one bounded frame to a bounded channel. Decoding runs off the audio callback on CPU.
+/// one bounded frame to a bounded channel. Decoding runs in a low-priority CPU worker process.
 /// </summary>
 internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
 {
     private const string ModelRelativePath = "speech/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/afc4a534ef85f2db4f84f05ed78eaac385b3387e";
-    private const string KeywordBuffer = SherpaKeywordSpotter.XiaoKWakeWordKeywords;
     private const int FrameQueueCapacity = 8;
     private static readonly IReadOnlyDictionary<string, string> ExpectedModelHashes = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -44,9 +44,10 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
     private AudioFrameOutputNode? _outputNode;
     private Channel<AudioFrameBlock>? _frames;
     private CancellationTokenSource? _captureStop;
-    private Task? _decoderTask;
-    private Task? _orphanedDecoderTask;
-    private SherpaKeywordSpotter? _spotter;
+    private Process? _workerProcess;
+    private WindowsKillOnCloseJob? _workerJob;
+    private Task? _frameForwardTask;
+    private Task? _workerOutputTask;
     private int _pauseReason = (int)PauseReason.Disabled;
     private int _generation;
     private int _captureActive;
@@ -120,7 +121,7 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
                     SetStatus("Windows 会话在麦克风启动期间锁定；Sherpa KWS 已停麦，等待解锁。");
                     return _status;
                 }
-                SetStatus("Sherpa KWS 实验候选正在本机 CPU 单线程监听；不保存音频，唤醒后立即停麦。真实误唤醒率尚未验收。");
+                SetStatus("Sherpa KWS 实验候选正在独立低优先级 CPU 进程中监听；音频经有界本地管道短时处理、不保存，唤醒后立即停麦。真实误唤醒率尚未验收。");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -172,7 +173,7 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
             {
                 VerifyLockedModelFiles(_modelDirectory);
                 await StartCaptureCoreAsync(cancellationToken);
-                SetStatus("Sherpa KWS 实验候选正在本机 CPU 单线程监听；不保存音频。");
+                SetStatus("Sherpa KWS 实验候选正在独立低优先级 CPU 进程中监听；音频经有界本地管道短时处理、不保存。");
             }
             catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
             {
@@ -201,40 +202,53 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
     private async Task StartCaptureCoreAsync(CancellationToken cancellationToken)
     {
         if (_graph is not null) return;
-        if (_orphanedDecoderTask is { } orphanedWorker)
+        if (_workerProcess is { } previousWorker)
         {
-            if (!orphanedWorker.IsCompleted)
-                throw new InvalidOperationException("上一次Sherpa KWS解码尚未退出；为避免并行占用CPU，拒绝重新打开麦克风。");
-            _orphanedDecoderTask = null;
+            if (!previousWorker.HasExited)
+                throw new InvalidOperationException("上一次Sherpa KWS worker尚未退出；为避免并行占用CPU，拒绝重新打开麦克风。");
+            await WaitForWorkerTasksAsync(_frameForwardTask, _workerOutputTask).ConfigureAwait(true);
+            _frameForwardTask = null;
+            _workerOutputTask = null;
+            if (_frames is { } previousFrames)
+                while (previousFrames.Reader.TryRead(out var pending)) ReturnFrame(pending.Samples);
+            _frames = null;
+            _captureStop?.Dispose();
+            _captureStop = null;
+            _workerJob?.Dispose();
+            _workerJob = null;
+            previousWorker.Dispose();
+            _workerProcess = null;
         }
+
         cancellationToken.ThrowIfCancellationRequested();
-        var spotter = await Task.Run(
-            () => SherpaKeywordSpotter.CreateWithKeywords(_modelDirectory, KeywordBuffer), cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        var encoding = AudioEncodingProperties.CreatePcm(SherpaKeywordSpotter.SampleRate, 1, 32);
-        encoding.Subtype = MediaEncodingSubtypes.Float;
-        encoding.Bitrate = SherpaKeywordSpotter.SampleRate * sizeof(float) * 8;
-        var settings = new AudioGraphSettings(AudioRenderCategory.Media)
-        {
-            EncodingProperties = encoding,
-            QuantumSizeSelectionMode = Windows.Media.Audio.QuantumSizeSelectionMode.SystemDefault
-        };
+        var worker = await StartKwsWorkerProcessAsync(_modelDirectory, cancellationToken).ConfigureAwait(true);
+        _workerProcess = worker.Process;
+        _workerJob = worker.Job;
         AudioGraph? graph = null;
         AudioDeviceInputNode? input = null;
         AudioFrameOutputNode? output = null;
         try
         {
-            var graphResult = await AudioGraph.CreateAsync(settings);
             cancellationToken.ThrowIfCancellationRequested();
+            var encoding = AudioEncodingProperties.CreatePcm(SherpaKeywordSpotter.SampleRate, 1, 32);
+            encoding.Subtype = MediaEncodingSubtypes.Float;
+            encoding.Bitrate = SherpaKeywordSpotter.SampleRate * sizeof(float) * 8;
+            var settings = new AudioGraphSettings(AudioRenderCategory.Media)
+            {
+                EncodingProperties = encoding,
+                QuantumSizeSelectionMode = Windows.Media.Audio.QuantumSizeSelectionMode.SystemDefault
+            };
+            var graphResult = await AudioGraph.CreateAsync(settings);
             if (graphResult.Status != AudioGraphCreationStatus.Success)
                 throw new InvalidOperationException($"AudioGraph 创建失败：{graphResult.Status}");
             graph = graphResult.Graph;
+            cancellationToken.ThrowIfCancellationRequested();
 
             var inputResult = await graph.CreateDeviceInputNodeAsync(MediaCategory.Speech, encoding);
-            cancellationToken.ThrowIfCancellationRequested();
             if (inputResult.Status != AudioDeviceNodeCreationStatus.Success)
                 throw new UnauthorizedAccessException($"麦克风输入节点创建失败：{inputResult.Status}");
             input = inputResult.DeviceInputNode;
+            cancellationToken.ThrowIfCancellationRequested();
             output = graph.CreateFrameOutputNode(encoding);
             output.ConsumeInput = true;
             input.AddOutgoingConnection(output);
@@ -247,8 +261,6 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
                 AllowSynchronousContinuations = false
             });
             var cancellation = new CancellationTokenSource();
-            _spotter = spotter;
-            spotter = null!;
             _graph = graph;
             graph = null;
             _inputNode = input;
@@ -260,7 +272,11 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
             var generation = Interlocked.Increment(ref _generation);
             Interlocked.Exchange(ref _wakePending, 0);
             Volatile.Write(ref _captureActive, 1);
-            _decoderTask = Task.Run(() => DecodeFramesAsync(channel, _spotter!, generation, cancellation.Token));
+            var activeWorker = _workerProcess ?? throw new InvalidOperationException("Sherpa KWS worker未启动。");
+            _frameForwardTask = Task.Run(() => ForwardFramesAsync(channel.Reader, activeWorker,
+                generation, cancellation.Token));
+            _workerOutputTask = Task.Run(() => ReadWorkerOutputAsync(activeWorker,
+                generation, cancellation.Token));
             _graph!.QuantumStarted += OnQuantumStarted;
             _graph.UnrecoverableErrorOccurred += OnGraphError;
             _outputNode!.Start();
@@ -269,13 +285,12 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
         catch
         {
             Volatile.Write(ref _captureActive, 0);
-            if (_graph is not null) await StopCaptureCoreAsync();
+            if (_graph is not null || _workerProcess is not null) await StopCaptureCoreAsync();
             else
             {
                 output?.Dispose();
                 input?.Dispose();
                 graph?.Dispose();
-                spotter?.Dispose();
             }
             throw;
         }
@@ -284,7 +299,6 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
             output?.Dispose();
             input?.Dispose();
             graph?.Dispose();
-            spotter?.Dispose();
         }
     }
 
@@ -325,35 +339,153 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
         }
     }
 
-    private async Task DecodeFramesAsync(Channel<AudioFrameBlock> frames, SherpaKeywordSpotter spotter,
+    private async Task ForwardFramesAsync(ChannelReader<AudioFrameBlock> frames, Process worker,
         int generation, CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var frame in frames.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            var input = worker.StandardInput.BaseStream;
+            var header = new byte[sizeof(int)];
+            await foreach (var frame in frames.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
+                byte[]? payload = null;
                 try
                 {
-                    foreach (var label in spotter.AcceptWaveform(frame.Samples.AsSpan(0, frame.Count)))
-                    {
-                        if (label is not ("XIAOK_HI" or "XIAOK_HELLO" or "XIAOK_HI_EN")) continue;
-                        if (Interlocked.Exchange(ref _wakePending, 1) == 0)
-                        {
-                            Volatile.Write(ref _captureActive, 0);
-                            _ = Task.Run(() => PauseAfterWakeAsync(generation));
-                        }
-                        return;
-                    }
+                    var byteCount = checked(frame.Count * sizeof(float));
+                    payload = ArrayPool<byte>.Shared.Rent(byteCount);
+                    SherpaKwsWorkerProtocol.WriteSampleCount(header, frame.Count);
+                    MemoryMarshal.AsBytes(frame.Samples.AsSpan(0, frame.Count)).CopyTo(payload);
+                    await input.WriteAsync(header, cancellationToken).ConfigureAwait(false);
+                    await input.WriteAsync(payload.AsMemory(0, byteCount), cancellationToken).ConfigureAwait(false);
+                    await input.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
-                finally { ReturnFrame(frame.Samples); }
+                finally
+                {
+                    if (payload is not null)
+                    {
+                        CryptographicOperations.ZeroMemory(payload);
+                        ArrayPool<byte>.Shared.Return(payload);
+                    }
+                    ReturnFrame(frame.Samples);
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
             Volatile.Write(ref _captureActive, 0);
-            _ = Task.Run(() => FailCaptureAsync($"Sherpa KWS 本机解码失败（0x{error.HResult:X8}）。", generation));
+            _ = Task.Run(() => FailCaptureAsync("Sherpa KWS worker音频管道失败；", generation));
         }
+        finally
+        {
+            while (frames.TryRead(out var pending)) ReturnFrame(pending.Samples);
+        }
+    }
+
+    private async Task ReadWorkerOutputAsync(Process worker, int generation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                var line = await worker.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                {
+                    if (cancellationToken.IsCancellationRequested) return;
+                    throw new InvalidDataException("KWS worker已提前退出。");
+                }
+                if (line.Length > 64)
+                    throw new InvalidDataException("KWS worker协议行超过限制。");
+
+                if (line.StartsWith("KEYWORD:", StringComparison.Ordinal))
+                {
+                    var label = line["KEYWORD:".Length..];
+                    if (!SherpaKwsWorkerProtocol.IsAllowedKeywordLabel(label))
+                        throw new InvalidDataException("KWS worker返回未知标签。");
+                    if (Interlocked.Exchange(ref _wakePending, 1) == 0)
+                    {
+                        Volatile.Write(ref _captureActive, 0);
+                        _ = Task.Run(() => PauseAfterWakeAsync(generation));
+                    }
+                    return;
+                }
+
+                if (line.StartsWith("ERROR:", StringComparison.Ordinal))
+                    throw new InvalidDataException("KWS worker报告解码失败。");
+                throw new InvalidDataException("KWS worker协议响应无效。");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+        {
+            Volatile.Write(ref _captureActive, 0);
+            _ = Task.Run(() => FailCaptureAsync("Sherpa KWS隔离worker异常退出；", generation));
+        }
+    }
+
+    private static async Task<(Process Process, WindowsKillOnCloseJob Job)> StartKwsWorkerProcessAsync(
+        string modelDirectory, CancellationToken cancellationToken)
+    {
+        if (!WindowsPackageIdentity.IsPresent)
+            throw new InvalidOperationException("Sherpa KWS worker仅允许从已安装MSIX启动。");
+        if (!Path.IsPathFullyQualified(modelDirectory))
+            throw new InvalidOperationException("Sherpa KWS模型路径必须是本机绝对路径。");
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
+            throw new FileNotFoundException("无法定位已安装Host可执行文件以启动KWS worker。");
+
+        var start = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = AppContext.BaseDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = new System.Text.UTF8Encoding(false),
+            StandardOutputEncoding = new System.Text.UTF8Encoding(false),
+            StandardErrorEncoding = new System.Text.UTF8Encoding(false)
+        };
+        start.ArgumentList.Add("--kws-worker");
+        start.ArgumentList.Add("--model-dir");
+        start.ArgumentList.Add(Path.GetFullPath(modelDirectory));
+
+        var job = WindowsKillOnCloseJob.Create();
+        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        try
+        {
+            if (!process.Start()) throw new InvalidOperationException("无法启动隔离Sherpa KWS worker。");
+            job.Assign(process);
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            _ = DrainWorkerStandardErrorAsync(process);
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(45));
+            var ready = await process.StandardOutput.ReadLineAsync(timeout.Token).ConfigureAwait(false);
+            if (!string.Equals(ready, "READY", StringComparison.Ordinal))
+                throw new InvalidDataException("Sherpa KWS worker没有完成握手。");
+            await process.StandardInput.WriteLineAsync("START".AsMemory(), timeout.Token).ConfigureAwait(false);
+            await process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
+            var started = await process.StandardOutput.ReadLineAsync(timeout.Token).ConfigureAwait(false);
+            if (!string.Equals(started, "STARTED", StringComparison.Ordinal))
+                throw new InvalidDataException("Sherpa KWS worker未通过模型检查和加载。");
+            return (process, job);
+        }
+        catch
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            job.Dispose();
+            process.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task DrainWorkerStandardErrorAsync(Process process)
+    {
+        try { await process.StandardError.BaseStream.CopyToAsync(Stream.Null).ConfigureAwait(false); }
+        catch (Exception error) when (error is IOException or InvalidOperationException) { }
     }
 
     private async Task PauseAfterWakeAsync(int generation)
@@ -410,50 +542,84 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
             try { graph.Stop(); } catch (Exception) { }
         }
         try { _outputNode?.Stop(); } catch (Exception) { }
-        _frames?.Writer.TryComplete();
-        var cancellation = _captureStop;
-        _captureStop = null;
-        try { cancellation?.Cancel(); } catch (ObjectDisposedException) { }
-        var worker = _decoderTask;
-        var workerStopped = true;
-        if (worker is not null)
-        {
-            var completed = await Task.WhenAny(worker, Task.Delay(TimeSpan.FromSeconds(1))).ConfigureAwait(false);
-            workerStopped = ReferenceEquals(completed, worker);
-            if (workerStopped)
-            {
-                try { await worker.ConfigureAwait(false); } catch (Exception) { }
-            }
-            else _orphanedDecoderTask = worker;
-        }
-        _decoderTask = null;
-        if (_frames is { } frames)
-            while (frames.Reader.TryRead(out var pending)) ReturnFrame(pending.Samples);
-        _frames = null;
-        var spotter = _spotter;
-        _spotter = null;
-        if (spotter is not null)
-        {
-            if (workerStopped) SafeDispose(spotter);
-            else _ = DisposeSpotterAfterWorkerAsync(worker!, spotter);
-        }
         try { _inputNode?.Dispose(); } catch (Exception) { }
         _inputNode = null;
         try { _outputNode?.Dispose(); } catch (Exception) { }
         _outputNode = null;
         try { graph?.Dispose(); } catch (Exception) { }
-        try { cancellation?.Dispose(); } catch (Exception) { }
+
+        _frames?.Writer.TryComplete();
+        var cancellation = _captureStop;
+        _captureStop = null;
+        try { cancellation?.Cancel(); } catch (ObjectDisposedException) { }
+        try
+        {
+            var worker = _workerProcess;
+            if (worker is not null)
+            {
+                var exited = await StopWorkerProcessAsync(worker, _workerJob).ConfigureAwait(false);
+                _workerJob?.Dispose();
+                _workerJob = null;
+                if (!exited)
+                    throw new TimeoutException("Sherpa KWS worker未能在强制停止后退出；拒绝重新打开麦克风。");
+                worker.Dispose();
+                _workerProcess = null;
+            }
+
+            await WaitForWorkerTasksAsync(_frameForwardTask, _workerOutputTask).ConfigureAwait(false);
+            _frameForwardTask = null;
+            _workerOutputTask = null;
+
+            if (_frames is { } frames)
+                while (frames.Reader.TryRead(out var pending)) ReturnFrame(pending.Samples);
+            _frames = null;
+        }
+        finally
+        {
+            try { cancellation?.Dispose(); } catch (ObjectDisposedException) { }
+        }
     }
 
-    private static async Task DisposeSpotterAfterWorkerAsync(Task worker, SherpaKeywordSpotter spotter)
+    private static async Task<bool> StopWorkerProcessAsync(Process worker, WindowsKillOnCloseJob? job)
     {
-        try { await worker.ConfigureAwait(false); } catch (Exception) { }
-        SafeDispose(spotter);
+        try { worker.StandardInput.BaseStream.Dispose(); }
+        catch (Exception error) when (error is IOException or InvalidOperationException) { }
+
+        try
+        {
+            if (!worker.HasExited)
+            {
+                var waitForGracefulExit = worker.WaitForExitAsync();
+                var firstWait = await Task.WhenAny(waitForGracefulExit, Task.Delay(TimeSpan.FromMilliseconds(500)))
+                    .ConfigureAwait(false);
+                if (!ReferenceEquals(firstWait, waitForGracefulExit))
+                {
+                    try { worker.Kill(entireProcessTree: true); }
+                    catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                }
+            }
+        }
+        finally { job?.Dispose(); }
+
+        try
+        {
+            if (!worker.HasExited)
+                await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        }
+        catch (TimeoutException) { return false; }
+        catch (InvalidOperationException) { return true; }
+        return true;
     }
 
-    private static void SafeDispose(SherpaKeywordSpotter spotter)
+    private static async Task WaitForWorkerTasksAsync(Task? frameForwardTask, Task? workerOutputTask)
     {
-        try { spotter.Dispose(); } catch (Exception) { }
+        var tasks = new[] { frameForwardTask, workerOutputTask }.Where(task => task is not null).Cast<Task>().ToArray();
+        if (tasks.Length == 0) return;
+        var all = Task.WhenAll(tasks);
+        var completed = await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+        if (!ReferenceEquals(completed, all))
+            throw new TimeoutException("Sherpa KWS worker管道任务尚未退出；拒绝重新打开麦克风。");
+        try { await all.ConfigureAwait(false); } catch (Exception) { }
     }
 
     private void OnSessionSwitch(object? sender, SessionSwitchEventArgs args)
@@ -485,7 +651,7 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
             SetPauseReason(PauseReason.None);
             VerifyLockedModelFiles(_modelDirectory);
             await StartCaptureCoreAsync(CancellationToken.None);
-            SetStatus("Sherpa KWS 实验候选已恢复监听；不保存音频。");
+            SetStatus("Sherpa KWS 实验候选已在独立低优先级 CPU 进程中恢复监听；音频经有界本地管道短时处理、不保存。");
         }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
@@ -512,7 +678,7 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
         ArrayPool<float>.Shared.Return(samples);
     }
 
-    private static void VerifyLockedModelFiles(string modelDirectory)
+    internal static void VerifyLockedModelFiles(string modelDirectory)
     {
         var root = Path.GetFullPath(modelDirectory);
         if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
