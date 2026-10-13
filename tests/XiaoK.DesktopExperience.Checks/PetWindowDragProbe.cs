@@ -92,6 +92,14 @@ internal static class PetWindowDragProbe
                 minimumHorizontalDistance: 4, minimumVerticalDistance: 4) || gesture.PointerUp())
             failures.Add("无效移动坐标没有清除拖动手势状态。");
 
+        var origin = new PetWindowDragOrigin(100, 100, -1920, 500);
+        if (!origin.TryGetTargetPosition(-50, 175, out var targetLeft, out var targetTop)
+            || targetLeft != -2070 || targetTop != 575)
+            failures.Add("跨屏负坐标或不同方向的鼠标位移没有映射到正确窗口位置。");
+        var overflowOrigin = new PetWindowDragOrigin(0, 0, int.MaxValue, int.MinValue);
+        if (overflowOrigin.TryGetTargetPosition(1, -1, out _, out _))
+            failures.Add("极端光标坐标溢出时仍允许设置桌宠位置。");
+
         var routingFailure = VerifyButtonPointerRouting();
         if (routingFailure is not null) failures.Add(routingFailure);
 
@@ -102,13 +110,22 @@ internal static class PetWindowDragProbe
         if (!xaml.Contains("PreviewMouseLeftButtonDown=\"PetView_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
             || !xaml.Contains("PreviewMouseMove=\"PetView_PreviewMouseMove\"", StringComparison.Ordinal)
             || !xaml.Contains("PreviewMouseLeftButtonUp=\"PetView_PreviewMouseLeftButtonUp\"", StringComparison.Ordinal)
+            || !xaml.Contains("LostMouseCapture=\"PetView_LostMouseCapture\"", StringComparison.Ordinal)
             || xaml.Contains("MouseLeftButtonDown=\"PetView_MouseLeftButtonDown\"", StringComparison.Ordinal))
             failures.Add("宠物拖动没有接在按钮处理之前的预览事件上，或旧冒泡事件仍在使用。");
         if (!code.Contains("SystemParameters.MinimumHorizontalDragDistance", StringComparison.Ordinal)
             || !code.Contains("SystemParameters.MinimumVerticalDragDistance", StringComparison.Ordinal)
-            || !code.Contains("if (_petWindowDragGesture.PointerUp()) e.Handled = true;", StringComparison.Ordinal)
+            || !code.Contains("GetCursorPos(out var cursor)", StringComparison.Ordinal)
+            || !code.Contains("Mouse.Capture(PetView, System.Windows.Input.CaptureMode.SubTree)", StringComparison.Ordinal)
+            || !code.Contains("SetWindowPosition(handle, left, top);", StringComparison.Ordinal)
             || !code.Contains("PetResizeHandle.IsMouseOver", StringComparison.Ordinal))
-            failures.Add("拖动阈值、轻点保留或缩放手柄排除逻辑没有接入窗口事件。");
+            failures.Add("拖动阈值、屏幕坐标跟随、鼠标捕获或缩放手柄排除逻辑没有接入窗口事件。");
+
+        var moveHandlerStart = code.IndexOf("private void PetView_PreviewMouseMove", StringComparison.Ordinal);
+        var moveHandlerEnd = code.IndexOf("private void PetView_PreviewMouseLeftButtonUp", StringComparison.Ordinal);
+        if (moveHandlerStart < 0 || moveHandlerEnd <= moveHandlerStart
+            || code[moveHandlerStart..moveHandlerEnd].Contains("DragMove(", StringComparison.Ordinal))
+            failures.Add("桌宠拖动仍依赖在按钮鼠标移动期间调用 DragMove，可能因捕获状态失败。");
 
         return failures;
     }

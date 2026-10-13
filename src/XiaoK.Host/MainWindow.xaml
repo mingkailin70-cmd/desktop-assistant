@@ -263,6 +263,7 @@
                     PreviewMouseLeftButtonDown="PetView_PreviewMouseLeftButtonDown"
                     PreviewMouseMove="PetView_PreviewMouseMove"
                     PreviewMouseLeftButtonUp="PetView_PreviewMouseLeftButtonUp"
+                    LostMouseCapture="PetView_LostMouseCapture"
                     PreviewMouseWheel="PetView_PreviewMouseWheel"
                     ToolTip="按住拖动可移动；单击展开任务面板；右键打开菜单">
                 <Border.ContextMenu>

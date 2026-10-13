@@ -5463,6 +5463,7 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
     var diagnostic = monitor[diagnosticStart..diagnosticEnd];
     var settingsXaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml"));
     var settingsCode = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml.cs"));
+    var compactSettingsCode = string.Concat(settingsCode.Where(character => !char.IsWhiteSpace(character)));
     Require(diagnostic.Contains("notification.AppInfo.DisplayInfo.DisplayName", StringComparison.Ordinal)
         && diagnostic.Contains("notification.AppInfo.AppUserModelId", StringComparison.Ordinal)
         && diagnostic.Contains("notification.CreationTime", StringComparison.Ordinal)
@@ -5481,8 +5482,8 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
         "来源诊断结果不是只读展示、样本候选选择未绑定诊断结果，或界面暗示候选会自动启用。");
     Require(monitor.Contains("NotificationPublisherDiagnosticCompleted", StringComparison.Ordinal)
         && monitor.Contains("再手动填入对应 AUMID", StringComparison.Ordinal) == false
-        && settingsCode.Contains("hasSelectedPublisher", StringComparison.Ordinal)
-        && settingsCode.Contains("!active && !sessionExists && hasSelectedPublisher", StringComparison.Ordinal)
+        && compactSettingsCode.Contains("varhasSelectedPublisher=selectedPublisherisnotnull&&string.Equals(selectedPublisher.ApplicationId,applicationId,StringComparison.OrdinalIgnoreCase);", StringComparison.Ordinal)
+        && compactSettingsCode.Contains("StartNotificationSampleCaptureButton.IsEnabled=!active&&!sessionExists&&!_publisherInspectionFailed&&hasSelectedPublisher;", StringComparison.Ordinal)
         && settingsCode.Contains("时间戳在未来，需核对", StringComparison.Ordinal)
         && settingsCode.Contains("没有发现与{applicationDisplayName}匹配的来源候选", StringComparison.Ordinal),
         "无匹配来源时未说明平台状态、候选时间没有标注异常，或没有在候选选择前禁用样本采集。");

@@ -51,6 +51,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private double _petResizeHorizontal;
     private double _petResizeVertical;
     private readonly PetWindowDragGesture _petWindowDragGesture = new();
+    private PetWindowDragOrigin? _petWindowDragOrigin;
 
     public bool HasPendingActionConfirmationForTask(Guid taskId) =>
         _approvalInbox.HasPendingActionConfirmationForTask(taskId);
@@ -1027,36 +1028,81 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             || PetResizeHandle.IsMouseOver)
         {
             _petWindowDragGesture.Reset();
+            _petWindowDragOrigin = null;
             return;
         }
 
         var point = e.GetPosition(this);
         _petWindowDragGesture.PointerDown(point.X, point.Y);
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetCursorPos(out var cursor) || !GetWindowRect(handle, out var rect))
+        {
+            _petWindowDragGesture.Reset();
+            _petWindowDragOrigin = null;
+            return;
+        }
+
+        _petWindowDragOrigin = new PetWindowDragOrigin(cursor.X, cursor.Y, rect.Left, rect.Top);
+        _ = System.Windows.Input.Mouse.Capture(PetView, System.Windows.Input.CaptureMode.SubTree);
     }
 
     private void PetView_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (_expanded) return;
+        if (_expanded || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed) return;
 
-        var point = e.GetPosition(this);
-        if (!_petWindowDragGesture.TryStartDrag(point.X, point.Y,
-                e.LeftButton == System.Windows.Input.MouseButtonState.Pressed,
-                SystemParameters.MinimumHorizontalDragDistance,
-                SystemParameters.MinimumVerticalDragDistance)) return;
+        if (!_petWindowDragGesture.IsDragging)
+        {
+            var point = e.GetPosition(this);
+            if (!_petWindowDragGesture.TryStartDrag(point.X, point.Y, leftButtonPressed: true,
+                    SystemParameters.MinimumHorizontalDragDistance,
+                    SystemParameters.MinimumVerticalDragDistance)) return;
+
+            if (_petWindowDragOrigin is null)
+            {
+                _petWindowDragGesture.Reset();
+                return;
+            }
+
+            _ = System.Windows.Input.Mouse.Capture(PetView, System.Windows.Input.CaptureMode.SubTree);
+        }
 
         e.Handled = true;
-        try { DragMove(); }
-        catch (InvalidOperationException) { }
-        finally
-        {
-            FitWindowToMonitorWorkArea();
-            SaveWindowPosition();
-        }
+        MovePetWindowWithPointer();
     }
 
     private void PetView_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (_petWindowDragGesture.PointerUp()) e.Handled = true;
+        var wasDragging = _petWindowDragGesture.PointerUp();
+        _petWindowDragOrigin = null;
+        if (ReferenceEquals(System.Windows.Input.Mouse.Captured, PetView))
+            _ = System.Windows.Input.Mouse.Capture(null);
+
+        if (!wasDragging) return;
+
+        e.Handled = true;
+        FitWindowToMonitorWorkArea();
+        SaveWindowPosition();
+    }
+
+    private void PetView_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_petWindowDragGesture.IsDragging
+            || ReferenceEquals(System.Windows.Input.Mouse.Captured, PetView)) return;
+
+        _petWindowDragGesture.Reset();
+        _petWindowDragOrigin = null;
+        FitWindowToMonitorWorkArea();
+        SaveWindowPosition();
+    }
+
+    private void MovePetWindowWithPointer()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || _petWindowDragOrigin is not { } origin
+            || !GetCursorPos(out var cursor)
+            || !origin.TryGetTargetPosition(cursor.X, cursor.Y, out var left, out var top)) return;
+
+        SetWindowPosition(handle, left, top);
     }
 
     private void PetView_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
@@ -1505,6 +1551,13 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct MonitorInfo
     {
         public uint Size;
@@ -1518,6 +1571,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr MonitorFromRect(ref NativeRect rect, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]

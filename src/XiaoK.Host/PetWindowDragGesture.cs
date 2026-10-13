@@ -6,6 +6,8 @@ internal sealed class PetWindowDragGesture
     private (double X, double Y)? _pointerDown;
     private bool _dragStarted;
 
+    public bool IsDragging => _dragStarted;
+
     public void PointerDown(double x, double y)
     {
         _dragStarted = false;
@@ -48,4 +50,28 @@ internal sealed class PetWindowDragGesture
 
     private static double NormalizeThreshold(double value) =>
         double.IsFinite(value) && value > 0 ? value : 4;
+}
+
+internal readonly record struct PetWindowDragOrigin(
+    int CursorX,
+    int CursorY,
+    int WindowLeft,
+    int WindowTop)
+{
+    public bool TryGetTargetPosition(int cursorX, int cursorY, out int left, out int top)
+    {
+        var targetLeft = (long)WindowLeft + cursorX - CursorX;
+        var targetTop = (long)WindowTop + cursorY - CursorY;
+        if (targetLeft is < int.MinValue or > int.MaxValue
+            || targetTop is < int.MinValue or > int.MaxValue)
+        {
+            left = 0;
+            top = 0;
+            return false;
+        }
+
+        left = (int)targetLeft;
+        top = (int)targetTop;
+        return true;
+    }
 }
