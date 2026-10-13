@@ -58,7 +58,7 @@ internal static class PetWindowDragProbe
             || !code.Contains("IsInteractiveDragSource(e.OriginalSource)", StringComparison.Ordinal)
             || !code.Contains("System.Windows.Controls.Primitives.ButtonBase", StringComparison.Ordinal)
             || !code.Contains("System.Windows.Controls.Primitives.TextBoxBase", StringComparison.Ordinal)
-            || !code.Contains("System.Windows.Controls.Selector", StringComparison.Ordinal)
+            || !code.Contains("System.Windows.Controls.Primitives.Selector", StringComparison.Ordinal)
             || !code.Contains("System.Windows.Controls.ItemsControl", StringComparison.Ordinal)
             || !code.Contains("DragMove();", StringComparison.Ordinal)
             || !code.Contains("_petDragGestureActive = true", StringComparison.Ordinal)

@@ -511,7 +511,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                 or System.Windows.Controls.Primitives.RangeBase
                 or System.Windows.Controls.Primitives.ScrollBar
                 or System.Windows.Controls.Primitives.Thumb
-                or System.Windows.Controls.Selector
+                or System.Windows.Controls.Primitives.Selector
                 or System.Windows.Controls.ItemsControl
                 or System.Windows.Controls.MenuItem)
                 return true;
