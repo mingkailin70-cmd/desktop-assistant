@@ -345,15 +345,29 @@
                             <Image x:Name="PetSpriteFallback" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                    Width="284" Height="284" Margin="0,6,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
+                                   RenderTransformOrigin="0.5,0.78"
                                    AutomationProperties.Name="三维银渐层小猫小K，正面坐姿">
+                                <Image.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="PetFallbackPoseScale"/>
+                                        <TranslateTransform x:Name="PetFallbackPoseOffset"/>
+                                    </TransformGroup>
+                                </Image.RenderTransform>
                                 <Image.Effect>
                                     <DropShadowEffect Color="#667768" BlurRadius="16" ShadowDepth="4" Opacity="0.20"/>
                                 </Image.Effect>
                             </Image>
                             <Viewbox x:Name="PetEngineViewbox" Width="284" Height="284" Margin="0,6,0,0"
                                      Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
+                                     RenderTransformOrigin="0.5,0.78"
                                      AutomationProperties.Name="VPet Core驱动的小K银渐层桌宠"
                                      Loaded="PetEngineViewbox_Loaded">
+                                <Viewbox.RenderTransform>
+                                    <TransformGroup>
+                                        <ScaleTransform x:Name="PetEnginePoseScale"/>
+                                        <TranslateTransform x:Name="PetEnginePoseOffset"/>
+                                    </TransformGroup>
+                                </Viewbox.RenderTransform>
                                 <ContentControl x:Name="PetEngineHost" />
                             </Viewbox>
                         </Grid>

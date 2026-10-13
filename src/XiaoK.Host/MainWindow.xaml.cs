@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Interop;
 using Forms = System.Windows.Forms;
 using XiaoK.Core;
@@ -40,6 +41,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     private readonly CancellationTokenSource _petRendererCancellation = new();
     private VPetPortraitRuntime? _petRenderer;
     private Task? _petRendererInitializationTask;
+    private XiaoKPetPose? _currentPetPose;
     private string _currentStatus = "待命";
     private double _expandedWidth = 500;
     private double _expandedHeight = 650;
@@ -1276,21 +1278,28 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private void UpdatePetPose(string status)
     {
+        var pose = PetPosePresentationPolicy.FromStatus(status);
+        var previousPose = _currentPetPose;
+        var poseChanged = previousPose != pose;
+        _currentPetPose = pose;
+
+        if (poseChanged)
+        {
+            UpdateFallbackPetSprite(pose);
+
+            if (PetPosePresentationPolicy.ShouldAnimate(previousPose, pose,
+                    CanAnimatePetElement(PetSpriteFallback), SystemParameters.ClientAreaAnimation))
+                PetPoseTransitionAnimator.Play(PetFallbackPoseScale, PetFallbackPoseOffset,
+                    PetPosePresentationPolicy.GetMotionProfile(pose));
+
+            if (PetPosePresentationPolicy.ShouldAnimate(previousPose, pose,
+                    CanAnimatePetElement(PetEngineViewbox),
+                    SystemParameters.ClientAreaAnimation))
+                PetPoseTransitionAnimator.Play(PetEnginePoseScale, PetEnginePoseOffset,
+                    PetPosePresentationPolicy.GetMotionProfile(pose));
+        }
+
         if (_petRenderer is null) return;
-        var pose = status.Contains("采集麦克风", StringComparison.Ordinal)
-            || status.Contains("聆听", StringComparison.Ordinal)
-            || status.Contains("唤醒监听已开启", StringComparison.Ordinal)
-                ? XiaoKPetPose.Listening
-                : status.Contains("运行中", StringComparison.Ordinal)
-                    || status.Contains("执行", StringComparison.Ordinal)
-                    || status.Contains("播报", StringComparison.Ordinal)
-                    ? XiaoKPetPose.Executing
-                    : status.Contains("识别中", StringComparison.Ordinal)
-                        || status.Contains("分析", StringComparison.Ordinal)
-                        || status.Contains("思考", StringComparison.Ordinal)
-                        || status.Contains("任务队列中", StringComparison.Ordinal)
-                            ? XiaoKPetPose.Thinking
-                            : XiaoKPetPose.Idle;
         try
         {
             _petRenderer.SetPose(pose);
@@ -1305,6 +1314,37 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             try { renderer.Dispose(); }
             catch (Exception) { }
         }
+    }
+
+    private void UpdateFallbackPetSprite(XiaoKPetPose pose)
+    {
+        var assetPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Pets",
+            PetPosePresentationPolicy.GetFallbackAssetFileName(pose));
+        if (!File.Exists(assetPath)) return;
+
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.UriSource = new Uri(assetPath, UriKind.Absolute);
+            image.EndInit();
+            image.Freeze();
+            PetSpriteFallback.Source = image;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or ArgumentException or FormatException or InvalidOperationException
+            or System.Security.SecurityException)
+        {
+            // 保持XAML内置的空闲形象，姿态切换失败不应中断任务状态更新。
+        }
+    }
+
+    private static bool CanAnimatePetElement(FrameworkElement element)
+    {
+        var window = Window.GetWindow(element);
+        return window is not null && window.WindowState != WindowState.Minimized
+            && element.IsVisible && element.Opacity > 0.01;
     }
 
     private static string GetCompactStatus(string status)

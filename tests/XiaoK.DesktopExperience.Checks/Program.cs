@@ -75,6 +75,27 @@ Require(Near(tiny.HeightDip, 50) && Near(tiny.WidthDip / tiny.HeightDip, 300d / 
 Require(PetSizingPolicy.ClampPercent(12) == 40 && PetSizingPolicy.ClampPercent(300) == 160, "缩放限值错误。");
 Require(!PetSizingPolicy.IsValidPercent(double.NaN) && !PetSizingPolicy.IsValidPercent(double.PositiveInfinity), "接受非有限缩放。");
 
+Require(PetPosePresentationPolicy.FromStatus("正在采集麦克风") == XiaoKPetPose.Listening
+    && PetPosePresentationPolicy.FromStatus("唤醒监听已开启") == XiaoKPetPose.Listening
+    && PetPosePresentationPolicy.FromStatus("执行中") == XiaoKPetPose.Executing
+    && PetPosePresentationPolicy.FromStatus("正在分析请求") == XiaoKPetPose.Thinking
+    && PetPosePresentationPolicy.FromStatus("待命") == XiaoKPetPose.Idle,
+    "桌宠状态没有映射到对应姿态。");
+foreach (var pose in Enum.GetValues<XiaoKPetPose>())
+{
+    var motion = PetPosePresentationPolicy.GetMotionProfile(pose);
+    Require(double.IsFinite(motion.ScaleX) && double.IsFinite(motion.ScaleY) && double.IsFinite(motion.OffsetY)
+        && motion.ScaleX is >= 0.98 and <= 1.03 && motion.ScaleY is >= 0.98 and <= 1.03
+        && Math.Abs(motion.OffsetY) <= 2,
+        "桌宠姿态过渡超出轻量动效范围。");
+}
+Require(!PetPosePresentationPolicy.ShouldAnimate(null, XiaoKPetPose.Idle, true, true)
+    && !PetPosePresentationPolicy.ShouldAnimate(XiaoKPetPose.Idle, XiaoKPetPose.Idle, true, true)
+    && !PetPosePresentationPolicy.ShouldAnimate(XiaoKPetPose.Idle, XiaoKPetPose.Listening, false, true)
+    && !PetPosePresentationPolicy.ShouldAnimate(XiaoKPetPose.Idle, XiaoKPetPose.Listening, true, false)
+    && PetPosePresentationPolicy.ShouldAnimate(XiaoKPetPose.Idle, XiaoKPetPose.Listening, true, true),
+    "桌宠动画没有遵循状态变化、可见性或系统动画设置。");
+
 var root = Path.Combine(Path.GetTempPath(), "XiaoK-pet-checks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -171,6 +192,12 @@ var repositoryDirectory = new DirectoryInfo(AppContext.BaseDirectory);
 while (repositoryDirectory is not null && !File.Exists(Path.Combine(repositoryDirectory.FullName, "XiaoK.sln")))
     repositoryDirectory = repositoryDirectory.Parent;
 Require(repositoryDirectory is not null, "无法从桌面交互检查目录定位仓库根目录。");
+foreach (var pose in Enum.GetValues<XiaoKPetPose>())
+{
+    var asset = PetPosePresentationPolicy.GetFallbackAssetFileName(pose);
+    Require(File.Exists(Path.Combine(repositoryDirectory!.FullName, "src", "XiaoK.Host", "Assets", "Pets", asset)),
+        "桌宠静态回退姿态资源缺失。");
+}
 var assistantRuntimeSource = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
     "src", "XiaoK.Host", "AssistantRuntime.cs"));
 var directToolRoutes = Regex.Matches(assistantRuntimeSource,
@@ -284,8 +311,11 @@ foreach (var result in bindingResults)
 foreach (var failure in XiaoK.DesktopExperience.Checks.TaskHistoryWindowUiProbe.Run())
     Require(false, failure);
 Require(true, "任务中心离屏WPF检查通过。");
+foreach (var failure in XiaoK.DesktopExperience.Checks.PetPoseTransitionProbe.Run())
+    Require(false, failure);
+Require(true, "桌宠姿态过渡离屏WPF检查通过。");
 
-Console.WriteLine($"桌宠缩放/保存/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定：{checks} 项通过。");
+Console.WriteLine($"桌宠姿态/轻量过渡/缩放保存/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {
