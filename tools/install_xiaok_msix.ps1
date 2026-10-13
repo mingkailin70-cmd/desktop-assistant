@@ -126,13 +126,6 @@ namespace XiaoK.MsixInstaller
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint RegisterWindowMessage(string messageName);
 
-        [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-        private delegate bool EnumWindowsProc(IntPtr window, IntPtr state);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
-
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
 
@@ -143,8 +136,8 @@ namespace XiaoK.MsixInstaller
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
-        public static bool TryRequestShutdown(uint expectedProcessId, string expectedWindowTitle, out bool windowFound,
-            out uint windowProcessId, out int lastError)
+        public static bool TryRequestShutdown(IntPtr window, uint expectedProcessId, string expectedWindowTitle,
+            out bool windowFound, out uint windowProcessId, out int lastError)
         {
             windowFound = false;
             windowProcessId = 0;
@@ -157,42 +150,34 @@ namespace XiaoK.MsixInstaller
                 return false;
             }
 
-            IntPtr window = IntPtr.Zero;
-            int matchingWindows = 0;
-            EnumWindowsProc callback = (candidate, _) =>
-            {
-                uint processId;
-                GetWindowThreadProcessId(candidate, out processId);
-                if (processId != expectedProcessId) return true;
-
-                var title = new StringBuilder(256);
-                GetWindowText(candidate, title, title.Capacity);
-                if (!string.Equals(title.ToString(), expectedWindowTitle, StringComparison.Ordinal)) return true;
-
-                matchingWindows++;
-                window = candidate;
-                return true;
-            };
-
-            if (!EnumWindows(callback, IntPtr.Zero))
-            {
-                lastError = Marshal.GetLastWin32Error();
-                return false;
-            }
-
-            if (matchingWindows == 0)
+            if (window == IntPtr.Zero)
             {
                 lastError = 1168; // ERROR_NOT_FOUND
                 return false;
             }
 
-            windowFound = true;
-            windowProcessId = expectedProcessId;
-            if (matchingWindows != 1)
+            if (GetWindowThreadProcessId(window, out windowProcessId) == 0)
             {
-                lastError = 183; // ERROR_ALREADY_EXISTS: ambiguous matching windows
+                lastError = Marshal.GetLastWin32Error();
                 return false;
             }
+
+            windowFound = true;
+            if (windowProcessId != expectedProcessId)
+            {
+                lastError = 183; // ERROR_ALREADY_EXISTS: unexpected window owner
+                return false;
+            }
+
+            var title = new StringBuilder(256);
+            if (GetWindowText(window, title, title.Capacity) <= 0
+                || !string.Equals(title.ToString(), expectedWindowTitle, StringComparison.Ordinal))
+            {
+                windowFound = false;
+                lastError = 1168; // ERROR_NOT_FOUND: title does not match
+                return false;
+            }
+
             if (PostMessage(window, message, IntPtr.Zero, IntPtr.Zero)) return true;
 
             lastError = Marshal.GetLastWin32Error();
@@ -210,7 +195,10 @@ namespace XiaoK.MsixInstaller
             $windowFound = $false
             $candidateWindowProcessId = [uint32]0
             $candidateError = 0
+            $hostProcess.Refresh()
+            if ($hostProcess.HasExited) { continue }
             $posted = [XiaoK.MsixInstaller.ShutdownWindowMessage]::TryRequestShutdown(
+                $hostProcess.MainWindowHandle,
                 [uint32]$hostProcess.Id,
                 '小K',
                 [ref]$windowFound,
