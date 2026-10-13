@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-14 Qwen2.5-Coder社区量化权重来源核查
+
+`bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF`固定文件为Q4_K_M，仓库revision `8f235f74c3b6435080ed0ec31e0036e687c6a543`，Hub LFS SHA-256 `f530705d447660a4336c329981af164b471b60b974b1d808d57e8ec9fe23b239`。模型卡标注Apache-2.0，并说明使用llama.cpp b3772量化和外部imatrix；但未固定精确的Qwen底模检查点。imatrix说明链接至混合来源文本，没有逐项数据来源/许可证清单；Qwen官方模型卡的总体训练描述也不能验证该社区量化权重实际采用的精确底模版本或所有数据权利。锁定的本机`llama.cpp b11259`兼容性尚未核实。
+
+**处置：来源闸门未通过，不列为合格候选，不下载、不运行、不接生产。** 只有在精确底模、训练/校准数据来源与许可可核验后，才继续本地兼容性检查和固定任务集评估。本次只读网页核验，没有获取权重或启动模型。详情见[实施计划与模型选型](../产品与进度/实施计划与模型选型.md)。
+
 ## 2026-10-13 社区微调：Qwen3.5-4B Code-Forged来源暂停
 
 发布者`continuum-ai`提供Qwen3.5-4B社区代码微调及GGUF量化；模型卡链接到CambrianTech的Forge方法仓库。固定微调revision `253e71ab588a5c02882a77f21c6520b8f9f2acd8`的README/结果JSON写明训练数据是WikiText-2，而发布者目录与Forge论文把模型描述为基于CodeFeedback 156K；当前资料没有解释此数据来源差异，也未证明GGUF量化所用母权重对应哪个微调revision。权重和GGUF页面声明Apache-2.0；CodeFeedback数据页声明Apache-2.0，但这不能证明该固定权重的真实训练流水线或数据权利。固定GGUF revision `4bba82f69d1b5166b9e2a5b093fe93505acddda3`中的Q4_K_M文件为2.71 GB、Hub SHA-256 `15c8ebc22ac16e3e922041f25d285f8a322e228196de0e9b12592b8bf8b7646e`。README自带样例含复述提示的输出，困惑度为发布者自报指标，不能替代小K任务集。虽权重页声称面向llama.cpp，Windows锁定运行时b11259兼容性仍未知。

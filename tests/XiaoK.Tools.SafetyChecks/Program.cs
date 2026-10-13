@@ -5370,6 +5370,27 @@ static void CheckNoticeBodyReaderRequiresVerifiedPrivateConversation()
     Require(monitor.Contains("MessageNoticePolicy.GateBodyReader(", StringComparison.Ordinal)
         && monitor.Contains("bool? isPrivateConversation = null;", StringComparison.Ordinal),
         "Windows通知监视器没有在适配器边界应用正文读取器闸门，或当前未知会话被默认放行。");
+
+    var processStart = monitor.IndexOf("private async Task ProcessAddedAsync(uint id)", StringComparison.Ordinal);
+    var processEnd = processStart >= 0
+        ? monitor.IndexOf("private void StopForRevokedPermission", processStart, StringComparison.Ordinal)
+        : -1;
+    var processBody = processStart >= 0 && processEnd > processStart
+        ? monitor[processStart..processEnd]
+        : string.Empty;
+    var appIdRead = processBody.IndexOf("var sourceAppId = notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
+    var allowlistGuard = processBody.IndexOf(
+        "if (string.IsNullOrWhiteSpace(sourceAppId) || !_allowedAppIds.Contains(sourceAppId)) continue;",
+        StringComparison.Ordinal);
+    var deferredReader = processBody.IndexOf("string? ReadBodyIfStillAllowed() =>", StringComparison.Ordinal);
+    var bodyGate = processBody.IndexOf("MessageNoticePolicy.GateBodyReader(", StringComparison.Ordinal);
+    var adapterInspection = processBody.IndexOf("adapter.Inspect(", StringComparison.Ordinal);
+    var bodyMaterialization = processBody.IndexOf("ReadVisibleText(notification)", StringComparison.Ordinal);
+    Require(processBody.Length > 0 && appIdRead >= 0 && allowlistGuard > appIdRead
+        && deferredReader > allowlistGuard && bodyMaterialization > deferredReader
+        && bodyGate > deferredReader && adapterInspection > bodyGate
+        && processBody.IndexOf("ReadVisibleText(notification)", bodyMaterialization + 1, StringComparison.Ordinal) < 0,
+        "通知发布者检查、延迟正文读取、私聊闸门与适配器调用顺序发生变化；需重新审查正文访问边界。");
 }
 
 static void CheckNoticePermissionAndLockState()
