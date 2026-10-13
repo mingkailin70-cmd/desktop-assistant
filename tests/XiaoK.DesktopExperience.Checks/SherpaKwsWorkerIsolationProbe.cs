@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.IO;
 using XiaoK.Host;
 
 namespace XiaoK.DesktopExperience.Checks;
