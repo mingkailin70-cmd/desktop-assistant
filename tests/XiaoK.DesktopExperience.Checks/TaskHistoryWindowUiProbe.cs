@@ -41,15 +41,20 @@ internal static class TaskHistoryWindowUiProbe
             DateTimeOffset.UtcNow, "合成恢复说明：请核对目标状态；不会自动重试。", true,
             "合成当前步骤", "合成目标范围", "合成后台模式", "合成下一步");
         var currentSample = sample;
+        var failCancellation = false;
+        ApprovalInboxEntry? activeApproval = null;
+        var failApprovalResolution = false;
         var cancelCalls = 0;
+        var approvalCalls = 0;
         Guid? cancelledTaskId = null;
         Task<IReadOnlyList<TaskHistoryEntry>> LoadHistory(CancellationToken _) =>
             Task.FromResult<IReadOnlyList<TaskHistoryEntry>>([currentSample]);
-        IReadOnlyList<ApprovalInboxEntry> LoadApprovals() => [];
+        IReadOnlyList<ApprovalInboxEntry> LoadApprovals() => activeApproval is null ? [] : [activeApproval];
         Task<bool> CancelTask(Guid taskId)
         {
             cancelCalls++;
             cancelledTaskId = taskId;
+            if (failCancellation) throw new InvalidOperationException("CANCEL_PRIVATE_PATH");
             currentSample = currentSample with
             {
                 State = "取消请求中",
@@ -58,9 +63,15 @@ internal static class TaskHistoryWindowUiProbe
             };
             return Task.FromResult(true);
         }
+        bool ResolveApproval(Guid approvalId, ApprovalInboxChoice choice)
+        {
+            approvalCalls++;
+            if (failApprovalResolution) throw new InvalidOperationException("APPROVAL_PRIVATE_PATH");
+            return false;
+        }
 
         var window = new TaskHistoryWindow(LoadHistory, CancelTask,
-            LoadApprovals, (_, _) => false)
+            LoadApprovals, ResolveApproval)
         {
             ShowActivated = false,
             ShowInTaskbar = false,
@@ -135,6 +146,39 @@ internal static class TaskHistoryWindowUiProbe
                     || refreshed.SingleOrDefault()?.State != "取消请求中"
                     || refreshed.SingleOrDefault()?.CanCancel != false)
                     failures.Add("取消回调后任务列表没有刷新到当前取消状态。");
+
+                failCancellation = true;
+                currentSample = sample;
+                window.RefreshImmediately();
+                window.UpdateLayout();
+                historyList.UpdateLayout();
+                item = historyList.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
+                cancelButton = item is null ? null : Descendants(item).OfType<Button>()
+                    .FirstOrDefault(button => string.Equals(button.Content as string, "取消", StringComparison.Ordinal));
+                cancelButton?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cancelButton));
+                var refreshStatus = window.FindName("RefreshStatus") as TextBlock;
+                if (cancelCalls != 2 || cancelButton is null || refreshStatus is null
+                    || !refreshStatus.Text.Contains("取消结果待核对", StringComparison.Ordinal)
+                    || refreshStatus.Text.Contains("CANCEL_PRIVATE_PATH", StringComparison.Ordinal))
+                    failures.Add("取消回调异常没有被限制在任务中心内，或异常细节泄露到界面。");
+
+                activeApproval = new ApprovalInboxEntry(Guid.NewGuid(), ApprovalInboxKind.Confirmation,
+                    "合成审批", "合成审批详情", DateTimeOffset.UtcNow, false, sample.TaskId);
+                failApprovalResolution = true;
+                window.RefreshImmediately();
+                var tabs = Descendants(window).OfType<TabControl>().FirstOrDefault();
+                if (tabs is not null) tabs.SelectedIndex = 1;
+                window.UpdateLayout();
+                var approvalList = window.FindName("ApprovalList") as ListBox;
+                approvalList?.UpdateLayout();
+                var approvalItem = approvalList?.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
+                var approveButton = approvalItem is null ? null : Descendants(approvalItem).OfType<Button>()
+                    .FirstOrDefault(button => string.Equals(button.Content as string, "批准", StringComparison.Ordinal));
+                approveButton?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
+                if (approvalCalls != 1 || approveButton is null || refreshStatus is null
+                    || !refreshStatus.Text.Contains("待办处理结果待核对", StringComparison.Ordinal)
+                    || refreshStatus.Text.Contains("APPROVAL_PRIVATE_PATH", StringComparison.Ordinal))
+                    failures.Add("审批回调异常没有被限制在任务中心内，或异常细节泄露到界面。");
 
                 if (GetForegroundWindow() != foregroundBefore)
                     failures.Add("打开离屏任务中心改变了前台窗口。");

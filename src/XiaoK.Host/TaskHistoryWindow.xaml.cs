@@ -49,6 +49,11 @@ public partial class TaskHistoryWindow : Window
             else RefreshStatus.Text = "该任务已结束或无法取消；状态将在下一次刷新时更新。";
             await RefreshAsync();
         }
+        catch (Exception exception) when (IsNonFatal(exception))
+        {
+            await RefreshAsync();
+            RefreshStatus.Text = "取消结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试。";
+        }
         finally
         {
             if (button.IsLoaded)
@@ -61,11 +66,19 @@ public partial class TaskHistoryWindow : Window
     {
         if (sender is not System.Windows.Controls.Button { DataContext: ApprovalInboxEntry entry, Tag: string choiceText }
             || !Enum.TryParse<ApprovalInboxChoice>(choiceText, out var choice)) return;
-        if (_resolveApproval(entry.Id, choice))
-            RefreshStatus.Text = "已处理待办；相关任务会继续或结束。";
-        else
-            RefreshStatus.Text = "待办已结束或该操作不可用；正在刷新状态。";
-        await RefreshAsync();
+        try
+        {
+            if (_resolveApproval(entry.Id, choice))
+                RefreshStatus.Text = "已处理待办；相关任务会继续或结束。";
+            else
+                RefreshStatus.Text = "待办已结束或该操作不可用；正在刷新状态。";
+            await RefreshAsync();
+        }
+        catch (Exception exception) when (IsNonFatal(exception))
+        {
+            await RefreshAsync();
+            RefreshStatus.Text = "待办处理结果待核对；任务状态已刷新，请先核对目标状态；小K不会自动重试或重放。";
+        }
     }
 
     internal void RefreshImmediately()
@@ -115,13 +128,15 @@ public partial class TaskHistoryWindow : Window
             RefreshStatus.Text = $"已更新 {DateTime.Now:HH:mm:ss} · {history.Count} 项";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
-        catch (Exception exception) when (exception is not OutOfMemoryException
-            and not StackOverflowException and not AccessViolationException)
+        catch (Exception exception) when (IsNonFatal(exception))
         {
             RefreshStatus.Text = "读取任务状态失败；上次显示的数据仍保留。";
         }
         finally { _refreshInProgress = false; }
     }
+
+    private static bool IsNonFatal(Exception exception) => exception is not OutOfMemoryException
+        and not StackOverflowException and not AccessViolationException;
 
     private void Window_Closed(object? sender, EventArgs e)
     {
