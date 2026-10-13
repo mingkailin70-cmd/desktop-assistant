@@ -61,7 +61,9 @@ internal static class PetWindowDragProbe
 
     private static string? VerifyButtonPointerRouting()
     {
-        var previewReachedParent = false;
+        var sequence = 0;
+        var parentPreviewSequence = 0;
+        var buttonHandledSequence = 0;
         var bubbleReachedParent = false;
         Exception? failure = null;
         var thread = new Thread(() =>
@@ -72,7 +74,15 @@ internal static class PetWindowDragProbe
                 var button = new System.Windows.Controls.Button();
                 parent.Child = button;
                 parent.PreviewMouseLeftButtonDown += (_, e) =>
-                    previewReachedParent |= e.ChangedButton == System.Windows.Input.MouseButton.Left;
+                {
+                    if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
+                        parentPreviewSequence = ++sequence;
+                };
+                button.AddHandler(System.Windows.UIElement.MouseLeftButtonDownEvent,
+                    (System.Windows.Input.MouseButtonEventHandler)((_, e) =>
+                    {
+                        if (e.Handled) buttonHandledSequence = ++sequence;
+                    }), handledEventsToo: true);
                 parent.MouseLeftButtonDown += (_, _) => bubbleReachedParent = true;
 
                 button.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(
@@ -102,8 +112,10 @@ internal static class PetWindowDragProbe
             return "WPF按钮事件路由检查超时。";
         if (failure is not null)
             return $"WPF按钮事件路由检查失败：{failure.GetType().Name}。";
-        return previewReachedParent && !bubbleReachedParent
+        return parentPreviewSequence > 0
+            && buttonHandledSequence > parentPreviewSequence
+            && !bubbleReachedParent
             ? null
-            : "按钮处理鼠标按下后，桌宠父容器没有先收到预览事件或仍收到冒泡事件。";
+            : "按钮未收到已处理的左键事件，或父容器预览没有先发生/冒泡处理后仍收到事件。";
     }
 }
