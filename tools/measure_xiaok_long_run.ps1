@@ -7,8 +7,10 @@ checks that launch does not change the foreground window, samples process/system
 requests the app's registered graceful shutdown when the observation ends. It never force-kills the Host.
 The diagnostics profile uses temporary data/model/voice roots and disables notification monitoring and wake word.
 Only aggregate counters and package hashes are written under the repository's ignored .tools/stability folder.
+The script publishes an ignored control-file path; request a graceful partial report with
+tools/request_xiaok_long_run_stop.ps1 -ControlFilePath <path>. The request never terminates a process.
 .EXAMPLE
-.\tools\measure_xiaok_long_run.ps1 -DurationMinutes 1440 -ExpectedVersion 0.1.124.0
+.\tools\measure_xiaok_long_run.ps1 -DurationMinutes 1440 -ExpectedVersion 0.1.125.0
 #>
 [CmdletBinding()]
 param(
@@ -77,6 +79,41 @@ public static class XiaoKLongRunNativeMethods
 '@
 Add-Type -TypeDefinition $nativeSource -Language CSharp
 
+function Get-LongRunStopRequestState {
+    param(
+        [Parameter(Mandatory = $true)][string] $Path,
+        [Parameter(Mandatory = $true)][string] $RunId,
+        [Parameter(Mandatory = $true)][int] $MonitorProcessId,
+        [Parameter(Mandatory = $true)][int] $HostProcessId
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ Exists = $false; Valid = $false; RequestedUtc = $null }
+    }
+    try {
+        $request = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+        $requested = [DateTimeOffset]::MinValue
+        $hasTimestamp = if ($request.requestedUtc -is [datetime]) {
+            $requested = [DateTimeOffset]([datetime]$request.requestedUtc)
+            $true
+        }
+        else {
+            [DateTimeOffset]::TryParse([string]$request.requestedUtc, [ref]$requested)
+        }
+        $valid = $request.schemaVersion -eq 1 -and $request.runId -ceq $RunId -and
+            $request.monitorProcessId -eq $MonitorProcessId -and $request.hostProcessId -eq $HostProcessId -and
+            $hasTimestamp
+        return [pscustomobject]@{
+            Exists = $true
+            Valid = [bool]$valid
+            RequestedUtc = if ($valid) { $requested.ToUniversalTime().ToString('o') } else { $null }
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Exists = $true; Valid = $false; RequestedUtc = $null }
+    }
+}
+
 $package = @(
     Get-AppxPackage -Name 'MingKaiLin.XiaoK' |
         Where-Object { $_.Status -eq 'Ok' -and $_.Version.ToString() -eq $ExpectedVersion }
@@ -99,19 +136,75 @@ if (-not (Test-Path -LiteralPath $hostExecutable -PathType Leaf) -or
 
 $executableHash = (Get-FileHash -LiteralPath $hostExecutable -Algorithm SHA256).Hash
 $libraryHash = (Get-FileHash -LiteralPath $hostLibrary -Algorithm SHA256).Hash
+$reportDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) '.tools\stability'
+New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
+$runId = [guid]::NewGuid().ToString('N')
+$reportPath = Join-Path $reportDirectory ('xiaok-visible-idle-{0}-{1}.json' -f $ExpectedVersion, $runId)
+$controlFilePath = Join-Path $reportDirectory "xiaok-visible-idle-$runId.control.json"
+$stopRequestPath = Join-Path $reportDirectory "xiaok-visible-idle-$runId.stop.json"
+$stopEventName = "Local\XiaoKLongRun_$runId"
+$createdStopEvent = $false
+$stopEvent = [Threading.EventWaitHandle]::new(
+    $false, [Threading.EventResetMode]::ManualReset, $stopEventName, [ref]$createdStopEvent)
+if (-not $createdStopEvent) {
+    $stopEvent.Dispose()
+    throw 'Could not create a unique long-run stop event.'
+}
+$monitorProcess = Get-Process -Id $PID
 $foregroundBeforeLaunch = [XiaoKLongRunNativeMethods]::GetForegroundWindow()
 $startedUtc = [datetime]::UtcNow
-$launched = Start-Process -FilePath $hostExecutable -ArgumentList '--diagnostics-profile' -PassThru
-$hostProcessId = $launched.Id
+$launched = $null
+$hostProcessId = 0
+try {
+    $launched = Start-Process -FilePath $hostExecutable -ArgumentList '--diagnostics-profile' -PassThru
+    $hostProcessId = $launched.Id
+    $hostStartedUtc = $launched.StartTime.ToUniversalTime().ToString('o')
+    $monitorStartedUtc = $monitorProcess.StartTime.ToUniversalTime().ToString('o')
+    $control = [ordered]@{
+        schemaVersion = 1
+        runId = $runId
+        state = 'running'
+        monitorProcessId = $PID
+        monitorStartedUtc = $monitorStartedUtc
+        hostProcessId = $hostProcessId
+        hostStartedUtc = $hostStartedUtc
+        stopEventName = $stopEventName
+    }
+    $control | ConvertTo-Json -Compress | Set-Content -LiteralPath $controlFilePath -Encoding UTF8
+}
+catch {
+    if ($null -ne $launched) {
+        [void][XiaoKLongRunNativeMethods]::RequestShutdownForProcess([uint32]$hostProcessId)
+        $cleanupClock = [System.Diagnostics.Stopwatch]::StartNew()
+        while ($cleanupClock.Elapsed.TotalSeconds -lt 15 -and
+            (Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue)) {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    $stopEvent.Dispose()
+    Remove-Item -LiteralPath $controlFilePath, $stopRequestPath -Force -ErrorAction SilentlyContinue
+    throw
+}
+Write-Output "controlFile=$controlFilePath"
 $process = $null
 $mainWindow = [IntPtr]::Zero
 $launchForegroundUnchanged = $false
 $outcome = 'startup_timeout'
 $errorKind = $null
+$stopRequestObserved = $false
+$stopRequestedUtc = $null
 $clock = [System.Diagnostics.Stopwatch]::StartNew()
 $startupClock = [System.Diagnostics.Stopwatch]::StartNew()
 
 while ($startupClock.Elapsed.TotalSeconds -lt 45) {
+    if ($stopEvent.WaitOne(0)) {
+        $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
+            -MonitorProcessId $PID -HostProcessId $hostProcessId
+        $stopRequestObserved = $true
+        $stopRequestedUtc = $stopState.RequestedUtc
+        $outcome = if ($stopState.Valid) { 'interrupted_during_startup' } else { 'invalid_stop_request' }
+        break
+    }
     try {
         $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
         if ($null -eq $process) {
@@ -145,6 +238,11 @@ while ($startupClock.Elapsed.TotalSeconds -lt 45) {
     Start-Sleep -Seconds 1
 }
 
+if ($outcome -ne 'completed_duration') {
+    $clock.Stop()
+    $clock.Reset()
+}
+
 $sampleCount = 0
 $expectedSampleCount = [int][Math]::Ceiling(($DurationMinutes * 60) / $SampleIntervalSeconds)
 $visibleSampleCount = 0
@@ -171,12 +269,27 @@ $shutdownExited = $false
 $exitCode = $null
 
 try {
+    if ($outcome -eq 'completed_duration' -and $stopEvent.WaitOne(0)) {
+        $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
+            -MonitorProcessId $PID -HostProcessId $hostProcessId
+        $stopRequestObserved = $true
+        $stopRequestedUtc = $stopState.RequestedUtc
+        $outcome = if ($stopState.Valid) { 'interrupted_during_startup' } else { 'invalid_stop_request' }
+    }
     if ($outcome -eq 'completed_duration') {
         $clock.Restart()
         $process.Refresh()
         $cpuAtStartSeconds = [double]$process.CPU
         $previousSampleUtc = [datetime]::UtcNow
         while ($clock.Elapsed.TotalMinutes -lt $DurationMinutes) {
+            if ($stopEvent.WaitOne(0)) {
+                $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
+                    -MonitorProcessId $PID -HostProcessId $hostProcessId
+                $stopRequestObserved = $true
+                $stopRequestedUtc = $stopState.RequestedUtc
+                $outcome = if ($stopState.Valid) { 'interrupted' } else { 'invalid_stop_request' }
+                break
+            }
             $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
             if ($null -eq $process) {
                 $outcome = 'process_exited_early'
@@ -275,8 +388,13 @@ try {
             $remainingObservationMilliseconds = [int][Math]::Ceiling(
                 ($DurationMinutes * 60 - $clock.Elapsed.TotalSeconds) * 1000)
             $sleepMilliseconds = [Math]::Min($remainingSleepMilliseconds, $remainingObservationMilliseconds)
-            if ($sleepMilliseconds -gt 0) {
-                Start-Sleep -Milliseconds $sleepMilliseconds
+            if ($sleepMilliseconds -gt 0 -and $stopEvent.WaitOne($sleepMilliseconds)) {
+                $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
+                    -MonitorProcessId $PID -HostProcessId $hostProcessId
+                $stopRequestObserved = $true
+                $stopRequestedUtc = $stopState.RequestedUtc
+                $outcome = if ($stopState.Valid) { 'interrupted' } else { 'invalid_stop_request' }
+                break
             }
         }
 
@@ -290,6 +408,13 @@ try {
                 $outcome = 'process_exited_at_end'
             }
         }
+        elseif ($null -eq $cpuAtEndSeconds -and $null -ne $cpuAtStartSeconds) {
+            $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
+            if ($null -ne $process) {
+                $process.Refresh()
+                $cpuAtEndSeconds = [double]$process.CPU
+            }
+        }
         $clock.Stop()
     }
 }
@@ -299,6 +424,12 @@ catch {
     $errorKind = $_.Exception.GetType().Name
 }
 finally {
+    try {
+        $control.state = 'finishing'
+        $control | ConvertTo-Json -Compress | Set-Content -LiteralPath $controlFilePath -Encoding UTF8
+    }
+    catch { }
+
     $process = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
     if ($null -ne $process) {
         $shutdownPosted = ([XiaoKLongRunNativeMethods]::RequestShutdownForProcess([uint32]$hostProcessId) -gt 0)
@@ -322,6 +453,7 @@ finally {
         }
         catch { $exitCode = $null }
     }
+    $stopEvent.Dispose()
 }
 
 if ($outcome -eq 'completed_duration') {
@@ -354,6 +486,9 @@ $report = [ordered]@{
     expectedSampleCount = $expectedSampleCount
     sampleCount = $sampleCount
     outcome = $outcome
+    observationCompleted = ($outcome -eq 'completed_duration')
+    stopRequestObserved = $stopRequestObserved
+    stopRequestedUtc = $stopRequestedUtc
     monitorErrorType = $errorKind
     processId = $hostProcessId
     processExitedNormallyAfterShutdownRequest = $shutdownExited
@@ -380,12 +515,9 @@ $report = [ordered]@{
     endedUtc = [datetime]::UtcNow.ToString('o')
 }
 
-$reportDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) '.tools\stability'
-New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null
-$reportPath = Join-Path $reportDirectory (
-    'xiaok-visible-idle-{0}-{1}.json' -f $ExpectedVersion, [guid]::NewGuid().ToString('N'))
 $json = $report | ConvertTo-Json -Depth 4
 Set-Content -LiteralPath $reportPath -Value $json -Encoding UTF8
+Remove-Item -LiteralPath $controlFilePath, $stopRequestPath -Force -ErrorAction SilentlyContinue
 Write-Output $json
 Write-Output "reportPath=$reportPath"
 
