@@ -222,6 +222,7 @@ public sealed partial class WindowsDesktopTools
             if (requireNewProjectWindow)
             {
                 existingWindowHandles = _appProcessController.GetVisibleWindowHandles(app).ToHashSet();
+                cancellationToken.ThrowIfCancellationRequested();
                 var existingSelection = WindowMatchSelector.Select(existingWindowHandles);
                 if (existingSelection.Status == WindowMatchStatus.Ambiguous)
                     return new(false, "检测到多个本地 VS Code 项目窗口；请手动选择目标，小K没有启动新窗口。", "APP_LAUNCH_TARGET_AMBIGUOUS");
@@ -243,6 +244,7 @@ public sealed partial class WindowsDesktopTools
                 start.ArgumentList.Add(app.WorkingDirectory);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             startAttempted = true;
             launchHandle = _appProcessController.Start(start);
             if (launchHandle is null)
@@ -253,6 +255,10 @@ public sealed partial class WindowsDesktopTools
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var visibleWindowHandles = _appProcessController.GetVisibleWindowHandles(app);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_timeProvider.GetElapsedTime(launchStartedAt) >= _appLaunchTimeout)
+                    return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但窗口核验超过时限；请手动核对应用状态。");
+
                 var targetWindowVisible = existingWindowHandles is null
                     ? visibleWindowHandles.Count > 0
                     : visibleWindowHandles.Any(handle => !existingWindowHandles.Contains(handle));

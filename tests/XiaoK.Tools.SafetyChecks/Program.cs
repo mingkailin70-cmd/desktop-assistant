@@ -4956,6 +4956,44 @@ static async Task CheckAppLaunchRoutingAndFailureAsync()
         && slowWindowScanController.StartCount == 1 && slowWindowScanController.WindowCheckCount == 2,
         "窗口核验已耗尽单调期限后仍继续轮询或等待，可能拖延结果并误导用户重试。");
 
+    var launchVerificationApp = new DesktopApp("launch-check-app", executable);
+    var launchVerificationProposal = ToolBroker.Proposal("app.launch.v1",
+        [new KeyValuePair<string, string>("app_id", launchVerificationApp.Id)],
+        launchVerificationApp.Id, ToolExpectedOutcome.ApplicationWindowVisible);
+    var lateVisibleTimeProvider = new AdvancingTimeProvider();
+    var lateVisibleWindowController = new FakeDesktopAppProcessController(windowVisible: false,
+        addVisibleWindowOnStart: true,
+        onWindowCheck: () => lateVisibleTimeProvider.Advance(TimeSpan.FromSeconds(2)));
+    var lateVisibleWindowDesktop = new WindowsDesktopTools([launchVerificationApp], [], lateVisibleWindowController,
+        appLaunchTimeout: TimeSpan.FromSeconds(1), timeProvider: lateVisibleTimeProvider);
+    var lateVisibleWindowResult = await lateVisibleWindowDesktop.LaunchAsync(launchVerificationProposal, CancellationToken.None);
+    Require(!lateVisibleWindowResult.Success
+        && lateVisibleWindowResult.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        && lateVisibleWindowController.StartCount == 1 && lateVisibleWindowController.WindowCheckCount == 1,
+        "窗口枚举超过期限后才发现窗口时仍被报告为按时启动成功。");
+
+    using var preflightCancellation = new CancellationTokenSource();
+    var preflightCancellationController = new FakeDesktopAppProcessController(windowVisible: false,
+        onWindowCheck: () => preflightCancellation.Cancel());
+    var preflightCancellationDesktop = new WindowsDesktopTools([app], [], preflightCancellationController);
+    var preflightCancellationObserved = false;
+    try { _ = await preflightCancellationDesktop.LaunchAsync(proposal, preflightCancellation.Token); }
+    catch (OperationCanceledException) when (preflightCancellation.IsCancellationRequested)
+    { preflightCancellationObserved = true; }
+    Require(preflightCancellationObserved && preflightCancellationController.StartCount == 0,
+        "VS Code启动前窗口核验期间收到取消后仍发出了启动请求。");
+
+    using var scanCancellation = new CancellationTokenSource();
+    var scanCancellationController = new FakeDesktopAppProcessController(windowVisible: false,
+        addVisibleWindowOnStart: true,
+        onWindowCheck: () => scanCancellation.Cancel());
+    var scanCancellationDesktop = new WindowsDesktopTools([launchVerificationApp], [], scanCancellationController);
+    var scanCancellationResult = await scanCancellationDesktop.LaunchAsync(launchVerificationProposal, scanCancellation.Token);
+    Require(!scanCancellationResult.Success
+        && scanCancellationResult.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        && scanCancellationController.StartCount == 1 && scanCancellationController.WindowCheckCount == 1,
+        "窗口扫描期间收到取消后仍把结果当作已确认成功。");
+
     var ambiguousHandlesController = new FakeDesktopAppProcessController(initialWindowHandles: [new IntPtr(1), new IntPtr(2)]);
     var ambiguousActivationController = new FakeDesktopWindowController(WindowActivationOutcome.Ambiguous);
     var ambiguousDesktop = new WindowsDesktopTools([app], [], ambiguousHandlesController, ambiguousActivationController);
