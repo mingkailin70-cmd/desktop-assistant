@@ -146,6 +146,7 @@ while ($startupClock.Elapsed.TotalSeconds -lt 45) {
 }
 
 $sampleCount = 0
+$expectedSampleCount = [int][Math]::Ceiling(($DurationMinutes * 60) / $SampleIntervalSeconds)
 $visibleSampleCount = 0
 $responsiveSampleCount = 0
 $unresponsiveStreak = 0
@@ -193,7 +194,7 @@ try {
 
             $sampleUtc = [datetime]::UtcNow
             $gapSeconds = ($sampleUtc - $previousSampleUtc).TotalSeconds
-            if ($gapSeconds -gt ($SampleIntervalSeconds * 2 + 20)) { $sampleGapCount++ }
+            if ($gapSeconds -gt ($SampleIntervalSeconds * 1.75)) { $sampleGapCount++ }
             $maximumSampleGapSeconds = [Math]::Max($maximumSampleGapSeconds, $gapSeconds)
             $previousSampleUtc = $sampleUtc
             $sampleCount++
@@ -247,6 +248,9 @@ try {
                 )
                 $dedicated = @($hostGpuSamples | Where-Object { $_.Path -match '\\Dedicated Usage$' })
                 $shared = @($hostGpuSamples | Where-Object { $_.Path -match '\\Shared Usage$' })
+                if ($availableSamples.Count -eq 0 -or $dedicated.Count -eq 0 -or $shared.Count -eq 0) {
+                    $counterFailureCount++
+                }
                 if ($dedicated.Count -gt 0) {
                     $dedicatedBytes = ($dedicated | Measure-Object -Property CookedValue -Sum).Sum
                     $dedicatedMiB = [double]$dedicatedBytes / 1MB
@@ -266,8 +270,13 @@ try {
                 $counterFailureCount++
             }
 
-            if ($clock.Elapsed.TotalMinutes -lt $DurationMinutes) {
-                Start-Sleep -Seconds $SampleIntervalSeconds
+            $remainingSleepMilliseconds = [int][Math]::Ceiling(
+                ($SampleIntervalSeconds - ([datetime]::UtcNow - $sampleUtc).TotalSeconds) * 1000)
+            $remainingObservationMilliseconds = [int][Math]::Ceiling(
+                ($DurationMinutes * 60 - $clock.Elapsed.TotalSeconds) * 1000)
+            $sleepMilliseconds = [Math]::Min($remainingSleepMilliseconds, $remainingObservationMilliseconds)
+            if ($sleepMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $sleepMilliseconds
             }
         }
 
@@ -315,6 +324,19 @@ finally {
     }
 }
 
+if ($outcome -eq 'completed_duration') {
+    if ($sampleGapCount -gt 0 -or $sampleCount -lt $expectedSampleCount -or
+        $visibleSampleCount -lt $sampleCount) {
+        $outcome = 'incomplete_observation'
+    }
+    elseif ($responsiveSampleCount -lt $sampleCount) {
+        $outcome = 'unresponsive_samples'
+    }
+    elseif ($counterFailureCount -gt 0) {
+        $outcome = 'incomplete_counters'
+    }
+}
+
 $logicalProcessorCount = [Environment]::ProcessorCount
 $cpuAveragePercentOfMachine = $null
 if ($null -ne $cpuAtStartSeconds -and $null -ne $cpuAtEndSeconds -and $clock.Elapsed.TotalSeconds -gt 0) {
@@ -329,6 +351,7 @@ $report = [ordered]@{
     durationRequestedMinutes = $DurationMinutes
     durationObservedSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
     sampleIntervalSeconds = $SampleIntervalSeconds
+    expectedSampleCount = $expectedSampleCount
     sampleCount = $sampleCount
     outcome = $outcome
     monitorErrorType = $errorKind
