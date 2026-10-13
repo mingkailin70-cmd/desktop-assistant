@@ -83,15 +83,23 @@ internal static class RuntimeTaskHistoryRecoveryProbe
 
                 var entries = first.Where(entry => entry.TaskId.HasValue)
                     .ToDictionary(entry => entry.TaskId!.Value);
-                Require(entries.Count == records.Length
-                    && entries[acceptedId].State == "失败"
-                    && entries[acceptedId].Detail.Contains("操作开始前退出", StringComparison.Ordinal)
-                    && entries[actionId].State == "结果待核对"
-                    && entries[actionId].Detail.Contains("不会自动重试", StringComparison.Ordinal)
-                    && entries[approvalId].State == "结果待核对"
-                    && entries[approvalId].Detail.Contains("不会自动继续或重放动作", StringComparison.Ordinal)
-                    && entries[completedId].State == "已完成",
-                    "生产Runtime没有按检查点安全区分未开始、可能已开始、旧审批和终态任务。");
+                Require(entries.Count == records.Length,
+                    "生产Runtime没有返回全部持久化任务历史记录。");
+                Require(entries.TryGetValue(acceptedId, out var acceptedEntry)
+                    && acceptedEntry.State == "失败"
+                    && acceptedEntry.Detail.Contains("操作开始前退出", StringComparison.Ordinal),
+                    "生产Runtime未将操作开始前中断的任务显示为未执行失败。");
+                Require(entries.TryGetValue(actionId, out var actionEntry)
+                    && actionEntry.State == "结果待核对"
+                    && actionEntry.Detail.Contains("不会自动重试", StringComparison.Ordinal),
+                    "生产Runtime未将可能已产生副作用的任务显示为待核对且禁止自动重试。");
+                Require(entries.TryGetValue(approvalId, out var approvalEntry)
+                    && approvalEntry.State == "结果待核对"
+                    && approvalEntry.Detail.Contains("不会自动继续或重放动作", StringComparison.Ordinal),
+                    "生产Runtime恢复了旧审批，或未说明动作不会自动继续/重放。");
+                Require(entries.TryGetValue(completedId, out var completedEntry)
+                    && completedEntry.State == "已完成",
+                    "生产Runtime没有保留终态任务的完成状态。");
 
                 var codeEntry = first.SingleOrDefault(entry => entry.EntryKey == "code:" + codeTaskId);
                 Require(codeEntry is not null
