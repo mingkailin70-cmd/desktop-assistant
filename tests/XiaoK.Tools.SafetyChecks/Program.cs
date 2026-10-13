@@ -7,6 +7,7 @@ using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -448,6 +449,24 @@ if (args.Length == 1 && args[0] == "--only-code-inspection")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-file-search-stress")
+{
+    var searchStressRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileSearchStress-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(searchStressRoot);
+    try
+    {
+        var result = await CheckFileSearchConcurrentJunctionSwapStressAsync(searchStressRoot);
+        if (result.SkipReason is not null)
+            Console.WriteLine("跳过：文件搜索并发压力检查无法创建重解析点夹具：" + result.SkipReason);
+        else
+            Console.WriteLine($"通过：文件搜索在 {result.SearchCount} 个并发查询期间安全处理目录/联接切换，完成 {result.JunctionSwaps} 次切换，用时 {result.ElapsedMilliseconds} ms。");
+    }
+    finally
+    {
+        if (Directory.Exists(searchStressRoot)) Directory.Delete(searchStressRoot, recursive: true);
+    }
+    return;
+}
 var skipAppContainerChecks = args.Length == 1 && args[0] == "--without-appcontainer";
 if (args.Length != 0 && !skipAppContainerChecks)
 {
@@ -860,8 +879,14 @@ try
         skipped.Add("文件搜索重解析点夹具无法创建，用例跳过：" + searchLinkSkipReason);
     else passed.Add("文件搜索拒绝重解析搜索根并忽略根目录内的外部联接目标");
 
-    await CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(tempRoot);
-    passed.Add("文件搜索通过稳定目录句柄读取多个枚举批次");
+    var searchStress = await CheckFileSearchConcurrentJunctionSwapStressAsync(tempRoot);
+    if (searchStress.SkipReason is not null)
+        skipped.Add("文件搜索并发目录/联接切换压力检查无法创建重解析点夹具，用例跳过：" + searchStress.SkipReason);
+    else
+        passed.Add($"文件搜索在 {searchStress.SearchCount} 个并发查询期间安全处理目录/联接切换，完成 {searchStress.JunctionSwaps} 次切换（{searchStress.ElapsedMilliseconds} ms）");
+
+    var batchSearchMilliseconds = await CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(tempRoot);
+    passed.Add($"文件搜索通过稳定目录句柄读取多个枚举批次；1,201项合成目录用时 {batchSearchMilliseconds} ms");
 
     if (!CheckDirectoryJunction(tempRoot, out var linkSkipReason)) skipped.Add("目录联接夹具无法创建，重解析点用例跳过：" + linkSkipReason);
     else passed.Add("目录联接不会被快照复制或读取");
@@ -7133,6 +7158,141 @@ static bool CheckFileSearchRejectsReparsePoints(string root, out string skipReas
     }
 }
 
+static async Task<(string? SkipReason, int SearchCount, int JunctionSwaps, long ElapsedMilliseconds)>
+    CheckFileSearchConcurrentJunctionSwapStressAsync(string root)
+{
+    const int SearchCount = 48;
+    const int SearchTimeoutSeconds = 20;
+    var fixtureRoot = Path.Combine(root, "file-search-concurrent-junction-swap");
+    var allowedRoot = Path.Combine(fixtureRoot, "allowed");
+    var outsideRoot = Path.Combine(fixtureRoot, "outside");
+    var racePath = Path.Combine(allowedRoot, "race");
+    var safeSlot = Path.Combine(allowedRoot, "safe-slot");
+    var junctionSlot = Path.Combine(allowedRoot, "junction-slot");
+    Directory.CreateDirectory(racePath);
+    Directory.CreateDirectory(outsideRoot);
+
+    var query = "needle-" + Guid.NewGuid().ToString("N")[..8];
+    var stableName = "stable-" + query + ".txt";
+    var safeName = "inside-" + query + ".txt";
+    var outsideName = "outside-" + query + "-sentinel.txt";
+    await File.WriteAllTextAsync(Path.Combine(allowedRoot, stableName), "synthetic stable match", new UTF8Encoding(false));
+    await File.WriteAllTextAsync(Path.Combine(racePath, safeName), "synthetic in-root match", new UTF8Encoding(false));
+    await File.WriteAllTextAsync(Path.Combine(outsideRoot, outsideName), "synthetic out-of-root sentinel", new UTF8Encoding(false));
+
+    if (!JunctionFixture.TryCreate(outsideRoot, junctionSlot, out var skipReason))
+        return (skipReason, 0, 0, 0);
+
+    var desktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
+        [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+    var proposal = ToolBroker.Proposal("file.search.v1",
+        [new("query", query), new("root_id", "user-files")], "user-files", ToolExpectedOutcome.MatchingFilesListed);
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(SearchTimeoutSeconds));
+    var stopwatch = Stopwatch.StartNew();
+    var completedSearches = 0;
+    var junctionSwaps = 0;
+    var safeDirectoryActive = true;
+    var firstJunctionSwap = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    bool IsJunction(string path) => Directory.Exists(path)
+        && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+
+    void RecoverActivePath()
+    {
+        if (Directory.Exists(racePath))
+        {
+            safeDirectoryActive = !IsJunction(racePath);
+            return;
+        }
+
+        if (Directory.Exists(safeSlot) && Directory.Exists(junctionSlot))
+        {
+            Directory.Move(junctionSlot, racePath);
+            safeDirectoryActive = false;
+            return;
+        }
+        if (Directory.Exists(safeSlot))
+        {
+            Directory.Move(safeSlot, racePath);
+            safeDirectoryActive = true;
+            return;
+        }
+
+        throw new IOException("目录切换压力夹具失去安全目录，无法恢复合成测试状态。");
+    }
+
+    async Task SwapDirectoriesAsync()
+    {
+        try
+        {
+            while (!timeout.IsCancellationRequested)
+            {
+                try
+                {
+                    if (safeDirectoryActive)
+                    {
+                        Directory.Move(racePath, safeSlot);
+                        Directory.Move(junctionSlot, racePath);
+                        safeDirectoryActive = false;
+                    }
+                    else
+                    {
+                        Directory.Move(racePath, junctionSlot);
+                        Directory.Move(safeSlot, racePath);
+                        safeDirectoryActive = true;
+                    }
+                    var completedSwaps = Interlocked.Increment(ref junctionSwaps);
+                    if (completedSwaps == 1) firstJunctionSwap.TrySetResult(true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+                {
+                    RecoverActivePath();
+                }
+
+                await Task.Delay(1, timeout.Token);
+            }
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+    }
+
+    var swapTask = Task.Run(SwapDirectoriesAsync);
+    var swapsBeforeSearch = 0;
+    try
+    {
+        await firstJunctionSwap.Task.WaitAsync(timeout.Token);
+        swapsBeforeSearch = Volatile.Read(ref junctionSwaps);
+        stopwatch.Restart();
+        await Parallel.ForEachAsync(Enumerable.Range(0, SearchCount),
+            new ParallelOptions { CancellationToken = timeout.Token, MaxDegreeOfParallelism = 4 },
+            async (_, cancellationToken) =>
+            {
+                var result = await desktop.SearchFilesAsync(proposal, cancellationToken);
+                var data = result.Data ?? "";
+                Require(result.Success && data.Contains(stableName, StringComparison.Ordinal),
+                    "并发目录切换期间，文件搜索未能返回始终存在的范围内哨兵文件。");
+                Require(!data.Contains(outsideName, StringComparison.Ordinal)
+                    && !data.Contains(Path.GetFullPath(outsideRoot), StringComparison.OrdinalIgnoreCase),
+                    "并发目录切换期间，文件搜索返回了联接目标中的范围外哨兵。");
+                Interlocked.Increment(ref completedSearches);
+            });
+    }
+    finally
+    {
+        timeout.Cancel();
+        await swapTask;
+        if (IsJunction(racePath)) Directory.Delete(racePath, recursive: false);
+        if (IsJunction(junctionSlot)) Directory.Delete(junctionSlot, recursive: false);
+    }
+
+    stopwatch.Stop();
+    Require(completedSearches == SearchCount,
+        $"并发目录切换搜索未完成预期次数：{completedSearches}/{SearchCount}。");
+    var swapsDuringSearch = junctionSwaps - swapsBeforeSearch;
+    Require(swapsDuringSearch > 0,
+        "并发搜索期间没有发生目录/联接切换，未形成有效竞争压力。");
+    return (null, completedSearches, swapsDuringSearch, stopwatch.ElapsedMilliseconds);
+}
+
 static void CheckFileSearchResultSummaryReportsLimits()
 {
     var completeEmpty = LocalFileSearchResultPolicy.CreateSummary(0, 123, scanLimitReached: false);
@@ -9196,7 +9356,7 @@ static async Task CheckFileClassificationAsync(string root)
     Require(cancelled, "预取消的文件分类仍继续扫描目录。");
 }
 
-static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
+static async Task<long> CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string root)
 {
     var searchRoot = Path.Combine(root, "file-search-batches");
     Directory.CreateDirectory(searchRoot);
@@ -9212,9 +9372,15 @@ static async Task CheckHandleSearchContinuesAcrossDirectoryBatchesAsync(string r
         [new KeyValuePair<string, string>("user-files", searchRoot)]);
     var proposal = ToolBroker.Proposal("file.search.v1",
         [new("query", targetName), new("root_id", "user-files")], "user-files", ToolExpectedOutcome.MatchingFilesListed);
-    var result = await desktop.SearchFilesAsync(proposal, CancellationToken.None);
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    var stopwatch = Stopwatch.StartNew();
+    var result = await desktop.SearchFilesAsync(proposal, timeout.Token);
+    stopwatch.Stop();
     Require(result.Success && result.Data?.Contains(targetName, StringComparison.Ordinal) == true,
         "目录句柄枚举没有继续读取后续文件批次。");
+    Require(stopwatch.Elapsed < TimeSpan.FromSeconds(10),
+        $"1,201项合成目录搜索超过10秒检查时限：{stopwatch.ElapsedMilliseconds} ms。");
+    return stopwatch.ElapsedMilliseconds;
 }
 
 static CodeTaskAgent NewAgent(IInferenceClient inference, IDotNetTestRunner? testRunner = null,
