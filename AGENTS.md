@@ -215,3 +215,5 @@ R0仍未通过：缺少自然微信Toast及其发布者交叉核验、可见正�
 ## 工程与进度
 
 解决方案 XiaoK.sln 包含 XiaoK.Host、XiaoK.Core、XiaoK.Tools、XiaoK.Adapters.Windows、XiaoK.Inference、XiaoK.Voice、XiaoK.Storage，以及 `tools/` 下的 XiaoK.RuntimeDiagnostics 和 XiaoK.CodingBenchmark。运行本地构建前不隐式下载依赖，需使用明确的锁定安装流程和仓库固定 SDK；用户已授权本项目下载和必要联网操作，无需逐项确认。每个里程碑提交前检查 Git diff 和忽略规则；完成阶段后将该阶段提交推送至用户指定 origin。
+
+用户要求按完整内容块推进：先集中完成一块独立功能，再进行一次有针对性的代码健康性、失败路径和抗压检查；不要因几行小改动反复运行相同测试。仅在代码变化、修复失败或出现新的风险时追加必要验证，阶段结束仍须检查差异并提交推送。
