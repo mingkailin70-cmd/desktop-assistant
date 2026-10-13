@@ -1,3 +1,9 @@
+## v0.1.124.0 P2正式Host三维桌宠渲染器（2026-10-13）
+
+将WPF `Viewport3D`银渐层网格和四态冻结缓存接入正式Host，并安装到当前账户。为保留已有 `artifacts\publish\win-x64`输出，使用独立发布目录`artifacts\publish\pet3d-0.1.124.0-4c48113`；固定SDK `10.0.401`锁定还原与Release自包含发布，包含Microsoft.NETCore.App和Microsoft.WindowsDesktop.App `10.0.12`。签名MSIX `artifacts\msix-validation\c4db4f47ac394594b4396e4475806eb0\XiaoK-signed-validation.msix`，155,792,717字节，SHA-256 `B3111E9C86847E9FBF3C9B7C05E4E225446C750B361EB571859F0ECFD66FD8E2`；SignTool验签0警告、0错误，使用此前已受信证书`B96A02547ABA84523619E11EB7788AE9850A5C60`，未更改信任。安装状态`Ok`，安装版和发布版Host DLL SHA-256均为`AE374DA918E6F5A2D5ED779CB057E762A1CEA329A065DE369550EA966EE42E97`。上一版`0.1.123.0`回滚包仍保留：`artifacts\msix-validation\1b5b1359ba734e10b5a090254f78b3e6\XiaoK-signed-validation.msix`，155,783,364字节，SHA-256 `9CDF1556F4D8BBA63B9ACD90EF44F78473BE8A8B018C93600A2F85074FCB8E26`。
+
+使用隔离`--diagnostics-profile`启动安装版；五分钟可见空闲期间启动前后前台句柄一致，DPI 144、窗口315×391物理像素。301秒CPU均值单核口径0.047%、整机归一化0.002%，采样峰值0.091%；私有内存120.1–125.7 MiB、工作集峰值173.7 MiB；GPU专用/共享内存峰值21.2/6.7 MiB。应用注册关闭请求使Host正常退出，退出码0。微信/QQ监听、唤醒词仍关闭，AUMID列表为空；未连接模型、没有读取通知正文或启动麦克风。以上只证明当前机器单次空闲窗口运行，不代表DWM透明边缘、缩放/多屏/睡眠恢复、用户任务或长期稳定性验收通过。上一代码阶段提交`4c48113`已推送，GitHub Actions [run 38343887383](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38343887383)成功；本安装阶段与文档更新尚待提交推送。
+
 ## v0.1.123.0 P2桌宠四态回退与短过渡动效（2026-10-13）
 
 将P2桌宠状态反馈源码安装到当前账户。固定仓库SDK `10.0.401` 使用锁定依赖生成自包含`win-x64`发布目录并完成MSIX封装；签名包`artifacts\msix-validation\1b5b1359ba734e10b5a090254f78b3e6\XiaoK-signed-validation.msix`，155,783,364字节，SHA-256 `9CDF1556F4D8BBA63B9ACD90EF44F78473BE8A8B018C93600A2F85074FCB8E26`。SignTool验签有效、0警告、0错误；使用此前已受信的证书`B96A02547ABA84523619E11EB7788AE9850A5C60`，没有变更证书信任。发布包包含Microsoft.NETCore.App与Microsoft.WindowsDesktop.App `10.0.12`。
