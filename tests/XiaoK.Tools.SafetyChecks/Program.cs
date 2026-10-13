@@ -4067,7 +4067,8 @@ static void CheckTaskHistoryDisplayPolicy()
         ("PPTX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
         ("XLSX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
         ("CODE_PATCH_OUTCOME_UNCERTAIN", "隔离工作区和补丁状态"),
-        ("UIA_VALUE_VERIFY_FAILED", "目标应用中的文本写入结果无法确认")
+        ("UIA_VALUE_VERIFY_FAILED", "目标应用中的文本写入结果无法确认"),
+        ("UIA_FOREGROUND_CHANGED_AFTER_SET", "目标应用中的文本写入结果无法确认")
     };
     Require(uncertainOutcomeGuidance.All(item =>
         {
@@ -4101,11 +4102,13 @@ static void CheckTaskHistoryDisplayPolicy()
 
     Require(TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("file-delete", routeStarted: true)
+        && TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("app", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("code", routeStarted: true)
         && !TaskFailureSafetyPolicy.RequiresManualVerification("file", routeStarted: true)
         && !TaskFailureSafetyPolicy.RequiresManualVerification("web-read", routeStarted: true)
         && !TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: false)
+        && !TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text", routeStarted: false)
         && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.CancelledOutcomeUncertainErrorCode)
         && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.TimedOutOutcomeUncertainErrorCode)
         && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.ExceptionOutcomeUncertainErrorCode)
@@ -4116,6 +4119,7 @@ static void CheckTaskHistoryDisplayPolicy()
     var xaml = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "TaskHistoryWindow.xaml"));
     var host = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
     var mainWindow = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
+    var uiAutomationAdapter = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Adapters.Windows", "WindowsUiAutomationSnapshotAdapter.cs"));
     var broker = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Tools", "ToolBroker.cs"));
     var codeAgent = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Tools", "CodeTaskAgent.cs"));
     Require(xaml.Contains("Binding TargetScope", StringComparison.Ordinal)
@@ -4135,6 +4139,10 @@ static void CheckTaskHistoryDisplayPolicy()
         && broker.Contains("details, cancellationToken, taskId)", StringComparison.Ordinal)
         && codeAgent.Contains("testTarget, commandPreview, cancellationToken, taskId)", StringComparison.Ordinal)
         && host.Contains("TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted)", StringComparison.Ordinal)
+        && host.Contains("if (category == \"app-ui-set-text\")", StringComparison.Ordinal)
+        && host.Contains("return \"app-ui-set-text\";", StringComparison.Ordinal)
+        && uiAutomationAdapter.Contains("UIA_VALUE_VERIFY_FAILED\" or \"UIA_FOREGROUND_CHANGED_AFTER_SET", StringComparison.Ordinal)
+        && uiAutomationAdapter.Contains("FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null", StringComparison.Ordinal)
         && host.Contains("routeStarted = true;", StringComparison.Ordinal)
         && host.IndexOf("routeStarted = true;", StringComparison.Ordinal)
             < host.IndexOf("await RouteAsync(work.Id, work.Category", StringComparison.Ordinal)
