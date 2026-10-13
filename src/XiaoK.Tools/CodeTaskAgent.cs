@@ -3323,7 +3323,11 @@ internal sealed class CodeWorkspaceSnapshot
             RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
         new("""\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^/\s:@]+:[^@\s/]+@[^\s/]+""",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new("""["']?(?:authorization|proxy-authorization)["']?\s*[:=]\s*["']?(?:Bearer|Basic)\s+(?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[A-Za-z0-9._~+/-]{12,}={0,2}["']?""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
         new("""["']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|aws[_-]?secret[_-]?(?:access[_-]?)?key|password|passwd|secret|token|connection[_-]?string|signing[_-]?key)["']?\s*[:=]\s*["'](?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[^"'\r\n]{12,}["']""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new("""["']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|aws[_-]?secret[_-]?(?:access[_-]?)?key|password|passwd|secret|token|connection[_-]?string|signing[_-]?key)["']?\s*[:=]\s*(?!["'])(?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[A-Za-z0-9_./+=:-]{12,}(?=$|[\s,;}\]])""",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
     ];
     private static readonly HashSet<string> ExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)

@@ -458,6 +458,22 @@ if (args.Length == 1 && args[0] == "--only-code-inspection")
     }
     return;
 }
+if (args.Length == 1 && args[0] == "--only-code-credential-boundary")
+{
+    var credentialTestRoot = Path.Combine(Path.GetTempPath(), "XiaoK-CodeCredentialProbe-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(credentialTestRoot);
+    try
+    {
+        await CheckLikelyCredentialIsNotSentAsync(credentialTestRoot);
+        await CheckLikelyCredentialIsRedactedBeforeModelContextAsync(credentialTestRoot);
+        Console.WriteLine("通过：已知凭证、未加引号赋值与Authorization头不会进入模型上下文，示例占位符保留。");
+    }
+    finally
+    {
+        if (Directory.Exists(credentialTestRoot)) Directory.Delete(credentialTestRoot, recursive: true);
+    }
+    return;
+}
 if (args.Length == 1 && args[0] == "--only-file-search-stress")
 {
     var searchStressRoot = Path.Combine(Path.GetTempPath(), "XiaoK-FileSearchStress-" + Guid.NewGuid().ToString("N"));
@@ -5081,6 +5097,9 @@ static async Task CheckLikelyCredentialIsNotSentAsync(string root)
         "sk_live_" + new string('s', 24),
         "eyJ" + new string('a', 16) + "." + new string('b', 16) + "." + new string('c', 16),
         "postgres://user:" + new string('p', 24) + "@db.example.invalid/app",
+        "api_key: " + new string('q', 32),
+        "Authorization: Bearer " + new string('r', 32),
+        "Authorization: Basic " + new string('s', 32),
         "-----BEGIN OPENSSH PRIVATE KEY-----"
     };
     var source = "internal const string secrets = \"" + string.Join(";", syntheticCredentials) + "\";\n";
@@ -5093,6 +5112,9 @@ static async Task CheckLikelyCredentialIsNotSentAsync(string root)
 
 static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string root)
 {
+    var unquotedApiKey = new string('m', 32);
+    var bearerToken = new string('n', 32);
+    var basicToken = new string('o', 32);
     var syntheticCredentials = new[]
     {
         "sk-" + new string('7', 32),
@@ -5105,11 +5127,17 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "npm_" + new string('g', 36),
         "sk_live_" + new string('h', 24),
         "eyJ" + new string('i', 16) + "." + new string('j', 16) + "." + new string('k', 16),
-        "redis://user:" + new string('m', 24) + "@cache.example.invalid/0"
+        "redis://user:" + new string('p', 24) + "@cache.example.invalid/0",
+        unquotedApiKey,
+        bearerToken,
+        basicToken
     };
     var original = "internal class Sample {\n"
         + string.Join("\n", syntheticCredentials.Select((secret, index) => $"    private const string Key{index} = \"{secret}\";"))
-        + "\n    private const string Placeholder = \"${API_KEY}\";\n    static void Target() { int value = 1; }\n}\n";
+        + $"\n    // api_key: {unquotedApiKey}\n    // Authorization: Bearer {bearerToken}\n    // Authorization: Basic {basicToken}\n"
+        + "    private const string Placeholder = \"${API_KEY}\";\n"
+        + "    // Authorization: Bearer example-token-placeholder-123456\n"
+        + "    static void Target() { int value = 1; }\n}\n";
     var project = CreateProject(root, "credential-redaction", original);
     var workspaceRoot = Path.Combine(root, "credential-redaction-workspaces");
     var inference = new ScriptedInference(
@@ -5123,7 +5151,8 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "含有可脱敏凭证的多行代码没有继续进行安全编辑。" + result.Summary);
     Require(inference.Prompts.All(prompt => syntheticCredentials.All(secret => !prompt.Contains(secret, StringComparison.Ordinal))
         && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)
-        && prompt.Contains("${API_KEY}", StringComparison.Ordinal)),
+        && prompt.Contains("${API_KEY}", StringComparison.Ordinal)
+        && prompt.Contains("example-token-placeholder-123456", StringComparison.Ordinal)),
         "原始凭证进入了本地模型提示，或没有显示脱敏占位符。");
     Require(File.ReadAllText(Path.Combine(project, "Sample.cs")) == original,
         "凭证脱敏期间修改了原项目。");
