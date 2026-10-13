@@ -8,6 +8,8 @@
 
 2026-10-14 06:44补充：提交`8ae9b1b`已推送，GitHub Actions run `38479312053`失败；check-run注释定位到新增KWS检查文件未显式导入`System.IO`，`Path`/`File`无法解析。已补`using System.IO`，准备随修复提交再跑同一CI。本机Host与附着观察未动；当前没有本机构建或检查结果，KWS隔离仍是候选。
 
+2026-10-14 06:51补充：修复提交`f366cb0`的CI `38479888843`已通过固定SDK解决方案构建、前12项安全/恢复检查，失败在桌面体验检查的KWS探针断言。失败日志指出通用字符串搜索把类型名`SherpaAudioGraphWakeWordListener`误当成worker直接使用麦克风API；探针已改为检查`Windows.Media.Audio`、AudioGraph创建/输入节点及`MediaCapture`具体API，待再跑CI。未在本机执行检查，当前Host和观察保持运行。
+
 2026-10-14 06:17补充：提交`e4cbce1`的远端CI `38476247105`确认剩余编译错误为`Selector`命名空间应为`System.Windows.Controls.Primitives`；已修正并把包版本提升到`0.1.143.0`，待推送后的新CI。WPF控件命名空间已按框架归属逐项限定；本机不运行构建/检查，Host PID `18660`和附着观察PID `43316`保持运行。当前实际安装仍为`0.1.139.0`，没有实机鼠标位移证据。
 
 2026-10-14 06:12补充：窗口级桌宠拖动提交`fba3cbd`的远端CI `38475407957`在编译时失败，原因是WPF与WinForms的`ButtonBase`、`TextBoxBase`、`ScrollBar`和`MenuItem`类型名有歧义；不是运行时拖动验收。源码已将控件类型限定为WPF命名空间，包版本升为`0.1.142.0`，待推送后重新跑CI。未在本机运行构建/检查，以保持Host PID `18660`的24小时附着观察和PID `43316`监控不受本地负载干扰。仍没有真实鼠标位移证据；安装版继续是`0.1.139.0`。

@@ -88,8 +88,11 @@ internal static class SherpaKwsWorkerIsolationProbe
             || !job.Contains("AssignProcessToJobObject", StringComparison.Ordinal))
             failures.Add("KWS worker is not wired to a kill-on-Host-exit Windows job object.");
 
-        if (worker.Contains("AudioGraph", StringComparison.Ordinal)
+        if (worker.Contains("using Windows.Media.Audio", StringComparison.Ordinal)
+            || worker.Contains("AudioGraph.CreateAsync", StringComparison.Ordinal)
+            || worker.Contains("AudioDeviceInputNode", StringComparison.Ordinal)
             || worker.Contains("CreateDeviceInputNode", StringComparison.Ordinal)
+            || worker.Contains("MediaCapture", StringComparison.Ordinal)
             || !worker.Contains("Console.OpenStandardInput()", StringComparison.Ordinal)
             || !worker.Contains("CryptographicOperations.ZeroMemory(payload)", StringComparison.Ordinal))
             failures.Add("KWS worker must decode bounded pipe frames without opening a microphone and clear its audio buffer.");
