@@ -15,7 +15,17 @@ internal static class PetWindowDragProbe
 
     private static void VerifyCompletionPolicy(List<string> failures)
     {
-        if (PetWindowInteractionPolicy.GetCompletion(positionChanged: false, cancelled: false, expandOnClick: true)
+        if (!PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: true,
+                isOverResizeHandle: false, isInteractiveSource: false)
+            || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: false, isPressed: true,
+                isOverResizeHandle: false, isInteractiveSource: false)
+            || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: false,
+                isOverResizeHandle: false, isInteractiveSource: false)
+            || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: true,
+                isOverResizeHandle: true, isInteractiveSource: false)
+            || PetWindowInteractionPolicy.ShouldStartMove(isLeftButton: true, isPressed: true,
+                isOverResizeHandle: false, isInteractiveSource: true)
+            || PetWindowInteractionPolicy.GetCompletion(positionChanged: false, cancelled: false, expandOnClick: true)
                 != PetWindowMoveCompletion.Expand
             || PetWindowInteractionPolicy.GetCompletion(positionChanged: false, cancelled: false, expandOnClick: false)
                 != PetWindowMoveCompletion.Ignore
@@ -25,7 +35,7 @@ internal static class PetWindowDragProbe
                 != PetWindowMoveCompletion.SavePosition
             || PetWindowInteractionPolicy.GetCompletion(positionChanged: false, cancelled: true, expandOnClick: true)
                 != PetWindowMoveCompletion.Ignore)
-            failures.Add("拖动结束后没有按紧凑态/展开态区分单击、移动和取消。");
+            failures.Add("拖动入口未排除非左键、释放状态、缩放把手和交互控件，或结束时没有区分单击、移动和取消。");
     }
 
     private static void VerifyDragMoveInputWiring(string repositoryRoot, List<string> failures)
@@ -34,26 +44,26 @@ internal static class PetWindowDragProbe
         var codePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs");
         var xaml = File.ReadAllText(xamlPath);
         var code = File.ReadAllText(codePath);
-        if (!xaml.Contains("PreviewMouseLeftButtonDown=\"PetView_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
-            || !xaml.Contains("PreviewMouseLeftButtonDown=\"ExpandedPetImage_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
+        if (!xaml.Contains("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", StringComparison.Ordinal)
             || !xaml.Contains("ShowActivated=\"False\"", StringComparison.Ordinal)
             || !xaml.Contains("Cursor=\"SizeAll\"", StringComparison.Ordinal)
-            || !xaml.Contains("AutomationProperties.HelpText=\"按住猫图拖动可移动小K窗口\"", StringComparison.Ordinal)
+            || !xaml.Contains("按住桌宠任意位置并移动鼠标", StringComparison.Ordinal)
+            || !xaml.Contains("按住猫图或面板空白区域拖动可移动小K窗口", StringComparison.Ordinal)
             || !xaml.Contains("x:Name=\"PetResizeHandle\"", StringComparison.Ordinal))
-            failures.Add("紧凑桌宠/展开猫图拖动入口、提示、启动时不激活或独立缩放手柄接线不完整。");
+            failures.Add("窗口级桌宠拖动入口、紧凑/展开态提示、启动时不激活或独立缩放手柄接线不完整。");
 
-        if (!code.Contains("private void PetView_PreviewMouseLeftButtonDown", StringComparison.Ordinal)
-            || !code.Contains("private void ExpandedPetImage_PreviewMouseLeftButtonDown", StringComparison.Ordinal)
-            || !code.Contains("MoveWindowFromPointer(e, expandOnClick: true)", StringComparison.Ordinal)
-            || !code.Contains("MoveWindowFromPointer(e, expandOnClick: false)", StringComparison.Ordinal)
+        if (!code.Contains("private void Window_PreviewMouseLeftButtonDown", StringComparison.Ordinal)
+            || !code.Contains("PetWindowInteractionPolicy.ShouldStartMove(", StringComparison.Ordinal)
+            || !code.Contains("MoveWindowFromPointer(e, expandOnClick: !_expanded)", StringComparison.Ordinal)
+            || !code.Contains("IsInteractiveDragSource(e.OriginalSource)", StringComparison.Ordinal)
+            || !code.Contains("ButtonBase or TextBoxBase or Selector or RangeBase or ScrollBar or Thumb or ItemsControl or MenuItem", StringComparison.Ordinal)
             || !code.Contains("DragMove();", StringComparison.Ordinal)
-            || !code.Contains("PetResizeHandle.IsMouseOver", StringComparison.Ordinal)
             || !code.Contains("_petDragGestureActive = true", StringComparison.Ordinal)
             || !code.Contains("PetWindowInteractionPolicy.GetCompletion(moved, cancelled, expandOnClick)", StringComparison.Ordinal)
             || !code.Contains("FitWindowToMonitorWorkArea();", StringComparison.Ordinal)
             || !code.Contains("SaveWindowPosition();", StringComparison.Ordinal)
             || !code.Contains("case PetWindowMoveCompletion.Expand:", StringComparison.Ordinal))
-            failures.Add("紧凑态任意位置/展开态猫图拖动、缩放排除、轻点展开或位置保存接线不完整。");
+            failures.Add("窗口级拖动、交互控件排除、轻点展开、工作区约束或位置保存接线不完整。");
 
         var obsoleteNativeMove = new[]
         {

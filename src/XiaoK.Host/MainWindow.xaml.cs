@@ -4,7 +4,10 @@ using System.Media;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
 using Forms = System.Windows.Forms;
@@ -485,34 +488,40 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         catch (Exception) { }
     }
 
-    private void Header_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private void Window_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed)
+        if (!PetWindowInteractionPolicy.ShouldStartMove(
+                isLeftButton: e.ChangedButton == System.Windows.Input.MouseButton.Left,
+                isPressed: e.ButtonState == System.Windows.Input.MouseButtonState.Pressed,
+                isOverResizeHandle: PetResizeHandle.IsMouseOver,
+                isInteractiveSource: IsInteractiveDragSource(e.OriginalSource)))
+            return;
+
+        MoveWindowFromPointer(e, expandOnClick: !_expanded);
+    }
+
+    private static bool IsInteractiveDragSource(object? source)
+    {
+        if (source is not DependencyObject current)
+            return false;
+
+        // Do not turn controls inside the task panel into drag handles.
+        for (var depth = 0; current is not null && depth < 256; depth++)
         {
-            try { DragMove(); }
-            catch (InvalidOperationException) { return; }
-            FitWindowToMonitorWorkArea();
-            SaveWindowPosition();
+            if (current is ButtonBase or TextBoxBase or Selector or RangeBase or ScrollBar or Thumb or ItemsControl or MenuItem)
+                return true;
+
+            if (current is Visual or Visual3D)
+                current = VisualTreeHelper.GetParent(current);
+            else if (current is FrameworkContentElement frameworkContentElement)
+                current = frameworkContentElement.Parent;
+            else if (current is ContentElement contentElement)
+                current = ContentOperations.GetParent(contentElement);
+            else
+                current = LogicalTreeHelper.GetParent(current);
         }
-    }
 
-    private void PetView_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (_expanded || e.ChangedButton != System.Windows.Input.MouseButton.Left
-            || e.ButtonState != System.Windows.Input.MouseButtonState.Pressed
-            || PetResizeHandle.IsMouseOver)
-            return;
-
-        MoveWindowFromPointer(e, expandOnClick: true);
-    }
-
-    private void ExpandedPetImage_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
-    {
-        if (!_expanded || e.ChangedButton != System.Windows.Input.MouseButton.Left
-            || e.ButtonState != System.Windows.Input.MouseButtonState.Pressed)
-            return;
-
-        MoveWindowFromPointer(e, expandOnClick: false);
+        return false;
     }
 
     private void MoveWindowFromPointer(System.Windows.Input.MouseButtonEventArgs e, bool expandOnClick)

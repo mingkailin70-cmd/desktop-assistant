@@ -4,6 +4,7 @@
         Title="小K" Height="650" Width="500" MinHeight="372" MinWidth="300"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="False"
         ResizeMode="CanResizeWithGrip" ShowInTaskbar="True" ShowActivated="False"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
         SizeChanged="Window_SizeChanged">
     <Window.Resources>
         <LinearGradientBrush x:Key="PanelSurfaceBrush" StartPoint="0,0" EndPoint="1,1">
@@ -90,7 +91,7 @@
         </Style>
     </Window.Resources>
     <Border x:Name="ShellBorder" CornerRadius="28" Background="{StaticResource PanelSurfaceBrush}" BorderBrush="{StaticResource PanelOutlineBrush}" BorderThickness="1"
-            Padding="14" Margin="5">
+            Padding="14" Margin="5" AutomationProperties.HelpText="展开面板可拖动空白区域或猫图；按钮、输入框、列表和滑块保留原操作">
         <Grid>
             <ScrollViewer x:Name="ExpandedViewScroller" Visibility="Visible"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
@@ -104,8 +105,7 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,14"
-                           MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,14">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <Button Content="任务" Width="42" Height="32" Click="History_Click" ToolTip="打开并查看任务状态"/>
                         <Button Content="⚙" Width="34" Height="32" Margin="5,0,0,0" Click="Settings_Click" ToolTip="设置"/>
@@ -187,11 +187,10 @@
                                Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
                                Width="154" Height="154" Margin="0,-3,-3,-8" Stretch="Uniform"
                                VerticalAlignment="Center" Cursor="SizeAll"
-                               PreviewMouseLeftButtonDown="ExpandedPetImage_PreviewMouseLeftButtonDown"
                                RenderOptions.BitmapScalingMode="HighQuality"
                                AutomationProperties.Name="小K银渐层小猫三维角色"
-                               AutomationProperties.HelpText="按住猫图拖动可移动小K窗口"
-                               ToolTip="按住猫图拖动可移动小K窗口">
+                               AutomationProperties.HelpText="按住猫图或面板空白区域拖动可移动小K窗口；控件保留原操作"
+                               ToolTip="按住猫图或面板空白区域拖动可移动小K窗口">
                             <Image.Effect>
                                 <DropShadowEffect Color="#607160" BlurRadius="13" ShadowDepth="3" Opacity="0.18"/>
                             </Image.Effect>
@@ -266,7 +265,6 @@
 
             <Border x:Name="PetView" Visibility="Collapsed" Background="Transparent" CornerRadius="30"
                     BorderBrush="Transparent" BorderThickness="0" Cursor="SizeAll"
-                    PreviewMouseLeftButtonDown="PetView_PreviewMouseLeftButtonDown"
                     AutomationProperties.Name="小K桌宠，可按住任意位置拖动；单击展开任务面板"
                     AutomationProperties.HelpText="按住桌宠任意位置并移动鼠标，松开后保存位置；右下角手柄用于缩放"
                     ToolTip="按住桌宠任意位置拖动，松开后保存位置；单击展开任务面板；右键打开菜单">

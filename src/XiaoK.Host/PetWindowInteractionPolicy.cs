@@ -9,6 +9,9 @@ internal enum PetWindowMoveCompletion
 
 internal static class PetWindowInteractionPolicy
 {
+    public static bool ShouldStartMove(bool isLeftButton, bool isPressed, bool isOverResizeHandle, bool isInteractiveSource)
+        => isLeftButton && isPressed && !isOverResizeHandle && !isInteractiveSource;
+
     public static PetWindowMoveCompletion GetCompletion(bool positionChanged, bool cancelled, bool expandOnClick)
     {
         if (positionChanged) return PetWindowMoveCompletion.SavePosition;
