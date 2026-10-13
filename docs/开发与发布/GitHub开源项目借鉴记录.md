@@ -1,5 +1,13 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-13 GitHub社区权重：TernaryQuench Qwen3.8-27B
+
+- GitHub项目[penk/ternary-quench](https://github.com/penk/ternary-quench)公开了三值量化训练、导出和评测流程；可运行权重实际托管在[Hugging Face](https://huggingface.co/penkia/TernaryQuench-Qwen3.8-27B-GGUF)，这说明GitHub项目可以作为权重发现与来源追溯入口，但不把GitHub源码仓库误称为大文件托管位置。模型卡标Apache-2.0，底模Qwen3.8-27B也标Apache-2.0。
+- 固定上游revision元数据`d7ebbe9fb5580113ba670a251dc2b4f432a33130`；Q2_K文件10,863,895,520字节，Hub LFS SHA-256 `ff158c11394e6f1de53b7bcf140ad6bac55d407b2a7edd73d68ca695da693ffc`；Hybrid-Q2_0文件9,757,875,616字节，SHA-256 `e640991f9842f509ead53d91233de7fd13a80459c1f6b25d51295fd2ba54a14b`。这些值来自Hub API元数据，本机尚未下载/校验，状态仍是“来源筛查”，没有加入已下载权重锁。
+- 发布方的Q2_K五项通用零样本任务均分72.28，对照BF16基座74.35；WikiText-2困惑度12.8569。发布方报告生成、JSON和一次工具调用往返正常，但没有证明复杂多轮代码Agent能力。数据来自作者协议、未作独立复现；不能外推为小K中文代码/桌面任务结果。
+- 适合做隔离比较的原因是它提供标准Q2_K GGUF，并明确列出转换精度布局和SHA元数据；限制是权重约10.12 GiB、RTX 5060 Laptop仅8 GiB显存，需混合卸载。当前本机可用RAM 11.56 GiB，未达到27B启动保护线；本轮未下载、未加载、未推理。后续若可用RAM≥15 GiB，再固定权重、核验散列并从4096上下文的低优先级资源探测开始；至少保留4 GiB系统内存和1 GiB显存，不满足即停止。
+- 决定：列为候选评测，不列入生产模型。与现有Ternary Bonsai 2（自定义Prism运行时）和GSQ-RCO IQ2_XS（普通GGUF）分别比较；不能仅凭27B参数量推断比4B或现有模型更适合。任何模型输出仍只能给ToolBroker提供动作提案。
+
 ## 2026-10-13 Qwen3.5-4B-Prime个人微调核查
 
 - 适配范围很窄：轨迹将文件读写转成Emacs `python-bridge`/MCP调用，模型要求随附专用System Prompt；但转换后的工具模式仍保留Bash，不能直接暴露给小K。数据样例主要为英文编程任务。衍生数据卡标MIT，但其引用的上游`TeichAI/Ox-Alpha-Pi-Traces`页面未显示数据许可证，故训练数据权利仍待厘清；模型权重Apache-2.0不能替代训练数据许可审查。该候选固定模型revision/权重SHA-256、中文效果和仓库锁定llama.cpp b11259兼容性也未核实；不下载、不运行、不接入。将来若做适配，必须先厘清数据许可，再只开放小K白名单工具并由ToolBroker逐项验证，禁止桥接、Bash、任意写入和云端回退。
