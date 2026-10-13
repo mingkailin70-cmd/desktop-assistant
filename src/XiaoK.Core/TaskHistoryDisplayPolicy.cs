@@ -24,6 +24,8 @@ public static class TaskHistoryDisplayPolicy
         "app-ui-set-text" => "允许列表应用中的唯一普通文本框（逐次确认完整文本）",
         "window" => "已打开且唯一匹配的允许列表窗口",
         "file" => "用户配置的本机搜索根",
+        "file-create-text" or "file-create-csv" or "file-create-xlsx" or "file-create-docx" or "file-create-pptx" =>
+            "固定小K导出目录中的新建文件（不覆盖现有文件）",
         "file-copy" => "配置搜索根中的源文件与小K导出目录",
         "file-archive" => "配置搜索根中的源文件与小K导出目录",
         "file-move" => "配置搜索根中的源文件和同卷目标目录",
@@ -34,6 +36,13 @@ public static class TaskHistoryDisplayPolicy
         "file-summary" => "用户指定的本机文档（只读，本地模型摘要）",
         "web-read" => "用户提供的公开 HTTPS 页面",
         "web-read-dynamic" => "用户提供的公开 HTTPS 页面（启用内联脚本，只读提取）",
+        "browser-session-open" => "用户提供的 HTTPS 公网页面与临时隔离会话",
+        "browser-session-navigate" => "当前隔离会话中由用户提供的 HTTPS 公网页面",
+        "browser-session-snapshot" => "当前隔离会话中的页面可访问结构（只读）",
+        "browser-session-follow-link" => "当前快照中唯一可见的同源 HTTPS 链接",
+        "browser-session-click" => "当前快照中唯一可见的非提交按钮",
+        "browser-session-fill" => "当前快照中唯一的普通 textbox/searchbox（拒绝敏感字段）",
+        "browser-session-close" => "当前运行时生成的小K隔离网页会话",
         "web-download" => "用户提供的公开 HTTPS 文件与小K导出目录",
         "analyze" => "用户提供的单条消息（本地处理）",
         "draft" => "用户提供的单条消息（本地草拟）",
@@ -50,7 +59,15 @@ public static class TaskHistoryDisplayPolicy
         "app-ui-snapshot" => "后台只读界面结构；不点击、不输入、不改变前台窗口",
         "app-ui-wait-enabled" => "后台等待控件状态；不点击、不输入、不改变前台窗口",
         "app-ui-set-text" => "后台写入唯一普通文本框；逐次确认完整文本，不模拟按键或改变前台",
+        "file-create-text" or "file-create-csv" or "file-create-xlsx" or "file-create-docx" or "file-create-pptx" =>
+            "后台在固定导出目录中新建文件；不覆盖现有文件或改变前台窗口",
         "file-delete" => "后台执行；任务中心逐项确认，文件目标变化时停止",
+        "browser-session-open" or "browser-session-navigate" or "browser-session-follow-link" =>
+            "后台使用无登录态隔离会话；不操作用户 Edge 或桌面前台",
+        "browser-session-snapshot" => "后台读取隔离页面结构；不访问用户登录会话或改变前台",
+        "browser-session-click" => "后台点击隔离网页中的非提交按钮；不发送页面网络请求或控制用户 Edge",
+        "browser-session-fill" => "后台填写隔离网页普通文本框；不提交表单或控制用户 Edge",
+        "browser-session-close" => "只关闭小K隔离会话；不影响用户浏览器窗口",
         "send" => "需要检查预览；当前未接入真实发送适配器",
         "code" => "后台隔离执行；补丁写回或命令需人工审批",
         _ => "后台处理：不发送键鼠输入，不改变前台窗口"

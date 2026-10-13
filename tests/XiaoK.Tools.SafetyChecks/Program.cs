@@ -4070,6 +4070,28 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file").Contains("不改变前台窗口", StringComparison.Ordinal),
         "任务中心没有显示准确的固定目标范围或执行模式。");
+    var taskTargetModeGuidance = new (string Kind, string TargetPhrase, string ModePhrase)[]
+    {
+        ("file-create-text", "固定小K导出目录", "不覆盖现有文件"),
+        ("file-create-csv", "固定小K导出目录", "不覆盖现有文件"),
+        ("file-create-xlsx", "固定小K导出目录", "不覆盖现有文件"),
+        ("file-create-docx", "固定小K导出目录", "不覆盖现有文件"),
+        ("file-create-pptx", "固定小K导出目录", "不覆盖现有文件"),
+        ("browser-session-open", "用户提供的 HTTPS 公网页面", "无登录态隔离会话"),
+        ("browser-session-navigate", "当前隔离会话", "不操作用户 Edge"),
+        ("browser-session-snapshot", "页面可访问结构", "不访问用户登录会话"),
+        ("browser-session-follow-link", "同源 HTTPS 链接", "无登录态隔离会话"),
+        ("browser-session-click", "非提交按钮", "不发送页面网络请求"),
+        ("browser-session-fill", "拒绝敏感字段", "不提交表单"),
+        ("browser-session-close", "小K隔离网页会话", "不影响用户浏览器窗口")
+    };
+    Require(taskTargetModeGuidance.All(item =>
+            TaskHistoryDisplayPolicy.TargetScope(item.Kind).Contains(item.TargetPhrase, StringComparison.Ordinal)
+            && TaskHistoryDisplayPolicy.ExecutionMode(item.Kind).Contains(item.ModePhrase, StringComparison.Ordinal))
+        && !taskTargetModeGuidance.Any(item =>
+            TaskHistoryDisplayPolicy.TargetScope(item.Kind) == "本地处理；未指定外部目标"
+            || TaskHistoryDisplayPolicy.ExecutionMode(item.Kind) == "后台处理：不发送键鼠输入，不改变前台窗口"),
+        "新建文件或隔离浏览器任务仍使用了泛化的目标范围/执行模式，或丢失其固定限制。");
     Require(TaskHistoryDisplayPolicy.FailureDetail("FOREGROUND_REQUIRED").Contains("没有执行，也没有排队", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.FailureDetail("WINDOW_NOT_FOUND").Contains("没有切换焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.FailureDetail("SEND_ADAPTER_UNAVAILABLE").Contains("消息没有发送", StringComparison.Ordinal)
