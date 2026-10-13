@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using XiaoK.Core;
 using XiaoK.Host;
 
 namespace XiaoK.DesktopExperience.Checks;
