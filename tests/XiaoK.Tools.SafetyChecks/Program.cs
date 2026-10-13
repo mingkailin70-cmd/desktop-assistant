@@ -4944,6 +4944,18 @@ static async Task CheckAppLaunchRoutingAndFailureAsync()
         && staleWindowController.StartCount == 1 && staleWindowController.WindowCheckCount >= 2,
         "没有出现新的 VS Code 项目窗口时未返回结果待核对。");
 
+    var advancingTimeProvider = new AdvancingTimeProvider();
+    var slowWindowScanController = new FakeDesktopAppProcessController(windowVisible: false,
+        onWindowCheck: () => advancingTimeProvider.Advance(TimeSpan.FromSeconds(2)));
+    var monotonicDeadlineDesktop = new WindowsDesktopTools([app], [], slowWindowScanController,
+        appLaunchTimeout: TimeSpan.FromSeconds(1), timeProvider: advancingTimeProvider);
+    var monotonicDeadlineResult = await monotonicDeadlineDesktop.LaunchAsync(proposal, CancellationToken.None);
+    Require(!monotonicDeadlineResult.Success
+        && monotonicDeadlineResult.ErrorCode == "APP_LAUNCH_OUTCOME_UNCERTAIN"
+        && monotonicDeadlineResult.FinalState == TaskLifecycleState.OutcomeUncertain
+        && slowWindowScanController.StartCount == 1 && slowWindowScanController.WindowCheckCount == 2,
+        "窗口核验已耗尽单调期限后仍继续轮询或等待，可能拖延结果并误导用户重试。");
+
     var ambiguousHandlesController = new FakeDesktopAppProcessController(initialWindowHandles: [new IntPtr(1), new IntPtr(2)]);
     var ambiguousActivationController = new FakeDesktopWindowController(WindowActivationOutcome.Ambiguous);
     var ambiguousDesktop = new WindowsDesktopTools([app], [], ambiguousHandlesController, ambiguousActivationController);
@@ -10327,7 +10339,7 @@ internal sealed class FakeDesktopAppStatusController(DesktopAppStatus status) : 
 internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bool windowVisible = true,
     Exception? startFailure = null, bool addVisibleWindowOnStart = false,
     IReadOnlyCollection<IntPtr>? initialWindowHandles = null,
-    Exception? windowCheckFailure = null, int windowCheckFailureNumber = 1)
+    Exception? windowCheckFailure = null, int windowCheckFailureNumber = 1, Action? onWindowCheck = null)
     : IDesktopAppProcessController
 {
     private readonly List<IntPtr> _windowHandles = initialWindowHandles?.ToList()
@@ -10350,6 +10362,7 @@ internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bo
     public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app)
     {
         WindowCheckCount++;
+        onWindowCheck?.Invoke();
         if (windowCheckFailure is not null && WindowCheckCount == windowCheckFailureNumber)
             throw windowCheckFailure;
         return _windowHandles.ToArray();
@@ -10359,6 +10372,15 @@ internal sealed class FakeDesktopAppProcessController(Action? onStart = null, bo
     {
         public void Dispose() { }
     }
+}
+
+internal sealed class AdvancingTimeProvider : TimeProvider
+{
+    private long _timestamp;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+    public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+    public void Advance(TimeSpan elapsed) => Interlocked.Add(ref _timestamp, elapsed.Ticks);
 }
 
 internal sealed class FakeDesktopWindowController(WindowActivationOutcome outcome, Action? onActivate = null)

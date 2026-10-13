@@ -80,21 +80,23 @@ public sealed partial class WindowsDesktopTools
     private readonly IDesktopWindowController _windowController;
     private readonly TimeSpan _appLaunchTimeout;
     private readonly Action? _searchEntryObserver;
+    private readonly TimeProvider _timeProvider;
 
     public WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
         IDesktopAppProcessController? appProcessController = null, IDesktopWindowController? windowController = null,
-        TimeSpan? appLaunchTimeout = null, string? exportRoot = null)
-        : this(apps, searchRoots, appProcessController, windowController, appLaunchTimeout, exportRoot, null)
+        TimeSpan? appLaunchTimeout = null, string? exportRoot = null, TimeProvider? timeProvider = null)
+        : this(apps, searchRoots, appProcessController, windowController, appLaunchTimeout, exportRoot, null, timeProvider)
     {
     }
 
     internal WindowsDesktopTools(IEnumerable<DesktopApp> apps, IEnumerable<KeyValuePair<string, string>> searchRoots,
         IDesktopAppProcessController? appProcessController, IDesktopWindowController? windowController,
-        TimeSpan? appLaunchTimeout, string? exportRoot, Action? searchEntryObserver)
+        TimeSpan? appLaunchTimeout, string? exportRoot, Action? searchEntryObserver, TimeProvider? timeProvider = null)
     {
         _searchEntryObserver = searchEntryObserver;
         _appProcessController = appProcessController ?? new SystemDesktopAppProcessController();
         _windowController = windowController ?? new SystemDesktopWindowController();
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _appLaunchTimeout = appLaunchTimeout ?? TimeSpan.FromSeconds(8);
         if (_appLaunchTimeout <= TimeSpan.Zero || _appLaunchTimeout > TimeSpan.FromMinutes(1))
             throw new ArgumentOutOfRangeException(nameof(appLaunchTimeout), "应用窗口核验超时必须在1毫秒到1分钟之间。");
@@ -246,8 +248,8 @@ public sealed partial class WindowsDesktopTools
             if (launchHandle is null)
                 return LaunchOutcomeUncertain(app.Id, "Windows 已收到启动请求，但没有返回可核验的进程句柄。");
 
-            var until = DateTimeOffset.UtcNow.Add(_appLaunchTimeout);
-            while (DateTimeOffset.UtcNow < until)
+            var launchStartedAt = _timeProvider.GetTimestamp();
+            while (_timeProvider.GetElapsedTime(launchStartedAt) < _appLaunchTimeout)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var visibleWindowHandles = _appProcessController.GetVisibleWindowHandles(app);
@@ -261,7 +263,7 @@ public sealed partial class WindowsDesktopTools
                         : $"已启动并检测到 {app.Id} 的窗口。";
                     return new(true, summary, Data: app.WorkingDirectory);
                 }
-                var remaining = until - DateTimeOffset.UtcNow;
+                var remaining = _appLaunchTimeout - _timeProvider.GetElapsedTime(launchStartedAt);
                 if (remaining > TimeSpan.Zero)
                     await Task.Delay(remaining < TimeSpan.FromMilliseconds(250) ? remaining : TimeSpan.FromMilliseconds(250), cancellationToken);
             }
