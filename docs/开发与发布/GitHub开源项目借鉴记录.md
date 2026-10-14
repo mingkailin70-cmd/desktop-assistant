@@ -76,15 +76,21 @@ Sherpa-ONNX官方`tts-models`release说明`vits-icefall-zh-aishell3`为Icefall A
 - **WeChatAuto：需要恢复客户端并走聊天搜索。** 项目按托盘唤起微信，再以`Ctrl+F`查联系人并发送；这会占用前台焦点，不适用于用户同时工作的后台发送。[GitHub项目](https://github.com/strong68/WeChatAuto)
 - **Persona Morph：具备窗口消息投递，但会短暂置前且读取本地库。** 作者README明确说明后台投递会“伪激活”微信，发消息时可能短暂置前约1秒，切会话约3–7秒，失败重试最长约15秒；项目还读取本地消息数据库和相关密钥。即使减少鼠标动作，也不能保证用户键入不被打断，并越过小K当前不读客户端数据库的边界。[GitHub项目及作者的实测/风险说明](https://github.com/Eifptaur/Eif-MAPT-PersonaMorph)
 - **wechatauto-replica：不满足隐私与焦点约束。** 项目读取SQLCipher加密的微信联系人/消息库，并以UIA与OCR混合驱动发送；其说明指出发送仍需要聚焦输入框和回车。项目也标注个人学习用途，不复用代码或数据库适配。[GitHub项目](https://github.com/jiatj/wechatapi)
-- **QQ官方机器人API：有主动单聊能力，但不是个人QQ代发通道。** 现行腾讯文档支持QQ机器人C2C主动消息和符合条件的互动召回，发送目标为Bot专属的`user_openid`；被动回复可关联机器人事件。接口即使允许机器人主动联系用户，身份仍是机器人而不是用户当前个人QQ账号，不能满足给既有好友K发送的要求。[QQ Bot消息收发概述](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)、[发送单聊消息接口](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html)、[Bot专属OpenID说明](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html)
+- **QQ官方机器人API：个人开发者的消息列表单聊标为暂不开放，主动推送状态的官方页面表述冲突。** 接入README称个人主体默认仅支持频道场景，并将个人开发者的消息列表单聊列为“暂不开放”；发送接口页顶部注明主动推送自2025-04-21起不再提供，但后续仍列出主动消息额度及C2C发送参数，因此不能断言Bot主动单聊当前可用。即使未来资格和接口状态明确，发送身份仍是Bot及其专属`user_openid`，不等于用户个人QQ，不能满足给既有好友K发送。[QQ Bot接入与场景资格](https://github.com/tencent-connect/bot-docs/blob/main/docs/README.md)、[QQ Bot发送消息接口](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
 - **R0结论：当前未找到同时满足个人账号、稳定K/L身份、不读数据库、不抢焦点和可核验回执的微信/QQ发送路径。** 不接入上述客户端操控或注入方案，不把QQ机器人身份冒充成个人QQ。继续保留显式消息预览/逐条确认；若没有满足约束的API，具体发送能力按不可用反馈用户，不伪称后台完成。
 - 本次只检查公开文档和仓库说明，未克隆、安装、启动这些项目，未打开或操作微信/QQ窗口，也没有发送消息。
 
-## 2026-10-13 腾讯QQ Bot官方接口复核与旧结论更正
+## 2026-10-13 腾讯QQ Bot官方接口复核与旧结论更正（已由下节更新）
 
 前一版复核曾依据当时的官方GitHub文档记为“主动推送自2025-04-21起不再提供”。2026-10-13重新读取腾讯当前[消息收发概述](https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html)、[发送单聊消息接口](https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html)、[API调用与唯一身份机制](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/api-call-guide.html)及[变更记录](https://bot.q.qq.com/wiki/develop/api-v2/changelog.html)，确认当前文档支持QQ机器人C2C主动消息，并列明用户主动与机器人对话后的30天互动召回；单聊发送使用`user_openid`，不同Bot对应不同用户OpenID。被动回复仍可使用事件的`event_id`或消息的`msg_id`。因此旧的“主动消息不再提供”已更正。
 
-这项更新仅说明QQ机器人的能力，不是个人账号API：发送方仍是机器人，接收目标为其Bot专属OpenID，不能以用户个人QQ身份向用户既有好友K发送。当前未创建机器人、申请凭证、接收或发送消息，也未接入该路线；R0个人账号发送闸门不变。微信个人号仍没有找到可验证的受支持后台发送路径；企业微信属于不同产品身份，不直接满足个人微信好友L的要求。
+这项更新仅说明QQ机器人的能力，不是个人账号API：发送方仍是机器人，接收目标为其Bot专属OpenID，不能以用户个人QQ身份向用户既有好友K发送。当前未创建机器人、申请凭证、接收或发送消息，也未接入该路线；R0个人账号发送闸门不变。微信个人号仍没有找到可验证的受支持后台发送路径；企业微信属于不同产品身份，不直接满足个人微信好友L的要求。本节关于当前主动消息可用性的判断已由下节复核取代。
+
+## 2026-10-14 腾讯QQ Bot资格与主动推送文档再核
+
+腾讯维护的[QQ Bot接入README](https://github.com/tencent-connect/bot-docs/blob/main/docs/README.md)目前称个人主体默认只支持频道场景，场景能力表将“消息列表单聊”对个人开发者标注为“暂不开放”。[发送消息接口页](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)顶部仍提示主动推送自2025-04-21起不再提供；同页后续却保留单聊主动消息频次及`/v2/users/{openid}/messages`参数说明。两处官方文档表述不一致，因此本记录不再把QQ Bot主动C2C可用性当作已确认能力，也不推断矛盾条款如何执行。
+
+R0要求以用户本人个人QQ身份给既有好友K发送。Bot的`user_openid`和消息列表关系链属于机器人身份，不能代替个人账号；个人开发者场景表也未开放消息列表单聊。因此QQ Bot不构成当前合格路径，原“当前确定支持C2C主动单聊”的2026-10-13结论已撤回。未创建机器人、申请凭证、发送消息或访问QQ客户端；若未来官方资格和接口页面更新，届时再核验。
 
 ## 2026-10-12 sherpa-onnx KWS许可复核与候选锁定
 
