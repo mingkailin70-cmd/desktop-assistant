@@ -1329,7 +1329,7 @@
     },
     {
       "id": "sherpa-vits-icefall-aishell3-2024-04-06",
-      "role": "tts-source-review-pending",
+      "role": "tts-license-scope-review-pending",
       "source": "https://huggingface.co/csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06",
       "revision": "29953c80423f4c37918217808ecb308c1b9b7196",
       "acquisitionMethod": "sherpa-release-archive",
@@ -1348,14 +1348,23 @@
       "licenseEvidenceSource": "https://huggingface.co/csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06/blob/29953c80423f4c37918217808ecb308c1b9b7196/README.md",
       "licenseEvidenceCheckedAt": "2026-10-14",
       "dataSource": "AISHELL-3",
-      "dataSourceEvidenceStatus": "family_level_only_exact_checkpoint_unverified",
+      "dataSourceEvidenceStatus": "exact_binary_match_official_aishell3_release",
+      "dataSourceEvidenceCheckedAt": "2026-10-14",
+      "dataSourceEvidenceMethod": "Local model.onnx SHA-256 matches the fixed Hub checkpoint and model.onnx in the official Sherpa AISHELL-3 release archive; official Sherpa docs attribute that named model to AISHELL-3 training.",
       "dataSourceEvidenceSources": [
         "https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/tts/pretrained_models/vits.rst",
-        "https://www.aishelltech.com/aishell_3",
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-zh-aishell3.tar.bz2",
+        "https://huggingface.co/csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06/blob/29953c80423f4c37918217808ecb308c1b9b7196/exp/vits-epoch-960.onnx",
         "https://www.openslr.org/93/"
       ],
+      "dataLicenseScopeStatus": "unresolved_provider_research_only_notice_vs_apache_metadata",
+      "dataLicenseScopeEvidenceSources": [
+        "https://www.openslr.org/93/",
+        "https://opendata.aishelltech.com/",
+        "https://aishelltech.com/newsitem/278532347"
+      ],
       "status": "downloaded_and_verified",
-      "notes": "固定Hub revision的模型卡仅声明Apache-2.0；四份公开训练日志均未标明训练语料名/路径，文件树也未提供数据集清单。Sherpa只明确AISHELL-3 VITS家族级来源，不能证明该low检查点的数据链。故此记录中的AISHELL-3仅为家族级来源，精确检查点来源未核实；下载/散列状态只证明文件身份，不代表候选来源/许可准入。仅暂存为隔离工件，来源澄清前不运行评测、不接Host或生产路由。model.onnx的SHA-256与固定Hub revision中的exp/vits-epoch-960.onnx上游LFS SHA一致。Hub权重元数据和AISHELL-3语料页标Apache-2.0；Sherpa官方release归档本身未附LICENSE/README；每个解包文件散列由下述SHA固定归档提取并逐项核验，不能称为上游逐文件LFS摘要。归档许可与产品分发范围仍按来源页面审查，不据此宣称已获生产发布许可。CPU兼容、延迟、文本准确率、听感和Host/ModelBroker链路均未验收。",
+      "notes": "固定Hub revision的模型卡和OpenSLR SLR93标Apache-2.0。四份Hub训练日志与文件树没有语料清单，但本机model.onnx的SHA-256与固定Hub文件及Sherpa官方AISHELL-3 release归档中的model.onnx一致；Sherpa官方VITS说明明确该命名模型以AISHELL-3训练、含174说话人，故精确二进制身份到公开AISHELL-3来源现有散列链支持。AISHELL提供方当前开放门户显示学术研究/非商业的一般条款，旧公告称免费向高校科研教育机构开放；其对本固定历史语料和衍生权重的适用范围未澄清。故只确认数据来源，不确认模型/数据授权范围；继续隔离，不运行候选评测、不接Host或生产、不分发。下载/散列状态不是许可准入。Sherpa release归档本身未附LICENSE/README；9个解包文件散列按固定归档记录，不能称为上游逐文件LFS摘要。CPU兼容、延迟、文本准确率、听感和Host/ModelBroker链路均未验收。",
       "localDirectory": "tts-candidates/vits-icefall-zh-aishell3",
       "requiredForP0": false,
       "runtimeLock": {
