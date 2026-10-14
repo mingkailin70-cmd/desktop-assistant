@@ -375,6 +375,7 @@ function Save-LongRunReportSnapshot {
     }
 
     $report = [ordered]@{
+        runId = $runId
         reportState = $ReportState
         checkpointUtc = [datetime]::UtcNow.ToString('o')
         packageVersion = $ExpectedVersion
