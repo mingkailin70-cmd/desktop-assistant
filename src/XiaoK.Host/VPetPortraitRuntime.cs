@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Threading;
 using LinePutScript;
 using VPet_Simulator.Core;
@@ -21,11 +22,21 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
     private const string PetAssetDirectory = "keke-corgi-v1";
     private readonly GraphCore _graph;
     private readonly Main _pet;
+    private readonly Grid _petLayerCanvas = new()
+    {
+        Width = 500,
+        Height = 500,
+        ClipToBounds = true,
+        IsHitTestVisible = false,
+        Focusable = false,
+        Background = System.Windows.Media.Brushes.Transparent
+    };
+    private readonly Viewbox _petLayerView;
     private bool _initialized;
     private bool _disposed;
     private XiaoKPetPose? _currentPose;
 
-    public System.Windows.FrameworkElement View => _pet;
+    public System.Windows.FrameworkElement View => _petLayerView;
     public XiaoKPetPose? CurrentPose => _currentPose;
 
     public VPetPortraitRuntime(Dispatcher dispatcher, string dataRoot)
@@ -38,6 +49,13 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(assetRoot);
+        _petLayerView = new Viewbox
+        {
+            Stretch = System.Windows.Media.Stretch.Uniform,
+            Child = _petLayerCanvas,
+            IsHitTestVisible = false,
+            Focusable = false
+        };
         var cacheRoot = Path.Combine(dataRoot, "PetRenderCache");
         Directory.CreateDirectory(cacheRoot);
         GraphCore.CachePath = cacheRoot;
@@ -86,10 +104,9 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
         _pet.LoadALL();
-        KeepPortraitOnly(_pet);
         await _pet.Load_2_WaitGraph();
-        KeepPortraitOnly(_pet);
         await WaitForInitialGraphAsync(_pet, cancellationToken);
+        AttachPetLayersOnly();
         cancellationToken.ThrowIfCancellationRequested();
         _initialized = true;
         SetPose(XiaoKPetPose.Idle);
@@ -108,18 +125,19 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
             _ => "xiaok-idle"
         };
         _pet.Display(name, AnimatType.Single, GraphType.Default, static () => { });
-        KeepPortraitOnly(_pet);
         _currentPose = pose;
     }
 
-    private static void KeepPortraitOnly(Main pet)
+    private void AttachPetLayersOnly()
     {
-        pet.VoicePlayer.Visibility = Visibility.Collapsed;
-        pet.UIGrid_Back.Visibility = Visibility.Collapsed;
-        pet.UIGrid.Visibility = Visibility.Collapsed;
-        pet.LabelDisplay.Visibility = Visibility.Collapsed;
-        if (pet.ToolBar is not null) pet.ToolBar.Visibility = Visibility.Collapsed;
-        if (pet.WorkTimer is not null) pet.WorkTimer.Visibility = Visibility.Collapsed;
+        var mainChildren = _pet.MainGrid.Children;
+        if (!mainChildren.Contains(_pet.PetGrid) || !mainChildren.Contains(_pet.PetGrid2))
+            throw new InvalidOperationException("VPet宠物动画层未能从完整Main容器安全分离。");
+
+        mainChildren.Remove(_pet.PetGrid);
+        mainChildren.Remove(_pet.PetGrid2);
+        _petLayerCanvas.Children.Add(_pet.PetGrid);
+        _petLayerCanvas.Children.Add(_pet.PetGrid2);
     }
 
     public void StopAnimations()

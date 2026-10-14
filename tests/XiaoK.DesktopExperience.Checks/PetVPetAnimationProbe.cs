@@ -80,6 +80,9 @@ internal static class PetVPetAnimationProbe
                 Require(renderer.View is FrameworkElement element
                         && !element.IsHitTestVisible && !element.Focusable,
                     "VPet柯基动画视图可命中或可聚焦。", failures);
+                Require(renderer.View is System.Windows.Controls.Viewbox
+                        { Child: System.Windows.Controls.Grid { Children.Count: 2 } },
+                    "VPet柯基视图未隔离为两层宠物动画网格。", failures);
 
                 var hashes = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var pose in Enum.GetValues<XiaoKPetPose>())
