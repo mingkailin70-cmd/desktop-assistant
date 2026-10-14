@@ -5703,8 +5703,8 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
         : startMethod.IndexOf("if (_disposed || !IsActive) return Status;", existingLookup, StringComparison.Ordinal);
     var capturePermissionRecheck = existingLookup < 0 ? -1
         : startMethod.IndexOf("if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)", existingLookup, StringComparison.Ordinal);
-    var captureDeadlineCheck = capturePermissionRecheck < 0 ? -1
-        : startMethod.IndexOf("if (StopIfExpired()) return Status;", capturePermissionRecheck, StringComparison.Ordinal);
+    var captureDeadlineCheck = captureInactiveGuard < 0 ? -1
+        : startMethod.IndexOf("if (StopIfExpired()) return Status;", captureInactiveGuard, StringComparison.Ordinal);
     var captureGuard = startMethod.IndexOf("!NotificationStartupBaselinePolicy.IsSafeBaselineCount(existing.Count)", StringComparison.Ordinal);
     var captureStop = captureGuard < 0 ? -1 : startMethod.IndexOf("Stop(", captureGuard, StringComparison.Ordinal);
     var captureLoop = startMethod.IndexOf("foreach (var notification in existing)", StringComparison.Ordinal);
