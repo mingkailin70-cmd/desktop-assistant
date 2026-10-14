@@ -104,7 +104,8 @@ $sessionChecks = @(
     'Test-XiaoKMsixHostProcessSession',
     '$matchingHostProcesses += $hostProcess'
 ) | ForEach-Object { $installerSource.IndexOf($_, [System.StringComparison]::Ordinal) }
-if (($sessionChecks | Where-Object { $_ -lt 0 }).Count -gt 0 -or $sessionChecks[0] -gt $sessionChecks[1] -or $sessionChecks[1] -gt $sessionChecks[2] -or $sessionChecks[2] -gt $sessionChecks[3]) {
+$missingSessionChecks = @($sessionChecks | Where-Object { $_ -lt 0 })
+if ($missingSessionChecks.Count -gt 0 -or $sessionChecks[0] -gt $sessionChecks[1] -or $sessionChecks[1] -gt $sessionChecks[2] -or $sessionChecks[2] -gt $sessionChecks[3]) {
     throw 'The installer must verify the XiaoK process session before allowing it into the shutdown candidate list.'
 }
 $checks++
