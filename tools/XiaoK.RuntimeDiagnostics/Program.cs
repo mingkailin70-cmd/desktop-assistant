@@ -33,6 +33,16 @@ if (args.Length == 1 && args[0] == "--aishell3-contract")
 if (args.Length == 3 && args[0] == "--aishell3-cpu-roundtrip")
     return await Aishell3CandidateTtsRoundTrip.RunAsync(args[1], args[2]);
 
+if (args.Length == 3 && args[0] == "--aishell3-cpu-worker")
+    return await WindowsChildProcessSupervisor.WaitForStartSignalAsync()
+        ? await Aishell3CandidateTtsRoundTrip.RunWorkerAsync(args[1], args[2])
+        : 2;
+
+if (args.Length == 1 && args[0] == "--aishell3-contract-synchronous-worker")
+    return await WindowsChildProcessSupervisor.WaitForStartSignalAsync()
+        ? Aishell3CandidateTtsRoundTrip.RunContractSynchronousWorker()
+        : 2;
+
 if (args.Length != 4 || args[0] != "--managed-qwen")
 {
     Console.Error.WriteLine("用法：");

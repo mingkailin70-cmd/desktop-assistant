@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using SherpaOnnx;
 using XiaoK.Inference;
 using XiaoK.Voice;
@@ -146,7 +147,15 @@ internal static class Aishell3CandidateTtsRoundTrip
             Require(malformedControlRejected,
                 "Malformed observer state must fail closed before candidate loading.");
 
-            Console.WriteLine("AISHELL-3 isolated CPU evaluator contract checks passed; no model was loaded.");
+            var supervisorProbe = WindowsChildProcessSupervisor.RunAsync(
+                    ["--aishell3-contract-synchronous-worker"], TimeSpan.FromMilliseconds(750))
+                .GetAwaiter().GetResult();
+            Require(supervisorProbe.JobAssigned && supervisorProbe.TimedOut && supervisorProbe.ProcessReaped
+                    && supervisorProbe.ProcessId is not null && supervisorProbe.ErrorCode is null
+                    && !IsExactProcessAlive(supervisorProbe.ProcessId.Value, supervisorProbe.ProcessStartedAtUtc),
+                "A timed-out synchronous child must be reaped by the kill-on-close job before its report is accepted.");
+
+            Console.WriteLine("AISHELL-3 evaluator and hard-timeout contracts passed; no model was loaded.");
             return 0;
         }
         catch (Exception exception)
@@ -158,17 +167,156 @@ internal static class Aishell3CandidateTtsRoundTrip
 
     public static async Task<int> RunAsync(string workspaceArgument, string reportArgument)
     {
-        if (!OperatingSystem.IsWindows() || !Environment.Is64BitProcess)
+        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
         {
             Console.Error.WriteLine("AISHELL-3 evaluation requires the locked Windows x64 runtime.");
             return 2;
         }
 
+        var paths = ResolvePaths(workspaceArgument, reportArgument);
+        if (paths is null) return 2;
+
+        var startedAtUtc = DateTimeOffset.UtcNow;
+        var temporaryRoot = Path.Combine(Path.GetTempPath(), "XiaoK-AishellWorker-" + Guid.NewGuid().ToString("N"));
+        var retainTemporaryRoot = false;
+        try
+        {
+            Directory.CreateDirectory(temporaryRoot);
+            if (HasReparsePointInPath(temporaryRoot)
+                || IsWithinRoot(temporaryRoot, paths.Workspace)
+                || IsWithinRoot(temporaryRoot, paths.ModelRoot)
+                || IsWithinRoot(temporaryRoot, paths.EnvironmentRoot))
+                return await WriteWorkerFailureReportAsync(paths.ReportPath, startedAtUtc, null,
+                    "WORKER_TEMP_DIRECTORY_INVALID").ConfigureAwait(false);
+
+            var workerReportPath = Path.Combine(temporaryRoot, "worker-report.json");
+            WindowsChildProcessSupervisor.ChildProcessResult execution;
+            try
+            {
+                execution = await WindowsChildProcessSupervisor.RunAsync(
+                    ["--aishell3-cpu-worker", paths.Workspace, workerReportPath],
+                    TimeSpan.FromMinutes(13)).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                // The supervisor could have started a worker before an unexpected failure.
+                // Keep its private directory unless process termination was confirmed.
+                retainTemporaryRoot = true;
+                return await WriteWorkerFailureReportAsync(paths.ReportPath, startedAtUtc, null,
+                    $"WORKER_START_{exception.GetType().Name.ToUpperInvariant()}",
+                    temporaryDirectoryRetained: true).ConfigureAwait(false);
+            }
+
+            retainTemporaryRoot = execution.ProcessId is not null && !execution.ProcessReaped;
+            if (execution.ErrorCode is not null || !execution.JobAssigned || execution.ExitCode is null)
+                return await WriteWorkerFailureReportAsync(paths.ReportPath, startedAtUtc, execution,
+                    execution.ErrorCode ?? "WORKER_EXECUTION_INVALID", retainTemporaryRoot).ConfigureAwait(false);
+            if (!execution.ProcessReaped)
+                return await WriteWorkerFailureReportAsync(paths.ReportPath, startedAtUtc, execution,
+                    "WORKER_REAP_FAILED", retainTemporaryRoot).ConfigureAwait(false);
+            if (execution.TimedOut)
+                return await WriteWorkerFailureReportAsync(paths.ReportPath, startedAtUtc, execution,
+                    "DIAGNOSTIC_HARD_TIMEOUT", retainTemporaryRoot).ConfigureAwait(false);
+
+            try
+            {
+                var workerInfo = new FileInfo(workerReportPath);
+                if (!workerInfo.Exists || workerInfo.Length is <= 0 or > 1024 * 1024)
+                    throw new InvalidDataException("Worker report is missing or outside the size limit.");
+
+                var workerReport = JsonNode.Parse(await File.ReadAllTextAsync(workerReportPath).ConfigureAwait(false))
+                    as JsonObject ?? throw new InvalidDataException("Worker report root must be an object.");
+                if (workerReport["candidate"]?["id"]?.GetValue<string>() != ModelId
+                    || workerReport["candidate"]?["revision"]?.GetValue<string>() != Revision
+                    || workerReport["productionAdmitted"]?.GetValue<bool>() is not false
+                    || workerReport["syntheticTextAndAudioSaved"]?.GetValue<bool>() is not false
+                    || workerReport["transcriptSaved"]?.GetValue<bool>() is not false)
+                    throw new InvalidDataException("Worker report does not match the fixed isolated evaluation contract.");
+
+                var workerPassed = workerReport["passed"]?.GetValue<bool>() == true;
+                var workerResult = workerReport["result"]?.GetValue<string>();
+                if ((execution.ExitCode == 0) != workerPassed
+                    || (execution.ExitCode == 3) != string.Equals(workerResult, "REFUSED", StringComparison.Ordinal))
+                    throw new InvalidDataException("Worker exit status and report result disagree.");
+
+                workerReport["schemaVersion"] = 2;
+                workerReport["processSupervisor"] = JsonSerializer.SerializeToNode(execution,
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                await WriteNewReportAsync(paths.ReportPath, workerReport).ConfigureAwait(false);
+                Console.WriteLine("AISHELL-3 isolated CPU evaluator finished inside a kill-on-close worker; metrics saved outside the repository.");
+                return execution.ExitCode.Value;
+            }
+            catch (Exception exception)
+            {
+                return await WriteWorkerFailureReportAsync(paths.ReportPath, startedAtUtc, execution,
+                    $"WORKER_REPORT_{exception.GetType().Name.ToUpperInvariant()}",
+                    retainTemporaryRoot).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (!retainTemporaryRoot && Directory.Exists(temporaryRoot) && !HasReparsePointInPath(temporaryRoot))
+                    Directory.Delete(temporaryRoot, recursive: true);
+                else if (retainTemporaryRoot)
+                    Console.Error.WriteLine("AISHELL-3 worker directory retained because worker exit could not be confirmed.");
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"AISHELL-3 temporary worker report cleanup failed: {exception.GetType().Name}");
+            }
+        }
+    }
+
+    public static int RunContractSynchronousWorker()
+    {
+        Thread.Sleep(TimeSpan.FromSeconds(30));
+        return 0;
+    }
+
+    private static async Task<int> WriteWorkerFailureReportAsync(string reportPath, DateTimeOffset startedAtUtc,
+        WindowsChildProcessSupervisor.ChildProcessResult? execution, string errorCode,
+        bool temporaryDirectoryRetained = false)
+    {
+        var report = new
+        {
+            schemaVersion = 2,
+            startedAtUtc,
+            completedAtUtc = DateTimeOffset.UtcNow,
+            result = "FAIL",
+            errorCode,
+            candidate = new { id = ModelId, revision = Revision, role = "isolated-cpu-evaluation-only" },
+            processSupervisor = execution,
+            temporaryWorkerDirectoryRetained = temporaryDirectoryRetained,
+            syntheticTextAndAudioSaved = false,
+            transcriptSaved = false,
+            microphoneUsed = false,
+            audioPlaybackUsed = false,
+            hostTouched = false,
+            cpuOnly = true,
+            productionAdmitted = false,
+            passed = false
+        };
+        try
+        {
+            await WriteNewReportAsync(reportPath, report).ConfigureAwait(false);
+            Console.Error.WriteLine($"AISHELL-3 evaluator stopped safely: {errorCode}; metrics report saved outside the repository.");
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"AISHELL-3 evaluator failed safely: {errorCode}; report unavailable ({exception.GetType().Name}).");
+        }
+        return 1;
+    }
+
+    private static EvaluationPaths? ResolvePaths(string workspaceArgument, string reportArgument)
+    {
         var workspace = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceArgument));
         if (!Directory.Exists(workspace) || HasReparsePointInPath(workspace))
         {
             Console.Error.WriteLine("The workspace must be an existing directory without reparse points.");
-            return 2;
+            return null;
         }
         var modelRoot = Path.GetFullPath(Path.Combine(workspace, "models"));
         var environmentRoot = Path.GetFullPath(Path.Combine(workspace, ".tools", "venvs"));
@@ -179,13 +327,42 @@ internal static class Aishell3CandidateTtsRoundTrip
             || !Directory.Exists(reportDirectory) || HasReparsePointInPath(reportDirectory))
         {
             Console.Error.WriteLine("The metrics report must be a new file in an existing, non-reparse directory outside the repository, models, and runtime environments.");
-            return 2;
+            return null;
         }
         if (File.Exists(reportPath) || Directory.Exists(reportPath))
         {
             Console.Error.WriteLine("The report already exists; this diagnostic never overwrites prior results.");
+            return null;
+        }
+        return new EvaluationPaths(workspace, modelRoot, environmentRoot, reportPath);
+    }
+
+    private static bool IsExactProcessAlive(int processId, DateTimeOffset? expectedStartTimeUtc)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return !process.HasExited && expectedStartTimeUtc is not null
+                && process.StartTime.ToUniversalTime() == expectedStartTimeUtc.Value;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    public static async Task<int> RunWorkerAsync(string workspaceArgument, string reportArgument)
+    {
+        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            Console.Error.WriteLine("AISHELL-3 evaluation requires the locked Windows x64 runtime.");
             return 2;
         }
+
+        var paths = ResolvePaths(workspaceArgument, reportArgument);
+        if (paths is null) return 2;
+        var workspace = paths.Workspace;
+        var modelRoot = paths.ModelRoot;
+        var environmentRoot = paths.EnvironmentRoot;
+        var reportPath = paths.ReportPath;
 
         var startedAtUtc = DateTimeOffset.UtcNow;
         var ttsLatenciesMs = new List<double>(Phrases.Length);
@@ -816,6 +993,7 @@ internal static class Aishell3CandidateTtsRoundTrip
 
     private sealed record CandidateProfile(string LocalDirectory, IReadOnlyList<LockedFile> Files,
         string Revision, bool RequiredForP0);
+    private sealed record EvaluationPaths(string Workspace, string ModelRoot, string EnvironmentRoot, string ReportPath);
     private sealed record LockedFile(string Name, long SizeBytes, string Sha256);
     private sealed record AudioSummary(int SampleRate, int SampleCount, double DurationSeconds, float Peak, double Rms,
         int ClippedSampleCount);
