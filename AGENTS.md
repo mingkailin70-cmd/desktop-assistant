@@ -2,6 +2,8 @@
 
 ## 持续有效的用户要求（更新至2026-10-14）
 
+2026-10-14 08:36补充：Sherpa官方`tts-models`发布包`vits-icefall-zh-aishell3.tar.bz2`已下载至忽略路径`models/tts-candidates/`并解包逐文件核验。包大小31,559,701字节，SHA-256 `AB468DB3A3308CDD861495E0DB2F25D79418A0C00639F74944C7CDF5DD8C6EC1`；其中`model.onnx`的SHA-256与固定Hub revision `29953c80423f4c37918217808ecb308c1b9b7196`中的`vits-epoch-960.onnx`完全一致。AISHELL-3数据集与权重元数据均标Apache-2.0，Sherpa文档明确该174说话人Icefall模型使用AISHELL-3；可进入隔离CPU评估队列。仅完成下载和文件散列，没有加载、运行、接Host或改变生产配置；Windows运行时兼容、时延、质量与听感仍待观察于2026-10-15 05:23 CST结束后核验。详见语音报告。
+
 2026-10-14 08:32补充：AISHELL官方数据集页、OpenSLR SLR93和数据集论文均将AISHELL-3语料标注为Apache-2.0；旧发布说明称面向高校科研教育开放，但未明确列出非商业限制。固定`csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06`检查点的README没有训练数据说明，Sherpa文档仅确认AISHELL-3 VITS家族来源，尚不能单独证实该low权重的精确数据链；配套词典/FST和本机兼容也未完成核验。故语料许可标记已核实，固定权重仍隔离，不下载、不运行、不接生产。详见`docs/验收与评测/语音模型合成往返首测.md`及`docs/产品与进度/实施计划与模型选型.md`。
 
 2026-10-14 08:21补充：提交`4772252`的GitHub Actions [Build 38489215996](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38489215996)全Job成功：固定SDK直接安装到`.tools\dotnet`，Release构建通过，完整安全套件134项通过/0跳过（含AppContainer），完整桌面体验套件通过。该CI是合成/自动化证据，不等于当前安装版桌宠拖动实测。本机仍运行签名安装`0.1.139.0` Host PID `18660`及附着24小时观察PID `43316`；观察结束前不本机安装、测试或操作Host。主线拖动修复尚未安装，真实自由移动和位置持久化验收待观察结束。

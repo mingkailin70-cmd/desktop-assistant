@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-14 08:36 Sherpa AISHELL-3官方TTS整包固定
+
+Sherpa-ONNX官方`tts-models`release说明`vits-icefall-zh-aishell3`为Icefall AISHELL-3中文VITS模型，AISHELL-3语料Apache-2.0；固定Hub模型卡声明Apache-2.0。下载官方归档31,559,701字节，SHA-256 `AB468DB3A3308CDD861495E0DB2F25D79418A0C00639F74944C7CDF5DD8C6EC1`。解包后模型权重SHA-256与固定Hub revision `29953c80423f4c37918217808ecb308c1b9b7196`完全相同，且补齐词典、tokens、speaker表、4个FST文件。逐文件哈希与隔离路径见[语音验收报告](../验收与评测/语音模型合成往返首测.md)。
+
+**处置：** 已固定且校验为隔离CPU评估候选；release标签可变，依赖归档和每文件散列锁定。没有LICENSE文件随归档提供，许可依据为模型卡与数据提供方/OpenSLR声明；目前只用于本地隔离评估，不接入生产或对外分发。24小时Host观察结束前不加载/运行；Windows Sherpa版本兼容和本机质量仍待测。
+
 ## 2026-10-14 08:32 AISHELL-3 VITS候选的数据许可核验
 
 固定Hub候选`csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06`使用revision `29953c80423f4c37918217808ecb308c1b9b7196`，ONNX权重`exp/vits-epoch-960.onnx`上游SHA-256为`5511d651b7840c0a93a6bbfd4afd070a2c7f39ca1ec3ff2ecd73191519bbb852`。AISHELL官方[数据集页](https://www.aishelltech.com/aishell_3)、[OpenSLR SLR93](https://www.openslr.org/93/)与[论文](https://www.isca-archive.org/interspeech_2021/shi21c_interspeech.pdf)均将AISHELL-3语料标为Apache-2.0；提供方旧[发布说明](https://aishelltech.com/newsitem/278532347)中的“面向高校科研教育机构开放”没有明确列出非商业限制。社区模型卡也标Apache-2.0，但README只有许可证元数据，没有列出精确训练数据；Sherpa文档只确认AISHELL-3 VITS家族与AISHELL-3数据的关系。故语料许可标记已核实，固定low检查点来源链仍不完整。
