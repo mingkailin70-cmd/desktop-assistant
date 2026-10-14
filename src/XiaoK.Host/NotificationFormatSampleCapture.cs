@@ -70,6 +70,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             _startedAtUtc = DateTimeOffset.UtcNow;
             IsActive = true;
             _listener.NotificationChanged += OnNotificationChanged;
+            _ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);
             var existing = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
             if (_disposed || !IsActive) return Status;
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
@@ -103,7 +104,6 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             }
 
             _baselineReady = true;
-            _ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);
             var message = $"已开始{GetApplicationDisplayName()}通知样本核验。最长15分钟、最多采集30条新通知；正文只在内存和本机设置页显示，不送模型、不保存文件。小K每2秒检查一次通知权限和会话锁定状态，发现异常会停止并清除样本；关闭设置页也会清除。";
             RaiseStatus(message);
             StartDrain();

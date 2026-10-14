@@ -6001,6 +6001,18 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
         && expiry.Contains("clearSamples: true", StringComparison.Ordinal),
         "到期、权限失效或锁屏时没有停止采集并清除内存样本。");
 
+    var startCapture = capture.IndexOf("public async Task<string> StartAsync()", StringComparison.Ordinal);
+    var stopCapture = startCapture < 0 ? -1 : capture.IndexOf("public void Stop(", startCapture, StringComparison.Ordinal);
+    var startMethod = startCapture >= 0 && stopCapture > startCapture
+        ? capture[startCapture..stopCapture] : string.Empty;
+    var captureStartedAt = startMethod.IndexOf("_startedAtUtc = DateTimeOffset.UtcNow;", StringComparison.Ordinal);
+    var listenerAttached = startMethod.IndexOf("_listener.NotificationChanged += OnNotificationChanged;", StringComparison.Ordinal);
+    var expiryStarted = startMethod.IndexOf("_ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);", StringComparison.Ordinal);
+    var baselineAwait = startMethod.IndexOf("await _listener.GetNotificationsAsync(NotificationKinds.Toast)", StringComparison.Ordinal);
+    Require(captureStartedAt >= 0 && listenerAttached > captureStartedAt
+        && expiryStarted > listenerAttached && baselineAwait > expiryStarted,
+        "通知样本最长15分钟期限必须在异步读取Toast基线前启动，避免基线查询挂起时采集无限期保持活动。");
+
     var settingsCode = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml.cs"));
     var closeStart = settingsCode.IndexOf("private void SettingsWindow_Closed(", StringComparison.Ordinal);
     var closeEnd = closeStart < 0 ? -1
