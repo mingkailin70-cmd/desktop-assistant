@@ -91,7 +91,7 @@
         </Style>
     </Window.Resources>
     <Border x:Name="ShellBorder" CornerRadius="28" Background="{StaticResource PanelSurfaceBrush}" BorderBrush="{StaticResource PanelOutlineBrush}" BorderThickness="1"
-            Padding="14" Margin="5" AutomationProperties.HelpText="展开面板可拖动空白区域或猫图；按钮、输入框、列表和滑块保留原操作">
+            Padding="14" Margin="5" AutomationProperties.HelpText="展开面板可拖动空白区域或柯基图；按钮、输入框、列表和滑块保留原操作">
         <Grid>
             <ScrollViewer x:Name="ExpandedViewScroller" Visibility="Visible"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
@@ -123,17 +123,17 @@
                                 </LinearGradientBrush>
                             </Border.Background>
                             <Grid>
-                                <Image Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
+                                <Image Source="pack://siteoforigin:,,,/Assets/Pets/keke-corgi-v1/idle/00_420.png"
                                        Width="59" Height="59" Margin="-3" Stretch="Uniform"
                                        RenderOptions.BitmapScalingMode="HighQuality"
-                                       AutomationProperties.Name="银渐层小猫小K"/>
+                                       AutomationProperties.Name="柯基小K"/>
                                 <Ellipse Width="7" Height="7" Fill="#75A47F" HorizontalAlignment="Right"
                                          VerticalAlignment="Top" Margin="0,7,7,0"/>
                             </Grid>
                         </Border>
                         <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="小K" FontSize="20" FontWeight="SemiBold" Foreground="#20253A"/>
-                            <TextBlock Text="银渐层伙伴 · 本地运行" FontSize="11" Foreground="#6B806F" Margin="0,2,0,0"/>
+                            <TextBlock Text="红白柯基伙伴 · 本地运行" FontSize="11" Foreground="#6B806F" Margin="0,2,0,0"/>
                         </StackPanel>
                         <Border Background="#E9F2E8" CornerRadius="10" Width="98" Padding="7,5" Margin="8,0,0,0"
                                 VerticalAlignment="Center">
@@ -184,13 +184,13 @@
                                        FontSize="11" Foreground="#607565" Margin="0,5,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                         <Image x:Name="ExpandedPetImage" Grid.Column="1"
-                               Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
+                               Source="pack://siteoforigin:,,,/Assets/Pets/keke-corgi-v1/idle/00_420.png"
                                Width="154" Height="154" Margin="0,-3,-3,-8" Stretch="Uniform"
                                VerticalAlignment="Center" Cursor="SizeAll"
                                RenderOptions.BitmapScalingMode="HighQuality"
-                               AutomationProperties.Name="小K银渐层小猫三维角色"
-                               AutomationProperties.HelpText="按住猫图或面板空白区域拖动可移动小K窗口；控件保留原操作"
-                               ToolTip="按住猫图或面板空白区域拖动可移动小K窗口">
+                               AutomationProperties.Name="小K红白柯基角色"
+                               AutomationProperties.HelpText="按住柯基图或面板空白区域拖动可移动小K窗口；控件保留原操作"
+                               ToolTip="按住柯基图或面板空白区域拖动可移动小K窗口">
                             <Image.Effect>
                                 <DropShadowEffect Color="#607160" BlurRadius="13" ShadowDepth="3" Opacity="0.18"/>
                             </Image.Effect>
@@ -390,7 +390,7 @@
                         </Border.Effect>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Border Width="28" Height="28" CornerRadius="14" Background="#E8F0E7" Margin="0,0,9,0"
-                                    AutomationProperties.Name="小K猫爪标记">
+                                    AutomationProperties.Name="小K爪印标记">
                                 <Canvas Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Ellipse Canvas.Left="1" Canvas.Top="4" Width="4.5" Height="5.5" Fill="#739178"/>
                                     <Ellipse Canvas.Left="5.5" Canvas.Top="0.5" Width="4.5" Height="5.5" Fill="#739178"/>

@@ -218,6 +218,14 @@ foreach (var pose in Enum.GetValues<XiaoKPetPose>())
     Require(File.Exists(Path.Combine(repositoryDirectory!.FullName, "src", "XiaoK.Host", "Assets", "Pets", asset)),
         "桌宠静态回退姿态资源缺失。");
 }
+var mainWindowXaml = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
+    "src", "XiaoK.Host", "MainWindow.xaml"));
+const string corgiIdleUri = "pack://siteoforigin:,,,/Assets/Pets/keke-corgi-v1/idle/00_420.png";
+Require(!mainWindowXaml.Contains("xiaok-silver-shaded-3d-v15.png", StringComparison.OrdinalIgnoreCase)
+    && mainWindowXaml.Split(corgiIdleUri, StringSplitOptions.None).Length - 1 == 3
+    && mainWindowXaml.Contains("红白柯基伙伴 · 本地运行", StringComparison.Ordinal)
+    && mainWindowXaml.Contains("小K红白柯基角色", StringComparison.Ordinal),
+    "展开面板仍混用旧猫图或桌宠角色文案与柯基不一致。");
 var assistantRuntimeSource = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
     "src", "XiaoK.Host", "AssistantRuntime.cs"));
 var directToolRoutes = Regex.Matches(assistantRuntimeSource,
