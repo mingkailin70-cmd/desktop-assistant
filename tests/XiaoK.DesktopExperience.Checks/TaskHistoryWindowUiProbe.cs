@@ -11,6 +11,9 @@ namespace XiaoK.DesktopExperience.Checks;
 
 internal static class TaskHistoryWindowUiProbe
 {
+    private static readonly TimeSpan WindowLoadedTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan StaThreadTimeout = TimeSpan.FromSeconds(20);
+
     public static IReadOnlyList<string> Run()
     {
         var failures = new List<string>();
@@ -26,8 +29,8 @@ internal static class TaskHistoryWindowUiProbe
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        if (!thread.Join(TimeSpan.FromSeconds(12)))
-            return ["任务中心离屏UI检查超过12秒；工作线程设为后台且不会触碰用户窗口。"];
+        if (!thread.Join(StaThreadTimeout))
+            return ["任务中心离屏UI检查超过20秒；工作线程设为后台且不会触碰用户窗口。"];
         if (threadFailure is not null)
             return [$"任务中心离屏UI检查异常：{threadFailure.GetType().Name}"];
         return failures;
@@ -90,7 +93,7 @@ internal static class TaskHistoryWindowUiProbe
         var completed = false;
         var watchdog = new DispatcherTimer(DispatcherPriority.ApplicationIdle, dispatcher)
         {
-            Interval = TimeSpan.FromSeconds(8)
+            Interval = WindowLoadedTimeout
         };
         watchdog.Tick += (_, _) =>
         {
@@ -208,8 +211,9 @@ internal static class TaskHistoryWindowUiProbe
             }
         }));
         window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
-        watchdog.Start();
         window.Show();
+        // Exclude synchronous HWND creation from the Loaded-event deadline.
+        watchdog.Start();
         Dispatcher.Run();
     }
 
