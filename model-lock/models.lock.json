@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "p0-required-model-assets-downloaded-and-verified",
-  "lastSourceReviewDate": "2026-10-13",
+  "lastSourceReviewDate": "2026-10-14",
   "models": [
     {
       "id": "qwen3.5-4b-q4km",
@@ -1325,6 +1325,100 @@
         "executableSha256": "36fa11f15b0effa8f392b9ee2ad30e126945dc0ec9357573dd2c8cabc9aaf751",
         "signatureVerified": true,
         "thirdPartyNoticesPath": ".tools/runtimes/feder-cr-jev/jevos-v4/jev/THIRD_PARTY_NOTICES.md"
+      }
+    },
+    {
+      "id": "sherpa-vits-icefall-aishell3-2024-04-06",
+      "role": "tts-isolated-evaluation-candidate",
+      "source": "https://huggingface.co/csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06",
+      "revision": "29953c80423f4c37918217808ecb308c1b9b7196",
+      "acquisitionMethod": "sherpa-release-archive",
+      "format": "ONNX VITS",
+      "conversionRuntime": "Sherpa-ONNX org.k2fsa.sherpa.onnx 1.13.5, net10.0/win-x64; this model/runtime pairing has not been loaded or tested.",
+      "files": [
+        {
+          "name": "exp/vits-epoch-960.onnx",
+          "localName": "model.onnx",
+          "upstreamReportedSizeBytes": 30482262,
+          "expectedUpstreamSha256": "5511d651b7840c0a93a6bbfd4afd070a2c7f39ca1ec3ff2ecd73191519bbb852",
+          "localVerifiedSha256": "5511d651b7840c0a93a6bbfd4afd070a2c7f39ca1ec3ff2ecd73191519bbb852"
+        }
+      ],
+      "license": "apache-2.0",
+      "licenseEvidenceSource": "https://huggingface.co/csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06/blob/29953c80423f4c37918217808ecb308c1b9b7196/README.md",
+      "licenseEvidenceCheckedAt": "2026-10-14",
+      "dataSource": "AISHELL-3",
+      "dataSourceEvidenceSources": [
+        "https://github.com/k2-fsa/sherpa/blob/master/docs/source/onnx/tts/pretrained_models/vits.rst",
+        "https://www.aishelltech.com/aishell_3",
+        "https://www.openslr.org/93/"
+      ],
+      "status": "downloaded_and_verified",
+      "notes": "仅作隔离CPU评估候选，不接Host或生产路由。model.onnx的SHA-256与固定Hub revision中的exp/vits-epoch-960.onnx上游LFS SHA一致。Hub权重元数据和AISHELL-3语料页标Apache-2.0；Sherpa说明AISHELL-3 Icefall模型以该语料训练，支持174说话人。Sherpa官方release归档本身未附LICENSE/README；每个解包文件散列由下述SHA固定归档提取并逐项核验，不能称为上游逐文件LFS摘要。归档许可与产品分发范围仍按来源页面审查，不据此宣称已获生产发布许可。CPU兼容、延迟、文本准确率、听感和Host/ModelBroker链路均未验收。",
+      "localDirectory": "tts-candidates/vits-icefall-zh-aishell3",
+      "requiredForP0": false,
+      "runtimeLock": {
+        "packageId": "org.k2fsa.sherpa.onnx",
+        "version": "1.13.5",
+        "target": "net10.0/win-x64",
+        "packageContentHash": "YCk9fwwlioQ2F9dQHhHpUyP96O+YWn3WTQJERWXdHqWgHOMzwKu+TKgW9Rx8hKA3ukDJwS1i5OqLdSCB4bUbvw==",
+        "lockFile": "src/XiaoK.Voice/packages.lock.json",
+        "compatibilityStatus": "unverified"
+      },
+      "upstreamArchive": {
+        "name": "vits-icefall-zh-aishell3.tar.bz2",
+        "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-zh-aishell3.tar.bz2",
+        "releaseTag": "tts-models",
+        "sizeBytes": 31559701,
+        "sha256": "ab468db3a3308cdd861495e0db2f25d79418a0c00639f74944c7cdf5dd8c6ec1",
+        "localArchiveName": "vits-icefall-zh-aishell3-tts-models-20261014.tar.bz2",
+        "verifiedContents": [
+          {
+            "name": "date.fst",
+            "sizeBytes": 59154,
+            "sha256": "eb8aa079ae3cb81d8f4404992f39d61a0cb990947512b5b8d1e54d1f6980e718"
+          },
+          {
+            "name": "lexicon.txt",
+            "sizeBytes": 2042943,
+            "sha256": "ab2e61d357551e7b24ddd965d924aca784c20165ff58c150794e539c6b5e9e35"
+          },
+          {
+            "name": "model.onnx",
+            "sizeBytes": 30482262,
+            "sha256": "5511d651b7840c0a93a6bbfd4afd070a2c7f39ca1ec3ff2ecd73191519bbb852"
+          },
+          {
+            "name": "new_heteronym.fst",
+            "sizeBytes": 21974,
+            "sha256": "ca14b2127e27baa571664e4bb791e143e7425f56a6bc29db08d74f97e6aa4e29"
+          },
+          {
+            "name": "number.fst",
+            "sizeBytes": 64482,
+            "sha256": "743f402181fcfebf76cc2f0546b71fa26476e626fbe4e460fb7b4c3a7a8bd5bd"
+          },
+          {
+            "name": "phone.fst",
+            "sizeBytes": 88630,
+            "sha256": "1ac2b6fa56b1442320c4de7db08353bab8963a2b57f365eebcdd3a2d3562f8d7"
+          },
+          {
+            "name": "rule.far",
+            "sizeBytes": 180717014,
+            "sha256": "b090ed05e333fe125b62d8b1de5f1a1d4579fb237c606e7ac0b84707c863a01f"
+          },
+          {
+            "name": "speakers.txt",
+            "sizeBytes": 1392,
+            "sha256": "50a825fc9a89172eee04a4d68869d933d0eca0d847f3b6fcffff9514cc72442d"
+          },
+          {
+            "name": "tokens.txt",
+            "sizeBytes": 1671,
+            "sha256": "50b45a7b7de1752fd3c7b4755661c285f1547f59186eca2281089a81307ad953"
+          }
+        ]
       }
     }
   ]

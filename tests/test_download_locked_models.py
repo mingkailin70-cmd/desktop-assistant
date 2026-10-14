@@ -51,5 +51,16 @@ class P0ModelAssetStatusTests(unittest.TestCase):
         )
 
 
+class AcquisitionMethodTests(unittest.TestCase):
+    def test_huggingface_file_tree_is_the_default_supported_method(self) -> None:
+        download_locked_models.ensure_supported_acquisition({"id": "legacy-candidate"})
+
+    def test_archive_candidate_is_rejected_by_huggingface_downloader(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "仅下载固定 Hugging Face revision 文件树"):
+            download_locked_models.ensure_supported_acquisition(
+                {"id": "archive-candidate", "acquisitionMethod": "sherpa-release-archive"}
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,16 @@ REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 ROOT_ASSET_READY_STATUSES = {"downloaded_and_verified", "locally_evaluated", "accepted"}
 ROOT_ASSETS_READY = "p0-required-model-assets-downloaded-and-verified"
 ROOT_ASSETS_PARTIAL = "p0-models-partially-downloaded"
+SUPPORTED_ACQUISITION_METHOD = "huggingface-file-tree"
+
+
+def ensure_supported_acquisition(model: dict) -> None:
+    method = model.get("acquisitionMethod", SUPPORTED_ACQUISITION_METHOD)
+    if method != SUPPORTED_ACQUISITION_METHOD:
+        raise RuntimeError(
+            f"{model.get('id')}: 获取方式 {method!r} 不受此工具支持；"
+            "该工具仅下载固定 Hugging Face revision 文件树。"
+        )
 
 
 def derive_p0_model_asset_status(lock: dict) -> str:
@@ -278,6 +288,7 @@ def main() -> int:
     model = next((item for item in lock.get("models", []) if item.get("id") == args.model), None)
     if model is None:
         raise RuntimeError(f"模型锁中没有此 ID：{args.model}")
+    ensure_supported_acquisition(model)
     if model.get("status") not in ("candidate", "partially_downloaded", "downloaded_and_verified"):
         raise RuntimeError(f"模型状态不允许下载：{model.get('status')}")
     local_directory = model.get("localDirectory")
