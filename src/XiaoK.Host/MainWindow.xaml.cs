@@ -1288,6 +1288,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         PetStatusText.Text = compactStatus;
         StatusText.ToolTip = status;
         PetStatusText.ToolTip = status;
+        System.Windows.Automation.AutomationProperties.SetItemStatus(PetView, status);
+        PetStatusBadge.Visibility = compactStatus == "待命" ? Visibility.Collapsed : Visibility.Visible;
         PetView.ToolTip = $"{status} · 拖动移动，单击展开，右键调大小，Ctrl+滚轮缩放";
         UpdatePetPose(status);
         var color = status.Contains("失败", StringComparison.Ordinal) || status.Contains("不可用", StringComparison.Ordinal)

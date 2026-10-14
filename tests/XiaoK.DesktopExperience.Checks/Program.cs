@@ -80,12 +80,14 @@ foreach (var percent in new[] { 40d, 70d, 100d, 160d })
 foreach (var dpi in new uint[] { 96, 144, 192 })
 {
     var size = PetSizingPolicy.FitToWorkArea(percent, 1920, 1080, dpi);
-    Require(Near(size.WidthDip / size.HeightDip, 300d / 372), "桌宠宽高比改变。");
+    Require(Near(size.WidthDip / size.HeightDip, PetSizingPolicy.BaseWidthDip / PetSizingPolicy.BaseHeightDip), "桌宠宽高比改变。");
     Require(size.WidthDip * dpi / 96 <= 1920 && size.HeightDip * dpi / 96 <= 1080,
         "桌宠超出工作区。");
 }
 var tiny = PetSizingPolicy.FitToWorkArea(160, 100, 100, 192);
-Require(Near(tiny.HeightDip, 50) && Near(tiny.WidthDip / tiny.HeightDip, 300d / 372), "小屏幕裁剪错误。");
+Require(Near(tiny.HeightDip, 50)
+    && Near(tiny.WidthDip / tiny.HeightDip, PetSizingPolicy.BaseWidthDip / PetSizingPolicy.BaseHeightDip),
+    "小屏幕裁剪错误。");
 Require(PetSizingPolicy.ClampPercent(12) == 40 && PetSizingPolicy.ClampPercent(300) == 160, "缩放限值错误。");
 Require(!PetSizingPolicy.IsValidPercent(double.NaN) && !PetSizingPolicy.IsValidPercent(double.PositiveInfinity), "接受非有限缩放。");
 
@@ -220,12 +222,26 @@ foreach (var pose in Enum.GetValues<XiaoKPetPose>())
 }
 var mainWindowXaml = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
     "src", "XiaoK.Host", "MainWindow.xaml"));
+var mainWindowCode = File.ReadAllText(Path.Combine(repositoryDirectory.FullName,
+    "src", "XiaoK.Host", "MainWindow.xaml.cs"));
 const string corgiIdleUri = "pack://siteoforigin:,,,/Assets/Pets/keke-corgi-v1/idle/00_420.png";
 Require(!mainWindowXaml.Contains("xiaok-silver-shaded-3d-v15.png", StringComparison.OrdinalIgnoreCase)
     && mainWindowXaml.Split(corgiIdleUri, StringSplitOptions.None).Length - 1 == 3
     && mainWindowXaml.Contains("红白柯基伙伴 · 本地运行", StringComparison.Ordinal)
     && mainWindowXaml.Contains("小K红白柯基角色", StringComparison.Ordinal),
     "展开面板仍混用旧猫图或桌宠角色文案与柯基不一致。");
+Require(Regex.IsMatch(mainWindowXaml,
+        "<Border x:Name=\"PetStatusBadge\"[^>]*Visibility=\"Collapsed\"", RegexOptions.Singleline)
+    && PetSizingPolicy.BaseHeightDip == 324
+    && mainWindowXaml.Contains("<Grid Width=\"300\" Height=\"324\" Margin=\"0\">", StringComparison.Ordinal)
+    && mainWindowXaml.Contains("x:Name=\"PetResizeHandle\" Width=\"24\" Height=\"24\"", StringComparison.Ordinal)
+    && !mainWindowXaml.Contains("拖动移动 · 单击展开", StringComparison.Ordinal)
+    && !mainWindowXaml.Contains("小K爪印标记", StringComparison.Ordinal)
+    && !mainWindowXaml.Contains("#2EC48E58", StringComparison.Ordinal)
+    && !mainWindowXaml.Contains("Color=\"#7A5940\"", StringComparison.Ordinal)
+    && mainWindowCode.Contains("PetStatusBadge.Visibility = compactStatus == \"待命\" ? Visibility.Collapsed : Visibility.Visible;", StringComparison.Ordinal)
+    && mainWindowCode.Contains("AutomationProperties.SetItemStatus(PetView, status);", StringComparison.Ordinal),
+    "桌宠闲置态未收敛为透明柯基主体，或状态提示、缩放命中区域接线不完整。");
 var assistantRuntimeSource = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
     "src", "XiaoK.Host", "AssistantRuntime.cs"));
 var directToolRoutes = Regex.Matches(assistantRuntimeSource,

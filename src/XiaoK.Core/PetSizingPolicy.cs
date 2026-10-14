@@ -4,7 +4,7 @@ namespace XiaoK.Core;
 public static class PetSizingPolicy
 {
     public const double BaseWidthDip = 300;
-    public const double BaseHeightDip = 372;
+    public const double BaseHeightDip = 324;
     public const double MinimumPercent = 40;
     public const double MaximumPercent = 160;
     public const double DefaultPercent = 70;
