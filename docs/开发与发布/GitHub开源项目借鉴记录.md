@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-14 08:32 AISHELL-3 VITS候选的数据许可核验
+
+固定Hub候选`csukuangfj/icefall-tts-aishell3-vits-low-2024-04-06`使用revision `29953c80423f4c37918217808ecb308c1b9b7196`，ONNX权重`exp/vits-epoch-960.onnx`上游SHA-256为`5511d651b7840c0a93a6bbfd4afd070a2c7f39ca1ec3ff2ecd73191519bbb852`。AISHELL官方[数据集页](https://www.aishelltech.com/aishell_3)、[OpenSLR SLR93](https://www.openslr.org/93/)与[论文](https://www.isca-archive.org/interspeech_2021/shi21c_interspeech.pdf)均将AISHELL-3语料标为Apache-2.0；提供方旧[发布说明](https://aishelltech.com/newsitem/278532347)中的“面向高校科研教育机构开放”没有明确列出非商业限制。社区模型卡也标Apache-2.0，但README只有许可证元数据，没有列出精确训练数据；Sherpa文档只确认AISHELL-3 VITS家族与AISHELL-3数据的关系。故语料许可标记已核实，固定low检查点来源链仍不完整。
+
+**处置：** 保留在隔离评估队列，但当前不下载、不运行、不接生产。固定仓库尚缺与模型匹配的完整词典/FST推理资产清单，本地权重散列和Windows锁定Sherpa兼容性未验证；补齐精确数据来源及配套文件版本/散列后，再进行离线CPU评估。详细记录见[语音往返报告](../验收与评测/语音模型合成往返首测.md)和[实施计划与模型选型](../产品与进度/实施计划与模型选型.md)。
+
 ## 2026-10-14 Qwen2.5-Coder社区量化权重来源核查
 
 `bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF`固定文件为Q4_K_M，仓库revision `8f235f74c3b6435080ed0ec31e0036e687c6a543`，Hub LFS SHA-256 `f530705d447660a4336c329981af164b471b60b974b1d808d57e8ec9fe23b239`。模型卡标注Apache-2.0，并说明使用llama.cpp b3772量化和外部imatrix；但未固定精确的Qwen底模检查点。imatrix说明链接至混合来源文本，没有逐项数据来源/许可证清单；Qwen官方模型卡的总体训练描述也不能验证该社区量化权重实际采用的精确底模版本或所有数据权利。锁定的本机`llama.cpp b11259`兼容性尚未核实。
