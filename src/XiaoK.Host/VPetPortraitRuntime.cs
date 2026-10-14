@@ -104,12 +104,28 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
         _currentPose = pose;
     }
 
+    public void StopAnimations()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        StopAnimationsCore();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        try { _pet.Dispose(); }
+        try
+        {
+            StopAnimationsCore();
+            _pet.Dispose();
+        }
         finally { _graph.Dispose(); }
+    }
+
+    private void StopAnimationsCore()
+    {
+        foreach (var animation in _graph.GraphsALL)
+            animation.Stop(true);
     }
 
     private static void AddAnimation(GraphCore graph, string assetRoot, string name, string state,

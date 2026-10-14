@@ -129,6 +129,12 @@ internal static class PetVPetAnimationProbe
                 watchdog.Stop();
                 if (renderer is not null)
                 {
+                    try
+                    {
+                        renderer.StopAnimations();
+                        await Task.Delay(TimeSpan.FromMilliseconds(500));
+                    }
+                    catch (Exception exception) { failures.Add($"VPet柯基动画停止失败：{exception.GetType().Name}"); }
                     try { ClearImageSources(renderer.View); }
                     catch (Exception exception) { failures.Add($"VPet柯基动画图片资源释放失败：{exception.GetType().Name}"); }
                     try { renderer.Dispose(); }
