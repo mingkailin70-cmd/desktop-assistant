@@ -1,3 +1,11 @@
+## v0.1.163.0 通知事件读取更新（2026-10-14）
+
+按用户要求将最新CI通过候选更新到本机。固定SDK`10.0.401`锁定还原和自包含发布成功，发布目录为`artifacts\publish\desktop-update-0.1.163.0`；签名MSIX为`artifacts\msix-validation\4f6f0bf9022345619d96f2c765ed50d3\XiaoK-signed-validation.msix`，146,893,905字节，SHA-256 `F55F7C6B35FA984BF19467C0A40ABD3FFBD54C1B59B515D905186DFE297E6BB3`。SignTool验签0警告、0错误；证书`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已在`LocalMachine\TrustedPeople`，本次没有修改信任。
+
+安装前确认当前签名安装为`0.1.159.0`且只有Host PID`55316`；项目安装器通过核验过的AppX窗口消息请求正常退出并确认进程退出，随后安装当前用户`0.1.163.0`、状态`Ok`。使用正常AppX入口启动Host PID`54740`。安装版与发布目录`XiaoK.Host.dll` SHA-256均为`B1EBA8BC26CA06F2C526CA55F4857E2D00349E4F222868DD0E7287BE54E83D32`；`XiaoK.Tools.dll`均为`434002BA9952EFD134F3896875FEA2B2F5D2009D0AC846628FC48F417F12A60C`。只读检查确认窗口可见、Host响应且未成为前台，`llama-server`为0；未读取通知正文、请求通知权限、启动监听或打开微信/QQ。此版含已通过CI的紧凑态柯基及单条Toast按ID读取改动，但本次没有重复做真实鼠标/多屏验收。
+
+立即回滚包为安装前签名`0.1.159.0`：`artifacts\msix-validation\3385a1d079f845b0bc52dfb738b67c1b\XiaoK-signed-validation.msix`，146,894,038字节，SHA-256 `7949EAB638C16FC2301565E9CC4E970D75B68E6A0AB1213D69DEDAED3DCDFC22`。更新前24小时附着观察主动收尾，报告仅74/1440样本并标记`interrupted`；新版本`0.1.163.0`的只读附着观察PID`36560`、Host PID`54740`、run ID`602ba838e24e433a9a03080b9b8043d1`从`2026-10-14 16:47:55 CST`开始，预计`2026-10-15 16:47:55 CST`结束。观察期不本机测试、安装或操作Host。
+
 ## v0.1.159.0 柯基桌宠安装更新（2026-10-14）
 
 按用户要求将已通过GitHub Actions Build 38526341181的柯基候选更新到本机。使用固定SDK 10.0.401完成自包含Host发布；签名MSIX位于artifacts/msix-validation/3385a1d079f845b0bc52dfb738b67c1b/XiaoK-signed-validation.msix，大小146,894,038字节，SHA-256 7949EAB638C16FC2301565E9CC4E970D75B68E6A0AB1213D69DEDAED3DCDFC22。安装前脚本确认包版本0.1.159.0、签名有效，SignTool验签0警告、0错误；证书B96A02547ABA84523619E11EB7788AE9850A5C60已在机器受信任存储，本次未修改证书信任。安装器对旧Host PID 44336发送核验过的优雅关闭消息，Host正常退出；当前用户安装包状态Ok，经正常AppX入口启动Host PID 55316。安装版/包内XiaoK.Host.dll SHA-256均为F32ADA90A7849549632EAC6E3006A3BB19A63E37A5D9FA072274208E4430BB7E，XiaoK.Tools.dll SHA-256为FAFA578F7DA28BEA6EF4EC188CD92387F40515D814429D278019A0D1857D35D9，llama-server为0。
