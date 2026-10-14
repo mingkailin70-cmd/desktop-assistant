@@ -61,6 +61,58 @@ internal static class Aishell3CandidateTtsRoundTrip
             Require(Normalize("A+B") != Normalize("AB"),
                 "Transcript normalization must preserve symbols that can change meaning.");
 
+            var assetLeaseRoot = Path.Combine(Path.GetTempPath(), "XiaoK-AishellAssetLease-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(assetLeaseRoot);
+            try
+            {
+                var assetDirectory = Path.Combine(assetLeaseRoot, "bundle");
+                Directory.CreateDirectory(assetDirectory);
+                var assetPath = Path.Combine(assetDirectory, "asset.bin");
+                var assetBytes = Encoding.UTF8.GetBytes("locked-candidate-asset");
+                File.WriteAllBytes(assetPath, assetBytes);
+                var fixtureProfile = new CandidateProfile("bundle",
+                    [new LockedFile("asset.bin", assetBytes.Length,
+                        Convert.ToHexString(SHA256.HashData(assetBytes)).ToLowerInvariant())], Revision, false);
+                var leases = OpenVerifiedCandidateFiles(assetLeaseRoot, fixtureProfile);
+                try
+                {
+                    var writeBlocked = false;
+                    try
+                    {
+                        using var writer = new FileStream(assetPath, FileMode.Open, FileAccess.Write,
+                            FileShare.ReadWrite | FileShare.Delete);
+                        writer.WriteByte((byte)'X');
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        writeBlocked = true;
+                    }
+                    Require(writeBlocked,
+                        "A verified candidate asset must reject writes while its TTS loading lease is held.");
+
+                    var replacementPath = assetPath + ".replacement";
+                    File.WriteAllBytes(replacementPath, Encoding.UTF8.GetBytes("replacement"));
+                    var replacementBlocked = false;
+                    try { File.Move(replacementPath, assetPath, overwrite: true); }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        replacementBlocked = true;
+                    }
+                    Require(replacementBlocked,
+                        "A verified candidate asset must reject replacement while its TTS loading lease is held.");
+                }
+                finally
+                {
+                    _ = ReleaseCandidateAssetLeases(leases);
+                }
+                Require(File.ReadAllBytes(assetPath).AsSpan().SequenceEqual(assetBytes),
+                    "Rejected candidate asset mutations must leave the verified bytes unchanged.");
+            }
+            finally
+            {
+                if (Directory.Exists(assetLeaseRoot)) Directory.Delete(assetLeaseRoot, recursive: true);
+            }
+
             var wave = BuildWave([0f, 0.5f, -0.5f], 22050);
             Require(wave.Length == 50
                     && Encoding.ASCII.GetString(wave, 0, 4) == "RIFF"
@@ -147,6 +199,9 @@ internal static class Aishell3CandidateTtsRoundTrip
         var asrModelBrokerUsed = false;
         var asrWorkersAfterDispose = -1;
         var memorySamplingFailed = false;
+        var candidateAssetLeasesReleased = true;
+        var candidateAssetCount = 0;
+        var candidateAssetLeases = new List<FileStream>();
         string? errorCode = null;
         string result = "FAIL";
         VoiceInferenceService? voice = null;
@@ -159,7 +214,6 @@ internal static class Aishell3CandidateTtsRoundTrip
             RefuseWhileObservationIsLive(workspace);
             var profile = ReadProfile(workspace);
             VerifyLockedRuntime(workspace, profile);
-            VerifyCandidateFiles(modelRoot, profile);
             RefuseForCompetingModelProcesses();
             if (!Directory.Exists(environmentRoot) || HasReparsePointInPath(environmentRoot))
                 throw new DiagnosticRefusalException("VOICE_ENVIRONMENT_UNAVAILABLE");
@@ -170,6 +224,8 @@ internal static class Aishell3CandidateTtsRoundTrip
 
             diagnosticProcess.PriorityClass = ProcessPriorityClass.BelowNormal;
             memorySampler = new AvailableMemorySampler(initialAvailableMemoryMiB);
+            candidateAssetLeases = OpenVerifiedCandidateFiles(modelRoot, profile);
+            candidateAssetCount = candidateAssetLeases.Count;
             var modelDirectory = Path.GetFullPath(Path.Combine(modelRoot, profile.LocalDirectory));
             using (var tts = new OfflineTts(CreateTtsConfig(modelDirectory)))
             {
@@ -207,6 +263,11 @@ internal static class Aishell3CandidateTtsRoundTrip
                     peakWorkingSetMiB = Math.Max(peakWorkingSetMiB,
                         diagnosticProcess.PeakWorkingSet64 / (1024 * 1024));
                 }
+            }
+            if (!ReleaseCandidateAssetLeases(candidateAssetLeases))
+            {
+                candidateAssetLeasesReleased = false;
+                throw new DiagnosticRefusalException("MODEL_ASSET_LEASE_RELEASE_FAILED");
             }
 
             var asrPython = Path.Combine(environmentRoot, "asr", "Scripts", "python.exe");
@@ -260,6 +321,7 @@ internal static class Aishell3CandidateTtsRoundTrip
                 try { await voice.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception exception) { errorCode ??= exception.GetType().Name; result = "FAIL"; }
             }
+            candidateAssetLeasesReleased &= ReleaseCandidateAssetLeases(candidateAssetLeases);
             if (environmentRoot.Length != 0)
             {
                 try { asrWorkersAfterDispose = GetWorkerProcessIds(Path.Combine(environmentRoot, "asr", "Scripts", "python.exe")).Length; }
@@ -280,6 +342,7 @@ internal static class Aishell3CandidateTtsRoundTrip
         var passed = result == "PASS" && errorCode is null && asrModelBrokerUsed
             && ttsLatenciesMs.Count == Phrases.Length && asrLatenciesMs.Count == Phrases.Length
             && audioSummaries.Count == Phrases.Length && allWavsZeroed && asrWorkersAfterDispose == 0
+            && candidateAssetCount == ExpectedAssetNames.Length && candidateAssetLeasesReleased
             && minimumAvailableMemoryMiB >= MinimumRuntimeAvailableMemoryMiB && !memorySamplingFailed;
         if (memorySamplingFailed)
         {
@@ -319,6 +382,8 @@ internal static class Aishell3CandidateTtsRoundTrip
             wavsZeroedAfterUse = allWavsZeroed,
             asrModelBrokerUsed,
             asrWorkersAfterDispose,
+            candidateAssetCountHeldThroughTtsLoad = candidateAssetCount,
+            candidateAssetLeasesReleased,
             initialAvailableMemoryMiB,
             minimumAvailableMemoryMiB,
             memorySamplingFailed,
@@ -411,26 +476,70 @@ internal static class Aishell3CandidateTtsRoundTrip
             throw new DiagnosticRefusalException("SHERPA_PACKAGE_VERSION_MISMATCH");
     }
 
-    private static void VerifyCandidateFiles(string modelRoot, CandidateProfile profile)
+    private static List<FileStream> OpenVerifiedCandidateFiles(string modelRoot, CandidateProfile profile)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(modelRoot));
         var modelDirectory = Path.GetFullPath(Path.Combine(root, profile.LocalDirectory));
         if (!IsWithinRoot(modelDirectory, root) || HasReparsePointInPath(modelDirectory))
             throw new DiagnosticRefusalException("MODEL_PATH_ESCAPES_ROOT");
-        foreach (var file in profile.Files)
+        var leases = new List<FileStream>(profile.Files.Count);
+        try
         {
-            var path = Path.GetFullPath(Path.Combine(modelDirectory, file.Name));
-            if (!IsWithinRoot(path, modelDirectory) || HasReparsePointInPath(path) || !File.Exists(path))
-                throw new DiagnosticRefusalException("MODEL_FILE_UNAVAILABLE");
-            var info = new FileInfo(path);
-            if (info.Length != file.SizeBytes)
-                throw new DiagnosticRefusalException("MODEL_FILE_SIZE_MISMATCH");
-            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 1024 * 1024, FileOptions.SequentialScan);
-            var digest = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(digest), Convert.FromHexString(file.Sha256)))
-                throw new DiagnosticRefusalException("MODEL_FILE_HASH_MISMATCH");
+            foreach (var file in profile.Files)
+            {
+                var path = Path.GetFullPath(Path.Combine(modelDirectory, file.Name));
+                if (!IsWithinRoot(path, modelDirectory) || HasReparsePointInPath(path) || !File.Exists(path))
+                    throw new DiagnosticRefusalException("MODEL_FILE_UNAVAILABLE");
+                FileStream input;
+                try
+                {
+                    // Keep these read-only handles open through Sherpa disposal so verified paths cannot be rewritten or replaced before loading.
+                    input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                        bufferSize: 1024 * 1024, FileOptions.SequentialScan);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                    or System.Security.SecurityException)
+                {
+                    throw new DiagnosticRefusalException("MODEL_FILE_UNAVAILABLE_OR_IN_USE");
+                }
+
+                try
+                {
+                    if (HasReparsePointInPath(path))
+                        throw new DiagnosticRefusalException("MODEL_FILE_REPARSE_RACE");
+                    if (input.Length != file.SizeBytes)
+                        throw new DiagnosticRefusalException("MODEL_FILE_SIZE_MISMATCH");
+                    var digest = SHA256.HashData(input);
+                    if (!CryptographicOperations.FixedTimeEquals(digest, Convert.FromHexString(file.Sha256)))
+                        throw new DiagnosticRefusalException("MODEL_FILE_HASH_MISMATCH");
+                    input.Position = 0;
+                    leases.Add(input);
+                }
+                catch
+                {
+                    input.Dispose();
+                    throw;
+                }
+            }
+            return leases;
         }
+        catch
+        {
+            _ = ReleaseCandidateAssetLeases(leases);
+            throw;
+        }
+    }
+
+    private static bool ReleaseCandidateAssetLeases(List<FileStream> leases)
+    {
+        var released = true;
+        foreach (var lease in leases)
+        {
+            try { lease.Dispose(); }
+            catch { released = false; }
+        }
+        leases.Clear();
+        return released;
     }
 
     private static OfflineTtsConfig CreateTtsConfig(string modelDirectory)
