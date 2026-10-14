@@ -46,7 +46,7 @@ Raw View的只读结构结果：
 
 Raw View确实暴露了一些按钮、文本及编辑/文档模式，但探查没有读取控件名称或内容，没有调用`ValuePattern.SetValue`、`Invoke`或其他动作，也没有验证目标联系人、会话类别、消息内容和发送结果。因此不能把控件数量或模式支持当作后台消息能力通过；也不能仅凭窗口坐标或模糊控件顺序构造发送适配器。后续若继续探索，必须先设计只读映射/合成目标核验，再由真实客户端样本验证；任何真实发送仍需针对最终内容单条确认。
 
-QQ官方机器人开放平台不是个人QQ账号的等价发送通道：官方消息文档列出单聊使用机器人侧的用户 `openid`，被动回复需引用收到的事件或消息；同一文档说明主动推送自2025年4月21日起不再提供。该API即使具备开发者凭据，也会以机器人身份发送，不能据此宣称小K能够在用户个人QQ客户端中任意向好友K主动发送。[腾讯QQ机器人发送消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
+QQ官方机器人开放平台不是个人QQ账号的等价发送通道：接入README将个人开发者的消息列表单聊标为“暂不开放”；发送消息页顶部说明主动推送自2025年4月21日起不再提供，但该页后文仍列有主动消息配额和C2C参数，官方页面表述冲突，不能断言机器人主动单聊当前可用。无论接口状态如何，单聊使用机器人侧用户 `openid`，不能据此宣称小K能够以用户个人QQ身份向既有好友K发送。[QQ Bot接入与场景资格](https://github.com/tencent-connect/bot-docs/blob/main/docs/README.md)、[QQ机器人发送消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)
 
 所以目前既没有已验证的会话UIA解析器，也没有可替代用户个人QQ身份的官方主动发送路由。上述探查没有解决通知私聊归属问题，也没有读取真实通知样本、启用监听或发送消息。后续仍须在用户能够识别来源的自然通知上完成 AUMID 与私聊格式验证；若客户端 UIA 仍只暴露自绘表面，应报告真实限制，不得转用数据库、进程注入、协议逆向或抢前台坐标点击。
 
