@@ -122,6 +122,7 @@ try {
     if ($null -ne $previousPackage) {
         $previousHostPath = [System.IO.Path]::GetFullPath((Join-Path $previousPackage.InstallLocation 'XiaoK.Host.exe'))
         $matchingHostProcesses = @()
+        $currentSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
         foreach ($hostProcess in @(Get-Process -Name 'XiaoK.Host' -ErrorAction SilentlyContinue)) {
             $processPath = $null
             try { $processPath = $hostProcess.Path } catch { }
@@ -131,6 +132,14 @@ try {
 
             $processPath = [System.IO.Path]::GetFullPath($processPath)
             if ([string]::Equals($processPath, $previousHostPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $processSessionId = $null
+                try { $processSessionId = [int]$hostProcess.SessionId } catch { }
+                if ($null -eq $processSessionId) {
+                    throw "Cannot verify the Windows session for XiaoK.Host process $($hostProcess.Id); no process was asked to exit and no certificate or package changes were made. Close XiaoK in its Windows session and retry."
+                }
+                if (-not (Test-XiaoKMsixHostProcessSession -ProcessSessionId $processSessionId -CurrentSessionId $currentSessionId)) {
+                    throw "XiaoK.Host process $($hostProcess.Id) is running in another Windows session; no process was asked to exit and no certificate or package changes were made. Exit XiaoK in that session, then retry."
+                }
                 $matchingHostProcesses += $hostProcess
             }
         }

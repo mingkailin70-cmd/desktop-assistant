@@ -14,6 +14,22 @@ function Open-XiaoKMsixPackageReadLock {
         [System.IO.FileShare]::Read)
 }
 
+function Test-XiaoKMsixHostProcessSession {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessSessionId,
+        [Parameter(Mandatory = $true)]
+        [int]$CurrentSessionId
+    )
+
+    if ($ProcessSessionId -lt 0 -or $CurrentSessionId -lt 0) {
+        throw 'Windows session IDs must be non-negative.'
+    }
+
+    return $ProcessSessionId -eq $CurrentSessionId
+}
+
 function Resolve-XiaoKMsixInstallPolicy {
     [CmdletBinding()]
     param(
@@ -100,4 +116,4 @@ function Resolve-XiaoKMsixInstallPolicy {
     }
 }
 
-Export-ModuleMember -Function Open-XiaoKMsixPackageReadLock, Resolve-XiaoKMsixInstallPolicy
+Export-ModuleMember -Function Open-XiaoKMsixPackageReadLock, Resolve-XiaoKMsixInstallPolicy, Test-XiaoKMsixHostProcessSession

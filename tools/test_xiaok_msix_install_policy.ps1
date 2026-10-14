@@ -77,6 +77,38 @@ function Assert-PolicyRejects([string]$Name, [scriptblock]$Action) {
     $script:checks++
 }
 
+foreach ($case in @(
+    @{ Name = 'same Windows session'; Process = 3; Current = 3; Expected = $true; Reject = $false },
+    @{ Name = 'different Windows session'; Process = 4; Current = 3; Expected = $false; Reject = $false },
+    @{ Name = 'negative process session'; Process = -1; Current = 3; Reject = $true },
+    @{ Name = 'negative current session'; Process = 3; Current = -1; Reject = $true }
+)) {
+    $rejected = $false
+    try {
+        $eligible = Test-XiaoKMsixHostProcessSession -ProcessSessionId $case.Process -CurrentSessionId $case.Current
+    } catch {
+        $rejected = $true
+    }
+    if ([bool]$case.Reject) {
+        if (-not $rejected) { throw "Session eligibility check '$($case.Name)' should have failed closed." }
+    } elseif ($rejected -or [bool]$eligible -ne [bool]$case.Expected) {
+        throw "Session eligibility check '$($case.Name)' returned an unexpected result."
+    }
+    $checks++
+}
+
+$installerSource = Get-Content (Join-Path $PSScriptRoot 'install_xiaok_msix.ps1') -Raw
+$sessionChecks = @(
+    '$currentSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId',
+    '$hostProcess.SessionId',
+    'Test-XiaoKMsixHostProcessSession',
+    '$matchingHostProcesses += $hostProcess'
+) | ForEach-Object { $installerSource.IndexOf($_, [System.StringComparison]::Ordinal) }
+if (($sessionChecks | Where-Object { $_ -lt 0 }).Count -gt 0 -or $sessionChecks[0] -gt $sessionChecks[1] -or $sessionChecks[1] -gt $sessionChecks[2] -or $sessionChecks[2] -gt $sessionChecks[3]) {
+    throw 'The installer must verify the XiaoK process session before allowing it into the shutdown candidate list.'
+}
+$checks++
+
 Assert-Policy 'first install' {
     Resolve-XiaoKMsixInstallPolicy -InstallRequested -ActualSha256 $hashA -TargetVersion '0.1.164.0'
 } $false
@@ -131,4 +163,4 @@ Assert-PolicyRejects 'invalid installed version' {
 
 Assert-PackageLockBlocksReplacement
 
-Write-Output "通过：MSIX升级/回滚准入与文件锁检查 $checks 项；回滚固定包散列、目标版本和唯一当前版本，校验与安装期间锁定同一MSIX文件。"
+Write-Output "通过：MSIX升级/回滚准入、文件锁与Windows会话隔离检查 $checks 项；回滚固定包散列、目标版本和唯一当前版本，校验与安装期间锁定同一MSIX文件，且安装器只向当前Windows会话中的旧Host发送关闭请求。"
