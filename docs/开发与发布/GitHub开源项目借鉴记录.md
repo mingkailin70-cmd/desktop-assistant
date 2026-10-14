@@ -1,12 +1,12 @@
 # GitHub开源项目借鉴记录
 
-## 2026-10-14 12:00 Codex宠物制作方式与小K柯基对照
+## 2026-10-14 12:10 Codex宠物制作方式与小K柯基对照
 
 参考OpenAI公开的[Codex宠物状态模型](https://github.com/openai/codex/blob/main/codex-rs/tui/src/pets/model.rs)、[`hatch-pet`图集契约](https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/references/codex-pet-contract.md)和[QA rubric](https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/references/qa-rubric.md)：借鉴方向是让动作分行、角色轮廓与基线保持稳定、逐状态预览并检查方向可读性。Codex仓库该公开状态模型属于TUI宠物数据结构，不能证明或复刻Codex桌面版私有窗口合成与渲染实现；本次没有声称复制桌面版源码。公开contract当前记录8×9基础图集，而本次Codex应用宠物工具为当前v2素材执行了自己的完整校验；不把旧公开contract误作v2规格。
 
 小K侧继续使用已锁定的VPet Core 1.1.0.66承载WPF窗口动画，帧图为小K自有柯基素材，不复制VPet或GitHub项目的角色素材。四种小K状态分别使用循环帧，Codex中另创建并激活宠物“柯柯”（ID `pet_6acef5394ff48191ad8db5cd3a371c67`）供用户并排比较。Codex图集经应用工具验证有效；动画联系表和四态预览位于本机`C:\Users\LMK\.codex\work-pet-runs\xiaoke-corgi-20261014\qa\previews-v6`。Codex宠物已激活不代表小K桌面Host已构建或安装。
 
-小K候选已提交推送；两轮远端CI均通过Release构建和完整安全检查，但桌面体验探针在VPet执行态左下角单像素alpha检查处失败，当前修复等待新CI。小K仍未安装，且本机24小时观察期禁止编译/测试/安装。实际窗口观感、透明合成、状态循环、移动、缩放和资源占用仍待观察结束后集中验收。盲测与动画QA记录了045°、135°和157.5°斜向辨识警告；主要正交方向可辨，不能把该预览夸大为所有方向无误。
+小K候选已推送。Build `38509234691`的Release构建0警告/错误、完整安全检查134项/0跳过通过；桌面体验检查发现VPet执行态离屏视图左下12×12角区不透明。原始22张PNG角落透明，故当前源码改为逐张核验原图透明角落，并用可见像素覆盖率检查排除接近整画布的不透明底色；渲染角区数值保留为诊断。该修复尚未提交、尚未获得远端CI验证。小K仍未安装，本机24小时观察期禁止编译/测试/安装。实际窗口观感、透明合成、状态循环、移动、缩放和资源占用仍待观察结束后集中验收。盲测与动画QA记录了045°、135°和157.5°斜向辨识警告；主要正交方向可辨，不能把该预览夸大为所有方向无误。
 
 ## 2026-10-14 08:36 Sherpa AISHELL-3官方TTS整包固定
 
