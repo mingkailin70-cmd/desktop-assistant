@@ -1,5 +1,9 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-14 22:06 QQ Bot与腾讯云IM身份边界复核
+
+复核腾讯当前官方文档后，QQ Bot仍不能替代个人QQ：个人开发者的消息列表单聊仍标为暂不开放，主动推送状态在官方发送页内互相矛盾；接口身份是Bot/OpenID。腾讯云IM虽支持自有应用单聊，但以应用自定的`UserID/UserSig`鉴权；官方资料没有说明它能映射或操作用户已有个人QQ/微信联系人，因此不能推断为个人号桥接。此处没有可接入给既有好友K/L的个人账号发送路径；不创建Bot、不申请凭证、不发送测试消息。详见[R0基线记录](../验收与评测/R0基线与可行性闸门记录.md)。
+
 ## 2026-10-14 14:24 Codex透明宠物风格对照
 
 继续依据OpenAI公开的[Codex宠物图集契约](https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/references/codex-pet-contract.md)及[宠物制作与预览流程](https://github.com/openai/skills/tree/main/skills/.curated/hatch-pet)：可验证的借鉴点是透明背景、按状态拆分动作、保持角色清晰，并用逐态预览把动作质量作为验收对象。该资料描述宠物素材/格式，不是Codex桌面应用的窗口、合成或拖动实现；桌面内部实现未从公开源码证实，不能宣称复制了实现代码。
