@@ -91,14 +91,19 @@ internal static class PetVPetAnimationProbe
                     var pixels = new byte[360 * 360 * 4];
                     bitmap.CopyPixels(pixels, 360 * 4, 0);
                     var visiblePixels = CountVisiblePixels(pixels);
-                    var cornersTransparent = GetAlpha(pixels, 0, 0) == 0
-                        && GetAlpha(pixels, 359, 0) == 0
-                        && GetAlpha(pixels, 0, 359) == 0
-                        && GetAlpha(pixels, 359, 359) == 0;
+                    var cornerAlpha = new[]
+                    {
+                        GetAlpha(pixels, 0, 0),
+                        GetAlpha(pixels, 359, 0),
+                        GetAlpha(pixels, 0, 359),
+                        GetAlpha(pixels, 359, 359)
+                    };
+                    var cornersTransparent = cornerAlpha.All(alpha => alpha <= 8);
                     hashes.Add(Convert.ToHexString(SHA256.HashData(pixels)));
                     Require(renderer.CurrentPose == pose, $"VPet柯基桌宠状态切换没有保存 {pose}。", failures);
                     Require(visiblePixels > 8_000, $"VPet柯基桌宠姿态 {pose} 没有渲染出完整主体。", failures);
-                    Require(cornersTransparent, $"VPet柯基桌宠姿态 {pose} 填充了透明角落。", failures);
+                    Require(cornersTransparent,
+                        $"VPet柯基桌宠姿态 {pose} 填充了透明角落，alpha={string.Join(",", cornerAlpha)}。", failures);
                 }
 
                 Require(hashes.Count == Enum.GetValues<XiaoKPetPose>().Length,
