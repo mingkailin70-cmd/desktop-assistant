@@ -11,11 +11,11 @@ public static class PublicFileDownloadPolicy
 
     private static readonly HashSet<string> BlockedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".app", ".appref-ms", ".application", ".appx", ".bash", ".bat", ".chm", ".cmd", ".com", ".command",
+        ".app", ".appref-ms", ".application", ".appx", ".bash", ".bat", ".cjs", ".chm", ".cmd", ".com", ".command",
         ".cpl", ".csh", ".desktop", ".dll", ".exe", ".gadget", ".hta", ".htm", ".html", ".jar", ".js", ".jse",
-        ".ksh", ".lnk", ".msi", ".msix", ".msp", ".ocx", ".pif", ".pl", ".ps1", ".ps1xml", ".ps2", ".ps2xml",
+        ".ksh", ".lnk", ".msi", ".msix", ".msp", ".mjs", ".ocx", ".pif", ".pl", ".ps1", ".ps1xml", ".ps2", ".ps2xml",
         ".psc1", ".psc2", ".psm1", ".py", ".pyw", ".rb", ".reg", ".scf", ".scr", ".sh", ".shb", ".shs",
-        ".svg", ".svgz", ".sys", ".url", ".vbe", ".vbs", ".ws", ".wsc", ".wsf", ".wsh", ".xhtml"
+        ".svg", ".svgz", ".sys", ".url", ".vbe", ".vbs", ".wasm", ".ws", ".wsc", ".wsf", ".wsh", ".xhtml"
     };
 
     private static readonly HashSet<string> BlockedMediaTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -23,7 +23,9 @@ public static class PublicFileDownloadPolicy
         "application/vnd.microsoft.portable-executable", "application/x-bat", "application/x-dosexec",
         "application/x-msdownload", "application/x-msi", "application/x-powershell", "application/x-sh",
         "application/x-vbs", "application/x-windows-executable", "application/x-ms-shortcut",
+        "application/ecmascript", "application/x-ecmascript", "application/x-javascript", "application/wasm",
         "application/javascript", "image/svg+xml", "text/javascript", "text/html", "application/xhtml+xml",
+        "text/ecmascript", "text/x-ecmascript", "text/x-javascript", "application/x-webassembly",
         "text/x-python", "text/x-shellscript"
     };
 
@@ -53,6 +55,8 @@ public static class PublicFileDownloadPolicy
                 || (content[0] == (byte)'#' && content[1] == (byte)'!'))) return false;
         if (content.Length >= 4 && content[0] == 0x7F && content[1] == (byte)'E'
             && content[2] == (byte)'L' && content[3] == (byte)'F') return false;
+        if (content.Length >= 4 && content[0] == 0 && content[1] == (byte)'a'
+            && content[2] == (byte)'s' && content[3] == (byte)'m') return false;
         return !LooksLikeMarkup(content);
     }
 

@@ -8743,16 +8743,19 @@ static async Task CheckPublicFileDownloadAsync(string root)
         && PublicFileDownloadPolicy.IsAllowedFileName("短报告.txt"),
         "有效的被动文件名被拒绝。");
     foreach (var name in new[] { "../escape.txt", "..\\escape.txt", "CON.txt", "unsafe.exe", "launch.PS1",
-                 "page.html", "active.svg", "trailing.", "trailing ", "" })
+                 "page.html", "active.svg", "module.mjs", "module.cjs", "module.wasm", "trailing.", "trailing ", "" })
         Require(!PublicFileDownloadPolicy.IsAllowedFileName(name), $"公网下载接受了不安全文件名：{name}");
     Require(PublicFileDownloadPolicy.IsAllowedMediaType("application/pdf")
         && !PublicFileDownloadPolicy.IsAllowedMediaType("text/html; charset=utf-8")
-        && !PublicFileDownloadPolicy.IsAllowedMediaType("application/x-msdownload"),
+        && !PublicFileDownloadPolicy.IsAllowedMediaType("application/x-msdownload")
+        && !PublicFileDownloadPolicy.IsAllowedMediaType("application/ecmascript")
+        && !PublicFileDownloadPolicy.IsAllowedMediaType("application/wasm"),
         "公网下载内容类型策略错误。");
     Require(!PublicFileDownloadPolicy.IsAllowedContent([0x4d, 0x5a])
         && !PublicFileDownloadPolicy.IsAllowedContent([0x23, 0x21])
+        && !PublicFileDownloadPolicy.IsAllowedContent([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
         && PublicFileDownloadPolicy.IsAllowedContent([0x25, 0x50, 0x44, 0x46]),
-        "公网下载没有拦截可执行文件或脚本特征，或误拒被动内容。");
+        "公网下载没有拦截可执行文件、脚本或WebAssembly特征，或误拒被动内容。");
     var utf8Html = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(" \r\n<!doctype html><html><body>伪装网页</body></html>")).ToArray();
     var utf16LeXml = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(" \r\n<?xml version=\"1.0\"?><svg></svg>")).ToArray();
     var utf16BeScript = Encoding.BigEndianUnicode.GetPreamble().Concat(Encoding.BigEndianUnicode.GetBytes(" \r\n<script>bad()</script>")).ToArray();

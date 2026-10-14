@@ -114,7 +114,7 @@ public sealed class PublicFileDownloader : IPublicFileDownloader
             if (bytes.Length == 0)
                 return Failure("下载内容为空；没有保存文件。", "WEB_DOWNLOAD_EMPTY");
             if (!PublicFileDownloadPolicy.IsAllowedContent(bytes))
-                return Failure("内容具有可执行文件或脚本特征；没有保存文件。", "WEB_DOWNLOAD_CONTENT_TYPE_REJECTED");
+                return Failure("内容具有网页、可执行文件或脚本特征；没有保存文件。", "WEB_DOWNLOAD_CONTENT_TYPE_REJECTED");
 
             return new(true, "公网文件已下载到内存，等待写入固定导出目录。", FileName: name,
                 MediaType: mediaType, Content: bytes, Sha256: Convert.ToHexString(SHA256.HashData(bytes)));
