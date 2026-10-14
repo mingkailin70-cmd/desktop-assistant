@@ -521,8 +521,13 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient"))
                 .WaitAsync(cancellationToken).ConfigureAwait(false);
             var page = await context.NewPageAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
-            context.Page += (_, popup) => { if (!ReferenceEquals(page, popup)) _ = popup.CloseAsync(); };
-            page.Dialog += (_, dialog) => _ = dialog.DismissAsync();
+            context.Page += (_, popup) =>
+            {
+                if (!ReferenceEquals(page, popup))
+                    _ = BrowserBackgroundCleanup.RunBestEffortAsync(() => popup.CloseAsync(), BrowserCloseTimeout);
+            };
+            page.Dialog += (_, dialog) =>
+                _ = BrowserBackgroundCleanup.RunBestEffortAsync(() => dialog.DismissAsync(), BrowserCloseTimeout);
             await page.SetContentAsync("<!doctype html><html><body><iframe id=\"xiaok-page\" title=\"隔离网页\" sandbox=\"allow-scripts\"></iframe></body></html>",
                 new PageSetContentOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 8_000 })
                 .WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -542,21 +547,20 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         }
         catch
         {
-            if (browser is not null)
+            try
             {
-                try { await browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false); }
-                catch (Exception exception) when (exception is TimeoutException or PlaywrightException) { }
+                var browserToClose = browser;
+                if (browserToClose is not null)
+                    await BrowserBackgroundCleanup.RunBestEffortAsync(() => browserToClose.CloseAsync(), BrowserCloseTimeout)
+                        .ConfigureAwait(false);
             }
-            playwright.Dispose();
+            finally { playwright.Dispose(); }
             throw;
         }
     }
 
-    private static async Task CloseLateBrowserAsync(IBrowser browser)
-    {
-        try { await browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false); }
-        catch (Exception exception) when (exception is TimeoutException or PlaywrightException) { }
-    }
+    private static Task CloseLateBrowserAsync(IBrowser browser) =>
+        BrowserBackgroundCleanup.RunBestEffortAsync(() => browser.CloseAsync(), BrowserCloseTimeout);
 
     private static async Task<PageSnapshot> CaptureSnapshotAsync(Session session, CancellationToken cancellationToken)
     {
@@ -662,8 +666,11 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
         var session = _session;
         _session = null;
         if (session is null) return;
-        try { await session.Browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false); }
-        catch (Exception exception) when (exception is TimeoutException or PlaywrightException) { }
+        try
+        {
+            await BrowserBackgroundCleanup.RunBestEffortAsync(() => session.Browser.CloseAsync(), BrowserCloseTimeout)
+                .ConfigureAwait(false);
+        }
         finally { session.Playwright.Dispose(); }
     }
 

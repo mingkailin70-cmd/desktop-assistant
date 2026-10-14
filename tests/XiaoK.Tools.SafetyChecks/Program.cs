@@ -10259,6 +10259,8 @@ static string CreateProject(string root, string name, string content)
 
 static async Task CheckIsolatedBrowserInitializationCancellationAsync()
 {
+    await CheckBrowserBackgroundCleanupAsync();
+
     using (var alreadyCancelled = new CancellationTokenSource())
     {
         alreadyCancelled.Cancel();
@@ -10331,6 +10333,40 @@ static async Task CheckIsolatedBrowserInitializationCancellationAsync()
     var closed = await manager.CloseAsync(sessionId, CancellationToken.None);
     Require(closed.Success, "取消恢复测试的隔离网页会话未能关闭。");
     Console.WriteLine("通过：隔离浏览器初始化途中取消后会清理，并可重新建立与关闭会话。");
+}
+
+static async Task CheckBrowserBackgroundCleanupAsync()
+{
+    await BrowserBackgroundCleanup.RunBestEffortAsync(
+        () => throw new InvalidOperationException("synthetic synchronous close failure"),
+        TimeSpan.FromMilliseconds(250));
+
+    await BrowserBackgroundCleanup.RunBestEffortAsync(
+        () => Task.FromException(new InvalidOperationException("synthetic asynchronous close failure")),
+        TimeSpan.FromMilliseconds(250));
+
+    var lateFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var lateFailureObserved = BrowserBackgroundCleanup.ObserveCompletionAsync(lateFailure.Task);
+    var stopwatch = Stopwatch.StartNew();
+    await BrowserBackgroundCleanup.RunBestEffortAsync(() => lateFailure.Task, TimeSpan.FromMilliseconds(100));
+    stopwatch.Stop();
+    Require(stopwatch.Elapsed < TimeSpan.FromSeconds(1), "挂起的浏览器清理超过限定等待时间。");
+    lateFailure.TrySetException(new InvalidOperationException("synthetic late close failure"));
+    await lateFailureObserved.WaitAsync(TimeSpan.FromSeconds(1));
+
+    var root = FindRepositoryRoot();
+    foreach (var relativePath in new[]
+             {
+                 Path.Combine("src", "XiaoK.Adapters.Browser", "PlaywrightIsolatedBrowserSessionManager.cs"),
+                 Path.Combine("src", "XiaoK.Adapters.Browser", "PlaywrightPublicWebPageReader.cs")
+             })
+    {
+        var source = File.ReadAllText(Path.Combine(root, relativePath));
+        Require(!source.Contains("_ = popup.CloseAsync()", StringComparison.Ordinal)
+            && !source.Contains("_ = dialog.DismissAsync()", StringComparison.Ordinal)
+            && source.Contains("BrowserBackgroundCleanup.RunBestEffortAsync", StringComparison.Ordinal),
+            $"{relativePath}仍存在未统一观察的弹窗/对话框清理回调。");
+    }
 }
 
 static void Require(bool condition, string message)

@@ -248,9 +248,11 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
             var page = await context.NewPageAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             context.Page += (_, popup) =>
             {
-                if (!ReferenceEquals(page, popup)) _ = popup.CloseAsync();
+                if (!ReferenceEquals(page, popup))
+                    _ = BrowserBackgroundCleanup.RunBestEffortAsync(() => popup.CloseAsync(), BrowserCloseTimeout);
             };
-            page.Dialog += (_, dialog) => _ = dialog.DismissAsync();
+            page.Dialog += (_, dialog) =>
+                _ = BrowserBackgroundCleanup.RunBestEffortAsync(() => dialog.DismissAsync(), BrowserCloseTimeout);
             ILocator body;
             string title;
             if (runInlineScripts)
@@ -294,17 +296,10 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
         {
             try
             {
-                if (browser is not null)
-                    await browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // The browser has no persistent state or artifacts; disposing Playwright below
-                // tears down its driver if Chromium cannot complete the force-close in time.
-            }
-            catch (PlaywrightException) when (browser is { IsConnected: false })
-            {
-                // A renderer crash already disconnected and ended the browser process.
+                var browserToClose = browser;
+                if (browserToClose is not null)
+                    await BrowserBackgroundCleanup.RunBestEffortAsync(() => browserToClose.CloseAsync(), BrowserCloseTimeout)
+                        .ConfigureAwait(false);
             }
             finally { playwright.Dispose(); }
         }
