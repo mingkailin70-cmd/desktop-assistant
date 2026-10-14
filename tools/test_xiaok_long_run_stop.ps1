@@ -12,11 +12,23 @@ $stabilityDirectory = Join-Path $repositoryRoot '.tools\stability'
 New-Item -ItemType Directory -Path $stabilityDirectory -Force | Out-Null
 $helperPath = Join-Path $PSScriptRoot 'request_xiaok_long_run_stop.ps1'
 $monitorScriptPath = Join-Path $PSScriptRoot 'measure_xiaok_long_run.ps1'
+$reportModulePath = Join-Path $PSScriptRoot 'XiaoKLongRunReport.psm1'
+Import-Module $reportModulePath -Force
 $monitorTokens = $null
 $monitorParseErrors = $null
 $monitorAst = [System.Management.Automation.Language.Parser]::ParseFile(
     $monitorScriptPath, [ref]$monitorTokens, [ref]$monitorParseErrors)
 Assert-Condition ($monitorParseErrors.Count -eq 0) 'The long-run monitor script has PowerShell parse errors.'
+$checkpointLoop = $monitorAst.Find({
+    param($node)
+    if ($node -isnot [System.Management.Automation.Language.WhileStatementAst]) { return $false }
+    @($node.FindAll({
+        param($child)
+        $child -is [System.Management.Automation.Language.CommandAst] -and
+            $child.GetCommandName() -eq 'Save-LongRunReportSnapshot'
+    }, $true)).Count -gt 0
+}, $true)
+Assert-Condition ($null -ne $checkpointLoop) 'The long-run monitor must write a report checkpoint from its sampling loop.'
 $shutdownCalls = @(
     $monitorAst.FindAll({
         param($node)
@@ -58,6 +70,33 @@ $event = [Threading.EventWaitHandle]::new(
 
 try {
     Assert-Condition $createdEvent 'Could not create the synthetic named event.'
+
+    $atomicTestDirectory = Join-Path $stabilityDirectory "atomic-report-test-$runId"
+    [void][IO.Directory]::CreateDirectory($atomicTestDirectory)
+    $atomicTestPath = Join-Path $atomicTestDirectory 'report.json'
+    try {
+        Write-XiaoKLongRunJsonAtomic -Path $atomicTestPath -InputObject ([ordered]@{
+            reportState = 'checkpoint'; sampleCount = 3; observationCompleted = $false
+        })
+        $firstCheckpoint = Get-Content -LiteralPath $atomicTestPath -Raw | ConvertFrom-Json
+        Assert-Condition ($firstCheckpoint.reportState -ceq 'checkpoint' -and
+            $firstCheckpoint.sampleCount -eq 3 -and -not $firstCheckpoint.observationCompleted) `
+            'The atomic writer did not persist a valid incomplete checkpoint.'
+
+        Write-XiaoKLongRunJsonAtomic -Path $atomicTestPath -InputObject ([ordered]@{
+            reportState = 'final'; sampleCount = 4; observationCompleted = $true
+        })
+        $finalReport = Get-Content -LiteralPath $atomicTestPath -Raw | ConvertFrom-Json
+        Assert-Condition ($finalReport.reportState -ceq 'final' -and
+            $finalReport.sampleCount -eq 4 -and $finalReport.observationCompleted) `
+            'The atomic writer did not replace a checkpoint with the final report.'
+        Assert-Condition (@(Get-ChildItem -LiteralPath $atomicTestDirectory -File -Force).Count -eq 1) `
+            'The atomic writer left a temporary file behind.'
+    }
+    finally {
+        Remove-Item -LiteralPath $atomicTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     $control = [ordered]@{
         schemaVersion = 1
         runId = $runId

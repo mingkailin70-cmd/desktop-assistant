@@ -34,6 +34,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'XiaoKLongRunReport.psm1') -Force
 
 $nativeSource = @'
 using System;
@@ -213,6 +214,7 @@ try {
         monitorStartedUtc = $monitorStartedUtc
         hostProcessId = $hostProcessId
         hostStartedUtc = $hostStartedUtc
+        reportPath = $reportPath
         stopEventName = $stopEventName
     }
     $control | ConvertTo-Json -Compress | Set-Content -LiteralPath $controlFilePath -Encoding UTF8
@@ -350,10 +352,79 @@ $foregroundWindowWasHost = $false
 $sampleGapCount = 0
 $maximumSampleGapSeconds = 0.0
 $previousSampleUtc = $null
+$checkpointWriteFailureCount = 0
+$checkpointWriteErrorType = $null
 $shutdownPosted = $null
 $shutdownExited = $null
 $hostStillRunningAtMonitorExit = $false
 $exitCode = $null
+
+function Save-LongRunReportSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('checkpoint', 'final')]
+        [string] $ReportState
+    )
+
+    $isFinal = $ReportState -eq 'final'
+    $logicalProcessorCount = [Environment]::ProcessorCount
+    $cpuAveragePercentOfMachine = $null
+    if ($null -ne $cpuAtStartSeconds -and $null -ne $cpuAtEndSeconds -and $clock.Elapsed.TotalSeconds -gt 0) {
+        $cpuAveragePercentOfMachine = [Math]::Round(
+            (($cpuAtEndSeconds - $cpuAtStartSeconds) / $clock.Elapsed.TotalSeconds / $logicalProcessorCount) * 100, 4)
+    }
+
+    $report = [ordered]@{
+        reportState = $ReportState
+        checkpointUtc = [datetime]::UtcNow.ToString('o')
+        packageVersion = $ExpectedVersion
+        observationMode = $observationMode
+        hostLaunchedByMonitor = $hostOwnedByMonitor
+        hostExecutableSha256 = $executableHash
+        hostDllSha256 = $libraryHash
+        durationRequestedMinutes = $DurationMinutes
+        durationObservedSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
+        sampleIntervalSeconds = $SampleIntervalSeconds
+        expectedSampleCount = $expectedSampleCount
+        sampleCount = $sampleCount
+        outcome = if ($isFinal) { $outcome } else { 'monitoring' }
+        observationCompleted = ($isFinal -and $outcome -eq 'completed_duration')
+        stopRequestObserved = $stopRequestObserved
+        stopRequestedUtc = $stopRequestedUtc
+        monitorErrorType = $errorKind
+        monitorProcessId = $PID
+        monitorStartedUtc = $monitorStartedUtc
+        processId = $hostProcessId
+        hostStartedUtc = $hostStartedUtc
+        hostStillRunningAtMonitorExit = if ($isFinal) { $hostStillRunningAtMonitorExit } else { $null }
+        processExitedNormallyAfterShutdownRequest = if ($isFinal) { $shutdownExited } else { $null }
+        shutdownMessagePosted = if ($isFinal) { $shutdownPosted } else { $null }
+        exitCode = if ($isFinal) { $exitCode } else { $null }
+        launchForegroundUnchanged = $launchForegroundUnchanged
+        foregroundWindowWasHostDuringSample = $foregroundWindowWasHost
+        visibleWindowSamples = $visibleSampleCount
+        responsiveSamples = $responsiveSampleCount
+        maximumUnresponsiveStreak = $maxUnresponsiveStreak
+        sampleGapCount = $sampleGapCount
+        maximumSampleGapSeconds = [Math]::Round($maximumSampleGapSeconds, 1)
+        averageCpuPercentOfMachine = $cpuAveragePercentOfMachine
+        privateMemoryMiBPeak = [Math]::Round($privateMemoryMiBMax, 1)
+        workingSetMiBPeak = [Math]::Round($workingSetMiBMax, 1)
+        threadCountMinimum = $threadCountMin
+        threadCountMaximum = $threadCountMax
+        availableMemoryMiBMinimum = if ($null -eq $availableMemoryMiBMin) { $null } else { [Math]::Round($availableMemoryMiBMin, 0) }
+        availableMemoryMiBMaximum = if ($null -eq $availableMemoryMiBMax) { $null } else { [Math]::Round($availableMemoryMiBMax, 0) }
+        dedicatedGpuMiBPeak = if ($null -eq $dedicatedGpuMiBMax) { $null } else { [Math]::Round($dedicatedGpuMiBMax, 2) }
+        sharedGpuMiBPeak = if ($null -eq $sharedGpuMiBMax) { $null } else { [Math]::Round($sharedGpuMiBMax, 2) }
+        counterFailureCount = $counterFailureCount
+        checkpointWriteFailureCount = $checkpointWriteFailureCount
+        checkpointWriteErrorType = $checkpointWriteErrorType
+        startedUtc = $startedUtc.ToString('o')
+        endedUtc = if ($isFinal) { [datetime]::UtcNow.ToString('o') } else { $null }
+    }
+
+    Write-XiaoKLongRunJsonAtomic -Path $reportPath -InputObject $report
+}
 
 try {
     if ($outcome -eq 'completed_duration' -and $stopEvent.WaitOne(0)) {
@@ -368,6 +439,11 @@ try {
         $process.Refresh()
         $cpuAtStartSeconds = [double]$process.CPU
         $previousSampleUtc = [datetime]::UtcNow
+        try { Save-LongRunReportSnapshot -ReportState 'checkpoint' }
+        catch {
+            $checkpointWriteFailureCount++
+            $checkpointWriteErrorType = $_.Exception.GetType().Name
+        }
         while ($clock.Elapsed.TotalMinutes -lt $DurationMinutes) {
             if ($stopEvent.WaitOne(0)) {
                 $stopState = Get-LongRunStopRequestState -Path $stopRequestPath -RunId $runId `
@@ -475,6 +551,15 @@ try {
                 $counterFailureCount++
             }
 
+            try {
+                $cpuAtEndSeconds = [double]$process.CPU
+                Save-LongRunReportSnapshot -ReportState 'checkpoint'
+            }
+            catch {
+                $checkpointWriteFailureCount++
+                $checkpointWriteErrorType = $_.Exception.GetType().Name
+            }
+
             $remainingSleepMilliseconds = [int][Math]::Ceiling(
                 ($SampleIntervalSeconds - ([datetime]::UtcNow - $sampleUtc).TotalSeconds) * 1000)
             $remainingObservationMilliseconds = [int][Math]::Ceiling(
@@ -577,60 +662,9 @@ if ($outcome -eq 'completed_duration') {
     }
 }
 
-$logicalProcessorCount = [Environment]::ProcessorCount
-$cpuAveragePercentOfMachine = $null
-if ($null -ne $cpuAtStartSeconds -and $null -ne $cpuAtEndSeconds -and $clock.Elapsed.TotalSeconds -gt 0) {
-    $cpuAveragePercentOfMachine = [Math]::Round(
-        (($cpuAtEndSeconds - $cpuAtStartSeconds) / $clock.Elapsed.TotalSeconds / $logicalProcessorCount) * 100, 4)
-}
-
-$report = [ordered]@{
-    packageVersion = $ExpectedVersion
-    observationMode = $observationMode
-    hostLaunchedByMonitor = $hostOwnedByMonitor
-    hostExecutableSha256 = $executableHash
-    hostDllSha256 = $libraryHash
-    durationRequestedMinutes = $DurationMinutes
-    durationObservedSeconds = [Math]::Round($clock.Elapsed.TotalSeconds, 1)
-    sampleIntervalSeconds = $SampleIntervalSeconds
-    expectedSampleCount = $expectedSampleCount
-    sampleCount = $sampleCount
-    outcome = $outcome
-    observationCompleted = ($outcome -eq 'completed_duration')
-    stopRequestObserved = $stopRequestObserved
-    stopRequestedUtc = $stopRequestedUtc
-    monitorErrorType = $errorKind
-    processId = $hostProcessId
-    hostStartedUtc = $hostStartedUtc
-    hostStillRunningAtMonitorExit = $hostStillRunningAtMonitorExit
-    processExitedNormallyAfterShutdownRequest = $shutdownExited
-    shutdownMessagePosted = $shutdownPosted
-    exitCode = $exitCode
-    launchForegroundUnchanged = $launchForegroundUnchanged
-    foregroundWindowWasHostDuringSample = $foregroundWindowWasHost
-    visibleWindowSamples = $visibleSampleCount
-    responsiveSamples = $responsiveSampleCount
-    maximumUnresponsiveStreak = $maxUnresponsiveStreak
-    sampleGapCount = $sampleGapCount
-    maximumSampleGapSeconds = [Math]::Round($maximumSampleGapSeconds, 1)
-    averageCpuPercentOfMachine = $cpuAveragePercentOfMachine
-    privateMemoryMiBPeak = [Math]::Round($privateMemoryMiBMax, 1)
-    workingSetMiBPeak = [Math]::Round($workingSetMiBMax, 1)
-    threadCountMinimum = $threadCountMin
-    threadCountMaximum = $threadCountMax
-    availableMemoryMiBMinimum = if ($null -eq $availableMemoryMiBMin) { $null } else { [Math]::Round($availableMemoryMiBMin, 0) }
-    availableMemoryMiBMaximum = if ($null -eq $availableMemoryMiBMax) { $null } else { [Math]::Round($availableMemoryMiBMax, 0) }
-    dedicatedGpuMiBPeak = if ($null -eq $dedicatedGpuMiBMax) { $null } else { [Math]::Round($dedicatedGpuMiBMax, 2) }
-    sharedGpuMiBPeak = if ($null -eq $sharedGpuMiBMax) { $null } else { [Math]::Round($sharedGpuMiBMax, 2) }
-    counterFailureCount = $counterFailureCount
-    startedUtc = $startedUtc.ToString('o')
-    endedUtc = [datetime]::UtcNow.ToString('o')
-}
-
-$json = $report | ConvertTo-Json -Depth 4
-Set-Content -LiteralPath $reportPath -Value $json -Encoding UTF8
+Save-LongRunReportSnapshot -ReportState 'final'
 Remove-Item -LiteralPath $controlFilePath, $stopRequestPath -Force -ErrorAction SilentlyContinue
-Write-Output $json
+Write-Output (Get-Content -LiteralPath $reportPath -Raw)
 Write-Output "reportPath=$reportPath"
 
 $monitorSucceeded = if ($hostOwnedByMonitor) {
