@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows.Threading;
 using Windows.UI.Notifications;
 using Windows.UI.Notifications.Management;
@@ -32,6 +33,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
     private readonly string _publisherAppUserModelId;
     private readonly string _publisherDisplayName;
     private DateTimeOffset _startedAtUtc;
+    private long _startedAtTimestamp;
     private readonly BoundedNotificationKeySet _baselineKeys = new(MaximumTrackedNotificationKeys);
     private readonly BoundedNotificationKeySet _seenKeys = new(MaximumTrackedNotificationKeys);
     private readonly BoundedNotificationIdQueue _pendingIds = new(128);
@@ -68,6 +70,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         try
         {
             _startedAtUtc = DateTimeOffset.UtcNow;
+            _startedAtTimestamp = Stopwatch.GetTimestamp();
             IsActive = true;
             _listener.NotificationChanged += OnNotificationChanged;
             _ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);
@@ -317,10 +320,9 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 
     private async Task ExpireAfterMaximumDurationAsync(CancellationToken cancellationToken)
     {
-        var expiresAtUtc = _startedAtUtc + MaximumDuration;
         while (true)
         {
-            var remaining = expiresAtUtc - DateTimeOffset.UtcNow;
+            var remaining = MaximumDuration - Stopwatch.GetElapsedTime(_startedAtTimestamp);
             var delay = remaining < SessionStateCheckInterval ? remaining : SessionStateCheckInterval;
             if (delay > TimeSpan.Zero)
             {

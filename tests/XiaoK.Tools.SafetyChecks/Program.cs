@@ -6006,12 +6006,16 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
     var startMethod = startCapture >= 0 && stopCapture > startCapture
         ? capture[startCapture..stopCapture] : string.Empty;
     var captureStartedAt = startMethod.IndexOf("_startedAtUtc = DateTimeOffset.UtcNow;", StringComparison.Ordinal);
+    var monotonicStart = startMethod.IndexOf("_startedAtTimestamp = Stopwatch.GetTimestamp();", StringComparison.Ordinal);
     var listenerAttached = startMethod.IndexOf("_listener.NotificationChanged += OnNotificationChanged;", StringComparison.Ordinal);
     var expiryStarted = startMethod.IndexOf("_ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);", StringComparison.Ordinal);
     var baselineAwait = startMethod.IndexOf("await _listener.GetNotificationsAsync(NotificationKinds.Toast)", StringComparison.Ordinal);
-    Require(captureStartedAt >= 0 && listenerAttached > captureStartedAt
+    Require(captureStartedAt >= 0 && monotonicStart > captureStartedAt && listenerAttached > monotonicStart
         && expiryStarted > listenerAttached && baselineAwait > expiryStarted,
         "通知样本最长15分钟期限必须在异步读取Toast基线前启动，避免基线查询挂起时采集无限期保持活动。");
+    Require(expiry.Contains("Stopwatch.GetElapsedTime(_startedAtTimestamp)", StringComparison.Ordinal)
+        && !expiry.Contains("DateTimeOffset.UtcNow", StringComparison.Ordinal),
+        "通知样本15分钟截止必须使用单调时钟，避免系统时间调整延长正文内存保留期限。");
 
     var settingsCode = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "SettingsWindow.xaml.cs"));
     var closeStart = settingsCode.IndexOf("private void SettingsWindow_Closed(", StringComparison.Ordinal);
