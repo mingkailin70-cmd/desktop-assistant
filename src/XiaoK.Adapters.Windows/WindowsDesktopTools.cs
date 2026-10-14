@@ -203,6 +203,13 @@ public sealed partial class WindowsDesktopTools
         { return false; }
     }
 
+    /// <summary>
+    /// Checks the configured application registry without enumerating windows. Callers use this
+    /// before allocating per-application coordination state for model-proposed targets.
+    /// </summary>
+    public bool IsApplicationRegistered(string? appId) =>
+        !string.IsNullOrWhiteSpace(appId) && _apps.ContainsKey(appId);
+
     public bool IsUiAutomationTextTargetAllowed(string appId) =>
         !string.IsNullOrWhiteSpace(appId) && _apps.TryGetValue(appId, out var app)
         && !ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(app.Id, app.DisplayName, app.Executable);

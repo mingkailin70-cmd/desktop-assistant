@@ -34,6 +34,8 @@ public sealed class InteractionCoordinator
         new(StringComparer.OrdinalIgnoreCase);
     private readonly IInteractionTargetUsageProbe? _targetUsage;
 
+    internal int TrackedTargetCount => _targets.Count;
+
     public InteractionCoordinator(IInteractionTargetUsageProbe? targetUsage = null) => _targetUsage = targetUsage;
 
     public async ValueTask<InteractionAdmission> AcquireAsync(ToolInteractionOperation operation,

@@ -68,6 +68,12 @@ public sealed class ToolBroker
         var operation = ToolInteractionPolicy.GetOperation(proposal.ToolId);
         if (!Enum.IsDefined(operation))
             return new(false, "未知桌面操作类型已拒绝。", "UNKNOWN_INTERACTION_OPERATION");
+        var isApplicationUiTool = proposal.ToolId is ApplicationUiAutomationPolicy.ToolId
+            or ApplicationUiAutomationPolicy.WaitForEnabledToolId
+            or ApplicationUiAutomationPolicy.SetTextToolId;
+        if (isApplicationUiTool && !_desktop.IsApplicationRegistered(proposal.Arguments["app_id"]))
+            return new(false, "目标应用未登记在本机允许列表；未创建界面协调租约，也没有访问窗口。",
+                "APP_NOT_ALLOWLISTED");
         var admission = await _interactionCoordinator.AcquireAsync(operation, access, proposal.Target, cancellationToken);
         if (admission.Denial is not null) return admission.Denial;
         await using var interactionLease = admission.Lease;

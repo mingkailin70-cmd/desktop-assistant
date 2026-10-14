@@ -4559,17 +4559,20 @@ static void CheckInstallGracefulShutdownContract(string repositoryRoot)
 static async Task CheckToolProposalPreconditionsAreTypedAsync()
 {
     const string appId = "not-allowlisted";
+    var targetCoordinator = new InteractionCoordinator();
     var valid = ToolBroker.Proposal("app.launch.v1", [new KeyValuePair<string, string>("app_id", appId)],
         appId, ToolExpectedOutcome.ApplicationWindowVisible);
-    var broker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "");
+    var broker = new ToolBroker(new WindowsDesktopTools([], []), null!, new ModelBroker(), null!, null!, "", "",
+        interactionCoordinator: targetCoordinator);
 
     var waitForUiControl = ToolBroker.Proposal("app.ui.wait-enabled.v1",
         [new KeyValuePair<string, string>("app_id", appId),
          new KeyValuePair<string, string>("automation_id", "SendButton_1")],
         appId, ToolExpectedOutcome.ApplicationUiConditionObserved);
     var waitTargetDenied = await broker.ExecuteAsync(waitForUiControl, CancellationToken.None);
-    Require(!waitTargetDenied.Success && waitTargetDenied.ErrorCode == "UIA_SNAPSHOT_UNAVAILABLE",
-        "只读UIA状态等待没有在固定参数校验后到达其未配置的只读适配器。");
+    Require(!waitTargetDenied.Success && waitTargetDenied.ErrorCode == "APP_NOT_ALLOWLISTED"
+        && targetCoordinator.TrackedTargetCount == 0,
+        "未登记UIA目标在应用允许列表核验前分配了界面协调锁。");
     var unsafeAutomationId = waitForUiControl with
     {
         Arguments = waitForUiControl.Arguments.SetItem("automation_id", "Send Button")
@@ -4608,6 +4611,34 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
         inspection with { ExpectedOutcome = ToolExpectedOutcome.ReviewablePatchCreated }, CancellationToken.None);
     Require(!wrongInspectionOutcome.Success && wrongInspectionOutcome.ErrorCode == "INVALID_TOOL_PROPOSAL",
         "只读代码检索提案未绑定固定的说明返回结果。");
+
+    for (var index = 0; index < 96; index++)
+    {
+        var unregisteredId = $"unregistered-{index:D3}";
+        var unregisteredTargets = new[]
+        {
+            ToolBroker.Proposal("app.ui.snapshot.v1",
+                [new KeyValuePair<string, string>("app_id", unregisteredId)], unregisteredId,
+                ToolExpectedOutcome.ApplicationUiSnapshotReturned),
+            ToolBroker.Proposal("app.ui.wait-enabled.v1",
+                [new KeyValuePair<string, string>("app_id", unregisteredId),
+                 new KeyValuePair<string, string>("automation_id", "Editor.Text")], unregisteredId,
+                ToolExpectedOutcome.ApplicationUiConditionObserved),
+            ToolBroker.Proposal("app.ui.set-text.v1",
+                [new KeyValuePair<string, string>("app_id", unregisteredId),
+                 new KeyValuePair<string, string>("automation_id", "Editor.Text"),
+                 new KeyValuePair<string, string>("value", "ordinary text")], unregisteredId,
+                ToolExpectedOutcome.ApplicationUiValueSet)
+        };
+        foreach (var unregisteredTarget in unregisteredTargets)
+        {
+            var result = await broker.ExecuteBackgroundAsync(unregisteredTarget, CancellationToken.None);
+            Require(!result.Success && result.ErrorCode == "APP_NOT_ALLOWLISTED",
+                "未登记应用的UIA提案没有在目标锁分配前被拒绝。");
+        }
+    }
+    Require(targetCoordinator.TrackedTargetCount == 0,
+        "连续不同的未登记UIA目标使每应用协调锁表持续增长。");
 }
 
 static async Task CheckUiTextWritePolicyAsync()
