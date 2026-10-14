@@ -8753,6 +8753,14 @@ static async Task CheckPublicFileDownloadAsync(string root)
         && !PublicFileDownloadPolicy.IsAllowedContent([0x23, 0x21])
         && PublicFileDownloadPolicy.IsAllowedContent([0x25, 0x50, 0x44, 0x46]),
         "公网下载没有拦截可执行文件或脚本特征，或误拒被动内容。");
+    var utf8Html = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(" \r\n<!doctype html><html><body>伪装网页</body></html>")).ToArray();
+    var utf16LeXml = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(" \r\n<?xml version=\"1.0\"?><svg></svg>")).ToArray();
+    var utf16BeScript = Encoding.BigEndianUnicode.GetPreamble().Concat(Encoding.BigEndianUnicode.GetBytes(" \r\n<script>bad()</script>")).ToArray();
+    Require(!PublicFileDownloadPolicy.IsAllowedContent(utf8Html)
+        && !PublicFileDownloadPolicy.IsAllowedContent(utf16LeXml)
+        && !PublicFileDownloadPolicy.IsAllowedContent(utf16BeScript)
+        && PublicFileDownloadPolicy.IsAllowedContent(Encoding.UTF8.GetBytes("ordinary report text")),
+        "公网下载没有识别带 BOM/空白的伪装 HTML、XML、SVG 或脚本正文，或误拒普通文本。");
     Require(PublicFileDownloadPolicy.MaximumDownloadBytes == 50 * 1024 * 1024,
         "公网下载资源上限意外变化。");
 

@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace XiaoK.Core;
 
 /// <summary>公网文件下载的固定资源、文件名与执行内容限制。</summary>
@@ -5,6 +7,7 @@ public static class PublicFileDownloadPolicy
 {
     public const int MaximumDownloadBytes = 50 * 1024 * 1024;
     public const int MaximumFileNameLength = 180;
+    private const int MaximumMarkupSniffBytes = 1_024;
 
     private static readonly HashSet<string> BlockedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -45,11 +48,36 @@ public static class PublicFileDownloadPolicy
 
     public static bool IsAllowedContent(ReadOnlySpan<byte> content)
     {
-        if (content.Length < 2) return true;
-        if (content[0] == (byte)'M' && content[1] == (byte)'Z'
-            || content[0] == (byte)'#' && content[1] == (byte)'!') return false;
-        return content.Length < 4 || !(content[0] == 0x7F && content[1] == (byte)'E'
-            && content[2] == (byte)'L' && content[3] == (byte)'F');
+        if (content.Length >= 2
+            && ((content[0] == (byte)'M' && content[1] == (byte)'Z')
+                || (content[0] == (byte)'#' && content[1] == (byte)'!'))) return false;
+        if (content.Length >= 4 && content[0] == 0x7F && content[1] == (byte)'E'
+            && content[2] == (byte)'L' && content[3] == (byte)'F') return false;
+        return !LooksLikeMarkup(content);
+    }
+
+    private static bool LooksLikeMarkup(ReadOnlySpan<byte> content)
+    {
+        if (content.IsEmpty) return false;
+        var prefix = content[..Math.Min(content.Length, MaximumMarkupSniffBytes)];
+        string text;
+        if (prefix.Length >= 3 && prefix[0] == 0xEF && prefix[1] == 0xBB && prefix[2] == 0xBF)
+            text = Encoding.UTF8.GetString(prefix[3..]);
+        else if (prefix.Length >= 2 && prefix[0] == 0xFF && prefix[1] == 0xFE)
+            text = Encoding.Unicode.GetString(prefix[2..]);
+        else if (prefix.Length >= 2 && prefix[0] == 0xFE && prefix[1] == 0xFF)
+            text = Encoding.BigEndianUnicode.GetString(prefix[2..]);
+        else
+            text = Encoding.UTF8.GetString(prefix);
+
+        var index = 0;
+        if (text.Length > 0 && text[0] == '\uFEFF') index++;
+        while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+        if (index + 1 >= text.Length || text[index] != '<') return false;
+        var next = text[index + 1];
+        // Conservatively reject a leading tag, declaration, comment, or processing instruction. This
+        // catches mislabeled HTML/XML/SVG even when headers claim application/octet-stream or text/plain.
+        return char.IsLetter(next) || next is '!' or '?' or '/';
     }
 
     private static bool IsReservedDeviceName(string stem) =>
