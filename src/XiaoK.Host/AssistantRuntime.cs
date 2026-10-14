@@ -45,7 +45,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, byte> _cancellationRequestedUserTasks = new();
     private readonly object _transientResultLock = new();
     private readonly object _userTaskAdmissionLock = new();
-    private readonly Queue<Guid> _transientResultOrder = new();
+    private readonly TransientTaskRetention _transientResultOrder = new(20);
     private readonly Channel<NoticeAnalysisWork> _noticeAnalysisQueue = Channel.CreateBounded<NoticeAnalysisWork>(
         new BoundedChannelOptions(32) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
     private readonly CancellationTokenSource _noticeAnalysisStop = new();
@@ -865,12 +865,11 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         lock (_transientResultLock)
         {
             _transientUserTaskResults[taskId] = result.Length <= 16_000 ? result : result[..16_000] + "…（结果已截断）";
-            _transientResultOrder.Enqueue(taskId);
-            while (_transientResultOrder.Count > 20)
+            foreach (var expiredTaskId in _transientResultOrder.Touch(taskId))
             {
-                var expiredTaskId = _transientResultOrder.Dequeue();
                 _transientUserTaskResults.TryRemove(expiredTaskId, out _);
                 _transientUserTaskSteps.TryRemove(expiredTaskId, out _);
+                _transientUserTaskStates.TryRemove(expiredTaskId, out _);
             }
         }
     }
@@ -1012,6 +1011,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _transientUserTaskSteps.Clear();
             _transientUserTaskStates.Clear();
             _cancellationRequestedUserTasks.Clear();
+            _transientResultOrder.Clear();
             _executionGate.Release();
         }
     }

@@ -685,6 +685,9 @@ try
     CheckTaskProgressIsVisibleAndTransient();
     passed.Add("任务中心显示真实生命周期步骤，步骤不进入持久化任务正文");
 
+    CheckTransientTaskRetentionIsBounded();
+    passed.Add("任务中心瞬时结果保留最近20个唯一任务；重复更新不挤占容量，失败取消状态随淘汰清除");
+
     CheckQueueRejectionPreservesRequestText();
     passed.Add("本地任务队列拒绝或满载时保留用户输入，可继续修改后重试");
 
@@ -4440,6 +4443,47 @@ static void CheckTaskProgressIsVisibleAndTransient()
         && recordStart >= 0 && recordEnd > recordStart
         && !contracts[recordStart..recordEnd].Contains("CurrentStep", StringComparison.Ordinal),
         "当前步骤没有展示到任务中心、使用不受生命周期约束的描述，或被加入持久化任务记录。");
+}
+
+static void CheckTransientTaskRetentionIsBounded()
+{
+    const int capacity = 20;
+    var retention = new TransientTaskRetention(capacity);
+    var initial = Enumerable.Range(0, capacity).Select(_ => Guid.NewGuid()).ToArray();
+    foreach (var taskId in initial)
+        Require(retention.Touch(taskId).Count == 0, "容量未满时提前淘汰了任务历史。");
+
+    Require(retention.Touch(initial[0]).Count == 0
+        && retention.Snapshot().Last() == initial[0],
+        "同一任务的结果更新没有刷新最近使用顺序。");
+
+    var replacement = Guid.NewGuid();
+    var firstEvicted = retention.Touch(replacement);
+    Require(firstEvicted.SequenceEqual([initial[1]])
+        && retention.Count == capacity
+        && retention.Snapshot().Distinct().Count() == capacity,
+        "重复任务ID占用多个槽位，或没有淘汰最久未更新的任务。");
+
+    for (var index = 0; index < 1_000; index++)
+    {
+        var expired = retention.Touch(Guid.NewGuid());
+        Require(expired.Count == 1 && retention.Count == capacity,
+            "长时间运行后最近任务保留集合没有维持固定上限。");
+    }
+
+    var repositoryRoot = FindRepositoryRoot();
+    var runtimeSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    var rememberStart = runtimeSource.IndexOf("private void RememberTransientTaskResult", StringComparison.Ordinal);
+    var rememberEnd = runtimeSource.IndexOf("private void SetTransientTaskStep", rememberStart, StringComparison.Ordinal);
+    Require(rememberStart >= 0 && rememberEnd > rememberStart,
+        "没有找到瞬时任务结果保留实现。");
+    var remember = runtimeSource[rememberStart..rememberEnd];
+    Require(remember.Contains("_transientResultOrder.Touch(taskId)", StringComparison.Ordinal)
+        && remember.Contains("_transientUserTaskResults.TryRemove(expiredTaskId", StringComparison.Ordinal)
+        && remember.Contains("_transientUserTaskSteps.TryRemove(expiredTaskId", StringComparison.Ordinal)
+        && remember.Contains("_transientUserTaskStates.TryRemove(expiredTaskId", StringComparison.Ordinal)
+        && runtimeSource.Contains("_transientResultOrder.Clear();", StringComparison.Ordinal),
+        "结果淘汰没有同步清理步骤/失败状态，或运行时退出时没有释放保留索引。");
 }
 
 static void CheckQueueRejectionPreservesRequestText()

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="XiaoK.Host" />
     <InternalsVisibleTo Include="XiaoK.Tools.SafetyChecks" />
   </ItemGroup>
 
