@@ -155,8 +155,11 @@ internal static class PetVPetAnimationProbe
         }
         finally
         {
-            if (!TryDeleteDirectory(dataRoot))
-                failures.Add("VPet柯基动画检查在Dispatcher关闭后仍未能清理临时缓存目录。");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            if (!TryDeleteDirectory(dataRoot, out var cleanupFailure))
+                failures.Add($"VPet柯基动画检查在Dispatcher关闭后仍未能清理临时缓存目录（{cleanupFailure}）。");
         }
     }
 
@@ -230,8 +233,9 @@ internal static class PetVPetAnimationProbe
 
     private static byte GetAlpha(byte[] pixels, int width, int x, int y) => pixels[(y * width + x) * 4 + 3];
 
-    private static bool TryDeleteDirectory(string path)
+    private static bool TryDeleteDirectory(string path, out string lastFailure)
     {
+        lastFailure = "unknown";
         for (var attempt = 0; attempt < 4; attempt++)
         {
             try
@@ -242,6 +246,7 @@ internal static class PetVPetAnimationProbe
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                lastFailure = exception.GetType().Name;
                 if (attempt == 3) return false;
                 Thread.Sleep(TimeSpan.FromMilliseconds(50 << attempt));
             }
