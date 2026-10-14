@@ -106,8 +106,8 @@ internal static class PetVPetAnimationProbe
                     Require(visiblePixels > 8_000, $"VPet柯基桌宠姿态 {pose} 没有渲染出完整主体。", failures);
                     Require(surfaceNotFilled,
                         $"VPet柯基桌宠姿态 {pose} 几乎填满整个画布，疑似渲染了不透明背景，非透明像素数={visiblePixels}。", failures);
-                    if (cornerLeakCount > 0)
-                        Console.WriteLine($"VPet柯基姿态 {pose} 离屏边缘诊断：角区非透明像素数={cornerLeakCount}，角点alpha={string.Join(",", cornerAlpha)}；原始PNG角落另行逐帧校验。");
+                    Require(cornerLeakCount == 0,
+                        $"VPet柯基姿态 {pose} 的离屏渲染在四角12x12区域出现非透明像素，数量={cornerLeakCount}，角点alpha={string.Join(",", cornerAlpha)}。", failures);
                 }
 
                 Require(hashes.Count == Enum.GetValues<XiaoKPetPose>().Length,
@@ -205,6 +205,9 @@ internal static class PetVPetAnimationProbe
                 };
                 Require(corners.All(alpha => alpha <= 8),
                     $"柯基原始帧 {Path.GetFileName(path)} 的画布角落不透明，alpha={string.Join(",", corners)}。", failures);
+                var cornerLeakCount = CountCornerLeaks(pixels, bitmap.PixelWidth, bitmap.PixelHeight);
+                Require(cornerLeakCount == 0,
+                    $"柯基原始帧 {Path.GetFileName(path)} 的四角12x12区域出现非透明像素，数量={cornerLeakCount}。", failures);
             }
             catch (Exception exception)
             {
@@ -220,16 +223,14 @@ internal static class PetVPetAnimationProbe
         for (var y = 0; y < cornerProbeSize; y++)
         for (var x = 0; x < cornerProbeSize; x++)
         {
-            if (GetAlpha(pixels, x, y) > 8) count++;
-            if (GetAlpha(pixels, width - 1 - x, y) > 8) count++;
-            if (GetAlpha(pixels, x, height - 1 - y) > 8) count++;
-            if (GetAlpha(pixels, width - 1 - x, height - 1 - y) > 8) count++;
+            if (GetAlpha(pixels, width, x, y) > 8) count++;
+            if (GetAlpha(pixels, width, width - 1 - x, y) > 8) count++;
+            if (GetAlpha(pixels, width, x, height - 1 - y) > 8) count++;
+            if (GetAlpha(pixels, width, width - 1 - x, height - 1 - y) > 8) count++;
         }
 
         return count;
     }
-
-    private static byte GetAlpha(byte[] pixels, int x, int y) => pixels[(y * 360 + x) * 4 + 3];
 
     private static byte GetAlpha(byte[] pixels, int width, int x, int y) => pixels[(y * width + x) * 4 + 3];
 

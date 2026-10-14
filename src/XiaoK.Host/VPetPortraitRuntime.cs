@@ -1,4 +1,6 @@
 using System.IO;
+using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
 using LinePutScript;
 using VPet_Simulator.Core;
@@ -62,7 +64,11 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
             {
                 Width = 500,
                 Height = 500,
-                IsHitTestVisible = false
+                IsHitTestVisible = false,
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0)
             };
 
             _graph = graph;
@@ -81,7 +87,9 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
         _pet.LoadALL();
+        KeepPortraitOnly(_pet);
         await _pet.Load_2_WaitGraph();
+        KeepPortraitOnly(_pet);
         await WaitForInitialGraphAsync(_pet, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         _initialized = true;
@@ -101,7 +109,18 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
             _ => "xiaok-idle"
         };
         _pet.Display(name, AnimatType.Single, GraphType.Default, static () => { });
+        KeepPortraitOnly(_pet);
         _currentPose = pose;
+    }
+
+    private static void KeepPortraitOnly(Main pet)
+    {
+        pet.VoicePlayer.Visibility = Visibility.Collapsed;
+        pet.UIGrid_Back.Visibility = Visibility.Collapsed;
+        pet.UIGrid.Visibility = Visibility.Collapsed;
+        pet.LabelDisplay.Visibility = Visibility.Collapsed;
+        if (pet.ToolBar is not null) pet.ToolBar.Visibility = Visibility.Collapsed;
+        if (pet.WorkTimer is not null) pet.WorkTimer.Visibility = Visibility.Collapsed;
     }
 
     public void StopAnimations()
