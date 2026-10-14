@@ -133,15 +133,20 @@ internal static class PetVPetAnimationProbe
                 if (GetForegroundWindow() != foregroundBefore)
                     failures.Add("VPet柯基动画离屏检查改变了前台窗口。");
                 window.Close();
-                try { Directory.Delete(dataRoot, recursive: true); }
-                catch (IOException) { failures.Add("VPet柯基动画检查未能清理临时缓存目录。"); }
-                catch (UnauthorizedAccessException) { failures.Add("VPet柯基动画检查未能清理临时缓存目录。"); }
             }
         };
         window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
-        watchdog.Start();
-        window.Show();
-        Dispatcher.Run();
+        try
+        {
+            watchdog.Start();
+            window.Show();
+            Dispatcher.Run();
+        }
+        finally
+        {
+            if (!TryDeleteDirectory(dataRoot))
+                failures.Add("VPet柯基动画检查在Dispatcher关闭后仍未能清理临时缓存目录。");
+        }
     }
 
     private static int CountVisiblePixels(byte[] pixels)
@@ -204,6 +209,26 @@ internal static class PetVPetAnimationProbe
     private static byte GetAlpha(byte[] pixels, int x, int y) => pixels[(y * 360 + x) * 4 + 3];
 
     private static byte GetAlpha(byte[] pixels, int width, int x, int y) => pixels[(y * width + x) * 4 + 3];
+
+    private static bool TryDeleteDirectory(string path)
+    {
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(path)) return true;
+                Directory.Delete(path, recursive: true);
+                return !Directory.Exists(path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 3) return false;
+                Thread.Sleep(TimeSpan.FromMilliseconds(50 << attempt));
+            }
+        }
+
+        return false;
+    }
 
     private static nint GetForegroundWindow() => NativeMethods.GetForegroundWindow();
 
