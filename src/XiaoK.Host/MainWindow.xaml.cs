@@ -60,6 +60,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
     public MainWindow()
     {
         InitializeComponent();
+        CompactPetButton.ContextMenu = PetView.ContextMenu;
         CancelButton.IsEnabled = false;
         _runtime = new AssistantRuntime(this);
         _approvalInbox.Changed += OnApprovalInboxChanged;
@@ -1133,6 +1134,38 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private void ResetPetSize_Click(object sender, RoutedEventArgs e) => SetPetScale(PetSizingPolicy.DefaultPercent, save: true);
 
+    private void MovePetLeft_Click(object sender, RoutedEventArgs e) => MovePetBy(PetWindowNudgeDirection.Left);
+
+    private void MovePetRight_Click(object sender, RoutedEventArgs e) => MovePetBy(PetWindowNudgeDirection.Right);
+
+    private void MovePetUp_Click(object sender, RoutedEventArgs e) => MovePetBy(PetWindowNudgeDirection.Up);
+
+    private void MovePetDown_Click(object sender, RoutedEventArgs e) => MovePetBy(PetWindowNudgeDirection.Down);
+
+    private void MovePetBy(PetWindowNudgeDirection direction)
+    {
+        if (_expanded) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero || !GetWindowRect(handle, out var origin))
+        {
+            ReportWindowDragUnavailable();
+            return;
+        }
+
+        var (horizontalDip, verticalDip) = PetWindowInteractionPolicy.GetKeyboardNudgeOffsetDip(direction);
+        var scale = GetEffectiveDpi(handle) / 96d;
+        var left = origin.Left + (int)Math.Round(horizontalDip * scale, MidpointRounding.AwayFromZero);
+        var top = origin.Top + (int)Math.Round(verticalDip * scale, MidpointRounding.AwayFromZero);
+        if (!SetWindowPosition(handle, left, top))
+        {
+            ReportWindowDragUnavailable();
+            return;
+        }
+
+        FitWindowToMonitorWorkArea();
+        SaveWindowPosition();
+    }
+
     private void PetResize_DragStarted(object sender, System.Windows.Controls.Primitives.DragStartedEventArgs e)
     {
         _petResizeStartPercent = _petScalePercent;
@@ -1254,10 +1287,8 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         if (left != rect.Left || top != rect.Top) SetWindowPosition(handle, left, top);
     }
 
-    private static void SetWindowPosition(IntPtr handle, int left, int top)
-    {
-        _ = SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
-    }
+    private static bool SetWindowPosition(IntPtr handle, int left, int top) =>
+        SetWindowPos(handle, IntPtr.Zero, left, top, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
 
     private static uint GetEffectiveDpi(IntPtr handle)
     {

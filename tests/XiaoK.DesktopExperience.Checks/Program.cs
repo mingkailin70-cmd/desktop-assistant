@@ -90,6 +90,16 @@ Require(Near(tiny.HeightDip, 50)
     "小屏幕裁剪错误。");
 Require(PetSizingPolicy.ClampPercent(12) == 40 && PetSizingPolicy.ClampPercent(300) == 160, "缩放限值错误。");
 Require(!PetSizingPolicy.IsValidPercent(double.NaN) && !PetSizingPolicy.IsValidPercent(double.PositiveInfinity), "接受非有限缩放。");
+var petNudgeCases = new[]
+{
+    (Direction: PetWindowNudgeDirection.Left, Expected: (-80, 0)),
+    (Direction: PetWindowNudgeDirection.Right, Expected: (80, 0)),
+    (Direction: PetWindowNudgeDirection.Up, Expected: (0, -80)),
+    (Direction: PetWindowNudgeDirection.Down, Expected: (0, 80))
+};
+foreach (var testCase in petNudgeCases)
+    Require(PetWindowInteractionPolicy.GetKeyboardNudgeOffsetDip(testCase.Direction) == testCase.Expected,
+        "桌宠方向微移未提供对称的80-DIP位置调整。");
 
 Require(PetPosePresentationPolicy.FromStatus("正在采集麦克风") == XiaoKPetPose.Listening
     && PetPosePresentationPolicy.FromStatus("唤醒监听已开启") == XiaoKPetPose.Listening
@@ -242,6 +252,14 @@ Require(Regex.IsMatch(mainWindowXaml,
     && mainWindowCode.Contains("PetStatusBadge.Visibility = compactStatus == \"待命\" ? Visibility.Collapsed : Visibility.Visible;", StringComparison.Ordinal)
     && mainWindowCode.Contains("AutomationProperties.SetItemStatus(PetView, status);", StringComparison.Ordinal),
     "桌宠闲置态未收敛为透明柯基主体，或状态提示、缩放命中区域接线不完整。");
+Require(Regex.IsMatch(mainWindowXaml, "<Trigger Property=\"IsKeyboardFocused\" Value=\"True\">", RegexOptions.Singleline)
+    && mainWindowXaml.Contains("Header=\"微调桌宠位置\"", StringComparison.Ordinal)
+    && new[] { "MovePetLeft_Click", "MovePetRight_Click", "MovePetUp_Click", "MovePetDown_Click" }
+        .All(handler => mainWindowXaml.Contains($"Click=\"{handler}\"", StringComparison.Ordinal)
+            && mainWindowCode.Contains($"private void {handler}", StringComparison.Ordinal))
+    && mainWindowCode.Contains("CompactPetButton.ContextMenu = PetView.ContextMenu;", StringComparison.Ordinal)
+    && mainWindowCode.Contains("SwpNoSize | SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal),
+    "桌宠键盘焦点提示、上下左右微移菜单或不激活位置保存接线不完整。");
 var assistantRuntimeSource = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
     "src", "XiaoK.Host", "AssistantRuntime.cs"));
 var directToolRoutes = Regex.Matches(assistantRuntimeSource,
@@ -382,7 +400,7 @@ foreach (var failure in XiaoK.DesktopExperience.Checks.SherpaKwsWorkerIsolationP
     Require(false, failure);
 Require(true, "Sherpa KWS隔离worker帧边界、关键词白名单、作业回收与先停麦后停进程检查通过。");
 
-Console.WriteLine($"桌宠VPet动画渲染/姿态切换/移动与缩放/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复/Sherpa KWS worker隔离：{checks} 项通过。");
+Console.WriteLine($"桌宠VPet动画渲染/姿态切换/移动与缩放/键盘位置微调/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复/Sherpa KWS worker隔离：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {

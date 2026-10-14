@@ -84,6 +84,12 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Chrome" Property="Background" Value="#1478B49D"/>
                             </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#2378B49D"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush"
+                                        Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"/>
+                                <Setter TargetName="Chrome" Property="BorderThickness" Value="3"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -288,6 +294,12 @@
                             </MenuItem>
                             <MenuItem Header="恢复推荐大小（70%）" Click="ResetPetSize_Click"/>
                         </MenuItem>
+                        <MenuItem Header="微调桌宠位置">
+                            <MenuItem Header="向左移动" Click="MovePetLeft_Click"/>
+                            <MenuItem Header="向右移动" Click="MovePetRight_Click"/>
+                            <MenuItem Header="向上移动" Click="MovePetUp_Click"/>
+                            <MenuItem Header="向下移动" Click="MovePetDown_Click"/>
+                        </MenuItem>
                         <Separator/>
                         <MenuItem Header="取消当前任务" Click="Cancel_Click"/>
                         <MenuItem Header="停麦" Click="StopMic_Click"/>
@@ -316,7 +328,8 @@
                     <Button x:Name="CompactPetButton" Grid.Row="1" Width="300" Height="300"
                             Style="{StaticResource PetExpandButton}" Click="ShowPanel_Click"
                             Focusable="True" AutomationProperties.Name="小K桌宠，按住并拖动可移动；单击展开任务面板"
-                            ToolTip="按住小K并拖动可自由移动；轻点展开任务面板">
+                            AutomationProperties.HelpText="键盘聚焦后按菜单键或 Shift+F10 打开菜单，用方向键选择并按 Enter 移动。"
+                            ToolTip="按住小K并拖动可自由移动；轻点展开任务面板；右键菜单也可微调位置">
                         <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Image x:Name="PetSpriteFallback" Source="pack://siteoforigin:,,,/Assets/Pets/keke-corgi-v1/idle/00_420.png"
                                    Width="300" Height="300" Stretch="Uniform"
