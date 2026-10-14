@@ -237,29 +237,41 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         _allowedAppIds = new HashSet<string>(wechatIds.Concat(qqIds), StringComparer.OrdinalIgnoreCase);
         if (_allowedAppIds.Count == 0) return SetStatus("微信 / QQ 通知监听关闭，或尚未配置已核实的发布者 AUMID。");
 
+        UserNotificationListener? startupListener = null;
+        CancellationTokenSource? startupSession = null;
         try
         {
             if (!WindowsPackageIdentity.IsPresent)
                 return SetStatus("监控开关已保存；运行通知监听需要具有 MSIX 身份的安装包。当前普通目录运行不会读取通知。");
 
-            _listener = UserNotificationListener.Current;
-            var access = _listener.GetAccessStatus();
+            var listener = UserNotificationListener.Current;
+            startupListener = listener;
+            _listener = listener;
+            var access = listener.GetAccessStatus();
             if (access != UserNotificationListenerAccessStatus.Allowed)
                 return SetStatus(FormatAccessStatus(access));
 
             _policy = new MessageNoticePolicy(wechatIds, qqIds);
             _wechatAdapter = new WeChatNoticeAdapter(_policy);
             _qqAdapter = new QQNoticeAdapter(_policy);
-            _sessionCancellation = new CancellationTokenSource();
+            var sessionCancellation = new CancellationTokenSource();
+            startupSession = sessionCancellation;
+            _sessionCancellation = sessionCancellation;
             _baselineReady = false;
             _pendingAddedIds.Clear();
             _seenNotificationKeys.Clear();
             _seenNotificationOrder.Clear();
             _listeningStartedAtUtc = DateTimeOffset.UtcNow;
-            _listener.NotificationChanged += OnNotificationChanged;
+            listener.NotificationChanged += OnNotificationChanged;
 
             // Establish a baseline so notifications already present at startup are not treated as new.
-            var current = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
+            var current = await listener.GetNotificationsAsync(NotificationKinds.Toast);
+            if (!IsStartupSessionCurrent(listener, sessionCancellation)) return Status;
+            if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+            {
+                StopForRevokedPermission(listener);
+                return Status;
+            }
             if (!NotificationStartupBaselinePolicy.IsSafeBaselineCount(current.Count))
             {
                 StopListening();
@@ -283,10 +295,17 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            if (startupListener is not null && startupSession is not null
+                && !IsStartupSessionCurrent(startupListener, startupSession))
+                return Status;
             StopListening();
             return SetStatus("Windows 通知监听未能启动；当前不会读取通知。请检查 MSIX 身份、权限和 Windows 版本。");
         }
     }
+
+    private bool IsStartupSessionCurrent(UserNotificationListener listener, CancellationTokenSource sessionCancellation) =>
+        !_disposed && ReferenceEquals(_listener, listener)
+            && ReferenceEquals(_sessionCancellation, sessionCancellation);
 
     public void Dispose()
     {

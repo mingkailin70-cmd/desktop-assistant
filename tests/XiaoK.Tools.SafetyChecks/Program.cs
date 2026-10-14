@@ -5660,6 +5660,24 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
         && baselineLoop > stopOnOverflow && metadataRead > baselineLoop,
         "主通知监听没有在基线元数据枚举前检查512条上限并超限停止。");
 
+    var sessionGuard = apply.IndexOf("if (!IsStartupSessionCurrent(listener, sessionCancellation)) return Status;", StringComparison.Ordinal);
+    var accessRecheck = apply.IndexOf("if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)", currentLookup, StringComparison.Ordinal);
+    var catchStart = apply.IndexOf("catch (Exception ex) when (IsRecoverable(ex))", currentLookup, StringComparison.Ordinal);
+    var staleCatchGuard = catchStart < 0 ? -1
+        : apply.IndexOf("&& !IsStartupSessionCurrent(startupListener, startupSession)", catchStart, StringComparison.Ordinal);
+    var catchStop = catchStart < 0 ? -1 : apply.IndexOf("StopListening();", catchStart, StringComparison.Ordinal);
+    var sessionHelperStart = monitor.IndexOf(
+        "private bool IsStartupSessionCurrent(UserNotificationListener listener, CancellationTokenSource sessionCancellation)",
+        StringComparison.Ordinal);
+    var sessionHelperEnd = sessionHelperStart < 0 ? -1 : monitor.IndexOf("public void Dispose()", sessionHelperStart, StringComparison.Ordinal);
+    var sessionHelper = sessionHelperStart >= 0 && sessionHelperEnd > sessionHelperStart
+        ? monitor[sessionHelperStart..sessionHelperEnd] : string.Empty;
+    Require(currentLookup >= 0 && sessionGuard > currentLookup && accessRecheck > sessionGuard
+        && catchStart > accessRecheck && staleCatchGuard > catchStart && catchStop > staleCatchGuard
+        && sessionHelper.Contains("ReferenceEquals(_listener, listener)", StringComparison.Ordinal)
+        && sessionHelper.Contains("ReferenceEquals(_sessionCancellation, sessionCancellation)", StringComparison.Ordinal),
+        "异步通知启动基线没有绑定当前监听会话；过期启动仍可能处理旧基线或停止新会话。");
+
     var addedStart = monitor.IndexOf("private async Task ProcessAddedAsync(uint id)", StringComparison.Ordinal);
     var addedEnd = addedStart < 0 ? -1
         : monitor.IndexOf("private void StopForRevokedPermission", addedStart, StringComparison.Ordinal);
