@@ -579,7 +579,7 @@ VS Code 新窗口核验修正（2026-10-03）：复核后发现旧启动验收�
 
 托管模型目录设置与 0.1.5.0 更新（2026-10-03）：设置校验允许开发阶段模型目录位于 Git 仓库忽略的 `models/` 子树，同时仍拒绝仓库其他目录、UNC 和磁盘根目录；固定 SDK Release 构建 0 警告/0 错误，安全检查 84 项通过、0 跳过。`0.1.5.0` 自包含 MSIX SHA-256：`42B17097C8434ADF02D7402C7E118883297B2A607521DE76B138429FED586800`，签名有效，更新后包状态 `Ok`；本次没有添加或修改证书信任。安装版设置将模型目录指向仓库锁定的 Qwen3.5-4B revision，保留原有其他配置，监控和唤醒词仍关闭，并在更新前保存设置备份。重启后的 Host 已加载托管模型配置并显示首次推理按需启动；本次未在安装版发起推理，故实际权重加载、显存和卸载结果未验收。
 
-当前回滚通过原位安装已签名的较低版本包，不先卸载应用。MSIX支持用 `Add-AppxPackage -ForceUpdateFromAnyVersion` 安装较低版本；该参数只允许在安装器的显式回滚模式使用。安装器要求当前账户恰有一个匹配的小K包、目标版本严格低于当前版本，并要求用完整SHA-256固定回滚包；它仍核对包身份、证书签名、优雅关闭Host，并在安装后验证实际登记的版本。此流程避免卸载应用，因此不触发卸载流程对包内应用数据的清理。回滚还必须使用支持当前用户数据格式的程序版本；当前保留的 `0.1.159.0` 回滚包与 `0.1.163.0` 安装版都使用SQLite schema 7。微软文档：[Add-AppxPackage](https://learn.microsoft.com/en-us/powershell/module/appx/add-appxpackage?view=windowsserver2025-ps)、[MSIX企业部署与降级](https://learn.microsoft.com/en-us/windows/msix/desktop/managing-your-msix-deployment-enterprise)。
+当前回滚通过原位安装已签名的较低版本包，不先卸载应用。MSIX支持用 `Add-AppxPackage -ForceUpdateFromAnyVersion` 安装较低版本；该参数只允许在安装器的显式回滚模式使用。安装器要求当前账户恰有一个匹配的小K包、目标版本严格低于当前版本，并要求用完整SHA-256固定回滚包；它仍核对包身份、证书签名、优雅关闭Host，并在安装后验证实际登记的版本。自首次读取清单前，安装器持有MSIX只读共享句柄直到AppX安装完成，避免清单、散列、签名检查与部署之间包文件被写入或替换；异常/预检返回时由`finally`释放句柄。此流程避免卸载应用，因此不触发卸载流程对包内应用数据的清理。回滚还必须使用支持当前用户数据格式的程序版本；当前保留的 `0.1.159.0` 回滚包与 `0.1.163.0` 安装版都使用SQLite schema 7。该锁定仅有CI合成与静态契约证据，真实`Add-AppxPackage`消费路径仍需实际部署核验。微软文档：[Add-AppxPackage](https://learn.microsoft.com/en-us/powershell/module/appx/add-appxpackage?view=windowsserver2025-ps)、[MSIX企业部署与降级](https://learn.microsoft.com/en-us/windows/msix/desktop/managing-your-msix-deployment-enterprise)。
 
 例如回滚到保留的 `0.1.159.0` 包时：
 
