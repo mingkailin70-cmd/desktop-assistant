@@ -20,6 +20,24 @@ $monitorParseErrors = $null
 $monitorAst = [System.Management.Automation.Language.Parser]::ParseFile(
     $monitorScriptPath, [ref]$monitorTokens, [ref]$monitorParseErrors)
 Assert-Condition ($monitorParseErrors.Count -eq 0) 'The long-run monitor script has PowerShell parse errors.'
+$atomicControlWrites = @(
+    $monitorAst.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.CommandAst] -and
+            $node.GetCommandName() -eq 'Write-XiaoKLongRunJsonAtomic' -and
+            $node.Extent.Text -match '\$controlFilePath'
+    }, $true)
+)
+$nonAtomicControlWrites = @(
+    $monitorAst.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.CommandAst] -and
+            $node.GetCommandName() -in @('Set-Content', 'Out-File') -and
+            $node.Extent.Text -match '\$controlFilePath'
+    }, $true)
+)
+Assert-Condition ($atomicControlWrites.Count -eq 2 -and $nonAtomicControlWrites.Count -eq 0) `
+    'The long-run control file must use atomic writes both when published and when marked finishing.'
 $checkpointLoop = $monitorAst.Find({
     param($node)
     if ($node -isnot [System.Management.Automation.Language.WhileStatementAst]) { return $false }

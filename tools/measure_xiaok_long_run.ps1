@@ -217,7 +217,7 @@ try {
         reportPath = $reportPath
         stopEventName = $stopEventName
     }
-    $control | ConvertTo-Json -Compress | Set-Content -LiteralPath $controlFilePath -Encoding UTF8
+    Write-XiaoKLongRunJsonAtomic -Path $controlFilePath -InputObject $control
 }
 catch {
     if ($hostOwnedByMonitor -and $null -ne $launched) {
@@ -604,7 +604,7 @@ catch {
 finally {
     try {
         $control.state = 'finishing'
-        $control | ConvertTo-Json -Compress | Set-Content -LiteralPath $controlFilePath -Encoding UTF8
+        Write-XiaoKLongRunJsonAtomic -Path $controlFilePath -InputObject $control
     }
     catch { }
 
