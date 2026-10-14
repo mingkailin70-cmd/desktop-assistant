@@ -5547,6 +5547,29 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
 
     Require(!NotificationPublisherDiagnosticPolicy.IsLikelyTargetClientName("Other Messenger"),
         "来源诊断把无关应用显示名识别为微信或QQ。");
+
+    var enumeratedNotifications = 0;
+    var readCreationTimes = 0;
+    IEnumerable<(int Id, DateTimeOffset CreatedAt)> LargeNotificationList()
+    {
+        for (var index = 0; index < NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications + 128; index++)
+        {
+            enumeratedNotifications++;
+            yield return (index, DateTimeOffset.UnixEpoch.AddSeconds(index));
+        }
+    }
+    var boundedNotifications = NotificationPublisherDiagnosticPolicy.TakeBoundedAndSortByCreationTimeDescending(
+        LargeNotificationList(), notification =>
+        {
+            readCreationTimes++;
+            return notification.CreatedAt;
+        });
+    Require(boundedNotifications.Count == NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications
+        && enumeratedNotifications == NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications
+        && readCreationTimes == NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications
+        && boundedNotifications[0].CreatedAt == DateTimeOffset.UnixEpoch.AddSeconds(
+            NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications - 1),
+        "来源诊断排序前未限制枚举范围，或对超过512条通知读取了创建时间元数据。");
     var wechatCandidates = NotificationPublisherDiagnosticPolicy.FilterForApplication(projected, "wechat");
     var qqCandidates = NotificationPublisherDiagnosticPolicy.FilterForApplication(projected, "qq");
     Require(wechatCandidates.Count == 1 && wechatCandidates[0].AppUserModelId == "weixin.desktop!Main"
@@ -5556,6 +5579,7 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
 
     var repositoryRoot = FindRepositoryRoot();
     var monitor = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "WindowsNotificationMonitor.cs"));
+    var headlessDiagnostic = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "WindowsNotificationSourceDiagnostic.cs"));
     var diagnosticStart = monitor.IndexOf("public async Task<string> InspectRecentPublisherIdsAsync()", StringComparison.Ordinal);
     var diagnosticEnd = diagnosticStart < 0 ? -1
         : monitor.IndexOf("public async Task<string> ApplySettingsAsync", diagnosticStart, StringComparison.Ordinal);
@@ -5568,6 +5592,10 @@ static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
     Require(diagnostic.Contains("notification.AppInfo.DisplayInfo.DisplayName", StringComparison.Ordinal)
         && diagnostic.Contains("notification.AppInfo.AppUserModelId", StringComparison.Ordinal)
         && diagnostic.Contains("notification.CreationTime", StringComparison.Ordinal)
+        && diagnostic.Contains("TakeBoundedAndSortByCreationTimeDescending(", StringComparison.Ordinal)
+        && headlessDiagnostic.Contains("TakeBoundedAndSortByCreationTimeDescending(", StringComparison.Ordinal)
+        && diagnostic.Contains("这不代表更长列表中没有候选", StringComparison.Ordinal)
+        && settingsXaml.Contains("更长列表可能还有未检查候选", StringComparison.Ordinal)
         && !diagnostic.Contains("notification.Notification.Visual", StringComparison.Ordinal)
         && !diagnostic.Contains("ReadVisibleText", StringComparison.Ordinal)
         && !diagnostic.Contains("RequestAccessAsync", StringComparison.Ordinal)

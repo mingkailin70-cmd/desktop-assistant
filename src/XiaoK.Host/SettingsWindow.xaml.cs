@@ -619,9 +619,9 @@ public partial class SettingsWindow : Window
                 var latestUtc = candidate.LatestNotificationTimeUtc.ToUniversalTime();
                 var timeLabel = latestUtc > DateTimeOffset.UtcNow
                     ? $"时间戳在未来，需核对（UTC {latestUtc:yyyy-MM-dd HH:mm:ss}Z）"
-                    : $"最近出现（UTC {latestUtc:yyyy-MM-dd HH:mm:ss}Z）";
+                    : $"检出子集内最近出现（UTC {latestUtc:yyyy-MM-dd HH:mm:ss}Z）";
                 return new NotificationPublisherCandidateChoice(applicationId!, candidate,
-                    $"{candidate.DisplayName} | AUMID: {candidate.AppUserModelId} | 当前通知数：{candidate.NotificationCount} | {timeLabel}");
+                    $"{candidate.DisplayName} | AUMID: {candidate.AppUserModelId} | 本次检出数：{candidate.NotificationCount} | {timeLabel}");
             })
             .ToArray();
         NotificationSamplePublisherBox.ItemsSource = candidates;

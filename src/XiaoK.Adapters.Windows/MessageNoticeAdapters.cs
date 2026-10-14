@@ -94,6 +94,16 @@ public static class NotificationPublisherDiagnosticPolicy
     public const int MaximumCandidates = 20;
     private const int MaximumDisplayNameLength = 80;
 
+    public static IReadOnlyList<T> TakeBoundedAndSortByCreationTimeDescending<T>(
+        IEnumerable<T> notifications, Func<T, DateTimeOffset> creationTimeSelector)
+    {
+        ArgumentNullException.ThrowIfNull(notifications);
+        ArgumentNullException.ThrowIfNull(creationTimeSelector);
+        return notifications.Take(MaximumInspectedNotifications)
+            .OrderByDescending(creationTimeSelector)
+            .ToArray();
+    }
+
     public static IReadOnlyList<NotificationPublisherCandidate> Project(
         IEnumerable<(string? DisplayName, string? AppUserModelId, DateTimeOffset CreationTimeUtc)> sources)
     {

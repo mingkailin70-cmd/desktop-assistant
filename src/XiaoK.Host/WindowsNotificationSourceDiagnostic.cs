@@ -32,10 +32,8 @@ internal static class WindowsNotificationSourceDiagnostic
                     "permission_revoked", "读取期间 Windows 通知访问权限已撤销；诊断结果已丢弃。", 3,
                     finalAccess.ToString());
 
-            var inspected = notifications
-                .OrderByDescending(notification => notification.CreationTime)
-                .Take(NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications)
-                .ToArray();
+            var inspected = NotificationPublisherDiagnosticPolicy.TakeBoundedAndSortByCreationTimeDescending(
+                notifications, notification => notification.CreationTime);
             var candidates = NotificationPublisherDiagnosticPolicy.Project(inspected.Select(notification =>
                 ((string?)notification.AppInfo.DisplayInfo.DisplayName,
                     (string?)notification.AppInfo.AppUserModelId,
