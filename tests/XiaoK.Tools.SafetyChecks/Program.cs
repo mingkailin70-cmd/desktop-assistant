@@ -5302,6 +5302,8 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
     var bearerToken = new string('n', 32);
     var basicToken = new string('o', 32);
     var ordinaryAzdoLike = new string('q', 76) + "AZDX" + new string('r', 4);
+    var nestedToken = "sk-" + new string('z', 32);
+    var nestedKnownToken = "api_key: " + nestedToken;
     var syntheticCredentials = new[]
     {
         "sk-" + new string('7', 32),
@@ -5320,9 +5322,10 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "eyJ" + new string('i', 16) + "." + new string('j', 16) + "." + new string('k', 16),
         "redis://user:" + new string('p', 24) + "@cache.example.invalid/0"
     };
-    var allSyntheticCredentials = syntheticCredentials.Concat([unquotedApiKey, bearerToken, basicToken]).ToArray();
+    var allSyntheticCredentials = syntheticCredentials.Concat([unquotedApiKey, bearerToken, basicToken, nestedToken, nestedKnownToken]).ToArray();
     var original = "internal class Sample {\n"
         + string.Join("\n", syntheticCredentials.Select((secret, index) => $"    private const string Key{index} = \"{secret}\";"))
+        + $"\n    private const string Nested = \"{nestedKnownToken}\";"
         + $"\n    private const string OrdinaryValue = \"{ordinaryAzdoLike}\";\n    private const string ShortExample = \"hf_example\";\n"
         + $"\n    // api_key: {unquotedApiKey}\n    // Authorization: Bearer {bearerToken}\n    // Authorization: Basic {basicToken}\n"
         + "    private const string Placeholder = \"${API_KEY}\";\n"

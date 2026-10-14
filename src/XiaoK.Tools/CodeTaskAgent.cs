@@ -3334,6 +3334,12 @@ internal sealed class CodeWorkspaceSnapshot
         new("""["']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|aws[_-]?secret[_-]?(?:access[_-]?)?key|password|passwd|secret|token|connection[_-]?string|signing[_-]?key)["']?\s*[:=]\s*(?!["'])(?!\$\{|\{\{|your[-_ ]|example|placeholder|changeme|todo)[A-Za-z0-9_./+=:-]{12,}(?=$|[\s,;}\]])""",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
     ];
+    private static readonly Regex SanitizableCredentialPattern = new(
+        string.Join("|", LikelyCredentialPatterns.Skip(1).Select(pattern => pattern.Options.HasFlag(RegexOptions.IgnoreCase)
+            ? $"(?i:{pattern})"
+            : $"(?:{pattern})")),
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(100));
     private static readonly HashSet<string> ExcludedDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
         ".git", ".vs", ".idea", "bin", "obj", "node_modules", ".venv", "venv", "__pycache__", "packages", "TestResults", "artifacts"
@@ -4071,13 +4077,9 @@ internal sealed class CodeWorkspaceSnapshot
         // block can be safely isolated, keep the entire file out of model context.
         if (LikelyCredentialPatterns[0].IsMatch(text)) return false;
 
-        for (var index = 1; index < LikelyCredentialPatterns.Length; index++)
-            safeText = LikelyCredentialPatterns[index].Replace(safeText, "[REDACTED_CREDENTIAL]");
+        safeText = SanitizableCredentialPattern.Replace(text, "[REDACTED_CREDENTIAL]");
 
-        var stillContainsCredential = false;
-        foreach (var pattern in LikelyCredentialPatterns.Skip(1))
-            if (pattern.IsMatch(safeText)) stillContainsCredential = true;
-        if (stillContainsCredential)
+        if (SanitizableCredentialPattern.IsMatch(safeText))
         {
             safeText = text;
             return false;
