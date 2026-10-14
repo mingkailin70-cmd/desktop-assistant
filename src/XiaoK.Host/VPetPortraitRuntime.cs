@@ -124,8 +124,18 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
 
     private void StopAnimationsCore()
     {
-        foreach (var animation in _graph.GraphsALL)
-            animation.Stop(true);
+        StopAnimation(_pet.PetGrid);
+        StopAnimation(_pet.PetGrid2);
+    }
+
+    private static void StopAnimation(object? petContainer)
+    {
+        if (petContainer is not System.Windows.FrameworkElement element) return;
+        if (element.Tag is IGraph taggedAnimation)
+            taggedAnimation.Stop(true);
+        if (element is System.Windows.Controls.Decorator decorator
+            && decorator.Child is IGraph childAnimation)
+            childAnimation.Stop(true);
     }
 
     private static void AddAnimation(GraphCore graph, string assetRoot, string name, string state,
