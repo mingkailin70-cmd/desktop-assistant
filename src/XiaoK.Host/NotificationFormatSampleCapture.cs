@@ -356,7 +356,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                         return true;
                     }
 
-                    if (DateTimeOffset.UtcNow >= expiresAtUtc)
+                    if (Stopwatch.GetElapsedTime(_startedAtTimestamp) >= MaximumDuration)
                     {
                         if (IsActive)
                             Stop("通知样本核验达到15分钟上限；监听已停止并清除内存样本。", clearSamples: true);
