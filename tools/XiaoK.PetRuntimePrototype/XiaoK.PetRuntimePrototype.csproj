@@ -11,8 +11,6 @@
     <RestoreLockedMode>true</RestoreLockedMode>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\..\src\XiaoK.Host\PetRendering\ThreeDPetScene.cs"
-             Link="PetRendering\ThreeDPetScene.cs" />
     <PackageReference Include="VPet-Simulator.Core" Version="[1.1.0.66]" />
     <Content Include="..\..\src\XiaoK.Host\Assets\Pets\xiaok-silver-shaded-3d-v15.png"
              Link="Assets\Pets\xiaok-silver-shaded-3d-v15.png"
