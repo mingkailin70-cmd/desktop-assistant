@@ -215,7 +215,7 @@ internal static class WindowsChildProcessSupervisor
     private sealed class WindowsKillOnCloseJob : IDisposable
     {
         private const uint KillOnJobClose = 0x00002000;
-        private const int JobObjectExtendedLimitInformation = 9;
+        private const int JobObjectExtendedLimitInformationClass = 9;
         private IntPtr _handle;
 
         private WindowsKillOnCloseJob(IntPtr handle) => _handle = handle;
@@ -228,7 +228,7 @@ internal static class WindowsChildProcessSupervisor
 
             var information = new JobObjectExtendedLimitInformation();
             information.BasicLimitInformation.LimitFlags = KillOnJobClose;
-            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, ref information,
+            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformationClass, ref information,
                     checked((uint)Marshal.SizeOf<JobObjectExtendedLimitInformation>())))
             {
                 var error = Marshal.GetLastWin32Error();
