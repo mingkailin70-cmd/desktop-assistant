@@ -5651,7 +5651,7 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
     var applyStart = monitor.IndexOf("public async Task<string> ApplySettingsAsync(XiaoKSettings settings)", StringComparison.Ordinal);
     var applyEnd = applyStart < 0 ? -1 : monitor.IndexOf("public void Dispose()", applyStart, StringComparison.Ordinal);
     var apply = applyStart >= 0 && applyEnd > applyStart ? monitor[applyStart..applyEnd] : string.Empty;
-    var currentLookup = apply.IndexOf("var current = await _listener.GetNotificationsAsync(NotificationKinds.Toast);", StringComparison.Ordinal);
+    var currentLookup = apply.IndexOf("var current = await listener.GetNotificationsAsync(NotificationKinds.Toast);", StringComparison.Ordinal);
     var countGuard = apply.IndexOf("!NotificationStartupBaselinePolicy.IsSafeBaselineCount(current.Count)", StringComparison.Ordinal);
     var stopOnOverflow = countGuard < 0 ? -1 : apply.IndexOf("StopListening();", countGuard, StringComparison.Ordinal);
     var baselineLoop = apply.IndexOf("foreach (var notification in current)", StringComparison.Ordinal);
