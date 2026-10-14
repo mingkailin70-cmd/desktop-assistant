@@ -10,7 +10,9 @@ public static class TaskFailureSafetyPolicy
     // Send is deliberately absent while the message tool only displays a preview; add it before wiring a sender.
     private static readonly HashSet<string> SideEffectCategories = new(StringComparer.Ordinal)
     {
-        "app", "window", "app-ui-set-text", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-create-pptx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download", "code"
+        "app", "window", "app-ui-set-text", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-create-pptx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download",
+        // These can mutate the isolated page's in-memory state even though outbound requests and form submits are blocked.
+        "browser-session-click", "browser-session-fill", "code"
     };
 
     // Known routes that do not commit a persistent user-visible side effect. Unknown categories fail closed so a
@@ -19,7 +21,7 @@ public static class TaskFailureSafetyPolicy
     {
         "app-status", "app-ui-snapshot", "app-ui-wait-enabled", "file", "file-content-search", "file-summary",
         "file-classify", "web-read", "web-read-dynamic", "browser-session-open", "browser-session-navigate",
-        "browser-session-snapshot", "browser-session-follow-link", "browser-session-click", "browser-session-fill",
+        "browser-session-snapshot", "browser-session-follow-link",
         "browser-session-close", "analyze", "draft", "send", "code-inspect", "chat"
     };
 
