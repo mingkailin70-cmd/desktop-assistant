@@ -4515,6 +4515,10 @@ static void CheckInstallGracefulShutdownContract(string repositoryRoot)
     var windowSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
     var installerSource = File.ReadAllText(Path.Combine(repositoryRoot, "tools", "install_xiaok_msix.ps1"));
     var installPolicySource = File.ReadAllText(Path.Combine(repositoryRoot, "tools", "XiaoKMsixInstallPolicy.psm1"));
+    var installerManifestRead = installerSource.IndexOf("$archive = [System.IO.Compression.ZipFile]::OpenRead($packagePath)", StringComparison.Ordinal);
+    var installerPackageLock = installerSource.IndexOf("Open-XiaoKMsixPackageReadLock -Path $packagePath", StringComparison.Ordinal);
+    var installerPackageInstall = installerSource.IndexOf("Add-AppxPackage -Path $packagePath", StringComparison.Ordinal);
+    var installerPackageUnlock = installerSource.IndexOf("$packageLock.Dispose()", StringComparison.Ordinal);
     Require(appSource.Contains(messageName, StringComparison.Ordinal)
         && appSource.Contains("ShutdownMessageId = RegisterWindowMessage", StringComparison.Ordinal)
         && windowSource.Contains("App.ShutdownMessageId", StringComparison.Ordinal)
@@ -4537,6 +4541,15 @@ static void CheckInstallGracefulShutdownContract(string repositoryRoot)
         && installerSource.Contains("Add-AppxPackage -Path $packagePath -ForceUpdateFromAnyVersion", StringComparison.Ordinal)
         && installerSource.Contains("UseForceUpdateFromAnyVersion", StringComparison.Ordinal)
         && installerSource.Contains("[version]$_.Version -eq $installPolicy.TargetVersion", StringComparison.Ordinal)
+        && installerSource.Contains("$packageLock = $null", StringComparison.Ordinal)
+        && installerSource.Contains("$lockedPackage.Attributes -band [System.IO.FileAttributes]::ReparsePoint", StringComparison.Ordinal)
+        && installerSource.Contains("} finally {", StringComparison.Ordinal)
+        && installerPackageLock >= 0 && installerPackageLock < installerManifestRead
+        && installerManifestRead < installerPackageInstall
+        && installerPackageInstall < installerPackageUnlock
+        && installerPackageUnlock > installerSource.LastIndexOf("Write-Output \"Installed for current user:", StringComparison.Ordinal)
+        && installPolicySource.Contains("Open-XiaoKMsixPackageReadLock", StringComparison.Ordinal)
+        && installPolicySource.Contains("[System.IO.FileShare]::Read", StringComparison.Ordinal)
         && installPolicySource.Contains("-ExpectedSha256", StringComparison.Ordinal)
         && installPolicySource.Contains("$target -ge $currentVersion", StringComparison.Ordinal)
         && installPolicySource.Contains("$target -lt $highestInstalledVersion", StringComparison.Ordinal),

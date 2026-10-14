@@ -1,5 +1,19 @@
 Set-StrictMode -Version Latest
 
+function Open-XiaoKMsixPackageReadLock {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    return [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read)
+}
+
 function Resolve-XiaoKMsixInstallPolicy {
     [CmdletBinding()]
     param(
@@ -86,4 +100,4 @@ function Resolve-XiaoKMsixInstallPolicy {
     }
 }
 
-Export-ModuleMember -Function Resolve-XiaoKMsixInstallPolicy
+Export-ModuleMember -Function Open-XiaoKMsixPackageReadLock, Resolve-XiaoKMsixInstallPolicy
