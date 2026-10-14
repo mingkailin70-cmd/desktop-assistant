@@ -13,8 +13,19 @@ public static class TaskFailureSafetyPolicy
         "app", "window", "app-ui-set-text", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-create-pptx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download", "code"
     };
 
+    // Known routes that do not commit a persistent user-visible side effect. Unknown categories fail closed so a
+    // newly added route cannot silently turn a cancelled or faulted operation into an apparently safe retry.
+    private static readonly HashSet<string> ReadOnlyCategories = new(StringComparer.Ordinal)
+    {
+        "app-status", "app-ui-snapshot", "app-ui-wait-enabled", "file", "file-content-search", "file-summary",
+        "file-classify", "web-read", "web-read-dynamic", "browser-session-open", "browser-session-navigate",
+        "browser-session-snapshot", "browser-session-follow-link", "browser-session-click", "browser-session-fill",
+        "browser-session-close", "analyze", "draft", "send", "code-inspect", "chat"
+    };
+
     public static bool RequiresManualVerification(string? taskCategory, bool routeStarted) =>
-        routeStarted && taskCategory is not null && SideEffectCategories.Contains(taskCategory);
+        routeStarted && (taskCategory is null || SideEffectCategories.Contains(taskCategory)
+            || !ReadOnlyCategories.Contains(taskCategory));
 
     public static bool IsUncertainOutcomeErrorCode(string? errorCode) => errorCode is
         CancelledOutcomeUncertainErrorCode or TimedOutOutcomeUncertainErrorCode or ExceptionOutcomeUncertainErrorCode
