@@ -28,6 +28,30 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.401
+      - name: Link pinned SDK for isolated child-process checks
+        shell: pwsh
+        run: |
+          $dotnetExe = (Get-Command dotnet).Source
+          $sdkVersion = (& $dotnetExe --version).Trim()
+          if ($sdkVersion -ne '10.0.401') {
+            throw "Expected pinned .NET SDK 10.0.401, found $sdkVersion."
+          }
+          $sdkRoot = Split-Path -Parent $dotnetExe
+          $toolsRoot = Join-Path $env:GITHUB_WORKSPACE '.tools'
+          $pinnedSdkRoot = Join-Path $toolsRoot 'dotnet'
+          New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
+          if (Test-Path -LiteralPath $pinnedSdkRoot) {
+            throw 'The CI checkout already contains .tools/dotnet; refusing to replace it.'
+          }
+          New-Item -ItemType Junction -Path $pinnedSdkRoot -Target $sdkRoot | Out-Null
+          $linkedDotnetExe = Join-Path $pinnedSdkRoot 'dotnet.exe'
+          if (-not (Test-Path -LiteralPath $linkedDotnetExe)) {
+            throw 'Pinned SDK junction does not expose dotnet.exe.'
+          }
+          $linkedVersion = (& $linkedDotnetExe --version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $linkedVersion -ne '10.0.401') {
+            throw "Pinned SDK junction failed validation: $linkedVersion."
+          }
       - name: Build
         run: dotnet build XiaoK.sln --configuration Release
       - name: Full safety checks
