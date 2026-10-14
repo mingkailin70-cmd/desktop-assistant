@@ -42,7 +42,7 @@ internal static class WindowsNotificationSourceDiagnostic
             return new NotificationSourceDiagnosticReport(
                 "ok",
                 access.ToString(),
-                inspected.Length,
+                inspected.Count,
                 candidates,
                 "仅读取候选应用显示名、AUMID和创建时间；未读取通知正文、未保存结果、未请求权限、未启动监听。",
                 0);
