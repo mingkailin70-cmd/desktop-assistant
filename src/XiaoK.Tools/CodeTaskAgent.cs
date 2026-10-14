@@ -4077,12 +4077,31 @@ internal sealed class CodeWorkspaceSnapshot
         // block can be safely isolated, keep the entire file out of model context.
         if (LikelyCredentialPatterns[0].IsMatch(text)) return false;
 
-        safeText = SanitizableCredentialPattern.Replace(text, "[REDACTED_CREDENTIAL]");
+        var combinedScanCompleted = false;
+        try
+        {
+            safeText = SanitizableCredentialPattern.Replace(text, "[REDACTED_CREDENTIAL]");
+            combinedScanCompleted = !SanitizableCredentialPattern.IsMatch(safeText);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Complex source may make a large alternation slower than its component rules.
+            // Retry with the original independently bounded rules before failing closed.
+            safeText = text;
+        }
 
-        if (SanitizableCredentialPattern.IsMatch(safeText))
+        if (!combinedScanCompleted)
         {
             safeText = text;
-            return false;
+            for (var index = 1; index < LikelyCredentialPatterns.Length; index++)
+                safeText = LikelyCredentialPatterns[index].Replace(safeText, "[REDACTED_CREDENTIAL]");
+
+            foreach (var pattern in LikelyCredentialPatterns.Skip(1))
+                if (pattern.IsMatch(safeText))
+                {
+                    safeText = text;
+                    return false;
+                }
         }
 
         if (!string.Equals(safeText, text, StringComparison.Ordinal)
