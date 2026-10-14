@@ -127,8 +127,13 @@ internal static class PetVPetAnimationProbe
             finally
             {
                 watchdog.Stop();
-                try { renderer?.Dispose(); }
-                catch (Exception exception) { failures.Add($"VPet柯基动画释放失败：{exception.GetType().Name}"); }
+                if (renderer is not null)
+                {
+                    try { ClearImageSources(renderer.View); }
+                    catch (Exception exception) { failures.Add($"VPet柯基动画图片资源释放失败：{exception.GetType().Name}"); }
+                    try { renderer.Dispose(); }
+                    catch (Exception exception) { failures.Add($"VPet柯基动画释放失败：{exception.GetType().Name}"); }
+                }
                 window.Content = null;
                 if (GetForegroundWindow() != foregroundBefore)
                     failures.Add("VPet柯基动画离屏检查改变了前台窗口。");
@@ -155,6 +160,15 @@ internal static class PetVPetAnimationProbe
         for (var offset = 3; offset < pixels.Length; offset += 4)
             if (pixels[offset] > 8) count++;
         return count;
+    }
+
+    private static void ClearImageSources(DependencyObject parent)
+    {
+        if (parent is System.Windows.Controls.Image image)
+            image.Source = null;
+
+        for (var childIndex = 0; childIndex < VisualTreeHelper.GetChildrenCount(parent); childIndex++)
+            ClearImageSources(VisualTreeHelper.GetChild(parent, childIndex));
     }
 
     private static void ValidateTransparentAssetCorners(string repositoryRoot, List<string> failures)
