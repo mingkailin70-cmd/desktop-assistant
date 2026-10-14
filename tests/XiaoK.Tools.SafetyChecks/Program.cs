@@ -5703,6 +5703,8 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
         : startMethod.IndexOf("if (_disposed || !IsActive) return Status;", existingLookup, StringComparison.Ordinal);
     var capturePermissionRecheck = existingLookup < 0 ? -1
         : startMethod.IndexOf("if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)", existingLookup, StringComparison.Ordinal);
+    var captureDeadlineCheck = capturePermissionRecheck < 0 ? -1
+        : startMethod.IndexOf("if (StopIfExpired()) return Status;", capturePermissionRecheck, StringComparison.Ordinal);
     var captureGuard = startMethod.IndexOf("!NotificationStartupBaselinePolicy.IsSafeBaselineCount(existing.Count)", StringComparison.Ordinal);
     var captureStop = captureGuard < 0 ? -1 : startMethod.IndexOf("Stop(", captureGuard, StringComparison.Ordinal);
     var captureLoop = startMethod.IndexOf("foreach (var notification in existing)", StringComparison.Ordinal);
@@ -5713,10 +5715,15 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
         : startMethod.IndexOf("if (_disposed || !IsActive) return Status;", captureCatchStart, StringComparison.Ordinal);
     var captureCatchStop = captureCatchStart < 0 ? -1 : startMethod.IndexOf("Stop(", captureCatchStart, StringComparison.Ordinal);
     Require(existingLookup >= 0 && captureInactiveGuard > existingLookup
-        && capturePermissionRecheck > captureInactiveGuard
+        && captureDeadlineCheck > captureInactiveGuard
+        && capturePermissionRecheck > captureDeadlineCheck
         && captureGuard > capturePermissionRecheck && captureStop > captureGuard
         && captureLoop > captureStop && captureMetadata > captureLoop,
         "用户启动的一次性样本入口没有在活动会话与权限检查后按顺序执行512条基线限制。");
+    var baselineLoopDeadlineCheck = captureLoop < 0 ? -1
+        : startMethod.IndexOf("if (StopIfExpired()) return Status;", captureLoop, StringComparison.Ordinal);
+    Require(baselineLoopDeadlineCheck > captureLoop && captureMetadata > baselineLoopDeadlineCheck,
+        "Toast基线枚举跨越15分钟期限后仍会继续处理后续元数据。");
     Require(captureCatchStart > captureMetadata && captureInactiveCatchGuard > captureCatchStart
         && captureCatchStop > captureInactiveCatchGuard,
         "用户停止或释放后，一次性样本旧启动异常仍会覆盖停止状态或再次清理会话。");
@@ -5970,10 +5977,16 @@ static void CheckVisibleNotificationTextAggregationIsBounded()
 
 static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
 {
+    var maximumDuration = NotificationSampleRetentionPolicy.MaximumDuration;
+    Require(maximumDuration == TimeSpan.FromMinutes(15)
+        && !NotificationSampleRetentionPolicy.HasExpired(maximumDuration - TimeSpan.FromTicks(1))
+        && NotificationSampleRetentionPolicy.HasExpired(maximumDuration)
+        && NotificationSampleRetentionPolicy.HasExpired(maximumDuration + TimeSpan.FromTicks(1)),
+        "通知样本15分钟截止策略在边界前后没有保持单调、确定的判定。");
+
     var capturePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "NotificationFormatSampleCapture.cs");
     var capture = File.ReadAllText(capturePath);
-    Require(capture.Contains("private static readonly TimeSpan MaximumDuration = TimeSpan.FromMinutes(15);", StringComparison.Ordinal)
-        && capture.Contains("private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);", StringComparison.Ordinal)
+    Require(capture.Contains("private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);", StringComparison.Ordinal)
         && capture.Contains("private const int MaximumTrackedNotificationKeys = 4096;", StringComparison.Ordinal)
         && capture.Contains("private readonly BoundedNotificationKeySet _baselineKeys = new(MaximumTrackedNotificationKeys);", StringComparison.Ordinal)
         && capture.Contains("private readonly BoundedNotificationKeySet _seenKeys = new(MaximumTrackedNotificationKeys);", StringComparison.Ordinal),
@@ -5997,9 +6010,18 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
     Require(expiry.Contains("Task.Delay(delay, cancellationToken)", StringComparison.Ordinal)
         && expiry.Contains("_listener.GetAccessStatus()", StringComparison.Ordinal)
         && expiry.Contains("WindowsNotificationMonitor.IsUnlockedInputDesktop()", StringComparison.Ordinal)
-        && expiry.Contains("_samples.Clear()", StringComparison.Ordinal)
-        && expiry.Contains("clearSamples: true", StringComparison.Ordinal),
+        && expiry.Contains("StopIfExpired()", StringComparison.Ordinal),
         "到期、权限失效或锁屏时没有停止采集并清除内存样本。");
+
+    var expiryGuardStart = capture.IndexOf("private bool StopIfExpired()", StringComparison.Ordinal);
+    var expiryGuardEnd = expiryGuardStart < 0 ? -1
+        : capture.IndexOf("private async Task ExpireAfterMaximumDurationAsync(", expiryGuardStart, StringComparison.Ordinal);
+    var expiryGuard = expiryGuardStart >= 0 && expiryGuardEnd > expiryGuardStart
+        ? capture[expiryGuardStart..expiryGuardEnd] : string.Empty;
+    Require(expiryGuard.Contains("NotificationSampleRetentionPolicy.HasExpired(Stopwatch.GetElapsedTime(_startedAtTimestamp))", StringComparison.Ordinal)
+        && expiryGuard.Contains("Stop(", StringComparison.Ordinal)
+        && expiryGuard.Contains("clearSamples: true", StringComparison.Ordinal),
+        "通知正文路径没有同步检查单调15分钟截止并清除过期样本。");
 
     var startCapture = capture.IndexOf("public async Task<string> StartAsync()", StringComparison.Ordinal);
     var stopCapture = startCapture < 0 ? -1 : capture.IndexOf("public void Stop(", startCapture, StringComparison.Ordinal);
@@ -6066,10 +6088,24 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
     var publisherRead = added.IndexOf("var sourceAppId = notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
     var seenKeyLimit = added.IndexOf("NotificationKeyTrackResult.CapacityReached", StringComparison.Ordinal);
     var sampleBodyRead = added.IndexOf("ReadVisibleTextElements(notification)", StringComparison.Ordinal);
+    var preBodyDeadline = sampleBodyRead < 0 ? -1
+        : added.LastIndexOf("if (StopIfExpired()) return;", sampleBodyRead, StringComparison.Ordinal);
+    var postBodyDeadline = sampleBodyRead < 0 ? -1
+        : added.IndexOf("if (!IsActive || StopIfExpired()) return;", sampleBodyRead, StringComparison.Ordinal);
+    var sampleAppend = added.IndexOf("_samples.Add(sample);", StringComparison.Ordinal);
+    var preAppendDeadline = sampleAppend < 0 ? -1
+        : added.LastIndexOf("if (StopIfExpired()) return;", sampleAppend, StringComparison.Ordinal);
+    var postAppendDeadline = sampleAppend < 0 ? -1
+        : added.IndexOf("if (StopIfExpired()) return;", sampleAppend, StringComparison.Ordinal);
+    var samplePublish = added.IndexOf("SampleCaptured?.Invoke(sample);", StringComparison.Ordinal);
     Require(directLookup >= 0 && exactIdGuard > directLookup && publisherRead > exactIdGuard
         && !added.Contains("GetNotificationsAsync", StringComparison.Ordinal)
         && publisherRead >= 0 && sampleBodyRead > publisherRead
-        && seenKeyLimit >= 0 && sampleBodyRead > seenKeyLimit,
+        && seenKeyLimit >= 0 && sampleBodyRead > seenKeyLimit
+        && preBodyDeadline > publisherRead && sampleBodyRead > preBodyDeadline
+        && postBodyDeadline > sampleBodyRead && preAppendDeadline > postBodyDeadline
+        && sampleAppend > preAppendDeadline && postAppendDeadline > sampleAppend
+        && samplePublish > postAppendDeadline,
         "通知样本入口未按事件ID精确取件、先核对所选发布者或在跟踪键超限时停止采集。");
     var startStart = capture.IndexOf("public async Task<string> StartAsync()", StringComparison.Ordinal);
     var startEnd = startStart < 0 ? -1 : capture.IndexOf("public void Stop(", startStart, StringComparison.Ordinal);

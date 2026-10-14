@@ -24,7 +24,6 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 {
     public const int MaximumSamples = 30;
     private const int MaximumTrackedNotificationKeys = 4096;
-    private static readonly TimeSpan MaximumDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan SessionStateCheckInterval = TimeSpan.FromSeconds(2);
 
     private readonly Dispatcher _dispatcher;
@@ -76,6 +75,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             _ = ExpireAfterMaximumDurationAsync(_timeoutCancellation.Token);
             var existing = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
             if (_disposed || !IsActive) return Status;
+            if (StopIfExpired()) return Status;
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 Stop("Windows 通知访问权限已撤销；样本采集已停止。", clearSamples: true);
@@ -90,6 +90,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 
             foreach (var notification in existing)
             {
+                if (StopIfExpired()) return Status;
                 var sourceAppId = notification.AppInfo.AppUserModelId;
                 if (!string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase)) continue;
                 if (NotificationStartupBaselinePolicy.ShouldAddToBaseline(notification.CreationTime, _startedAtUtc))
@@ -237,6 +238,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             // Keep added-ID draining asynchronous while resolving only the event's notification.
             await Task.Yield();
 
+            if (StopIfExpired()) return;
             if (!IsActive || _listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 Stop("Windows 通知访问权限已撤销；样本采集已停止并清除。", clearSamples: true);
@@ -286,8 +288,9 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                 return;
             }
 
+            if (StopIfExpired()) return;
             var (elements, truncated) = ReadVisibleTextElements(notification);
-            if (!IsActive) return;
+            if (!IsActive || StopIfExpired()) return;
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 Stop("读取期间 Windows 通知访问权限已撤销；该样本和已有样本均已丢弃。", clearSamples: true);
@@ -302,7 +305,9 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             var sample = new NotificationFormatSample(_samples.Count + 1, _applicationId,
                 _publisherDisplayName, _publisherAppUserModelId, notification.CreationTime,
                 elements, truncated);
+            if (StopIfExpired()) return;
             _samples.Add(sample);
+            if (StopIfExpired()) return;
             SampleCaptured?.Invoke(sample);
             RaiseStatus($"通知样本核验：已在内存中采集 {_samples.Count}/{MaximumSamples} 条新通知；没有送模型或保存文件。样本最迟在本轮15分钟截止时清除。" );
 
@@ -314,15 +319,27 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            if (StopIfExpired()) return;
             RaiseStatus("读取通知元数据失败；样本核验继续等待后续通知。没有保存正文。" );
         }
+    }
+
+    private bool StopIfExpired()
+    {
+        if (!NotificationSampleRetentionPolicy.HasExpired(Stopwatch.GetElapsedTime(_startedAtTimestamp)))
+            return false;
+
+        if (IsActive || _samples.Count > 0)
+            Stop("通知样本核验达到15分钟上限；采集已停止并清除内存样本。", clearSamples: true);
+        return true;
     }
 
     private async Task ExpireAfterMaximumDurationAsync(CancellationToken cancellationToken)
     {
         while (true)
         {
-            var remaining = MaximumDuration - Stopwatch.GetElapsedTime(_startedAtTimestamp);
+            var remaining = NotificationSampleRetentionPolicy.MaximumDuration
+                - Stopwatch.GetElapsedTime(_startedAtTimestamp);
             var delay = remaining < SessionStateCheckInterval ? remaining : SessionStateCheckInterval;
             if (delay > TimeSpan.Zero)
             {
@@ -356,17 +373,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                         return true;
                     }
 
-                    if (Stopwatch.GetElapsedTime(_startedAtTimestamp) >= MaximumDuration)
-                    {
-                        if (IsActive)
-                            Stop("通知样本核验达到15分钟上限；监听已停止并清除内存样本。", clearSamples: true);
-                        else if (_samples.Count > 0)
-                        {
-                            _samples.Clear();
-                            RaiseStatus("通知样本核验达到15分钟上限；内存样本已清除。");
-                        }
-                        return true;
-                    }
+                    if (StopIfExpired()) return true;
 
                     return !IsActive && _samples.Count == 0;
                 });
