@@ -5699,13 +5699,27 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
     var startEnd = start < 0 ? -1 : capture.IndexOf("public void Stop(", start, StringComparison.Ordinal);
     var startMethod = start >= 0 && startEnd > start ? capture[start..startEnd] : string.Empty;
     var existingLookup = startMethod.IndexOf("var existing = await _listener.GetNotificationsAsync(NotificationKinds.Toast);", StringComparison.Ordinal);
+    var captureInactiveGuard = existingLookup < 0 ? -1
+        : startMethod.IndexOf("if (_disposed || !IsActive) return Status;", existingLookup, StringComparison.Ordinal);
+    var capturePermissionRecheck = existingLookup < 0 ? -1
+        : startMethod.IndexOf("if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)", existingLookup, StringComparison.Ordinal);
     var captureGuard = startMethod.IndexOf("!NotificationStartupBaselinePolicy.IsSafeBaselineCount(existing.Count)", StringComparison.Ordinal);
     var captureStop = captureGuard < 0 ? -1 : startMethod.IndexOf("Stop(", captureGuard, StringComparison.Ordinal);
     var captureLoop = startMethod.IndexOf("foreach (var notification in existing)", StringComparison.Ordinal);
     var captureMetadata = startMethod.IndexOf("notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
-    Require(existingLookup >= 0 && captureGuard > existingLookup && captureStop > captureGuard
+    var captureCatchStart = existingLookup < 0 ? -1
+        : startMethod.IndexOf("catch (Exception ex) when (IsRecoverable(ex))", existingLookup, StringComparison.Ordinal);
+    var captureInactiveCatchGuard = captureCatchStart < 0 ? -1
+        : startMethod.IndexOf("if (_disposed || !IsActive) return Status;", captureCatchStart, StringComparison.Ordinal);
+    var captureCatchStop = captureCatchStart < 0 ? -1 : startMethod.IndexOf("Stop(", captureCatchStart, StringComparison.Ordinal);
+    Require(existingLookup >= 0 && captureInactiveGuard > existingLookup
+        && capturePermissionRecheck > captureInactiveGuard
+        && captureGuard > capturePermissionRecheck && captureStop > captureGuard
         && captureLoop > captureStop && captureMetadata > captureLoop,
-        "用户启动的一次性样本入口没有在基线元数据枚举前检查512条上限并停止。");
+        "用户启动的一次性样本入口没有在活动会话与权限检查后按顺序执行512条基线限制。");
+    Require(captureCatchStart > captureMetadata && captureInactiveCatchGuard > captureCatchStart
+        && captureCatchStop > captureInactiveCatchGuard,
+        "用户停止或释放后，一次性样本旧启动异常仍会覆盖停止状态或再次清理会话。");
 
     var monitorEventStart = monitor.IndexOf("private void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs args)", StringComparison.Ordinal);
     var monitorEventEnd = monitorEventStart < 0 ? -1 : monitor.IndexOf("private void QueueOrProcessAdded(uint id)", monitorEventStart, StringComparison.Ordinal);

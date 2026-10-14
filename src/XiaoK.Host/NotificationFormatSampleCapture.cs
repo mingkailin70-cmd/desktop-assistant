@@ -71,6 +71,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
             IsActive = true;
             _listener.NotificationChanged += OnNotificationChanged;
             var existing = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
+            if (_disposed || !IsActive) return Status;
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 Stop("Windows 通知访问权限已撤销；样本采集已停止。", clearSamples: true);
@@ -110,6 +111,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
+            if (_disposed || !IsActive) return Status;
             Stop("无法读取通知元数据；样本采集已停止。", clearSamples: true);
             return "无法开始通知样本核验；没有保存通知正文。请检查 MSIX 身份和 Windows 通知权限。";
         }
