@@ -2,6 +2,8 @@
 
 ## 持续有效的用户要求（更新至2026-10-14）
 
+2026-10-14 13:37补充：为排除VPet完整Main容器的其他界面层影响，Host现从其视觉树分离PetGrid/PetGrid2，只将两层宠物动画放入透明500×500画布并通过Viewbox显示；离屏探针断言树结构、四角12×12区域无alpha>8像素且四种姿态均可渲染。提交`6d05b66`、候选版本`0.1.154.0`已推送；GitHub Actions [Build 38517243255](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38517243255)全Job成功，Release构建、完整安全套件和完整桌面体验套件均通过。该合成检查不等于安装版透明合成或实机外观验收。用户当前截图仍来自签名安装版`0.1.139.0`，所以画面尚未显示柯基候选；Host PID `18660`和附着24小时观察PID `43316`仍运行至计划结束时间2026-10-15 05:23 CST，期间不本机构建、测试、安装或操作Host。观察结束后安装最新通过版本，再集中实测外观、四态动画、拖动、缩放/DPI和位置恢复。
+
 2026-10-14 09:26补充：KWS worker的文本控制协议现由最多64字符的有界读取器解析，覆盖Host握手、运行期worker响应及worker启动命令；超长行在继续分配前失败关闭。提交`d07f56d`、候选版本`0.1.148.0`已推送；GitHub Actions [Build 38495365606](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38495365606)完整通过，包含Release构建、完整安全套件和桌面体验套件。该CI不代表本机麦克风/worker或安装版验收。当前安装仍为`0.1.139.0`；Host PID `18660`与24小时观察PID `43316`仍运行，预计2026-10-15 05:23 CST结束；观察结束前不在本机编译、测试、安装或操作Host。
 
 2026-10-14 08:36补充：Sherpa官方`tts-models`发布包`vits-icefall-zh-aishell3.tar.bz2`已下载至忽略路径`models/tts-candidates/`并解包逐文件核验。包大小31,559,701字节，SHA-256 `AB468DB3A3308CDD861495E0DB2F25D79418A0C00639F74944C7CDF5DD8C6EC1`；其中`model.onnx`的SHA-256与固定Hub revision `29953c80423f4c37918217808ecb308c1b9b7196`中的`vits-epoch-960.onnx`完全一致。AISHELL-3数据集与权重元数据均标Apache-2.0，Sherpa文档明确该174说话人Icefall模型使用AISHELL-3；可进入隔离CPU评估队列。仅完成下载和文件散列，没有加载、运行、接Host或改变生产配置；Windows运行时兼容、时延、质量与听感仍待观察于2026-10-15 05:23 CST结束后核验。详见语音报告。
