@@ -1,3 +1,13 @@
+## 当前签名安装与回滚流程（2026-10-15）
+
+本文后续按版本排列的记录用于保留历史证据；旧版本段落中的命令不能自动视作当前操作步骤。尤其不得先卸载小K再安装较低版本，也不得直接对回滚包运行`Add-AppxPackage -ForceUpdateFromAnyVersion`。卸载可能清理包内应用数据，直接调用系统部署命令也绕过本仓库的版本、散列、身份和Host关闭核验。
+
+正常发布流程使用固定SDK脚本`tools\publish_xiaok.ps1`完成`10.0.401`锁定还原和自包含发布；随后用`tools\package_msix_validation.ps1 -CertificateThumbprint <本机证书指纹>`生成签名MSIX。打包只签名，不导入信任、不安装、不启动。使用`tools\install_xiaok_msix.ps1 -PackagePath <包路径>`先做只读预检；核对包版本、发布者、签名、SHA-256和证书结果后，才显式添加`-Install`安装到当前用户。安装脚本不会自动启动小K，并会在安装前对当前已安装Host作同会话、映像路径、PID和窗口标题核验，发送优雅关闭请求并等待正常退出；失败时不强杀。
+
+安装证书的管理员要求取决于机器信任状态：若公钥已存在于`LocalMachine\TrustedPeople`，安装器不会改动信任，当前用户包安装不需要为证书导入而提升权限；若尚未受信任，安装器只在管理员上下文导入公钥到该存储后继续。不得导入到`Trusted Root Certification Authorities`。本机当前签名证书已受信任时，应记录“既有信任、未更改”，不可把该次更新描述成新导入证书。
+
+回滚必须保留应用原位，并使用`tools\install_xiaok_msix.ps1 -Install -Rollback -ExpectedSha256 <完整64位SHA-256>`。安装器要求当前账户恰有一个匹配包、目标严格低于当前版本、完整SHA-256相同，并在安装后核验精确目标版本；只有显式回滚分支使用`-ForceUpdateFromAnyVersion`。执行前还要确认旧版本兼容当前SQLite数据格式。不得运行卸载脚本来完成降级。回滚包路径和散列必须从当前保留包的现场核验结果填写，不复制过期示例。
+
 ## v0.1.163.0 通知事件读取更新（2026-10-14）
 
 按用户要求将最新CI通过候选更新到本机。固定SDK`10.0.401`锁定还原和自包含发布成功，发布目录为`artifacts\publish\desktop-update-0.1.163.0`；签名MSIX为`artifacts\msix-validation\4f6f0bf9022345619d96f2c765ed50d3\XiaoK-signed-validation.msix`，146,893,905字节，SHA-256 `F55F7C6B35FA984BF19467C0A40ABD3FFBD54C1B59B515D905186DFE297E6BB3`。SignTool验签0警告、0错误；证书`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已在`LocalMachine\TrustedPeople`，本次没有修改信任。
@@ -264,7 +274,7 @@ llama.cpp托管模型进程在后台推理租约期间使用Windows `BelowNormal
 
 固定.NET SDK 10.0.401自包含Release发布成功，运行时包含.NET 10.0.12。签名MSIX位于`artifacts\msix-validation\093cb5ce385a42e58b1b34828c15c512\XiaoK-signed-validation.msix`，139,362,702字节，SHA-256 `E4E4997180B878AB77396F1F80283AA49DAD54BDCA6E9C55425524346C6E84C7`。SignTool验签0警告、0错误；证书指纹`B96A02547ABA84523619E11EB7788AE9850A5C60`已在`LocalMachine\TrustedPeople`，本次没有修改证书信任。当前账户已安装`0.1.98.0`、状态`Ok`；安装版与发布版Host DLL SHA-256均为`D57875637D7AF7BBE09514F974E164534EA63CD0CB5A60A01574DFC44F335AB1`。安装器未启动Host；安装后另以隔离诊断配置隐藏启动一次，窗口不可见、前台窗口句柄不变，注册关闭消息后退出码0。未读取聊天/通知或发送消息。
 
-本机忽略目录仍保留`0.1.97.0`签名回退包，SHA-256 `0AB4F57F8A3E6F034E8C5119776EE9351714D30F6F7C8CC84CA3607ED68CE48E`。如需回退，可在同一发布者身份下使用`Add-AppxPackage -Path '<该旧包路径>' -ForceUpdateFromAnyVersion`降级；本次未执行回退。
+本机忽略目录当时保留`0.1.97.0`签名回退包，SHA-256 `0AB4F57F8A3E6F034E8C5119776EE9351714D30F6F7C8CC84CA3607ED68CE48E`。本段曾记录直接调用`Add-AppxPackage -ForceUpdateFromAnyVersion`的旧回退建议，现仅作为历史，不可照此执行；当前回滚必须使用本文开头的显式安装器流程、完整包散列及数据格式兼容核验。本次历史记录未执行回退。
 
 ## v0.1.93.0 自定义应用白名单（2026-10-11）
 
