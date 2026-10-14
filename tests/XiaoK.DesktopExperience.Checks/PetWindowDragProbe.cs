@@ -56,7 +56,7 @@ internal static class PetWindowDragProbe
             || !xaml.Contains("x:Name=\"CompactPetButton\"", StringComparison.Ordinal)
             || !xaml.Contains("轻点展开任务面板", StringComparison.Ordinal)
             || !xaml.Contains("按住桌宠任意位置并移动鼠标", StringComparison.Ordinal)
-            || !xaml.Contains("按住猫图或面板空白区域拖动可移动小K窗口", StringComparison.Ordinal)
+            || !xaml.Contains("按住柯基图或面板空白区域拖动可移动小K窗口", StringComparison.Ordinal)
             || !xaml.Contains("x:Name=\"PetResizeHandle\"", StringComparison.Ordinal))
             failures.Add("窗口级桌宠拖动入口、紧凑/展开态提示、启动时不激活或独立缩放手柄接线不完整。");
 
