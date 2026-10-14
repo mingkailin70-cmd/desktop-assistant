@@ -1,6 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Media;
 using System.Windows.Threading;
 using LinePutScript;
 using VPet_Simulator.Core;
@@ -65,8 +64,8 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
                 Width = 500,
                 Height = 500,
                 IsHitTestVisible = false,
-                Background = Brushes.Transparent,
-                BorderBrush = Brushes.Transparent,
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderBrush = System.Windows.Media.Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0)
             };
