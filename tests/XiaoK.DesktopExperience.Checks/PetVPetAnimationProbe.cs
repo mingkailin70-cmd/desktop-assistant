@@ -98,12 +98,13 @@ internal static class PetVPetAnimationProbe
                         GetAlpha(pixels, 0, 359),
                         GetAlpha(pixels, 359, 359)
                     };
-                    var cornersTransparent = cornerAlpha.All(alpha => alpha <= 8);
+                    var cornerLeakCount = CountCornerLeaks(pixels, 360, 360);
+                    var cornersTransparent = cornerLeakCount <= 1;
                     hashes.Add(Convert.ToHexString(SHA256.HashData(pixels)));
                     Require(renderer.CurrentPose == pose, $"VPet柯基桌宠状态切换没有保存 {pose}。", failures);
                     Require(visiblePixels > 8_000, $"VPet柯基桌宠姿态 {pose} 没有渲染出完整主体。", failures);
                     Require(cornersTransparent,
-                        $"VPet柯基桌宠姿态 {pose} 填充了透明角落，alpha={string.Join(",", cornerAlpha)}。", failures);
+                        $"VPet柯基桌宠姿态 {pose} 填充了透明角落区域，非透明像素数={cornerLeakCount}，角点alpha={string.Join(",", cornerAlpha)}。", failures);
                 }
 
                 Require(hashes.Count == Enum.GetValues<XiaoKPetPose>().Length,
@@ -145,6 +146,22 @@ internal static class PetVPetAnimationProbe
         var count = 0;
         for (var offset = 3; offset < pixels.Length; offset += 4)
             if (pixels[offset] > 8) count++;
+        return count;
+    }
+
+    private static int CountCornerLeaks(byte[] pixels, int width, int height)
+    {
+        const int cornerProbeSize = 12;
+        var count = 0;
+        for (var y = 0; y < cornerProbeSize; y++)
+        for (var x = 0; x < cornerProbeSize; x++)
+        {
+            if (GetAlpha(pixels, x, y) > 8) count++;
+            if (GetAlpha(pixels, width - 1 - x, y) > 8) count++;
+            if (GetAlpha(pixels, x, height - 1 - y) > 8) count++;
+            if (GetAlpha(pixels, width - 1 - x, height - 1 - y) > 8) count++;
+        }
+
         return count;
     }
 
