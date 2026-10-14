@@ -394,7 +394,7 @@ internal static class Aishell3CandidateTtsRoundTrip
         if (files.Count != ExpectedAssetNames.Length
             || !files.Select(file => file.Name).ToHashSet(StringComparer.Ordinal).SetEquals(ExpectedAssetNames))
             throw new DiagnosticRefusalException("MODEL_BUNDLE_INCOMPLETE");
-        return new CandidateProfile(localDirectory, files, Revision, requiredForP0: false);
+        return new CandidateProfile(localDirectory, files, Revision, RequiredForP0: false);
     }
 
     private static void VerifyLockedRuntime(string workspace, CandidateProfile profile)
