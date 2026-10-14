@@ -499,6 +499,7 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
                 return Task.CompletedTask;
             }, cancellationToken).ConfigureAwait(false);
         IBrowser? browser = null;
+        var playwrightDisposalTransferred = false;
         try
         {
             browser = await CancellableAsyncResourceStartup.StartAsync(
@@ -510,7 +511,13 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
                     Timeout = 8_000,
                     Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
                         "--no-default-browser-check", "--disable-component-update"]
-                }), CloseLateBrowserAsync, cancellationToken).ConfigureAwait(false);
+                }), CloseLateBrowserAsync, cancellationToken,
+                onCancellation: () => playwrightDisposalTransferred = true,
+                disposeOwnerAfterLateCleanup: () =>
+                {
+                    playwright.Dispose();
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
@@ -554,7 +561,10 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
                     await BrowserBackgroundCleanup.RunBestEffortAsync(() => browserToClose.CloseAsync(), BrowserCloseTimeout)
                         .ConfigureAwait(false);
             }
-            finally { playwright.Dispose(); }
+            finally
+            {
+                if (!playwrightDisposalTransferred) playwright.Dispose();
+            }
             throw;
         }
     }

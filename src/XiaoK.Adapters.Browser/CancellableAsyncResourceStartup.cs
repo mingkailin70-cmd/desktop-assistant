@@ -7,10 +7,13 @@ namespace XiaoK.Adapters.Browser;
 internal static class CancellableAsyncResourceStartup
 {
     public static async Task<T> StartAsync<T>(Func<Task<T>> start, Func<T, Task> disposeLate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Action? onCancellation = null,
+        Func<Task>? disposeOwnerAfterLateCleanup = null)
     {
         ArgumentNullException.ThrowIfNull(start);
         ArgumentNullException.ThrowIfNull(disposeLate);
+        if ((onCancellation is null) != (disposeOwnerAfterLateCleanup is null))
+            throw new ArgumentException("Late cleanup ownership transfer requires both callbacks.");
         cancellationToken.ThrowIfCancellationRequested();
 
         var startup = start();
@@ -20,12 +23,14 @@ internal static class CancellableAsyncResourceStartup
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _ = DisposeIfStartupCompletesAsync(startup, disposeLate);
+            onCancellation?.Invoke();
+            _ = DisposeIfStartupCompletesAsync(startup, disposeLate, disposeOwnerAfterLateCleanup);
             throw;
         }
     }
 
-    private static async Task DisposeIfStartupCompletesAsync<T>(Task<T> startup, Func<T, Task> disposeLate)
+    private static async Task DisposeIfStartupCompletesAsync<T>(Task<T> startup, Func<T, Task> disposeLate,
+        Func<Task>? disposeOwnerAfterLateCleanup)
     {
         try
         {
@@ -36,6 +41,14 @@ internal static class CancellableAsyncResourceStartup
         {
             // Observe startup/cleanup failures on this detached cleanup path. The caller has already
             // received cancellation and cannot safely resume using a late browser resource.
+        }
+        finally
+        {
+            if (disposeOwnerAfterLateCleanup is not null)
+            {
+                try { await disposeOwnerAfterLateCleanup().ConfigureAwait(false); }
+                catch (Exception) { }
+            }
         }
     }
 }

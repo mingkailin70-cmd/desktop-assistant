@@ -10308,6 +10308,65 @@ static async Task CheckIsolatedBrowserInitializationCancellationAsync()
         Require(Volatile.Read(ref lateDisposeCount) == 1, "迟到的Playwright资源没有被恰好清理一次。");
     }
 
+    var lateOwnedResource = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var lateCloseStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var allowLateClose = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var lateOwnerDisposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var cleanupOrder = new ConcurrentQueue<string>();
+    using (var ownershipCancellation = new CancellationTokenSource())
+    {
+        var startup = CancellableAsyncResourceStartup.StartAsync(
+            () => lateOwnedResource.Task,
+            async _ =>
+            {
+                cleanupOrder.Enqueue("browser-close-started");
+                lateCloseStarted.TrySetResult();
+                await allowLateClose.Task.ConfigureAwait(false);
+                cleanupOrder.Enqueue("browser-closed");
+            },
+            ownershipCancellation.Token,
+            onCancellation: () => cleanupOrder.Enqueue("owner-transferred"),
+            disposeOwnerAfterLateCleanup: () =>
+            {
+                cleanupOrder.Enqueue("playwright-disposed");
+                lateOwnerDisposed.TrySetResult();
+                return Task.CompletedTask;
+            });
+        ownershipCancellation.Cancel();
+        var ownershipTransferred = false;
+        try { _ = await startup; }
+        catch (OperationCanceledException) when (ownershipCancellation.IsCancellationRequested)
+        {
+            ownershipTransferred = true;
+        }
+        Require(ownershipTransferred, "启动中的浏览器取消没有转移驱动资源所有权。");
+        lateOwnedResource.TrySetResult(new object());
+        var ownerStayedAliveUntilBrowserClose = false;
+        try
+        {
+            await lateCloseStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            ownerStayedAliveUntilBrowserClose = !lateOwnerDisposed.Task.IsCompleted;
+        }
+        finally { allowLateClose.TrySetResult(); }
+        await lateOwnerDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Require(ownerStayedAliveUntilBrowserClose
+            && cleanupOrder.ToArray().SequenceEqual(["owner-transferred", "browser-close-started", "browser-closed", "playwright-disposed"]),
+            "迟到浏览器与Playwright驱动没有按父子资源顺序清理。");
+    }
+
+    foreach (var relativePath in new[]
+             {
+                 Path.Combine("src", "XiaoK.Adapters.Browser", "PlaywrightIsolatedBrowserSessionManager.cs"),
+                 Path.Combine("src", "XiaoK.Adapters.Browser", "PlaywrightPublicWebPageReader.cs")
+             })
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), relativePath));
+        Require(source.Contains("onCancellation: () => playwrightDisposalTransferred = true", StringComparison.Ordinal)
+            && source.Contains("disposeOwnerAfterLateCleanup:", StringComparison.Ordinal)
+            && source.Contains("if (!playwrightDisposalTransferred) playwright.Dispose()", StringComparison.Ordinal),
+            $"{relativePath}取消浏览器启动后没有将Playwright所有权留给迟到资源清理。");
+    }
+
     await using var manager = new PlaywrightIsolatedBrowserSessionManager();
     using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
     var cancelled = false;
