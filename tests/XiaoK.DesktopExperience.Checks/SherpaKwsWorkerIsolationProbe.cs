@@ -9,10 +9,52 @@ internal static class SherpaKwsWorkerIsolationProbe
     public static IReadOnlyList<string> Run(string repositoryRoot)
     {
         var failures = new List<string>();
+        VerifyBoundedProtocolLines(failures);
         VerifyFrameBounds(failures);
         VerifyFixedKeywordAllowlist(failures);
         VerifyProcessIsolationWiring(repositoryRoot, failures);
         return failures;
+    }
+
+    private static void VerifyBoundedProtocolLines(List<string> failures)
+    {
+        try
+        {
+            var maximum = SherpaKwsWorkerProtocol.MaximumProtocolLineLength;
+            using var reader = new StringReader(new string('x', maximum) + "\r\nREADY\nfinal");
+            var exactLimit = SherpaKwsWorkerProtocol.ReadLineAsync(reader, CancellationToken.None).GetAwaiter().GetResult();
+            var nextLine = SherpaKwsWorkerProtocol.ReadLineAsync(reader, CancellationToken.None).GetAwaiter().GetResult();
+            var finalLine = SherpaKwsWorkerProtocol.ReadLineAsync(reader, CancellationToken.None).GetAwaiter().GetResult();
+            var eof = SherpaKwsWorkerProtocol.ReadLineAsync(reader, CancellationToken.None).GetAwaiter().GetResult();
+            if (exactLimit != new string('x', maximum) || nextLine != "READY" || finalLine != "final" || eof is not null)
+                failures.Add("KWS bounded protocol reader mishandled an exact-limit line, consecutive lines, or EOF.");
+
+            using var oversized = new StringReader(new string('x', maximum + 1) + "\n");
+            try
+            {
+                _ = SherpaKwsWorkerProtocol.ReadLineAsync(oversized, CancellationToken.None).GetAwaiter().GetResult();
+                failures.Add("KWS bounded protocol reader accepted an oversized line.");
+            }
+            catch (InvalidDataException) { }
+
+            using var empty = new StringReader(string.Empty);
+            if (SherpaKwsWorkerProtocol.ReadLineAsync(empty, CancellationToken.None).GetAwaiter().GetResult() is not null)
+                failures.Add("KWS bounded protocol reader returned a line for empty input.");
+
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            using var pending = new StringReader("READY\n");
+            try
+            {
+                _ = SherpaKwsWorkerProtocol.ReadLineAsync(pending, cancelled.Token).GetAwaiter().GetResult();
+                failures.Add("KWS bounded protocol reader ignored cancellation.");
+            }
+            catch (OperationCanceledException) { }
+        }
+        catch (Exception error)
+        {
+            failures.Add($"KWS bounded protocol reader probe failed: {error.GetType().Name}.");
+        }
     }
 
     private static void VerifyFrameBounds(List<string> failures)
@@ -81,7 +123,8 @@ internal static class SherpaKwsWorkerIsolationProbe
         if (launcher.Length == 0 || assignIndex < 0 || startCommandIndex <= assignIndex
             || !launcher.Contains("ProcessPriorityClass.BelowNormal", StringComparison.Ordinal)
             || !launcher.Contains("RedirectStandardInput = true", StringComparison.Ordinal)
-            || !launcher.Contains("RedirectStandardOutput = true", StringComparison.Ordinal))
+            || !launcher.Contains("RedirectStandardOutput = true", StringComparison.Ordinal)
+            || !launcher.Contains("SherpaKwsWorkerProtocol.ReadLineAsync(process.StandardOutput", StringComparison.Ordinal))
             failures.Add("KWS worker must be assigned to its kill-on-close job before model startup and use redirected low-priority pipes.");
 
         if (!job.Contains("JobObjectLimitKillOnJobClose", StringComparison.Ordinal)
@@ -94,6 +137,8 @@ internal static class SherpaKwsWorkerIsolationProbe
             || worker.Contains("CreateDeviceInputNode", StringComparison.Ordinal)
             || worker.Contains("MediaCapture", StringComparison.Ordinal)
             || !worker.Contains("Console.OpenStandardInput()", StringComparison.Ordinal)
+            || worker.Contains("Console.In.ReadLineAsync", StringComparison.Ordinal)
+            || !worker.Contains("SherpaKwsWorkerProtocol.ReadLineAsync(Console.In", StringComparison.Ordinal)
             || !worker.Contains("CryptographicOperations.ZeroMemory(payload)", StringComparison.Ordinal))
             failures.Add("KWS worker must decode bounded pipe frames without opening a microphone and clear its audio buffer.");
 

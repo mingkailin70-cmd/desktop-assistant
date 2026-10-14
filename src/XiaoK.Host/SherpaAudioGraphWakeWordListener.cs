@@ -388,15 +388,13 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
         {
             while (true)
             {
-                var line = await worker.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                var line = await SherpaKwsWorkerProtocol.ReadLineAsync(worker.StandardOutput, cancellationToken)
+                    .ConfigureAwait(false);
                 if (line is null)
                 {
                     if (cancellationToken.IsCancellationRequested) return;
                     throw new InvalidDataException("KWS worker已提前退出。");
                 }
-                if (line.Length > 64)
-                    throw new InvalidDataException("KWS worker协议行超过限制。");
-
                 if (line.StartsWith("KEYWORD:", StringComparison.Ordinal))
                 {
                     var label = line["KEYWORD:".Length..];
@@ -462,12 +460,14 @@ internal sealed class SherpaAudioGraphWakeWordListener : ILocalWakeWordListener
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(45));
-            var ready = await process.StandardOutput.ReadLineAsync(timeout.Token).ConfigureAwait(false);
+            var ready = await SherpaKwsWorkerProtocol.ReadLineAsync(process.StandardOutput, timeout.Token)
+                .ConfigureAwait(false);
             if (!string.Equals(ready, "READY", StringComparison.Ordinal))
                 throw new InvalidDataException("Sherpa KWS worker没有完成握手。");
             await process.StandardInput.WriteLineAsync("START".AsMemory(), timeout.Token).ConfigureAwait(false);
             await process.StandardInput.FlushAsync(timeout.Token).ConfigureAwait(false);
-            var started = await process.StandardOutput.ReadLineAsync(timeout.Token).ConfigureAwait(false);
+            var started = await SherpaKwsWorkerProtocol.ReadLineAsync(process.StandardOutput, timeout.Token)
+                .ConfigureAwait(false);
             if (!string.Equals(started, "STARTED", StringComparison.Ordinal))
                 throw new InvalidDataException("Sherpa KWS worker未通过模型检查和加载。");
             return (process, job);

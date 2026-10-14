@@ -9,8 +9,6 @@ namespace XiaoK.Host;
 internal static class SherpaKwsWorkerEntryPoint
 {
     private const int StartupTimeoutSeconds = 30;
-    private const int MaximumProtocolLineCharacters = 64;
-
     public static async Task<int> RunAsync(string[] args)
     {
         if (!WindowsPackageIdentity.IsPresent || args.Length != 3
@@ -26,7 +24,8 @@ internal static class SherpaKwsWorkerEntryPoint
         {
             await WriteStatusAsync("READY").ConfigureAwait(false);
             using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(StartupTimeoutSeconds));
-            var startCommand = await Console.In.ReadLineAsync(startupTimeout.Token).ConfigureAwait(false);
+            var startCommand = await SherpaKwsWorkerProtocol.ReadLineAsync(Console.In, startupTimeout.Token)
+                .ConfigureAwait(false);
             if (!string.Equals(startCommand, "START", StringComparison.Ordinal))
                 return 2;
 
@@ -107,7 +106,7 @@ internal static class SherpaKwsWorkerEntryPoint
 
     private static async Task WriteStatusAsync(string value)
     {
-        if (value.Length > MaximumProtocolLineCharacters) value = "ERROR:PROTOCOL";
+        if (value.Length > SherpaKwsWorkerProtocol.MaximumProtocolLineLength) value = "ERROR:PROTOCOL";
         await Console.Out.WriteLineAsync(value).ConfigureAwait(false);
         await Console.Out.FlushAsync().ConfigureAwait(false);
     }
