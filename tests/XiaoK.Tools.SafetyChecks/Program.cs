@@ -10366,6 +10366,10 @@ static async Task CheckBrowserBackgroundCleanupAsync()
             && !source.Contains("_ = dialog.DismissAsync()", StringComparison.Ordinal)
             && source.Contains("BrowserBackgroundCleanup.RunBestEffortAsync", StringComparison.Ordinal),
             $"{relativePath}仍存在未统一观察的弹窗/对话框清理回调。");
+        Require(source.Contains("sandbox=\\\"allow-scripts\\\"", StringComparison.Ordinal)
+            && !source.Contains("allow-modals", StringComparison.Ordinal)
+            && !source.Contains("allow-popups", StringComparison.Ordinal),
+            $"{relativePath}没有保留禁止脚本弹窗与页面弹窗的iframe沙箱边界。");
     }
 }
 
