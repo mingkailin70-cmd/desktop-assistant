@@ -70,9 +70,11 @@ public sealed class MessageNoticePolicy
         if (receivedAtUtc < timestampCheckUtc - MaximumNoticeAge)
             return new(true, false, "通知已超过24小时，已跳过自动分析；请手动查看会话。", notice);
         if (isPrivateConversation != true)
-            return new(true, false, "无法确定这是私聊，已保留为普通提示，不做自动分析。", notice);
+            return new(true, false,
+                "无法确认这是私聊；未读取正文或自动分析。请手动打开对应会话，小K不会切换窗口。", notice);
         if (!HasVerifiedPrivateConversation(isPrivateConversation, safeConversationId, safeSender))
-            return new(true, false, "无法核实通知对应的会话，已跳过自动分析；请手动查看会话。", notice);
+            return new(true, false,
+                "无法核实通知对应的会话；未读取正文或自动分析。请手动打开对应会话，小K不会切换窗口。", notice);
 
         var rateIdentity = safeConversationId ?? safeSender!;
         var rateKey = HashKey($"{appId}\0{rateIdentity}");

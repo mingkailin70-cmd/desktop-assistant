@@ -5905,7 +5905,9 @@ static void CheckNoticeWithoutVisibleBodyDoesNotAnalyze()
     var policy = CreateNoticePolicy();
     var missing = policy.Inspect("qq", "qq.package!Main", "chat-5", "Bob", true,
         () => null, DateTimeOffset.UtcNow, "notice-no-body", true, true);
-    Require(missing.Accepted && !missing.AnalyzeBody && missing.Notice?.Body is null,
+    Require(missing.Accepted && !missing.AnalyzeBody && missing.Notice?.Body is null
+        && missing.UserMessage.Contains("请手动打开对应会话", StringComparison.Ordinal)
+        && missing.UserMessage.Contains("小K不会切换窗口", StringComparison.Ordinal),
         "无可见正文的通知触发了分析或保存了正文。");
 
     var oversized = policy.Inspect("qq", "qq.package!Main", "chat-6", "Bob", true,
@@ -5935,8 +5937,19 @@ static void CheckStaleOrUnattributedPrivateNoticeDoesNotReadBody()
     var unattributedReads = 0;
     var unattributed = unattributedPolicy.Inspect("qq", "qq.package!Main", null, null, true,
         () => { unattributedReads++; return "无归属正文"; }, DateTimeOffset.UtcNow, "notice-unattributed", true, true);
-    Require(unattributed.Accepted && !unattributed.AnalyzeBody && unattributed.Notice?.Body is null && unattributedReads == 0,
+    Require(unattributed.Accepted && !unattributed.AnalyzeBody && unattributed.Notice?.Body is null
+        && unattributedReads == 0
+        && unattributed.UserMessage.Contains("请手动打开对应会话", StringComparison.Ordinal)
+        && unattributed.UserMessage.Contains("小K不会切换窗口", StringComparison.Ordinal),
         "缺少会话ID和发送者的私聊通知读取了正文或触发了分析。");
+
+    var groupReads = 0;
+    var group = unattributedPolicy.Inspect("qq", "qq.package!Main", "group-chat", "Bob", false,
+        () => { groupReads++; return "合成群聊正文"; }, DateTimeOffset.UtcNow, "notice-group", true, true);
+    Require(group.Accepted && !group.AnalyzeBody && group.Notice?.Body is null && groupReads == 0
+        && group.UserMessage.Contains("请手动打开对应会话", StringComparison.Ordinal)
+        && group.UserMessage.Contains("小K不会切换窗口", StringComparison.Ordinal),
+        "群聊或未确认私聊没有转为人工查看提示，或读取了正文。");
 }
 
 static void CheckNoticeRateLimitRunsBeforeBodyRead()
