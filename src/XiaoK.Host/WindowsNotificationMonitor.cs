@@ -87,37 +87,44 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         if (!WindowsPackageIdentity.IsPresent)
             return "通知样本核验需要已安装的 MSIX 身份；没有开始采集。";
 
+        NotificationFormatSampleCapture? capture = null;
         try
         {
             var listener = UserNotificationListener.Current;
             if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
                 return "Windows 通知访问权限当前未授予；没有请求权限或开始采集。";
 
-            _sampleCapture = new NotificationFormatSampleCapture(_dispatcher, listener,
+            var currentCapture = new NotificationFormatSampleCapture(_dispatcher, listener,
                 applicationId, candidate.DisplayName, candidate.AppUserModelId);
-            _sampleCapture.SampleCaptured += OnNotificationSampleCaptured;
-            _sampleCapture.StatusChanged += OnNotificationSampleStatusChanged;
-            var status = await _sampleCapture.StartAsync();
-            if (!_sampleCapture.IsActive)
+            capture = currentCapture;
+            _sampleCapture = currentCapture;
+            currentCapture.SampleCaptured += OnNotificationSampleCaptured;
+            currentCapture.StatusChanged += OnNotificationSampleStatusChanged;
+            var status = await currentCapture.StartAsync();
+            if (!ReferenceEquals(_sampleCapture, currentCapture)) return NotificationSampleStatus;
+            if (!currentCapture.IsActive)
             {
-                _sampleCapture.SampleCaptured -= OnNotificationSampleCaptured;
-                _sampleCapture.StatusChanged -= OnNotificationSampleStatusChanged;
-                _sampleCapture.Dispose();
-                _sampleCapture = null;
+                ReleaseSampleCapture(currentCapture);
             }
             return status;
         }
         catch (Exception ex) when (IsRecoverable(ex))
         {
-            if (_sampleCapture is not null)
+            if (capture is not null)
             {
-                _sampleCapture.SampleCaptured -= OnNotificationSampleCaptured;
-                _sampleCapture.StatusChanged -= OnNotificationSampleStatusChanged;
-                _sampleCapture.Dispose();
-                _sampleCapture = null;
+                if (!ReferenceEquals(_sampleCapture, capture)) return NotificationSampleStatus;
+                ReleaseSampleCapture(capture);
             }
             return "无法开始通知样本核验；没有保存通知正文。请检查 MSIX 身份和 Windows 通知权限。";
         }
+    }
+
+    private void ReleaseSampleCapture(NotificationFormatSampleCapture capture)
+    {
+        capture.SampleCaptured -= OnNotificationSampleCaptured;
+        capture.StatusChanged -= OnNotificationSampleStatusChanged;
+        capture.Dispose();
+        if (ReferenceEquals(_sampleCapture, capture)) _sampleCapture = null;
     }
 
     public void StopNotificationSampleCapture() =>

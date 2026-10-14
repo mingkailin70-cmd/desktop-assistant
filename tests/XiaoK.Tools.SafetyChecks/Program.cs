@@ -6010,6 +6010,38 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
         && settingsCode[closeStart..closeEnd].Contains("NotificationSamplesBox.Clear();", StringComparison.Ordinal),
         "关闭设置页时没有清除内存中的通知样本和正文展示。");
 
+    var monitorPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "WindowsNotificationMonitor.cs");
+    var monitor = File.ReadAllText(monitorPath);
+    var captureStart = monitor.IndexOf("public async Task<string> StartNotificationSampleCaptureAsync(", StringComparison.Ordinal);
+    var captureEnd = captureStart < 0
+        ? -1 : monitor.IndexOf("private void ReleaseSampleCapture(", captureStart, StringComparison.Ordinal);
+    var captureCoordinator = captureStart >= 0 && captureEnd > captureStart
+        ? monitor[captureStart..captureEnd] : string.Empty;
+    var localCapture = captureCoordinator.IndexOf("var currentCapture = new NotificationFormatSampleCapture(", StringComparison.Ordinal);
+    var localAwait = captureCoordinator.IndexOf("var status = await currentCapture.StartAsync();", StringComparison.Ordinal);
+    var staleResultGuard = captureCoordinator.IndexOf(
+        "if (!ReferenceEquals(_sampleCapture, currentCapture)) return NotificationSampleStatus;", StringComparison.Ordinal);
+    var releaseLocal = captureCoordinator.IndexOf("ReleaseSampleCapture(currentCapture);", StringComparison.Ordinal);
+    var coordinatorCatch = captureCoordinator.IndexOf("catch (Exception ex) when (IsRecoverable(ex))", StringComparison.Ordinal);
+    var staleExceptionGuard = coordinatorCatch < 0 ? -1
+        : captureCoordinator.IndexOf("if (!ReferenceEquals(_sampleCapture, capture)) return NotificationSampleStatus;",
+            coordinatorCatch, StringComparison.Ordinal);
+    var releaseCatchLocal = coordinatorCatch < 0 ? -1
+        : captureCoordinator.IndexOf("ReleaseSampleCapture(capture);", coordinatorCatch, StringComparison.Ordinal);
+    var releaseStart = captureEnd < 0 ? -1
+        : monitor.IndexOf("private void ReleaseSampleCapture(", captureEnd, StringComparison.Ordinal);
+    var releaseEnd = releaseStart < 0 ? -1
+        : monitor.IndexOf("public void StopNotificationSampleCapture()", releaseStart, StringComparison.Ordinal);
+    var releaseMethod = releaseStart >= 0 && releaseEnd > releaseStart
+        ? monitor[releaseStart..releaseEnd] : string.Empty;
+    Require(localCapture >= 0 && localAwait > localCapture && staleResultGuard > localAwait
+        && releaseLocal > staleResultGuard && coordinatorCatch > releaseLocal
+        && staleExceptionGuard > coordinatorCatch && releaseCatchLocal > staleExceptionGuard
+        && !captureCoordinator.Contains("_sampleCapture.StartAsync()", StringComparison.Ordinal)
+        && releaseMethod.Contains("capture.Dispose();", StringComparison.Ordinal)
+        && releaseMethod.Contains("if (ReferenceEquals(_sampleCapture, capture)) _sampleCapture = null;", StringComparison.Ordinal),
+        "较早的样本启动/异常可能通过协调器字段释放或覆盖一个新建的采集会话。");
+
     var addedStart = capture.IndexOf("private async Task ProcessAddedAsync(", StringComparison.Ordinal);
     var addedEnd = addedStart < 0 ? -1 : capture.IndexOf("private static bool IsRecoverable", addedStart, StringComparison.Ordinal);
     var added = addedStart >= 0 && addedEnd > addedStart ? capture[addedStart..addedEnd] : string.Empty;
