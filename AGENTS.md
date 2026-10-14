@@ -2,6 +2,8 @@
 
 ## 持续有效的用户要求（更新至2026-10-14）
 
+2026-10-14 21:10补充：修复提交`1e2eb7d`已推送，GitHub Actions [Build 38568547528](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38568547528)全Job成功：固定SDK Release构建、完整安全检查、桌面体验检查及AISHELL-3评测器合同检查均通过；20:56关于修复CI待验证的记录已由本条更新。工作区干净。此次只证明构建与自动化检查，不代表AISHELL-3运行、语音质量、Host集成或首版端到端通过。只读复核显示监控PID`11152`和Host PID`51240`仍运行；继续遵守观察期本机禁编译/测试/安装、禁TTS负载、不操作Host。
+
 2026-10-14 20:56补充：提交`c4c243b`推送后，GitHub Actions Build `38567174295`在编译新增AISHELL-3评测器时失败：`CandidateProfile`构造的命名参数大小写与记录属性不一致。已按现有记录参数名修正为`RequiredForP0`；该一行修复尚未本机编译，等待推送后的完整CI验证。长测PID`11152`和Host PID`51240`仍运行至预计`2026-10-15 17:12:04 CST`，期间不本机构建/测试/安装、不加载TTS、不操作Host。评测器仍未运行，AISHELL-3不代表产品语音或生产准入。失败Build注释定位源码编译错误，详见Actions run `38567174295`。
 
 2026-10-14 20:45补充：AISHELL-3隔离CPU评测入口已在工作区实现：Sherpa-ONNX 1.13.5 Windows x64 CPU、2线程、六条固定句生成内存音频，再经锁定ASR、VoiceInferenceService和诊断进程内ModelBroker回听；报告只含匹配标志、音频/延迟/资源指标，不保存合成文本、转写或WAV。加载前核对九个固定文件名/散列、模型锁、运行时锁、8 GiB起始/4 GiB运行RAM门槛及进程冲突；有活动长测、XiaoK.Host或llama服务时拒绝。已加入模型免加载的CI合同检查。集中审查修复符号归一化、单一可清零PCM缓冲、失败关闭内存采样、异常控制文件和新报告路径。尚未本机编译/测试/加载TTS；新代码的远端CI待提交推送后验证。附着观察PID`11152`、Host PID`51240`仍活跃至预计`2026-10-15 17:12:04 CST`，期间继续禁止本机构建、测试、安装、TTS负载或操作Host。即使隔离回听通过，也不代表听感、设备、Host集成、生产模型准入或首版端到端通过；报告固定`productionAdmitted=false`。详见语音往返报告与进度待办。
