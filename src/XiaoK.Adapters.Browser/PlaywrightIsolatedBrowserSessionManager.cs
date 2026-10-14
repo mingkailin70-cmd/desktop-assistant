@@ -491,20 +491,26 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
 
     private static async Task<Session> CreateSessionAsync(Uri finalUri, string html, CancellationToken cancellationToken)
     {
-        var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
+        var playwright = await CancellableAsyncResourceStartup.StartAsync(
+            Playwright.CreateAsync,
+            static instance =>
+            {
+                instance.Dispose();
+                return Task.CompletedTask;
+            }, cancellationToken).ConfigureAwait(false);
         IBrowser? browser = null;
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-            {
-                Channel = "msedge",
-                Headless = true,
-                ChromiumSandbox = true,
-                Timeout = 8_000,
-                Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
-                    "--no-default-browser-check", "--disable-component-update"]
-            }).ConfigureAwait(false);
+            browser = await CancellableAsyncResourceStartup.StartAsync(
+                () => playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                {
+                    Channel = "msedge",
+                    Headless = true,
+                    ChromiumSandbox = true,
+                    Timeout = 8_000,
+                    Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
+                        "--no-default-browser-check", "--disable-component-update"]
+                }), CloseLateBrowserAsync, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
@@ -544,6 +550,12 @@ public sealed class PlaywrightIsolatedBrowserSessionManager : IIsolatedBrowserSe
             playwright.Dispose();
             throw;
         }
+    }
+
+    private static async Task CloseLateBrowserAsync(IBrowser browser)
+    {
+        try { await browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is TimeoutException or PlaywrightException) { }
     }
 
     private static async Task<PageSnapshot> CaptureSnapshotAsync(Session session, CancellationToken cancellationToken)

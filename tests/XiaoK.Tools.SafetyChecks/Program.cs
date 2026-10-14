@@ -10259,6 +10259,53 @@ static string CreateProject(string root, string name, string content)
 
 static async Task CheckIsolatedBrowserInitializationCancellationAsync()
 {
+    using (var alreadyCancelled = new CancellationTokenSource())
+    {
+        alreadyCancelled.Cancel();
+        var factoryStarted = false;
+        var cancelledBeforeStart = false;
+        try
+        {
+            _ = await CancellableAsyncResourceStartup.StartAsync(
+                () =>
+                {
+                    factoryStarted = true;
+                    return Task.FromResult(new object());
+                }, _ => Task.CompletedTask, alreadyCancelled.Token);
+        }
+        catch (OperationCanceledException) when (alreadyCancelled.IsCancellationRequested)
+        {
+            cancelledBeforeStart = true;
+        }
+        Require(cancelledBeforeStart && !factoryStarted, "预取消时仍启动了Playwright资源创建。");
+    }
+
+    var lateResource = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var lateResourceDisposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var lateDisposeCount = 0;
+    using (var startupCancellation = new CancellationTokenSource())
+    {
+        var startup = CancellableAsyncResourceStartup.StartAsync(
+            () => lateResource.Task,
+            _ =>
+            {
+                Interlocked.Increment(ref lateDisposeCount);
+                lateResourceDisposed.TrySetResult();
+                return Task.CompletedTask;
+            }, startupCancellation.Token);
+        startupCancellation.Cancel();
+        var cancelledPromptly = false;
+        try { _ = await startup; }
+        catch (OperationCanceledException) when (startupCancellation.IsCancellationRequested)
+        {
+            cancelledPromptly = true;
+        }
+        Require(cancelledPromptly, "Playwright资源初始化未及时响应取消。");
+        lateResource.TrySetResult(new object());
+        await lateResourceDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Require(Volatile.Read(ref lateDisposeCount) == 1, "迟到的Playwright资源没有被恰好清理一次。");
+    }
+
     await using var manager = new PlaywrightIsolatedBrowserSessionManager();
     using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
     var cancelled = false;

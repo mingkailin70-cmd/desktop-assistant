@@ -217,27 +217,35 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
     private static async Task<RenderedPageSnapshot> RenderHtmlAsync(string html, bool runInlineScripts,
         CancellationToken cancellationToken)
     {
-        var playwright = await Playwright.CreateAsync().ConfigureAwait(false);
+        var playwright = await CancellableAsyncResourceStartup.StartAsync(
+            Playwright.CreateAsync,
+            static instance =>
+            {
+                instance.Dispose();
+                return Task.CompletedTask;
+            }, cancellationToken).ConfigureAwait(false);
         IBrowser? browser = null;
         try
         {
-            browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-            {
-                Channel = "msedge",
-                Headless = true,
-                ChromiumSandbox = true,
-                Timeout = 8_000,
-                Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
-                    "--no-default-browser-check", "--disable-component-update"]
-            }).ConfigureAwait(false);
+            browser = await CancellableAsyncResourceStartup.StartAsync(
+                () => playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                {
+                    Channel = "msedge",
+                    Headless = true,
+                    ChromiumSandbox = true,
+                    Timeout = 8_000,
+                    Args = ["--disable-gpu", "--disable-background-networking", "--disable-sync", "--no-first-run",
+                        "--no-default-browser-check", "--disable-component-update"]
+                }), CloseLateBrowserAsync, cancellationToken).ConfigureAwait(false);
             var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 JavaScriptEnabled = runInlineScripts,
                 ServiceWorkers = ServiceWorkerPolicy.Block,
                 AcceptDownloads = false
-            }).ConfigureAwait(false);
-            await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient")).ConfigureAwait(false);
-            var page = await context.NewPageAsync().ConfigureAwait(false);
+            }).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await context.RouteAsync("**/*", route => route.AbortAsync("blockedbyclient"))
+                .WaitAsync(cancellationToken).ConfigureAwait(false);
+            var page = await context.NewPageAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
             context.Page += (_, popup) =>
             {
                 if (!ReferenceEquals(page, popup)) _ = popup.CloseAsync();
@@ -326,6 +334,12 @@ public sealed class PlaywrightPublicWebPageReader : IPublicWebPageReader, IDynam
     private static bool IsRedirect(HttpStatusCode status) => status is HttpStatusCode.MovedPermanently
         or HttpStatusCode.Redirect or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect
         or HttpStatusCode.PermanentRedirect;
+
+    private static async Task CloseLateBrowserAsync(IBrowser browser)
+    {
+        try { await browser.CloseAsync().WaitAsync(BrowserCloseTimeout).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is TimeoutException or PlaywrightException) { }
+    }
 
     internal sealed record FetchedPage(Uri FinalUri, string Html, int StatusCode);
 }
