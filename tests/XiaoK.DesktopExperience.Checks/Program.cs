@@ -64,7 +64,14 @@ if (args.Length == 1 && args[0] == "--only-runtime-task-history-recovery")
 var checks = 0;
 void Require(bool passed, string message)
 {
-    if (!passed) throw new InvalidOperationException(message);
+    if (!passed)
+    {
+        var annotationMessage = message.Replace("%", "%25", StringComparison.Ordinal)
+            .Replace("\r", "%0D", StringComparison.Ordinal)
+            .Replace("\n", "%0A", StringComparison.Ordinal);
+        Console.WriteLine($"::error title=Desktop experience check::{annotationMessage}");
+        throw new InvalidOperationException(message);
+    }
     checks++;
 }
 static bool Near(double left, double right) => Math.Abs(left - right) < 0.00001;
