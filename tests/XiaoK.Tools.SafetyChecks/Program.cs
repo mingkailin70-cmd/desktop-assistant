@@ -7913,6 +7913,27 @@ static async Task CheckFileContentSearchAsync(string root)
             "路径被原子替换后仍被当作原文件接受，搜索可能返回过期位置。");
     }
 
+    var inPlaceMutationTarget = Path.Combine(allowed, "in-place-mutation-race.txt");
+    const string initialGeneration = "GENERATION_A_PRIVATE_TEXT";
+    const string changedGeneration = "GENERATION_B_PRIVATE_TEXT";
+    Require(Encoding.UTF8.GetByteCount(initialGeneration) == Encoding.UTF8.GetByteCount(changedGeneration),
+        "原位修改竞态夹具没有保持文件长度相同。");
+    await File.WriteAllTextAsync(inPlaceMutationTarget, initialGeneration, new UTF8Encoding(false));
+    Require(WindowsDesktopTools.TryOpenOrdinaryFileForRead(inPlaceMutationTarget, out var inPlaceHandle,
+            out var inPlaceCanonical, out var inPlaceIdentity, out var inPlaceLength, out var inPlaceWriteTime),
+        "原位修改竞态夹具无法记录初始文件身份和快照。");
+    using (inPlaceHandle)
+    {
+        await File.WriteAllTextAsync(inPlaceMutationTarget, changedGeneration, new UTF8Encoding(false));
+        File.SetLastWriteTimeUtc(inPlaceMutationTarget, DateTime.UtcNow.AddMinutes(2));
+        var acceptedChangedFile = WindowsDesktopTools.TryReadStableTextFile(inPlaceMutationTarget,
+            inPlaceCanonical, inPlaceIdentity, inPlaceHandle, inPlaceLength, inPlaceWriteTime,
+            LocalFileContentSearchPolicy.MaximumFileBytes, CancellationToken.None,
+            out var changedText, out _, out var exceededBudget);
+        Require(!acceptedChangedFile && changedText.Length == 0 && !exceededBudget,
+            "文件被同长度原位改写后仍返回内容搜索结果。");
+    }
+
     var desktop = new WindowsDesktopTools([], [new KeyValuePair<string, string>("user-files", allowed)]);
     var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "");
     var proposal = LocalFileContentSearchPolicy.CreateUserToolProposal("在文件内容中搜索：Needle")

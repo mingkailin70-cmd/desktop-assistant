@@ -265,7 +265,7 @@ public sealed partial class WindowsDesktopTools
         return new(true, summary, Data: response);
     }
 
-    private static bool TryReadStableTextFile(string requestedPath, string expectedCanonicalPath,
+    internal static bool TryReadStableTextFile(string requestedPath, string expectedCanonicalPath,
         FileIdentity expectedIdentity, SafeFileHandle handle, long expectedLength, long expectedWriteTime,
         int maximumBytes, CancellationToken cancellationToken, out string text, out long bytesRead,
         out bool exceededBudget)
