@@ -259,6 +259,12 @@ internal sealed class WindowsNotificationMonitor : IDisposable
 
             // Establish a baseline so notifications already present at startup are not treated as new.
             var current = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
+            if (!NotificationStartupBaselinePolicy.IsSafeBaselineCount(current.Count))
+            {
+                StopListening();
+                return SetStatus("当前 Toast 数量超过安全启动基线上限512条；通知监听已停止，未读取正文。请稍后再试。");
+            }
+
             foreach (var notification in current)
             {
                 var sourceAppId = notification.AppInfo.AppUserModelId;
@@ -385,6 +391,12 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             // Resolve one event ID only; inspect the publisher before any toast text property.
             var sourceAppId = notification.AppInfo.AppUserModelId;
             if (string.IsNullOrWhiteSpace(sourceAppId) || !_allowedAppIds.Contains(sourceAppId)) return;
+            if (NotificationStartupBaselinePolicy.ShouldAddToBaseline(notification.CreationTime,
+                    _listeningStartedAtUtc))
+            {
+                RememberNotification(sourceAppId, notification.Id);
+                return;
+            }
             if (!RememberNotification(sourceAppId, notification.Id)) return;
 
             var key = $"{notification.Id}:{notification.CreationTime.UtcDateTime.Ticks}";

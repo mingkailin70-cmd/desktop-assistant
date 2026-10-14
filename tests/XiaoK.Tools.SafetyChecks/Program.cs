@@ -92,6 +92,7 @@ if (args.Length == 1 && args[0] == "--only-tool-proposal-preconditions")
 }
 if (args.Length == 1 && args[0] == "--only-notification-sample-bounds")
 {
+    CheckNotificationStartupBaselineIsBounded(FindRepositoryRoot());
     CheckNotificationEventQueueIsBoundedAndDeduplicated();
     CheckNotificationSampleTextProjectionIsBounded();
     CheckVisibleNotificationTextAggregationIsBounded();
@@ -891,6 +892,9 @@ try
 
     CheckNoticeBodyAccessGateRechecksVolatileState();
     passed.Add("读取通知正文前重新核对权限与解锁状态");
+
+    CheckNotificationStartupBaselineIsBounded(FindRepositoryRoot());
+    passed.Add("通知启动基线最多处理512条；超限时停止且忽略迟到的旧事件");
 
     CheckNotificationEventQueueIsBoundedAndDeduplicated();
     passed.Add("通知事件队列只保留有界去重的系统通知 ID，并串行跟踪在途项");
@@ -5519,6 +5523,64 @@ static void CheckNoticePublisherAssignmentsAreUnambiguous()
         "不同客户端的发布者被错误判定为归属歧义。");
     Require(!MessageNoticePublisherAssignments.HasOverlap([], []),
         "空发布者清单被错误判定为归属歧义。");
+}
+
+static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
+{
+    const int limit = NotificationStartupBaselinePolicy.MaximumNotificationsToBaseline;
+    var listeningStartedAt = DateTimeOffset.UnixEpoch.AddDays(1);
+    Require(limit == NotificationPublisherDiagnosticPolicy.MaximumInspectedNotifications
+        && NotificationStartupBaselinePolicy.IsSafeBaselineCount(0)
+        && NotificationStartupBaselinePolicy.IsSafeBaselineCount(limit)
+        && !NotificationStartupBaselinePolicy.IsSafeBaselineCount(limit + 1)
+        && !NotificationStartupBaselinePolicy.IsSafeBaselineCount(-1)
+        && NotificationStartupBaselinePolicy.ShouldAddToBaseline(listeningStartedAt.AddTicks(-1), listeningStartedAt)
+        && !NotificationStartupBaselinePolicy.ShouldAddToBaseline(listeningStartedAt, listeningStartedAt)
+        && !NotificationStartupBaselinePolicy.ShouldAddToBaseline(listeningStartedAt.AddTicks(1), listeningStartedAt),
+        "通知启动基线数量或时间策略未在0/512与开始时刻边界正确处理。");
+
+    var monitorPath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "WindowsNotificationMonitor.cs");
+    var monitor = File.ReadAllText(monitorPath);
+    var applyStart = monitor.IndexOf("public async Task<string> ApplySettingsAsync(XiaoKSettings settings)", StringComparison.Ordinal);
+    var applyEnd = applyStart < 0 ? -1 : monitor.IndexOf("public void Dispose()", applyStart, StringComparison.Ordinal);
+    var apply = applyStart >= 0 && applyEnd > applyStart ? monitor[applyStart..applyEnd] : string.Empty;
+    var currentLookup = apply.IndexOf("var current = await _listener.GetNotificationsAsync(NotificationKinds.Toast);", StringComparison.Ordinal);
+    var countGuard = apply.IndexOf("!NotificationStartupBaselinePolicy.IsSafeBaselineCount(current.Count)", StringComparison.Ordinal);
+    var stopOnOverflow = countGuard < 0 ? -1 : apply.IndexOf("StopListening();", countGuard, StringComparison.Ordinal);
+    var baselineLoop = apply.IndexOf("foreach (var notification in current)", StringComparison.Ordinal);
+    var metadataRead = apply.IndexOf("notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
+    Require(currentLookup >= 0 && countGuard > currentLookup && stopOnOverflow > countGuard
+        && baselineLoop > stopOnOverflow && metadataRead > baselineLoop,
+        "主通知监听没有在基线元数据枚举前检查512条上限并超限停止。");
+
+    var addedStart = monitor.IndexOf("private async Task ProcessAddedAsync(uint id)", StringComparison.Ordinal);
+    var addedEnd = addedStart < 0 ? -1
+        : monitor.IndexOf("private void StopForRevokedPermission", addedStart, StringComparison.Ordinal);
+    var added = addedStart >= 0 && addedEnd > addedStart ? monitor[addedStart..addedEnd] : string.Empty;
+    var publisherRead = added.IndexOf("var sourceAppId = notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
+    var staleEventGate = added.IndexOf(
+        "NotificationStartupBaselinePolicy.ShouldAddToBaseline(notification.CreationTime,", StringComparison.Ordinal);
+    var staleEventRemember = staleEventGate < 0 ? -1
+        : added.IndexOf("RememberNotification(sourceAppId, notification.Id);", staleEventGate, StringComparison.Ordinal);
+    var staleEventReturn = staleEventRemember < 0 ? -1 : added.IndexOf("return;", staleEventRemember, StringComparison.Ordinal);
+    var adapterInspect = added.IndexOf("adapter.Inspect(", StringComparison.Ordinal);
+    Require(publisherRead >= 0 && staleEventGate > publisherRead && staleEventRemember > staleEventGate
+        && staleEventReturn > staleEventRemember && adapterInspect > staleEventReturn,
+        "主通知监听没有在适配器/正文路径前记录并忽略迟到的旧Toast事件。");
+
+    var capturePath = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "NotificationFormatSampleCapture.cs");
+    var capture = File.ReadAllText(capturePath);
+    var start = capture.IndexOf("public async Task<string> StartAsync()", StringComparison.Ordinal);
+    var startEnd = start < 0 ? -1 : capture.IndexOf("public void Stop(", start, StringComparison.Ordinal);
+    var startMethod = start >= 0 && startEnd > start ? capture[start..startEnd] : string.Empty;
+    var existingLookup = startMethod.IndexOf("var existing = await _listener.GetNotificationsAsync(NotificationKinds.Toast);", StringComparison.Ordinal);
+    var captureGuard = startMethod.IndexOf("!NotificationStartupBaselinePolicy.IsSafeBaselineCount(existing.Count)", StringComparison.Ordinal);
+    var captureStop = captureGuard < 0 ? -1 : startMethod.IndexOf("Stop(", captureGuard, StringComparison.Ordinal);
+    var captureLoop = startMethod.IndexOf("foreach (var notification in existing)", StringComparison.Ordinal);
+    var captureMetadata = startMethod.IndexOf("notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
+    Require(existingLookup >= 0 && captureGuard > existingLookup && captureStop > captureGuard
+        && captureLoop > captureStop && captureMetadata > captureLoop,
+        "用户启动的一次性样本入口没有在基线元数据枚举前检查512条上限并停止。");
 }
 
 static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()

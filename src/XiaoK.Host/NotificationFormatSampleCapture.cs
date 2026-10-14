@@ -76,6 +76,12 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
                 return "Windows 通知访问权限已撤销；样本采集未开始。";
             }
 
+            if (!NotificationStartupBaselinePolicy.IsSafeBaselineCount(existing.Count))
+            {
+                Stop("当前 Toast 数量超过安全样本基线上限512条；本轮核验已停止，未读取正文。请稍后再试。", clearSamples: true);
+                return Status;
+            }
+
             foreach (var notification in existing)
             {
                 var sourceAppId = notification.AppInfo.AppUserModelId;
