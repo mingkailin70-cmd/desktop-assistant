@@ -2,7 +2,7 @@
 
 ## 持续有效的用户要求（更新至2026-10-15）
 
-2026-10-15 07:14补充：复核R3公网下载拒绝策略发现未覆盖JavaScript模块扩展名`mjs/cjs`及WebAssembly媒体类型/魔数；服务器可用通用MIME伪装。现把扩展名、ECMAScript/WebAssembly媒体类型和WASM `\0asm`签名加入拒绝列表，并使内容拒绝提示准确说明网页、可执行文件或脚本。新增合成策略夹具；候选`0.1.183.0`，完整远端CI待推送核验，未本机测试/安装。签名安装`0.1.163.0`；Host PID`51240`、监控PID`11152`和附着run `990b1e033a0141d4b76927a7dc6dc4bb`仍运行至预计`2026-10-15 17:12:04 CST`，期间不操作Host、不加载TTS。R0与首版端到端未通过；清理暂停。
+2026-10-15 07:22补充：R3公网下载拒绝策略新增`.mjs`/`.cjs`扩展名、ECMAScript/WebAssembly媒体类型和WASM `\0asm`签名检查，内容拒绝提示准确说明网页、可执行文件或脚本。候选`0.1.183.0`、提交`b81ef5d`已推送；GitHub Actions [Build 38653008001](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38653008001)固定SDK Release构建、完整安全、桌面体验、AISHELL-3评测器合同、模型锁定、长测停止协议和MSIX策略检查全通过。CI/合成证据，不是实际公网下载或安装验收；未本机测试/安装。签名安装`0.1.163.0`；Host PID`51240`、监控PID`11152`和附着run `990b1e033a0141d4b76927a7dc6dc4bb`仍运行至预计`2026-10-15 17:12:04 CST`，期间不操作Host、不加载TTS。R0与首版端到端未通过；清理暂停。
 
 2026-10-15 07:07补充：R3公网文件下载新增固定1,024字节前缀检查，识别UTF-8/UTF-16 BOM、前导空白及HTML/XML/SVG起始标记，阻止服务器将网页伪报为`text/plain`或`application/octet-stream`；普通文本以标记开头时保守拒绝。提交`4ad82ef`、候选`0.1.182.0`已推送；GitHub Actions [Build 38651500377](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38651500377)固定SDK Release构建、完整安全、桌面体验、AISHELL-3评测器合同、模型锁定、长测停止协议和MSIX策略检查全部成功。只属CI/合成证据，真实公网/安装版下载验收仍未完成。本机未编译/测试/安装。当前签名安装`0.1.163.0`，Host PID`51240`与监控PID`11152`、run `990b1e033a0141d4b76927a7dc6dc4bb`仍在运行，预计`2026-10-15 17:12:04 CST`结束；不操作Host、不加载TTS。该内容签名检查是有限启发式，不是恶意软件扫描或完整HTML解析。通知/清理限制不变；R0与首版端到端仍未通过。
 
