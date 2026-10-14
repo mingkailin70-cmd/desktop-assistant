@@ -1,3 +1,9 @@
+## v0.1.159.0 柯基桌宠安装更新（2026-10-14）
+
+按用户要求将已通过GitHub Actions Build 38526341181的柯基候选更新到本机。使用固定SDK 10.0.401完成自包含Host发布；签名MSIX位于artifacts/msix-validation/3385a1d079f845b0bc52dfb738b67c1b/XiaoK-signed-validation.msix，大小146,894,038字节，SHA-256 7949EAB638C16FC2301565E9CC4E970D75B68E6A0AB1213D69DEDAED3DCDFC22。安装前脚本确认包版本0.1.159.0、签名有效，SignTool验签0警告、0错误；证书B96A02547ABA84523619E11EB7788AE9850A5C60已在机器受信任存储，本次未修改证书信任。安装器对旧Host PID 44336发送核验过的优雅关闭消息，Host正常退出；当前用户安装包状态Ok，经正常AppX入口启动Host PID 55316。安装版/包内XiaoK.Host.dll SHA-256均为F32ADA90A7849549632EAC6E3006A3BB19A63E37A5D9FA072274208E4430BB7E，XiaoK.Tools.dll SHA-256为FAFA578F7DA28BEA6EF4EC188CD92387F40515D814429D278019A0D1857D35D9，llama-server为0。
+
+只读窗口截图在动画稳定后显示紧凑态柯基。此项只是安装与静态窗口可见性核验，不代表真实鼠标拖动、缩放/DPI、多屏或重启位置恢复通过。立即回滚到安装前版本时，可按回滚说明卸载当前包后安装保留的0.1.139.0包：artifacts/msix-validation/7a88fa4ec5b74c86950a57a4741c8d97/XiaoK-signed-validation.msix，SHA-256 35BA312C9C876D15A052DE8267A9D1952F8C4928A30AD30C18081F6C318F724A。原附着观察以interrupted结束；当前0.1.159.0已开始新的24小时只读附着观察，详情见开发进度文档。
+
 ## v0.1.139.0 桌宠拖动允许用户输入正常激活（2026-10-14）
 
 历史实现已经调用WPF `Window.DragMove()`，但紧凑态仍通过`WM_MOUSEACTIVATE/MA_NOACTIVATE`拒绝用户点击激活。本版保留桌宠任意可见位置的`DragMove()`入口，移除该人工输入拦截，并设置`ShowActivated=false`只抑制程序首次显示时的激活；用户主动拖动时窗口按普通桌面行为处理。工作区约束、拖动后位置保存、短按展开与缩放手柄排除保留。Release全解构建0警告/错误，安全检查134项通过/0跳过，桌面体验109项通过。
