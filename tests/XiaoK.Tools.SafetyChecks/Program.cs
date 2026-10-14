@@ -7496,7 +7496,11 @@ static async Task<(string? SkipReason, int SearchCount, int JunctionSwaps, long 
         return (skipReason, 0, 0, 0);
 
     var desktop = new WindowsDesktopTools(Array.Empty<DesktopApp>(),
-        [new KeyValuePair<string, string>("user-files", allowedRoot)]);
+        [new KeyValuePair<string, string>("user-files", allowedRoot)],
+        appProcessController: null, windowController: null, appLaunchTimeout: null, exportRoot: null,
+        // Keep each live native directory enumeration open long enough for the competing rename loop
+        // to run on Windows CI, so this pressure check cannot pass or fail on scheduling luck alone.
+        searchEntryObserver: static () => Thread.Sleep(2));
     var proposal = ToolBroker.Proposal("file.search.v1",
         [new("query", query), new("root_id", "user-files")], "user-files", ToolExpectedOutcome.MatchingFilesListed);
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(SearchTimeoutSeconds));
