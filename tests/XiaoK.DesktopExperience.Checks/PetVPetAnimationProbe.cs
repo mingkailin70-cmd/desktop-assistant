@@ -94,10 +94,10 @@ internal static class PetVPetAnimationProbe
                     var visiblePixels = CountVisiblePixels(pixels);
                     var cornerAlpha = new[]
                     {
-                        GetAlpha(pixels, 0, 0),
-                        GetAlpha(pixels, 359, 0),
-                        GetAlpha(pixels, 0, 359),
-                        GetAlpha(pixels, 359, 359)
+                        GetAlpha(pixels, 360, 0, 0),
+                        GetAlpha(pixels, 360, 359, 0),
+                        GetAlpha(pixels, 360, 0, 359),
+                        GetAlpha(pixels, 360, 359, 359)
                     };
                     var cornerLeakCount = CountCornerLeaks(pixels, 360, 360);
                     var surfaceNotFilled = visiblePixels < 360 * 360 * 98 / 100;
