@@ -25,6 +25,9 @@ jobs:
       - name: Long-run cooperative-stop checks
         shell: pwsh
         run: ./tools/test_xiaok_long_run_stop.ps1
+      - name: MSIX install and rollback policy checks
+        shell: pwsh
+        run: ./tools/test_xiaok_msix_install_policy.ps1
       - uses: actions/setup-dotnet@v6
         env:
           DOTNET_INSTALL_DIR: ${{ github.workspace }}\.tools\dotnet

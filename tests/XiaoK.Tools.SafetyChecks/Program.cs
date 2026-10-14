@@ -140,7 +140,7 @@ if (args.Length == 1 && args[0] == "--only-window-activation")
 if (args.Length == 1 && args[0] == "--only-msix-installer-contract")
 {
     CheckInstallGracefulShutdownContract(FindRepositoryRoot());
-    Console.WriteLine("通过：MSIX升级通过ASCII脚本中的Unicode标题构造安全核验并请求正常退出。");
+    Console.WriteLine("通过：MSIX升级与固定散列回滚都经过版本/身份校验，且优雅退出不强杀进程。");
     return;
 }
 if (args.Length == 1 && args[0] == "--only-app-status")
@@ -578,7 +578,7 @@ try
     passed.Add("应用路由只接受已知别名，未知名称不会回退到 VS Code");
 
     CheckInstallGracefulShutdownContract(FindRepositoryRoot());
-    passed.Add("MSIX更新只向包路径与窗口PID匹配的小K请求优雅退出，超时不强杀且旧版本要求人工退出");
+    passed.Add("MSIX升级/回滚拒绝未授权降级，固定包散列并验证目标版本；优雅退出身份核验且不强杀进程");
 
     CheckFileSearchResultSummaryReportsLimits();
     passed.Add("文件搜索达到扫描/显示上限时明确标记结果可能不完整");
@@ -4514,6 +4514,7 @@ static void CheckInstallGracefulShutdownContract(string repositoryRoot)
     var appSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "App.xaml.cs"));
     var windowSource = File.ReadAllText(Path.Combine(repositoryRoot, "src", "XiaoK.Host", "MainWindow.xaml.cs"));
     var installerSource = File.ReadAllText(Path.Combine(repositoryRoot, "tools", "install_xiaok_msix.ps1"));
+    var installPolicySource = File.ReadAllText(Path.Combine(repositoryRoot, "tools", "XiaoKMsixInstallPolicy.psm1"));
     Require(appSource.Contains(messageName, StringComparison.Ordinal)
         && appSource.Contains("ShutdownMessageId = RegisterWindowMessage", StringComparison.Ordinal)
         && windowSource.Contains("App.ShutdownMessageId", StringComparison.Ordinal)
@@ -4531,8 +4532,15 @@ static void CheckInstallGracefulShutdownContract(string repositoryRoot)
         && installerSource.Contains("TryRequestShutdown", StringComparison.Ordinal)
         && installerSource.Contains("[version]'0.1.7.0'", StringComparison.Ordinal)
         && installerSource.Contains("AddSeconds(45)", StringComparison.Ordinal)
-        && installerSource.Contains("No process was force-terminated", StringComparison.Ordinal),
-        "MSIX安装器没有执行固定消息、进程/窗口身份核对、旧版本拒绝和限时等待策略。");
+        && installerSource.Contains("No process was force-terminated", StringComparison.Ordinal)
+        && installerSource.Contains("Resolve-XiaoKMsixInstallPolicy", StringComparison.Ordinal)
+        && installerSource.Contains("Add-AppxPackage -Path $packagePath -ForceUpdateFromAnyVersion", StringComparison.Ordinal)
+        && installerSource.Contains("UseForceUpdateFromAnyVersion", StringComparison.Ordinal)
+        && installerSource.Contains("[version]$_.Version -eq $installPolicy.TargetVersion", StringComparison.Ordinal)
+        && installPolicySource.Contains("-ExpectedSha256", StringComparison.Ordinal)
+        && installPolicySource.Contains("$target -ge $currentVersion", StringComparison.Ordinal)
+        && installPolicySource.Contains("$target -lt $highestInstalledVersion", StringComparison.Ordinal),
+        "MSIX安装器没有执行固定消息、进程/窗口身份核对、拒绝未授权降级、固定散列回滚及安装后精确版本核验。");
 }
 
 static async Task CheckToolProposalPreconditionsAreTypedAsync()

@@ -10,7 +10,7 @@
 
 按用户要求将已通过GitHub Actions Build 38526341181的柯基候选更新到本机。使用固定SDK 10.0.401完成自包含Host发布；签名MSIX位于artifacts/msix-validation/3385a1d079f845b0bc52dfb738b67c1b/XiaoK-signed-validation.msix，大小146,894,038字节，SHA-256 7949EAB638C16FC2301565E9CC4E970D75B68E6A0AB1213D69DEDAED3DCDFC22。安装前脚本确认包版本0.1.159.0、签名有效，SignTool验签0警告、0错误；证书B96A02547ABA84523619E11EB7788AE9850A5C60已在机器受信任存储，本次未修改证书信任。安装器对旧Host PID 44336发送核验过的优雅关闭消息，Host正常退出；当前用户安装包状态Ok，经正常AppX入口启动Host PID 55316。安装版/包内XiaoK.Host.dll SHA-256均为F32ADA90A7849549632EAC6E3006A3BB19A63E37A5D9FA072274208E4430BB7E，XiaoK.Tools.dll SHA-256为FAFA578F7DA28BEA6EF4EC188CD92387F40515D814429D278019A0D1857D35D9，llama-server为0。
 
-只读窗口截图在动画稳定后显示紧凑态柯基。此项只是安装与静态窗口可见性核验，不代表真实鼠标拖动、缩放/DPI、多屏或重启位置恢复通过。立即回滚到安装前版本时，可按回滚说明卸载当前包后安装保留的0.1.139.0包：artifacts/msix-validation/7a88fa4ec5b74c86950a57a4741c8d97/XiaoK-signed-validation.msix，SHA-256 35BA312C9C876D15A052DE8267A9D1952F8C4928A30AD30C18081F6C318F724A。原附着观察以interrupted结束；当前0.1.159.0已开始新的24小时只读附着观察，详情见开发进度文档。
+只读窗口截图在动画稳定后显示紧凑态柯基。此项只是安装与静态窗口可见性核验，不代表真实鼠标拖动、缩放/DPI、多屏或重启位置恢复通过。历史记录中提到的先卸载再装`0.1.139.0`方式已被下方新的原位回滚流程取代，不应照旧执行。当前安装前版本是`0.1.159.0`，固定包路径与SHA-256见下方示例。原附着观察以interrupted结束；当前`0.1.159.0`已开始新的24小时只读附着观察，详情见开发进度文档。
 
 ## v0.1.139.0 桌宠拖动允许用户输入正常激活（2026-10-14）
 
@@ -579,7 +579,19 @@ VS Code 新窗口核验修正（2026-10-03）：复核后发现旧启动验收�
 
 托管模型目录设置与 0.1.5.0 更新（2026-10-03）：设置校验允许开发阶段模型目录位于 Git 仓库忽略的 `models/` 子树，同时仍拒绝仓库其他目录、UNC 和磁盘根目录；固定 SDK Release 构建 0 警告/0 错误，安全检查 84 项通过、0 跳过。`0.1.5.0` 自包含 MSIX SHA-256：`42B17097C8434ADF02D7402C7E118883297B2A607521DE76B138429FED586800`，签名有效，更新后包状态 `Ok`；本次没有添加或修改证书信任。安装版设置将模型目录指向仓库锁定的 Qwen3.5-4B revision，保留原有其他配置，监控和唤醒词仍关闭，并在更新前保存设置备份。重启后的 Host 已加载托管模型配置并显示首次推理按需启动；本次未在安装版发起推理，故实际权重加载、显存和卸载结果未验收。
 
-若需回滚，先在目标账户移除小K包；只有全机没有仍依赖该发布者的软件包时，才移除机器信任项。使用支持 `-WhatIf` 和逐步确认的卸载脚本：
+当前回滚通过原位安装已签名的较低版本包，不先卸载应用。MSIX支持用 `Add-AppxPackage -ForceUpdateFromAnyVersion` 安装较低版本；该参数只允许在安装器的显式回滚模式使用。安装器要求当前账户恰有一个匹配的小K包、目标版本严格低于当前版本，并要求用完整SHA-256固定回滚包；它仍核对包身份、证书签名、优雅关闭Host，并在安装后验证实际登记的版本。此流程避免卸载应用，因此不触发卸载流程对包内应用数据的清理。回滚还必须使用支持当前用户数据格式的程序版本；当前保留的 `0.1.159.0` 回滚包与 `0.1.163.0` 安装版都使用SQLite schema 7。微软文档：[Add-AppxPackage](https://learn.microsoft.com/en-us/powershell/module/appx/add-appxpackage?view=windowsserver2025-ps)、[MSIX企业部署与降级](https://learn.microsoft.com/en-us/windows/msix/desktop/managing-your-msix-deployment-enterprise)。
+
+例如回滚到保留的 `0.1.159.0` 包时：
+
+~~~powershell
+.\tools\install_xiaok_msix.ps1 `
+  -PackagePath 'artifacts\msix-validation\3385a1d079f845b0bc52dfb738b67c1b\XiaoK-signed-validation.msix' `
+  -Install `
+  -Rollback `
+  -ExpectedSha256 '7949EAB638C16FC2301565E9CC4E970D75B68E6A0AB1213D69DEDAED3DCDFC22'
+~~~
+
+常规更新不接受较低版本；普通 `-Install` 遇到降级会在关闭Host或改动证书信任前失败。回滚命令只会安装包，不会自动启动小K。只有明确要卸载小K时才使用支持 `-WhatIf` 和逐步确认的卸载脚本；移除机器信任仍须确认全机没有依赖该发布者的软件包：
 
 ~~~powershell
 # 先预览会卸载的当前账户应用，不做变更

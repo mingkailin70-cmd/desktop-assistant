@@ -2,11 +2,18 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$PackagePath,
-    [switch]$Install
+    [switch]$Install,
+    [switch]$Rollback,
+    [string]$ExpectedSha256
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'XiaoKMsixInstallPolicy.psm1') -Force
+
+if ($Rollback -and -not $Install) {
+    throw '-Rollback requires -Install.'
+}
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $artifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))
@@ -57,6 +64,7 @@ try {
 $packageIdentity = $packageManifest.Package.Identity
 $manifestPublisher = [string]$packageIdentity.Publisher
 $manifestName = [string]$packageIdentity.Name
+$manifestVersion = [string]$packageIdentity.Version
 if ($manifestPublisher -cne $certificate.Subject -or $manifestName -cne 'MingKaiLin.XiaoK') {
     throw 'The package identity does not match the expected XiaoK development publisher and package name.'
 }
@@ -87,10 +95,20 @@ if (-not $Install) {
     return
 }
 
-$previousPackage = Get-AppxPackage -Name $manifestName |
+$matchingPackages = @(Get-AppxPackage -Name $manifestName |
     Where-Object { $_.Publisher -ceq $manifestPublisher } |
-    Sort-Object { [version]$_.Version } -Descending |
-    Select-Object -First 1
+    Sort-Object { [version]$_.Version } -Descending)
+$installPolicy = Resolve-XiaoKMsixInstallPolicy `
+    -InstallRequested:$Install `
+    -RollbackRequested:$Rollback `
+    -ExpectedSha256 $ExpectedSha256 `
+    -ActualSha256 $packageHash `
+    -TargetVersion $manifestVersion `
+    -InstalledVersions @($matchingPackages | ForEach-Object { [string]$_.Version })
+$previousPackage = $matchingPackages | Select-Object -First 1
+if ($Rollback) {
+    Write-Output "Verified explicit rollback from $($installPolicy.CurrentVersion) to $($installPolicy.TargetVersion) using the pinned package SHA-256."
+}
 if ($null -ne $previousPackage) {
     $previousHostPath = [System.IO.Path]::GetFullPath((Join-Path $previousPackage.InstallLocation 'XiaoK.Host.exe'))
     $matchingHostProcesses = @()
@@ -266,7 +284,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 try {
-    Add-AppxPackage -Path $packagePath
+    if ($installPolicy.UseForceUpdateFromAnyVersion) {
+        Add-AppxPackage -Path $packagePath -ForceUpdateFromAnyVersion
+    } else {
+        Add-AppxPackage -Path $packagePath
+    }
 } catch {
     if ($addedTrustedCertificate) {
         Remove-Item -LiteralPath "Cert:\LocalMachine\TrustedPeople\$($certificate.Thumbprint)" -ErrorAction SilentlyContinue
@@ -274,9 +296,14 @@ try {
     throw
 }
 
-$installedPackage = Get-AppxPackage -Name $manifestName | Where-Object { $_.Publisher -ceq $manifestPublisher } | Select-Object -First 1
+$installedPackage = Get-AppxPackage -Name $manifestName |
+    Where-Object {
+        $_.Publisher -ceq $manifestPublisher -and
+        [version]$_.Version -eq $installPolicy.TargetVersion
+    } |
+    Select-Object -First 1
 if ($null -eq $installedPackage) {
-    throw 'Add-AppxPackage returned without an error, but the XiaoK package could not be found for the current user. Inspect Windows deployment logs before retrying.'
+    throw "Add-AppxPackage returned without an error, but expected XiaoK version $($installPolicy.TargetVersion) could not be found for the current user. Inspect Windows deployment logs before retrying."
 }
 Write-Output "Installed for current user: $($installedPackage.PackageFullName)"
 $trustResult = if ($addedTrustedCertificate) { 'The certificate was added to LocalMachine\TrustedPeople.' } else { 'The certificate was already trusted in LocalMachine\TrustedPeople.' }
