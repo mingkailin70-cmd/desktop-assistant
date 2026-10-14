@@ -3317,6 +3317,8 @@ internal sealed class CodeWorkspaceSnapshot
             RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
         new(@"\b(?:hf_[A-Za-z0-9]{20,}|dckr_(?:pat|oat)_[A-Za-z0-9_-]{20,})\b",
             RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
+        new(@"\b(?:pypi-[A-Za-z0-9_-]{85,}|\d{8,10}:[A-Za-z0-9_-]{32,64}|sb_secret_[A-Za-z0-9_-]{22}_[A-Za-z0-9_-]{8})\b",
+            RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
         new(@"\b[A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4}\b",
             RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)),
         new(@"\b(?:ABSK[A-Za-z0-9+/]{109,269}={0,2}|bedrock-api-key-[A-Za-z0-9+/=_-]{16,})\b",

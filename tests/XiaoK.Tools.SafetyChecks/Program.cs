@@ -5370,6 +5370,9 @@ static async Task CheckLikelyCredentialIsNotSentAsync(string root)
         "hf_" + new string('h', 32),
         "dckr_pat_" + new string('d', 24),
         "dckr_oat_" + new string('o', 24),
+        "pypi-" + new string('p', 85),
+        "123456789:" + new string('t', 35),
+        "sb_secret_" + new string('s', 22) + "_" + new string('c', 8),
         new string('a', 76) + "AZDO" + new string('b', 4),
         "ghp_" + new string('g', 32),
         "glpat-" + new string('l', 30),
@@ -5419,10 +5422,12 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
         "redis://user:" + new string('p', 24) + "@cache.example.invalid/0"
     };
     var allSyntheticCredentials = syntheticCredentials.Concat([unquotedApiKey, bearerToken, basicToken, nestedToken, nestedKnownToken]).ToArray();
+    var publishableSupabaseKey = "sb_publishable_" + new string('s', 22) + "_" + new string('c', 8);
     var original = "internal class Sample {\n"
         + string.Join("\n", syntheticCredentials.Select((secret, index) => $"    private const string Key{index} = \"{secret}\";"))
         + $"\n    private const string Nested = \"{nestedKnownToken}\";"
         + $"\n    private const string OrdinaryValue = \"{ordinaryAzdoLike}\";\n    private const string ShortExample = \"hf_example\";\n"
+        + $"    private const string PublishableSupabaseKey = \"{publishableSupabaseKey}\";\n    private const string ShortPyPiExample = \"pypi-example\";\n"
         + $"\n    // api_key: {unquotedApiKey}\n    // Authorization: Bearer {bearerToken}\n    // Authorization: Basic {basicToken}\n"
         + "    private const string Placeholder = \"${API_KEY}\";\n"
         + "    // Authorization: Bearer example-token-placeholder-123456\n"
@@ -5441,6 +5446,8 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
     Require(inference.Prompts.All(prompt => allSyntheticCredentials.All(secret => !prompt.Contains(secret, StringComparison.Ordinal))
         && prompt.Contains("[REDACTED_CREDENTIAL]", StringComparison.Ordinal)
         && prompt.Contains(ordinaryAzdoLike, StringComparison.Ordinal)
+        && prompt.Contains(publishableSupabaseKey, StringComparison.Ordinal)
+        && prompt.Contains("pypi-example", StringComparison.Ordinal)
         && prompt.Contains("hf_example", StringComparison.Ordinal)
         && prompt.Contains("${API_KEY}", StringComparison.Ordinal)
         && prompt.Contains("example-token-placeholder-123456", StringComparison.Ordinal)),
@@ -5450,6 +5457,7 @@ static async Task CheckLikelyCredentialIsRedactedBeforeModelContextAsync(string 
     var taskRoot = Directory.GetDirectories(workspaceRoot).Single();
     var updated = File.ReadAllText(Path.Combine(taskRoot, "workspace", "Sample.cs"));
     Require(allSyntheticCredentials.All(secret => updated.Contains(secret, StringComparison.Ordinal))
+        && updated.Contains(publishableSupabaseKey, StringComparison.Ordinal)
         && updated.Contains("int value = 2;", StringComparison.Ordinal),
         "精确编辑没有保留隔离快照中的原始凭证字节内容。");
 }
