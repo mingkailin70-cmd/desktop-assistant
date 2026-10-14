@@ -755,6 +755,46 @@
       "requiredForP0": false
     },
     {
+      "id": "granite-4.1-3b-q4km-code-eval",
+      "role": "p0-code-evaluation-candidate",
+      "source": "https://huggingface.co/ibm-granite/granite-4.1-3b-GGUF",
+      "baseModel": "ibm-granite/granite-4.1-3b",
+      "baseModelRevision": "2fdf0283f76da610615e553a468ed1e760f640bc",
+      "revision": "b628c0ba2ad455695caee93e6a7ac8b3660ad229",
+      "format": "GGUF",
+      "quantization": "Q4_K_M",
+      "quantizer": "IBM Granite GGUF release workflow",
+      "conversionRuntime": "IBM/gguf compatibility matrix lists llama.cpp b8742; project-fixed b11259 is newer but local Windows compatibility remains unverified",
+      "files": [
+        {
+          "name": "granite-4.1-3b-Q4_K_M.gguf",
+          "upstreamReportedSizeBytes": 2099501664,
+          "expectedUpstreamSha256": "662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29"
+        }
+      ],
+      "license": "apache-2.0",
+      "licenseEvidenceSources": [
+        "https://huggingface.co/ibm-granite/granite-4.1-3b",
+        "https://huggingface.co/ibm-granite/granite-4.1-3b-GGUF/blob/b628c0ba2ad455695caee93e6a7ac8b3660ad229/README.md"
+      ],
+      "dataSource": "IBM Granite 4.1 3B disclosed pre-training and post-training datasets, including GneissWeb, Webhose, Code Pile, Granite Feedback and other listed sources",
+      "dataSourceEvidenceStatus": "public_disclosure_includes_private_third_party_and_internal_sources",
+      "dataSourceEvidenceMethod": "The model-specific IBM disclosure names Webhose as private non-public third-party data, Granite Feedback as internal feedback, and says the code pile retains files with permissive licenses. This does not independently establish rights for every item or disclose a reproducible per-example manifest.",
+      "dataSourceEvidenceSources": [
+        "https://github.com/ibm-granite/granite-4.1-language-models/blob/main/disclosures/granite_4.1_3b_disclosure.json",
+        "https://huggingface.co/ibm-granite/granite-4.1-3b"
+      ],
+      "dataLicenseScopeStatus": "model_apache2_data_item_rights_not_fully_independently_verified",
+      "dataLicenseScopeEvidenceSources": [
+        "https://github.com/ibm-granite/granite-4.1-language-models/blob/main/disclosures/granite_4.1_3b_disclosure.json",
+        "https://huggingface.co/ibm-granite/granite-4.1-3b"
+      ],
+      "status": "candidate",
+      "notes": "官方IBM GGUF文件页记录该文件由IBM/gguf工作流生成（tag v4.1-language-3B-rc1），并指向Granite 4.1 3B底模；本锁将底模固定到当时可见的仓库revision 2fdf0283f76da610615e553a468ed1e760f640bc，但发布说明没有证明转换所用的精确底模提交，因此权重与底模提交的对应关系仍是来源限制。IBM模型卡标Apache-2.0并披露代码任务能力，但厂商基准不是小K成绩。数据披露包含非公开第三方Webhose和内部反馈数据；不推断其违法，但由于逐项数据权利与完整清单未独立核实，仅作隔离候选，不得进入生产。未下载本地权重，未核验本机散列、Windows加载、资源、聊天模板或coding-zh-v4任务表现。只有先通过本机RAM/显存准入、再以固定运行时和任务集评估后，才讨论是否保留。",
+      "localDirectory": "llm/granite-4.1-3b-q4km-code-eval/b628c0ba2ad455695caee93e6a7ac8b3660ad229",
+      "requiredForP0": false
+    },
+    {
       "id": "qwen3.8-27b-pi-q4km-eval",
       "role": "p0-code-evaluation-candidate",
       "source": "https://huggingface.co/bytkim/Qwen3.8-27B-pi-GGUF",
