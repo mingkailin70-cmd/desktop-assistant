@@ -773,7 +773,7 @@
         }
       ],
       "license": "apache-2.0",
-      "status": "downloaded_and_verified",
+      "status": "candidate",
       "notes": "社区 Qwen3.8-27B-pi 编程代理微调候选：上游说明采用 Pi agent 成功轨迹 SFT 与 GRPO 推理效率奖励，GGUF主权重适用于 llama.cpp。上游小样本/特定硬件结果仅供筛选，不能代表小K质量；本机须用固定 coding-zh-v4 与现行工具/安全评测比较。首轮只下载文本 Q4_K_M 主权重，不下载视觉投影或 MTP draft，以免把多模态和推测解码混入质量/资源对照。27B Q4 权重约15.41 GiB；本机 RAM 需先达到已有18 GiB可用保护线并保留至少1 GiB独显余量，未达标不启动推理。候选不得改变生产模型。",
       "localDirectory": "llm/qwen3.8-27b-pi-q4km-eval/97caacb971d9246520fa8db5282a06bd36b103df",
       "requiredForP0": false
@@ -821,7 +821,7 @@
         }
       ],
       "license": "apache-2.0",
-      "status": "downloaded_and_verified",
+      "status": "candidate",
       "notes": "Qwen官方27B基础模型的Unsloth Dynamic 3.0社区量化版。模型卡称其改善编程、长程Agent与视觉语言能力；这些为发布方主张，须以小K固定评测独立验证。当前仅锁定文本GGUF，不含约928 MB的mmproj视觉投影文件。2026-10-12 12:34本机复核可用内存12.40 GiB、RTX 5060独显空闲显存5478 MiB（总计8151 MiB）；Q4权重16,464,440,224字节，当前不运行推理以免内存换页或影响前台工作。下载与散列核验已完成；待资源基线满足后，再用固定b11259做兼容性/资源短测，并与轻模型按同一任务评测。不得据下载或上游跑分切换生产配置。",
       "localDirectory": "llm/qwen3.8-27b-ud-q4km-eval/4ca720788d1e01f1bff70c033e0d0028fd02e502",
       "requiredForP0": false
@@ -845,7 +845,7 @@
         }
       ],
       "license": "apache-2.0",
-      "status": "downloaded_and_verified",
+      "status": "candidate",
       "notes": "Qwen3.8-27B同一底模与revision的Unsloth Dynamic 3.0 Q3量化版本；相比UD-Q4_K_M约少20%权重，更适合作为本机CPU/GPU混合卸载可行性候选，但更低位宽可能损失任务质量。仅作隔离对照，必须与Q4版本使用相同任务集、运行时和资源测量；不据模型规模或上游成绩切换生产配置。当前未启动推理。",
       "localDirectory": "llm/qwen3.8-27b-ud-q3kxl-eval/4ca720788d1e01f1bff70c033e0d0028fd02e502",
       "requiredForP0": false
@@ -1073,7 +1073,7 @@
         }
       ],
       "license": "apache-2.0",
-      "status": "downloaded_and_verified",
+      "status": "candidate",
       "notes": "GitHub IST-DASLab/GSQ量化代码与ISTA-DASLab发布的固定GGUF权重构成可追溯社区候选；上游声明权重继承Qwen3.8-27B Apache-2.0。模型卡报告IQ2_XS约8.42GB，并报告其在若干通用基准优于同体积Unsloth UD-IQ2_S；这些是上游结果，不代表小K代码/工具任务表现。隔离评测profile为8个GPU层、3,500 MiB预算、启动前至少4,524 MiB独显空闲和15,360 MiB可用RAM，并在运行中保留至少1 GiB显存和4 GiB系统内存。当前资源低于系统内存准入线；未通过b11259兼容、资源和同任务集门槛前不得运行或进入生产路由。",
       "localDirectory": "llm/qwen3.8-27b-gsq-rco-iq2-xs-eval/d562806dbafae37109975e970aae91b43e73b440",
       "requiredForP0": false
