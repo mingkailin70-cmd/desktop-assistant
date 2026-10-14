@@ -40,6 +40,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
     private bool _baselineReady;
     private bool _processing;
     private bool _disposed;
+    private int _pendingNotificationOverflow;
 
     public NotificationFormatSampleCapture(Dispatcher dispatcher, UserNotificationListener listener,
         string applicationId, string publisherDisplayName, string publisherAppUserModelId)
@@ -120,6 +121,7 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
         IsActive = false;
         _baselineReady = false;
         _pendingIds.Clear();
+        Interlocked.Exchange(ref _pendingNotificationOverflow, 0);
         if (clearSamples) _samples.Clear();
         if (clearSamples || _samples.Count == 0) _timeoutCancellation.Cancel();
         RaiseStatus(message);
@@ -146,13 +148,44 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
 
     private void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs args)
     {
-        if (args.ChangeKind != UserNotificationChangedKind.Added || !IsActive || _disposed) return;
+        if (args.ChangeKind != UserNotificationChangedKind.Added || !IsActive || _disposed
+            || !ReferenceEquals(sender, _listener)) return;
         var id = args.UserNotificationId;
         if (_dispatcher.CheckAccess()) QueueAdded(id);
         else
         {
-            try { _dispatcher.BeginInvoke(new Action(() => QueueAdded(id))); }
-            catch (InvalidOperationException) { }
+            var result = _pendingIds.TryEnqueue(id);
+            if (result == NotificationIdEnqueueResult.CapacityReached)
+                Interlocked.Exchange(ref _pendingNotificationOverflow, 1);
+            if (result is NotificationIdEnqueueResult.Added or NotificationIdEnqueueResult.CapacityReached)
+                ScheduleAddedQueueWake();
+        }
+    }
+
+    private void ScheduleAddedQueueWake()
+    {
+        if (!_pendingIds.TryReserveDispatcherWake()) return;
+        try
+        {
+            _dispatcher.BeginInvoke(new Action(() =>
+            {
+                _pendingIds.ReleaseDispatcherWake();
+                if (_disposed || !IsActive)
+                {
+                    _pendingIds.Clear();
+                    return;
+                }
+                if (Interlocked.Exchange(ref _pendingNotificationOverflow, 0) != 0)
+                {
+                    Stop("通知样本队列达到上限，已停止本轮采集；未读取未排队通知的正文。请清除样本后再开始新一轮。", clearSamples: false);
+                    return;
+                }
+                if (_baselineReady) StartDrain();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            _pendingIds.ReleaseDispatcherWake();
         }
     }
 

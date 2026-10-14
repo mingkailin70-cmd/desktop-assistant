@@ -33,12 +33,14 @@ public sealed class BoundedNotificationKeySet
     public void Clear() => _keys.Clear();
 }
 
-/// <summary>Bounded single-dispatcher queue that retains only Windows notification IDs, never toast content.</summary>
+/// <summary>Thread-safe bounded queue that retains only Windows notification IDs, never toast content.</summary>
 public sealed class BoundedNotificationIdQueue
 {
     private readonly int _capacity;
     private readonly Queue<uint> _pending = [];
     private readonly HashSet<uint> _tracked = [];
+    private readonly object _gate = new();
+    private int _dispatcherWakePending;
 
     public BoundedNotificationIdQueue(int capacity)
     {
@@ -46,26 +48,46 @@ public sealed class BoundedNotificationIdQueue
         _capacity = capacity;
     }
 
-    public int Count => _tracked.Count;
+    public int Count
+    {
+        get { lock (_gate) return _tracked.Count; }
+    }
 
     public NotificationIdEnqueueResult TryEnqueue(uint notificationId)
     {
-        if (_tracked.Contains(notificationId)) return NotificationIdEnqueueResult.AlreadyTracked;
-        if (_tracked.Count >= _capacity) return NotificationIdEnqueueResult.CapacityReached;
-        _tracked.Add(notificationId);
-        _pending.Enqueue(notificationId);
-        return NotificationIdEnqueueResult.Added;
+        lock (_gate)
+        {
+            if (_tracked.Contains(notificationId)) return NotificationIdEnqueueResult.AlreadyTracked;
+            if (_tracked.Count >= _capacity) return NotificationIdEnqueueResult.CapacityReached;
+            _tracked.Add(notificationId);
+            _pending.Enqueue(notificationId);
+            return NotificationIdEnqueueResult.Added;
+        }
     }
 
-    public bool TryDequeue(out uint notificationId) => _pending.TryDequeue(out notificationId);
+    public bool TryDequeue(out uint notificationId)
+    {
+        lock (_gate) return _pending.TryDequeue(out notificationId);
+    }
 
     /// <summary>Release a notification ID after processing; dequeued IDs remain tracked while in flight.</summary>
-    public void Complete(uint notificationId) => _tracked.Remove(notificationId);
+    public void Complete(uint notificationId)
+    {
+        lock (_gate) _tracked.Remove(notificationId);
+    }
+
+    /// <summary>Coalesces background event wakeups so a burst reserves at most one dispatcher callback.</summary>
+    public bool TryReserveDispatcherWake() => Interlocked.CompareExchange(ref _dispatcherWakePending, 1, 0) == 0;
+
+    public void ReleaseDispatcherWake() => Volatile.Write(ref _dispatcherWakePending, 0);
 
     public void Clear()
     {
-        _pending.Clear();
-        _tracked.Clear();
+        lock (_gate)
+        {
+            _pending.Clear();
+            _tracked.Clear();
+        }
     }
 }
 

@@ -5688,6 +5688,24 @@ static void CheckNotificationStartupBaselineIsBounded(string repositoryRoot)
     Require(existingLookup >= 0 && captureGuard > existingLookup && captureStop > captureGuard
         && captureLoop > captureStop && captureMetadata > captureLoop,
         "用户启动的一次性样本入口没有在基线元数据枚举前检查512条上限并停止。");
+
+    var monitorEventStart = monitor.IndexOf("private void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs args)", StringComparison.Ordinal);
+    var monitorEventEnd = monitorEventStart < 0 ? -1 : monitor.IndexOf("private void QueueOrProcessAdded(uint id)", monitorEventStart, StringComparison.Ordinal);
+    var monitorEvent = monitorEventStart >= 0 && monitorEventEnd > monitorEventStart
+        ? monitor[monitorEventStart..monitorEventEnd] : string.Empty;
+    var captureEventStart = capture.IndexOf("private void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs args)", StringComparison.Ordinal);
+    var captureEventEnd = captureEventStart < 0 ? -1 : capture.IndexOf("private void ScheduleAddedQueueWake()", captureEventStart, StringComparison.Ordinal);
+    var captureEvent = captureEventStart >= 0 && captureEventEnd > captureEventStart
+        ? capture[captureEventStart..captureEventEnd] : string.Empty;
+    Require(monitorEvent.Contains("_pendingAddedIds.TryEnqueue(id)", StringComparison.Ordinal)
+        && monitorEvent.Contains("ScheduleAddedQueueWake()", StringComparison.Ordinal)
+        && !monitorEvent.Contains("BeginInvoke(new Action(() => QueueOrProcessAdded(id)))", StringComparison.Ordinal)
+        && captureEvent.Contains("_pendingIds.TryEnqueue(id)", StringComparison.Ordinal)
+        && captureEvent.Contains("ScheduleAddedQueueWake()", StringComparison.Ordinal)
+        && !captureEvent.Contains("BeginInvoke(new Action(() => QueueAdded(id)))", StringComparison.Ordinal)
+        && monitor.Contains("TryReserveDispatcherWake()", StringComparison.Ordinal)
+        && capture.Contains("TryReserveDispatcherWake()", StringComparison.Ordinal),
+        "通知后台事件未先进入有界线程安全队列，或没有合并为单个 Dispatcher 唤醒。");
 }
 
 static void CheckNotificationPublisherDiagnosticIsBoundedAndEphemeral()
@@ -5819,6 +5837,29 @@ static void CheckNotificationEventQueueIsBoundedAndDeduplicated()
     queue.Complete(third);
     Require(queue.Count == 0 && !queue.TryDequeue(out _),
         "通知事件队列清空后仍保留了跟踪项。");
+
+    var concurrent = new BoundedNotificationIdQueue(capacity: 64);
+    Parallel.For(0, 8192, index => concurrent.TryEnqueue((uint)(index % 128)));
+    Require(concurrent.Count == 64,
+        "多个通知事件线程并发入队时，队列未保持容量上限或发生了同步丢失。");
+    var concurrentIds = new HashSet<uint>();
+    while (concurrent.TryDequeue(out var id))
+    {
+        Require(concurrentIds.Add(id), "并发通知队列返回了重复的排队 ID。");
+        concurrent.Complete(id);
+    }
+    Require(concurrent.Count == 0 && concurrentIds.Count == 64,
+        "并发通知队列没有完整保留其容量内的不同 ID。");
+
+    var wakeups = 0;
+    Parallel.For(0, 8192, _ =>
+    {
+        if (concurrent.TryReserveDispatcherWake()) Interlocked.Increment(ref wakeups);
+    });
+    Require(wakeups == 1, "同一批后台通知事件为 Dispatcher 保留了多个并发唤醒回调。");
+    concurrent.ReleaseDispatcherWake();
+    Require(concurrent.TryReserveDispatcherWake(), "Dispatcher 回调完成后未能重新安排后续通知唤醒。");
+    concurrent.ReleaseDispatcherWake();
 }
 
 static void CheckNotificationSampleTextProjectionIsBounded()

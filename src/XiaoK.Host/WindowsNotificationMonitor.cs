@@ -37,6 +37,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     private DateTimeOffset _listeningStartedAtUtc;
     private bool _processingAddedIds;
     private bool _addedQueueOverflowReported;
+    private int _pendingAddedOverflow;
     private bool _disposed;
 
     public WindowsNotificationMonitor(Dispatcher dispatcher) => _dispatcher = dispatcher;
@@ -302,14 +303,20 @@ internal sealed class WindowsNotificationMonitor : IDisposable
 
     private void OnNotificationChanged(UserNotificationListener sender, UserNotificationChangedEventArgs args)
     {
-        if (args.ChangeKind != UserNotificationChangedKind.Added || _disposed) return;
+        if (args.ChangeKind != UserNotificationChangedKind.Added || _disposed
+            || !ReferenceEquals(sender, _listener)) return;
         var id = args.UserNotificationId;
-        if (!_dispatcher.CheckAccess())
+        if (_dispatcher.CheckAccess())
         {
-            _dispatcher.BeginInvoke(new Action(() => QueueOrProcessAdded(id)));
+            QueueOrProcessAdded(id);
             return;
         }
-        QueueOrProcessAdded(id);
+
+        var result = _pendingAddedIds.TryEnqueue(id);
+        if (result == NotificationIdEnqueueResult.CapacityReached)
+            Interlocked.Exchange(ref _pendingAddedOverflow, 1);
+        if (result is NotificationIdEnqueueResult.Added or NotificationIdEnqueueResult.CapacityReached)
+            ScheduleAddedQueueWake();
     }
 
     private void QueueOrProcessAdded(uint id)
@@ -320,14 +327,38 @@ internal sealed class WindowsNotificationMonitor : IDisposable
             case NotificationIdEnqueueResult.AlreadyTracked:
                 return;
             case NotificationIdEnqueueResult.CapacityReached:
-                if (!_addedQueueOverflowReported)
-                {
-                    _addedQueueOverflowReported = true;
-                    RaiseStatus("通知事件队列达到上限；更多通知未自动处理，请手动查看微信 / QQ。");
-                }
+                Interlocked.Exchange(ref _pendingAddedOverflow, 1);
+                ReportAddedQueueOverflow();
+                if (_baselineReady) StartPendingAddedDrain();
                 return;
         }
         if (_baselineReady) StartPendingAddedDrain();
+    }
+
+    private void ScheduleAddedQueueWake()
+    {
+        if (!_pendingAddedIds.TryReserveDispatcherWake()) return;
+        try
+        {
+            _dispatcher.BeginInvoke(new Action(() =>
+            {
+                _pendingAddedIds.ReleaseDispatcherWake();
+                if (_disposed) return;
+                ReportAddedQueueOverflow();
+                if (_baselineReady) StartPendingAddedDrain();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            _pendingAddedIds.ReleaseDispatcherWake();
+        }
+    }
+
+    private void ReportAddedQueueOverflow()
+    {
+        if (Interlocked.Exchange(ref _pendingAddedOverflow, 0) == 0 || _addedQueueOverflowReported) return;
+        _addedQueueOverflowReported = true;
+        RaiseStatus("通知事件队列达到上限；更多通知未自动处理，请手动查看微信 / QQ。");
     }
 
     private void StartPendingAddedDrain()
@@ -484,6 +515,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
         _baselineReady = false;
         _pendingAddedIds.Clear();
         _addedQueueOverflowReported = false;
+        Interlocked.Exchange(ref _pendingAddedOverflow, 0);
         _seenNotificationKeys.Clear();
         _seenNotificationOrder.Clear();
     }
