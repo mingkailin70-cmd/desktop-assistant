@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-14 14:24 Codex透明宠物风格对照
+
+继续依据OpenAI公开的[Codex宠物图集契约](https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/references/codex-pet-contract.md)及[宠物制作与预览流程](https://github.com/openai/skills/tree/main/skills/.curated/hatch-pet)：可验证的借鉴点是透明背景、按状态拆分动作、保持角色清晰，并用逐态预览把动作质量作为验收对象。该资料描述宠物素材/格式，不是Codex桌面应用的窗口、合成或拖动实现；桌面内部实现未从公开源码证实，不能宣称复制了实现代码。
+
+Codex内现有红白柯基宠物“柯柯”保持启用，作为对照对象，不重复创建。小K候选`0.1.157.0`据此去掉底部品牌卡、光晕和附加投影，默认待命只显柯基本体，非待命状态显示简短状态；依旧使用本项目自有柯基素材和VPet Core。候选提交`8ce2b68`的GitHub Actions [Build 38520782578](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38520782578)成功；真实对比仍待观察结束后安装新版本，CI不证明实机观感。
+
 ## 2026-10-14 12:55 Codex宠物制作方式与小K柯基对照
 
 参考OpenAI公开的[Codex宠物状态模型](https://github.com/openai/codex/blob/main/codex-rs/tui/src/pets/model.rs)、[`hatch-pet`图集契约](https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/references/codex-pet-contract.md)和[QA rubric](https://github.com/openai/skills/blob/main/skills/.curated/hatch-pet/references/qa-rubric.md)：借鉴方向是让动作分行、角色轮廓与基线保持稳定、逐状态预览并检查方向可读性。Codex仓库该公开状态模型属于TUI宠物数据结构，不能证明或复刻Codex桌面版私有窗口合成与渲染实现；本次没有声称复制桌面版源码。公开contract当前记录8×9基础图集，而本次Codex应用宠物工具为当前v2素材执行了自己的完整校验；不把旧公开contract误作v2规格。
