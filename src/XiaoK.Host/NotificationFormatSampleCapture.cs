@@ -190,81 +190,82 @@ internal sealed class NotificationFormatSampleCapture : IDisposable
     {
         try
         {
+            // Keep added-ID draining asynchronous while resolving only the event's notification.
+            await Task.Yield();
+
             if (!IsActive || _listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 Stop("Windows 通知访问权限已撤销；样本采集已停止并清除。", clearSamples: true);
                 return;
             }
 
-            var notifications = await _listener.GetNotificationsAsync(NotificationKinds.Toast);
+            var notification = _listener.GetNotification(id);
             if (!IsActive) return;
             if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
             {
                 Stop("读取期间 Windows 通知访问权限已撤销；样本采集已停止并清除。", clearSamples: true);
                 return;
             }
+            if (notification is null || notification.Id != id) return;
 
-            foreach (var notification in notifications.Where(item => item.Id == id))
+            // Read only source metadata until the exact AUMID selected in the consent dialog matches.
+            var sourceAppId = notification.AppInfo.AppUserModelId;
+            if (!string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase)) return;
+            var key = CreateKey(sourceAppId, notification.Id, notification.CreationTime);
+            if (_baselineKeys.Contains(key)) return;
+            var trackingResult = _seenKeys.TryAdd(key);
+            if (trackingResult == NotificationKeyTrackResult.AlreadyTracked) return;
+            if (trackingResult == NotificationKeyTrackResult.CapacityReached)
             {
-                // Read only source metadata until the exact AUMID selected in the consent dialog matches.
-                var sourceAppId = notification.AppInfo.AppUserModelId;
-                if (!string.Equals(sourceAppId, _publisherAppUserModelId, StringComparison.OrdinalIgnoreCase)) continue;
-                var key = CreateKey(sourceAppId, notification.Id, notification.CreationTime);
-                if (_baselineKeys.Contains(key)) continue;
-                var trackingResult = _seenKeys.TryAdd(key);
-                if (trackingResult == NotificationKeyTrackResult.AlreadyTracked) continue;
-                if (trackingResult == NotificationKeyTrackResult.CapacityReached)
-                {
-                    var hasSamples = _samples.Count > 0;
-                    Stop(hasSamples
-                            ? "本轮唯一通知数量达到安全跟踪上限；采集已停止，已有样本仍按15分钟时限清除。"
-                            : "本轮唯一通知数量达到安全跟踪上限；采集已停止，没有保留通知正文。",
-                        clearSamples: !hasSamples);
-                    return;
-                }
-                if (notification.CreationTime < _startedAtUtc) continue;
-                if (notification.CreationTime > DateTimeOffset.UtcNow)
-                {
-                    RaiseStatus("通知时间戳晚于本机当前时间；该通知未采集，请核对系统时间。已有样本仍只在内存中保留。");
-                    continue;
-                }
+                var hasSamples = _samples.Count > 0;
+                Stop(hasSamples
+                        ? "本轮唯一通知数量达到安全跟踪上限；采集已停止，已有样本仍按15分钟时限清除。"
+                        : "本轮唯一通知数量达到安全跟踪上限；采集已停止，没有保留通知正文。",
+                    clearSamples: !hasSamples);
+                return;
+            }
+            if (notification.CreationTime < _startedAtUtc) return;
+            if (notification.CreationTime > DateTimeOffset.UtcNow)
+            {
+                RaiseStatus("通知时间戳晚于本机当前时间；该通知未采集，请核对系统时间。已有样本仍只在内存中保留。");
+                return;
+            }
 
-                if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
-                {
-                    Stop("读取通知正文前 Windows 通知访问权限已撤销；正文未读取，已有样本已清除。", clearSamples: true);
-                    return;
-                }
-                if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
-                {
-                    Stop("Windows 会话已锁定；已停止样本核验并清除，没有读取正文。", clearSamples: true);
-                    return;
-                }
+            if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+            {
+                Stop("读取通知正文前 Windows 通知访问权限已撤销；正文未读取，已有样本已清除。", clearSamples: true);
+                return;
+            }
+            if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
+            {
+                Stop("Windows 会话已锁定；已停止样本核验并清除，没有读取正文。", clearSamples: true);
+                return;
+            }
 
-                var (elements, truncated) = ReadVisibleTextElements(notification);
-                if (!IsActive) return;
-                if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
-                {
-                    Stop("读取期间 Windows 通知访问权限已撤销；该样本和已有样本均已丢弃。", clearSamples: true);
-                    return;
-                }
-                if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
-                {
-                    Stop("Windows 会话已锁定；该样本和已有样本已清除并停止核验。", clearSamples: true);
-                    return;
-                }
+            var (elements, truncated) = ReadVisibleTextElements(notification);
+            if (!IsActive) return;
+            if (_listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
+            {
+                Stop("读取期间 Windows 通知访问权限已撤销；该样本和已有样本均已丢弃。", clearSamples: true);
+                return;
+            }
+            if (!WindowsNotificationMonitor.IsUnlockedInputDesktop())
+            {
+                Stop("Windows 会话已锁定；该样本和已有样本已清除并停止核验。", clearSamples: true);
+                return;
+            }
 
-                var sample = new NotificationFormatSample(_samples.Count + 1, _applicationId,
-                    _publisherDisplayName, _publisherAppUserModelId, notification.CreationTime,
-                    elements, truncated);
-                _samples.Add(sample);
-                SampleCaptured?.Invoke(sample);
-                RaiseStatus($"通知样本核验：已在内存中采集 {_samples.Count}/{MaximumSamples} 条新通知；没有送模型或保存文件。样本最迟在本轮15分钟截止时清除。" );
+            var sample = new NotificationFormatSample(_samples.Count + 1, _applicationId,
+                _publisherDisplayName, _publisherAppUserModelId, notification.CreationTime,
+                elements, truncated);
+            _samples.Add(sample);
+            SampleCaptured?.Invoke(sample);
+            RaiseStatus($"通知样本核验：已在内存中采集 {_samples.Count}/{MaximumSamples} 条新通知；没有送模型或保存文件。样本最迟在本轮15分钟截止时清除。" );
 
-                if (_samples.Count >= MaximumSamples)
-                {
-                    Stop($"已达到单次上限 {MaximumSamples} 条；监听已停止。样本只在内存中保留，最多到本轮15分钟截止；关闭设置页或点击清除可提前删除。", clearSamples: false);
-                    return;
-                }
+            if (_samples.Count >= MaximumSamples)
+            {
+                Stop($"已达到单次上限 {MaximumSamples} 条；监听已停止。样本只在内存中保留，最多到本轮15分钟截止；关闭设置页或点击清除可提前删除。", clearSamples: false);
+                return;
             }
         }
         catch (Exception ex) when (IsRecoverable(ex))

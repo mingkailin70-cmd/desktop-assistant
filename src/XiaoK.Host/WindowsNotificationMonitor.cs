@@ -357,6 +357,9 @@ internal sealed class WindowsNotificationMonitor : IDisposable
     {
         try
         {
+            // Keep added-ID draining asynchronous while resolving only the event's notification.
+            await Task.Yield();
+
             var listener = _listener;
             var policy = _policy;
             var sessionCancellation = _sessionCancellation;
@@ -369,7 +372,7 @@ internal sealed class WindowsNotificationMonitor : IDisposable
                 return;
             }
 
-            var notifications = await listener.GetNotificationsAsync(NotificationKinds.Toast);
+            var notification = listener.GetNotification(id);
             if (_disposed || !ReferenceEquals(_listener, listener) || !ReferenceEquals(_policy, policy)
                 || !ReferenceEquals(_sessionCancellation, sessionCancellation)) return;
             if (listener.GetAccessStatus() != UserNotificationListenerAccessStatus.Allowed)
@@ -377,68 +380,66 @@ internal sealed class WindowsNotificationMonitor : IDisposable
                 StopForRevokedPermission(listener);
                 return;
             }
+            if (notification is null || notification.Id != id) return;
 
-            foreach (var notification in notifications.Where(item => item.Id == id))
+            // Resolve one event ID only; inspect the publisher before any toast text property.
+            var sourceAppId = notification.AppInfo.AppUserModelId;
+            if (string.IsNullOrWhiteSpace(sourceAppId) || !_allowedAppIds.Contains(sourceAppId)) return;
+            if (!RememberNotification(sourceAppId, notification.Id)) return;
+
+            var key = $"{notification.Id}:{notification.CreationTime.UtcDateTime.Ticks}";
+            var unlocked = IsUnlockedInputDesktop();
+            if (!unlocked)
             {
-                // AppUserModelId is the only notification content metadata read before the publisher allowlist check.
-                var sourceAppId = notification.AppInfo.AppUserModelId;
-                if (string.IsNullOrWhiteSpace(sourceAppId) || !_allowedAppIds.Contains(sourceAppId)) continue;
-                if (!RememberNotification(sourceAppId, notification.Id)) continue;
+                RaiseStatus("Windows 会话已锁定；通知正文未读取，请手动查看会话。");
+                return;
+            }
 
-                var key = $"{notification.Id}:{notification.CreationTime.UtcDateTime.Ticks}";
-                var unlocked = IsUnlockedInputDesktop();
-                if (!unlocked)
-                {
-                    RaiseStatus("Windows 会话已锁定；通知正文未读取，请手动查看会话。");
-                    continue;
-                }
+            var adapter = _wechatPublisherIds.Contains(sourceAppId) ? wechatAdapter
+                : _qqPublisherIds.Contains(sourceAppId) ? qqAdapter
+                : null;
+            if (adapter is null) return;
 
-                var adapter = _wechatPublisherIds.Contains(sourceAppId) ? wechatAdapter
-                    : _qqPublisherIds.Contains(sourceAppId) ? qqAdapter
-                    : null;
-                if (adapter is null) continue;
+            var bodyGateFailure = NoticeBodyAccessFailure.None;
+            string? ReadBodyIfStillAllowed() => NoticeBodyReadGate.ReadIfAllowed(
+                () => !_disposed && ReferenceEquals(_listener, listener)
+                    && listener.GetAccessStatus() == UserNotificationListenerAccessStatus.Allowed,
+                IsUnlockedInputDesktop,
+                () => ReadVisibleText(notification),
+                out bodyGateFailure);
 
-                var bodyGateFailure = NoticeBodyAccessFailure.None;
-                string? ReadBodyIfStillAllowed() => NoticeBodyReadGate.ReadIfAllowed(
-                    () => !_disposed && ReferenceEquals(_listener, listener)
-                        && listener.GetAccessStatus() == UserNotificationListenerAccessStatus.Allowed,
-                    IsUnlockedInputDesktop,
-                    () => ReadVisibleText(notification),
-                    out bodyGateFailure);
+            // No verified WeChat/QQ conversation parser is connected yet. Keep these metadata unknown and
+            // do not hand the real toast-body reader to an adapter unless a future parser verifies a private target.
+            string? conversationId = null;
+            string? sender = null;
+            bool? isPrivateConversation = null;
+            var visibleBodyReader = MessageNoticePolicy.GateBodyReader(
+                isPrivateConversation, conversationId, sender, ReadBodyIfStillAllowed);
+            var decision = adapter.Inspect(sourceAppId, conversationId, sender, isPrivateConversation, visibleBodyReader,
+                notification.CreationTime, key, true, true);
 
-                // No verified WeChat/QQ conversation parser is connected yet. Keep these metadata unknown and
-                // do not hand the real toast-body reader to an adapter unless a future parser verifies a private target.
-                string? conversationId = null;
-                string? sender = null;
-                bool? isPrivateConversation = null;
-                var visibleBodyReader = MessageNoticePolicy.GateBodyReader(
-                    isPrivateConversation, conversationId, sender, ReadBodyIfStillAllowed);
-                var decision = adapter.Inspect(sourceAppId, conversationId, sender, isPrivateConversation, visibleBodyReader,
-                    notification.CreationTime, key, true, true);
+            if (bodyGateFailure == NoticeBodyAccessFailure.PermissionUnavailable)
+            {
+                StopForRevokedPermission(listener);
+                return;
+            }
+            if (bodyGateFailure == NoticeBodyAccessFailure.SessionLocked)
+            {
+                RaiseStatus("Windows 会话已锁定；通知正文未读取，请手动查看会话。");
+                return;
+            }
 
-                if (bodyGateFailure == NoticeBodyAccessFailure.PermissionUnavailable)
-                {
-                    StopForRevokedPermission(listener);
-                    return;
-                }
-                if (bodyGateFailure == NoticeBodyAccessFailure.SessionLocked)
-                {
-                    RaiseStatus("Windows 会话已锁定；通知正文未读取，请手动查看会话。");
-                    continue;
-                }
+            if (!decision.Accepted) return;
 
-                if (!decision.Accepted) continue;
-
-                var status = adapter.ApplicationId == "wechat"
-                    ? $"微信通知：{decision.UserMessage}"
-                    : $"QQ 通知：{decision.UserMessage}";
-                RaiseStatus(status);
-                if (decision.AnalyzeBody && decision.Notice is { IsPrivateConversation: true, Body: { Length: > 0 } noticeBody }
-                    && !sessionCancellation.IsCancellationRequested)
-                {
-                    // The body is handed off synchronously so the receiver can bind work to this monitor session.
-                    PrivateNoticeAccepted?.Invoke(decision.Notice with { Body = noticeBody }, sessionCancellation.Token);
-                }
+            var status = adapter.ApplicationId == "wechat"
+                ? $"微信通知：{decision.UserMessage}"
+                : $"QQ 通知：{decision.UserMessage}";
+            RaiseStatus(status);
+            if (decision.AnalyzeBody && decision.Notice is { IsPrivateConversation: true, Body: { Length: > 0 } noticeBody }
+                && !sessionCancellation.IsCancellationRequested)
+            {
+                // The body is handed off synchronously so the receiver can bind work to this monitor session.
+                PrivateNoticeAccepted?.Invoke(decision.Notice with { Body = noticeBody }, sessionCancellation.Token);
             }
         }
         catch (Exception ex) when (IsRecoverable(ex))

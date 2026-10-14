@@ -5446,15 +5446,19 @@ static void CheckNoticeBodyReaderRequiresVerifiedPrivateConversation()
     var processBody = processStart >= 0 && processEnd > processStart
         ? monitor[processStart..processEnd]
         : string.Empty;
+    var directLookup = processBody.IndexOf("var notification = listener.GetNotification(id);", StringComparison.Ordinal);
+    var exactIdGuard = processBody.IndexOf("if (notification is null || notification.Id != id) return;", StringComparison.Ordinal);
     var appIdRead = processBody.IndexOf("var sourceAppId = notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
     var allowlistGuard = processBody.IndexOf(
-        "if (string.IsNullOrWhiteSpace(sourceAppId) || !_allowedAppIds.Contains(sourceAppId)) continue;",
+        "if (string.IsNullOrWhiteSpace(sourceAppId) || !_allowedAppIds.Contains(sourceAppId)) return;",
         StringComparison.Ordinal);
     var deferredReader = processBody.IndexOf("string? ReadBodyIfStillAllowed() =>", StringComparison.Ordinal);
     var bodyGate = processBody.IndexOf("MessageNoticePolicy.GateBodyReader(", StringComparison.Ordinal);
     var adapterInspection = processBody.IndexOf("adapter.Inspect(", StringComparison.Ordinal);
     var bodyMaterialization = processBody.IndexOf("ReadVisibleText(notification)", StringComparison.Ordinal);
-    Require(processBody.Length > 0 && appIdRead >= 0 && allowlistGuard > appIdRead
+    Require(processBody.Length > 0 && directLookup >= 0 && exactIdGuard > directLookup
+        && appIdRead > exactIdGuard && allowlistGuard > appIdRead
+        && !processBody.Contains("GetNotificationsAsync", StringComparison.Ordinal)
         && deferredReader > allowlistGuard && bodyMaterialization > deferredReader
         && bodyGate > deferredReader && adapterInspection > bodyGate
         && processBody.IndexOf("ReadVisibleText(notification)", bodyMaterialization + 1, StringComparison.Ordinal) < 0,
@@ -5767,10 +5771,16 @@ static void CheckNotificationSampleRetentionIsBounded(string repositoryRoot)
     var addedStart = capture.IndexOf("private async Task ProcessAddedAsync(", StringComparison.Ordinal);
     var addedEnd = addedStart < 0 ? -1 : capture.IndexOf("private static bool IsRecoverable", addedStart, StringComparison.Ordinal);
     var added = addedStart >= 0 && addedEnd > addedStart ? capture[addedStart..addedEnd] : string.Empty;
+    var directLookup = added.IndexOf("var notification = _listener.GetNotification(id);", StringComparison.Ordinal);
+    var exactIdGuard = added.IndexOf("if (notification is null || notification.Id != id) return;", StringComparison.Ordinal);
+    var publisherRead = added.IndexOf("var sourceAppId = notification.AppInfo.AppUserModelId", StringComparison.Ordinal);
     var seenKeyLimit = added.IndexOf("NotificationKeyTrackResult.CapacityReached", StringComparison.Ordinal);
     var sampleBodyRead = added.IndexOf("ReadVisibleTextElements(notification)", StringComparison.Ordinal);
-    Require(seenKeyLimit >= 0 && sampleBodyRead > seenKeyLimit,
-        "已见通知键超限时没有停止样本采集。");
+    Require(directLookup >= 0 && exactIdGuard > directLookup && publisherRead > exactIdGuard
+        && !added.Contains("GetNotificationsAsync", StringComparison.Ordinal)
+        && publisherRead >= 0 && sampleBodyRead > publisherRead
+        && seenKeyLimit >= 0 && sampleBodyRead > seenKeyLimit,
+        "通知样本入口未按事件ID精确取件、先核对所选发布者或在跟踪键超限时停止采集。");
     var startStart = capture.IndexOf("public async Task<string> StartAsync()", StringComparison.Ordinal);
     var startEnd = startStart < 0 ? -1 : capture.IndexOf("public void Stop(", startStart, StringComparison.Ordinal);
     var start = startStart >= 0 && startEnd > startStart ? capture[startStart..startEnd] : string.Empty;
