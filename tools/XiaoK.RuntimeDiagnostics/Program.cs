@@ -27,6 +27,12 @@ if (args.Length == 5 && args[0] == "--installed-file-search")
 if (args.Length == 1 && args[0] == "--notification-baseline-policy")
     return NotificationBaselinePolicyCheck.Run();
 
+if (args.Length == 1 && args[0] == "--aishell3-contract")
+    return Aishell3CandidateTtsRoundTrip.RunContractChecks(Environment.CurrentDirectory);
+
+if (args.Length == 3 && args[0] == "--aishell3-cpu-roundtrip")
+    return await Aishell3CandidateTtsRoundTrip.RunAsync(args[1], args[2]);
+
 if (args.Length != 4 || args[0] != "--managed-qwen")
 {
     Console.Error.WriteLine("用法：");
@@ -38,6 +44,8 @@ if (args.Length != 4 || args[0] != "--managed-qwen")
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --installed-content-search-directory <小K已安装包目录> <已配置搜索根内的子目录> <搜索词> <预期文件名>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --installed-file-search <小K已安装包目录> <已配置搜索根内的子目录> <文件名查询> <预期根目录文件名>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --notification-baseline-policy");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --aishell3-contract");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --aishell3-cpu-roundtrip <仓库目录> <仓库外新报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --browser-public-smoke");
     return 2;
 }
