@@ -1327,19 +1327,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         IPetRenderer? renderer = null;
         try
         {
-            try
-            {
-                renderer = await ThreeDPetRenderer.CreateAsync(Dispatcher, _petRendererCancellation.Token);
-            }
-            catch (OperationCanceledException) when (_petRendererCancellation.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                renderer = new VPetPortraitRuntime(Dispatcher, _runtime.CurrentSettings.DataRoot);
-                PetEngineHost.Content = renderer.View;
-            }
+            renderer = new VPetPortraitRuntime(Dispatcher, _runtime.CurrentSettings.DataRoot);
 
             await renderer.InitializeAsync(_petRendererCancellation.Token);
             if (_exiting)
@@ -1365,7 +1353,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             PetEngineHost.Content = null;
             PetEngineViewbox.Opacity = 0;
             PetSpriteFallback.Visibility = Visibility.Visible;
-            if (!_exiting) SetStatus("三维与VPet桌宠不可用，继续使用静态形象");
+            if (!_exiting) SetStatus("柯基动画暂不可用，继续显示静态形象");
         }
         finally
         {

@@ -31,10 +31,10 @@ internal static class PetPosePresentationPolicy
 
     public static string GetFallbackAssetFileName(XiaoKPetPose pose) => pose switch
     {
-        XiaoKPetPose.Listening => "xiaok-silver-shaded-vpet-listening-v1.png",
-        XiaoKPetPose.Thinking => "xiaok-silver-shaded-vpet-thinking-v1.png",
-        XiaoKPetPose.Executing => "xiaok-silver-shaded-vpet-executing-v1.png",
-        _ => "xiaok-silver-shaded-3d-v15.png"
+        XiaoKPetPose.Listening => "keke-corgi-v1/waving/00_240.png",
+        XiaoKPetPose.Thinking => "keke-corgi-v1/review/00_260.png",
+        XiaoKPetPose.Executing => "keke-corgi-v1/running/00_170.png",
+        _ => "keke-corgi-v1/idle/00_420.png"
     };
 
     public static bool ShouldAnimate(XiaoKPetPose? previous, XiaoKPetPose current,

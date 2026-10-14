@@ -306,15 +306,15 @@
                     </Grid.RowDefinitions>
                     <Border Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Top"
                             Background="#F8FBF7" BorderBrush="#D7E4D6" BorderThickness="1"
-                            CornerRadius="16" Padding="13,7" Margin="0,8,0,0" MaxWidth="260">
+                            CornerRadius="16" Padding="10,6" Margin="0,8,0,0" MaxWidth="174">
                         <Border.Effect>
-                            <DropShadowEffect Color="#617765" BlurRadius="16" ShadowDepth="3" Opacity="0.16"/>
+                            <DropShadowEffect Color="#617765" BlurRadius="11" ShadowDepth="2" Opacity="0.13"/>
                         </Border.Effect>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse x:Name="PetStatusDot" Width="7" Height="7" Fill="#78A17C"
-                                     VerticalAlignment="Center" Margin="0,0,7,0"/>
-                            <TextBlock x:Name="PetStatusText" Text="待命" FontSize="10" Foreground="#536651"
-                                       VerticalAlignment="Center" Width="214" TextTrimming="CharacterEllipsis"
+                            <Ellipse x:Name="PetStatusDot" Width="6" Height="6" Fill="#78A17C"
+                                     VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock x:Name="PetStatusText" Text="待命" FontSize="11" Foreground="#536651"
+                                       VerticalAlignment="Center" Width="128" TextTrimming="CharacterEllipsis"
                                        TextAlignment="Center"/>
                         </StackPanel>
                     </Border>
@@ -322,19 +322,19 @@
                             Focusable="True" AutomationProperties.Name="小K桌宠，按住并拖动可移动；单击展开任务面板"
                             ToolTip="按住小K并拖动可自由移动；轻点展开任务面板">
                         <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <Ellipse Width="262" Height="220" Margin="0,18,0,0" IsHitTestVisible="False">
+                            <Ellipse Width="226" Height="204" Margin="0,12,0,0" IsHitTestVisible="False">
                                 <Ellipse.Fill>
                                     <RadialGradientBrush>
-                                        <GradientStop Color="#5E91AD82" Offset="0"/>
-                                        <GradientStop Color="#1AE3EEE1" Offset="0.63"/>
+                                        <GradientStop Color="#2EC48E58" Offset="0"/>
+                                        <GradientStop Color="#12E3EEE1" Offset="0.68"/>
                                         <GradientStop Color="#00E3EEE1" Offset="1"/>
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Ellipse Width="186" Height="150" Margin="0,46,0,0" IsHitTestVisible="False">
+                            <Ellipse Width="168" Height="142" Margin="0,42,0,0" IsHitTestVisible="False">
                                 <Ellipse.Fill>
                                     <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
-                                        <GradientStop Color="#58FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#38FFF9EF" Offset="0"/>
                                         <GradientStop Color="#00FFFFFF" Offset="1"/>
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
@@ -349,11 +349,11 @@
                                     </RadialGradientBrush>
                                 </Ellipse.Fill>
                             </Ellipse>
-                            <Image x:Name="PetSpriteFallback" Source="/XiaoK.Host;component/Assets/Pets/xiaok-silver-shaded-3d-v15.png"
-                                   Width="284" Height="284" Margin="0,6,0,0" Stretch="Uniform"
+                            <Image x:Name="PetSpriteFallback" Source="pack://siteoforigin:,,,/Assets/Pets/keke-corgi-v1/idle/00_420.png"
+                                   Width="306" Height="306" Margin="0,4,0,0" Stretch="Uniform"
                                    RenderOptions.BitmapScalingMode="HighQuality"
-                                   RenderTransformOrigin="0.5,0.78"
-                                   AutomationProperties.Name="三维银渐层小猫小K，正面坐姿">
+                                   RenderTransformOrigin="0.5,0.88"
+                                   AutomationProperties.Name="柯基小K，红白毛色与绿色星星围巾">
                                 <Image.RenderTransform>
                                     <TransformGroup>
                                         <ScaleTransform x:Name="PetFallbackPoseScale"/>
@@ -361,13 +361,13 @@
                                     </TransformGroup>
                                 </Image.RenderTransform>
                                 <Image.Effect>
-                                    <DropShadowEffect Color="#667768" BlurRadius="16" ShadowDepth="4" Opacity="0.20"/>
+                                    <DropShadowEffect Color="#7A5940" BlurRadius="17" ShadowDepth="4" Opacity="0.22"/>
                                 </Image.Effect>
                             </Image>
-                            <Viewbox x:Name="PetEngineViewbox" Width="284" Height="284" Margin="0,6,0,0"
+                            <Viewbox x:Name="PetEngineViewbox" Width="306" Height="306" Margin="0,4,0,0"
                                      Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
-                                     RenderTransformOrigin="0.5,0.78"
-                                     AutomationProperties.Name="小K实时三维银渐层桌宠"
+                                     RenderTransformOrigin="0.5,0.88"
+                                     AutomationProperties.Name="VPet动画柯基桌宠小K"
                                      Loaded="PetEngineViewbox_Loaded">
                                 <Viewbox.RenderTransform>
                                     <TransformGroup>
@@ -375,13 +375,16 @@
                                         <TranslateTransform x:Name="PetEnginePoseOffset"/>
                                     </TransformGroup>
                                 </Viewbox.RenderTransform>
+                                <Viewbox.Effect>
+                                    <DropShadowEffect Color="#7A5940" BlurRadius="17" ShadowDepth="4" Opacity="0.22"/>
+                                </Viewbox.Effect>
                                 <ContentControl x:Name="PetEngineHost" />
                             </Viewbox>
                         </Grid>
                     </Button>
                     <Border Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Bottom"
                             Background="#F8FBF7" BorderBrush="#D7E4D6" BorderThickness="1"
-                            CornerRadius="17" Padding="17,7" Margin="0,0,0,8">
+                            CornerRadius="17" Padding="13,6" Margin="0,0,0,8">
                         <Border.Effect>
                             <DropShadowEffect Color="#617765" BlurRadius="16" ShadowDepth="3" Opacity="0.15"/>
                         </Border.Effect>

@@ -14,9 +14,10 @@ internal enum XiaoKPetPose
     Executing
 }
 
-/// <summary>以小K自有图像驱动 VPet Core；禁用宠物侧窗口动作与工具栏。</summary>
+/// <summary>以小K自有动画帧驱动 VPet Core；禁用宠物侧窗口动作与工具栏。</summary>
 internal sealed class VPetPortraitRuntime : IPetRenderer
 {
+    private const string PetAssetDirectory = "keke-corgi-v1";
     private readonly GraphCore _graph;
     private readonly Main _pet;
     private bool _initialized;
@@ -24,10 +25,18 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
     private XiaoKPetPose? _currentPose;
 
     public System.Windows.FrameworkElement View => _pet;
+    public XiaoKPetPose? CurrentPose => _currentPose;
 
     public VPetPortraitRuntime(Dispatcher dispatcher, string dataRoot)
+        : this(dispatcher, dataRoot, Path.Combine(AppContext.BaseDirectory, "Assets", "Pets"))
     {
-        var assetRoot = Path.Combine(AppContext.BaseDirectory, "Assets", "Pets");
+    }
+
+    internal VPetPortraitRuntime(Dispatcher dispatcher, string dataRoot, string assetRoot)
+    {
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(assetRoot);
         var cacheRoot = Path.Combine(dataRoot, "PetRenderCache");
         Directory.CreateDirectory(cacheRoot);
         GraphCore.CachePath = cacheRoot;
@@ -39,10 +48,10 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
         Main? pet = null;
         try
         {
-            AddPose(graph, assetRoot, "xiaok-idle", "xiaok-silver-shaded-3d-v15.png");
-            AddPose(graph, assetRoot, "xiaok-listening", "xiaok-silver-shaded-vpet-listening-v1.png");
-            AddPose(graph, assetRoot, "xiaok-thinking", "xiaok-silver-shaded-vpet-thinking-v1.png");
-            AddPose(graph, assetRoot, "xiaok-executing", "xiaok-silver-shaded-vpet-executing-v1.png");
+            AddAnimation(graph, assetRoot, "xiaok-idle", "idle", 6, 420);
+            AddAnimation(graph, assetRoot, "xiaok-listening", "waving", 4, 240);
+            AddAnimation(graph, assetRoot, "xiaok-thinking", "review", 6, 260);
+            AddAnimation(graph, assetRoot, "xiaok-executing", "running", 6, 170);
 
             pet = new Main(new GameCore
             {
@@ -103,19 +112,37 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
         finally { _graph.Dispose(); }
     }
 
-    private static void AddPose(GraphCore graph, string assetRoot, string name, string fileName)
+    private static void AddAnimation(GraphCore graph, string assetRoot, string name, string state,
+        int expectedFrameCount, int frameDurationMilliseconds)
     {
-        var path = Path.GetFullPath(Path.Combine(assetRoot, fileName));
-        var boundary = Path.GetFullPath(assetRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!path.StartsWith(boundary, StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
-            throw new FileNotFoundException("桌宠姿态图像缺失；将保留静态形象。", fileName);
+        var petRoot = Path.GetFullPath(Path.Combine(assetRoot, PetAssetDirectory));
+        var animationPath = Path.GetFullPath(Path.Combine(petRoot, state));
+        var boundary = petRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!animationPath.StartsWith(boundary, StringComparison.OrdinalIgnoreCase)
+            || !Directory.Exists(animationPath))
+            throw new DirectoryNotFoundException($"柯基桌宠动画资源缺失：{state}");
 
-        graph.AddGraph(new Picture(
-            graph,
-            path,
-            new GraphInfo(name, GraphType.Default, AnimatType.Single, IGameSave.ModeType.Nomal),
-            length: 500,
-            isloop: true));
+        var frames = Directory.GetFiles(animationPath, "*.png", SearchOption.TopDirectoryOnly)
+            .Select(path => new FileInfo(path))
+            .OrderBy(file => file.Name, StringComparer.Ordinal)
+            .ToArray();
+        if (frames.Length != expectedFrameCount)
+            throw new InvalidDataException($"柯基桌宠 {state} 动画帧数应为 {expectedFrameCount}，实际为 {frames.Length}。");
+
+        for (var index = 0; index < frames.Length; index++)
+        {
+            var expectedPrefix = $"{index:D2}_";
+            var fileName = Path.GetFileNameWithoutExtension(frames[index].Name);
+            var separator = fileName.LastIndexOf('_');
+            if (!fileName.StartsWith(expectedPrefix, StringComparison.Ordinal)
+                || separator < 0
+                || !int.TryParse(fileName.AsSpan(separator + 1), out var duration)
+                || duration is < 50 or > 5_000)
+                throw new InvalidDataException($"柯基桌宠 {state} 动画帧文件名或时长无效：{frames[index].Name}");
+        }
+
+        var graphInfo = new GraphInfo(name, GraphType.Default, AnimatType.Single, IGameSave.ModeType.Nomal);
+        graph.AddGraph(new PNGAnimation(graph, animationPath, frames, graphInfo, isLoop: true));
     }
 
     private static async Task WaitForInitialGraphAsync(Main pet, CancellationToken cancellationToken)
@@ -132,7 +159,7 @@ internal sealed class VPetPortraitRuntime : IPetRenderer
 
     private sealed class InertPetController : IController
     {
-        public double ZoomRatio => 0.6;
+        public double ZoomRatio => 1.0;
         public int PressLength => 500;
         public bool EnableFunction => false;
         public int InteractionCycle => 0;
