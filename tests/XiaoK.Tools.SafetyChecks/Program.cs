@@ -4829,6 +4829,50 @@ static async Task CheckUiTextWritePolicyAsync()
             DisplayName: displayName)], []);
 }
 
+static async Task CheckMessagingUiSnapshotBlockedAsync()
+{
+    var workerSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host",
+        "WindowsUiAutomationWorkerEntryPoint.cs"));
+    RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadSnapshot");
+    RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadScopedSnapshot");
+
+    var coordinator = new InteractionCoordinator();
+    var desktop = new WindowsDesktopTools(
+        [new DesktopApp("wechat", @"C:\XiaoKTests\Weixin.exe", DisplayName: "微信")], []);
+    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "",
+        interactionCoordinator: coordinator);
+    var proposals = new[]
+    {
+        ToolBroker.Proposal("app.ui.snapshot.v1",
+            [new KeyValuePair<string, string>("app_id", "wechat")], "wechat",
+            ToolExpectedOutcome.ApplicationUiSnapshotReturned),
+        ToolBroker.Proposal("app.ui.snapshot-scoped.v1",
+            [new KeyValuePair<string, string>("app_id", "wechat"),
+             new KeyValuePair<string, string>("automation_id", "Messages.Pane"),
+             new KeyValuePair<string, string>("root_control_type", "Pane")], "wechat",
+            ToolExpectedOutcome.ApplicationUiSnapshotReturned)
+    };
+    foreach (var proposal in proposals)
+    {
+        var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
+        Require(!result.Success && result.ErrorCode == "UIA_MESSAGING_APP_BLOCKED"
+            && coordinator.TrackedTargetCount == 0,
+            "伪造UIA提案绕过消息客户端快照封锁或在拒绝前创建了目标锁。");
+    }
+
+    static void RequireMessagingWorkerGuardPrecedesUiRead(string source, string methodName)
+    {
+        var methodStart = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse "
+            + methodName + "(", StringComparison.Ordinal);
+        var nextMethod = methodStart < 0 ? -1 : source.IndexOf("\n    private static ", methodStart + 1, StringComparison.Ordinal);
+        var methodEnd = nextMethod < 0 ? source.Length : nextMethod;
+        var guard = methodStart < 0 ? -1 : source.IndexOf("IsMessagingClientTarget(", methodStart, StringComparison.Ordinal);
+        var uiRead = methodStart < 0 ? -1 : source.IndexOf("TryResolveRoot(", methodStart, StringComparison.Ordinal);
+        Require(methodStart >= 0 && guard >= methodStart && guard < methodEnd && uiRead > guard && uiRead < methodEnd,
+            $"隔离UIA工作进程的{methodName}没有在查询目标界面前独立拒绝消息客户端。");
+    }
+}
+
 static void CheckWindowMatchSelection()
 {
     var noTarget = WindowMatchSelector.Select([IntPtr.Zero]);
@@ -11247,50 +11291,6 @@ internal static class SqliteSchemaFixture
 
     [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_close_v2")]
     private static extern int sqlite3_close_v2(IntPtr database);
-}
-
-static async Task CheckMessagingUiSnapshotBlockedAsync()
-{
-    var workerSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host",
-        "WindowsUiAutomationWorkerEntryPoint.cs"));
-    RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadSnapshot");
-    RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadScopedSnapshot");
-
-    var coordinator = new InteractionCoordinator();
-    var desktop = new WindowsDesktopTools(
-        [new DesktopApp("wechat", @"C:\XiaoKTests\Weixin.exe", DisplayName: "微信")], []);
-    var broker = new ToolBroker(desktop, null!, new ModelBroker(), null!, null!, "", "",
-        interactionCoordinator: coordinator);
-    var proposals = new[]
-    {
-        ToolBroker.Proposal("app.ui.snapshot.v1",
-            [new KeyValuePair<string, string>("app_id", "wechat")], "wechat",
-            ToolExpectedOutcome.ApplicationUiSnapshotReturned),
-        ToolBroker.Proposal("app.ui.snapshot-scoped.v1",
-            [new KeyValuePair<string, string>("app_id", "wechat"),
-             new KeyValuePair<string, string>("automation_id", "Messages.Pane"),
-             new KeyValuePair<string, string>("root_control_type", "Pane")], "wechat",
-            ToolExpectedOutcome.ApplicationUiSnapshotReturned)
-    };
-    foreach (var proposal in proposals)
-    {
-        var result = await broker.ExecuteBackgroundAsync(proposal, CancellationToken.None);
-        Require(!result.Success && result.ErrorCode == "UIA_MESSAGING_APP_BLOCKED"
-            && coordinator.TrackedTargetCount == 0,
-            "伪造UIA提案绕过消息客户端快照封锁或在拒绝前创建了目标锁。");
-    }
-
-    static void RequireMessagingWorkerGuardPrecedesUiRead(string source, string methodName)
-    {
-        var methodStart = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse "
-            + methodName + "(", StringComparison.Ordinal);
-        var nextMethod = methodStart < 0 ? -1 : source.IndexOf("\n    private static ", methodStart + 1, StringComparison.Ordinal);
-        var methodEnd = nextMethod < 0 ? source.Length : nextMethod;
-        var guard = methodStart < 0 ? -1 : source.IndexOf("IsMessagingClientTarget(", methodStart, StringComparison.Ordinal);
-        var uiRead = methodStart < 0 ? -1 : source.IndexOf("TryResolveRoot(", methodStart, StringComparison.Ordinal);
-        Require(methodStart >= 0 && guard >= methodStart && guard < methodEnd && uiRead > guard && uiRead < methodEnd,
-            $"隔离UIA工作进程的{methodName}没有在查询目标界面前独立拒绝消息客户端。");
-    }
 }
 
 static class TestProcessErrorMode
