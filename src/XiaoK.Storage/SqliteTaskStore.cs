@@ -501,6 +501,10 @@ public sealed class SqliteTaskStore : ITaskStore
             || actionId == ApprovalAuditCatalog.CodePatchApplyAction
                 && outcome == ApprovalAuditCatalog.Confirmed
             || actionId == ApprovalAuditCatalog.FileRecycleAction
+                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+            || actionId == ApprovalAuditCatalog.ApplicationUiTextSetAction
+                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+            || actionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
         if (!isKnownPair) throw new ArgumentException("审批审计只接受已登记动作及其固定结果。", nameof(actionId));
         return new ApprovalAuditRecord(Guid.NewGuid(), actionId, outcome, DateTimeOffset.UtcNow);
@@ -549,7 +553,11 @@ public sealed class SqliteTaskStore : ITaskStore
                 : actionId == ApprovalAuditCatalog.CodePatchApplyAction
                     ? outcome == ApprovalAuditCatalog.Confirmed
                     : actionId == ApprovalAuditCatalog.FileRecycleAction
-                        && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
+                        ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+                        : actionId == ApprovalAuditCatalog.ApplicationUiTextSetAction
+                            ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+                            : actionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
+                                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
 
     private static void InsertContactReplyStyle(SqliteDatabase database, ContactReplyStylePreference preference, bool ignoreExisting)
     {

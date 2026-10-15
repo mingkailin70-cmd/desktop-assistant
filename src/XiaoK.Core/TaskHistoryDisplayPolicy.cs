@@ -23,6 +23,7 @@ public static class TaskHistoryDisplayPolicy
         "app-ui-scoped-snapshot" => "允许列表应用中唯一匹配容器的有界控件子树（只含类型和状态元数据）",
         "app-ui-wait-enabled" => "允许列表应用中指定的唯一可见控件（只等待状态，不点击）",
         "app-ui-set-text" => "允许列表应用中的唯一普通文本框（逐次确认完整文本）",
+        "app-ui-invoke-button" => "允许列表应用中的唯一可见按钮（逐次确认，结果不确定时不自动重试）",
         "window" => "已打开且唯一匹配的允许列表窗口",
         "file" => "用户配置的本机搜索根",
         "file-create-text" or "file-create-csv" or "file-create-xlsx" or "file-create-docx" or "file-create-pptx" =>
@@ -61,6 +62,7 @@ public static class TaskHistoryDisplayPolicy
         "app-ui-scoped-snapshot" => "后台读取指定控件子树的有限类型/状态元数据；不读取名称、文本或子控件标识，不改变前台",
         "app-ui-wait-enabled" => "后台等待控件状态；不点击、不输入、不改变前台窗口",
         "app-ui-set-text" => "后台写入唯一普通文本框；逐次确认完整文本，不模拟按键或改变前台",
+        "app-ui-invoke-button" => "后台调用唯一可见按钮；逐次确认，应用可能产生外部副作用",
         "file-create-text" or "file-create-csv" or "file-create-xlsx" or "file-create-docx" or "file-create-pptx" =>
             "后台在固定导出目录中新建文件；不覆盖现有文件或改变前台窗口",
         "file-delete" => "后台执行；任务中心逐项确认，文件目标变化时停止",
@@ -97,11 +99,20 @@ public static class TaskHistoryDisplayPolicy
         "UIA_SCOPED_ROOT_TYPE_MISMATCH" => "找到的控件类型与请求的容器类型不一致；没有读取部分内容。请核对容器类型。",
         "UIA_SCOPED_SEARCH_LIMIT" or "UIA_SCOPED_TREE_LIMIT" => "目标界面超出固定检查范围；没有显示部分结果。请指定更小的容器区域。",
         "UIA_SCOPED_RESPONSE_INVALID" => "隔离检查器返回了不符合元数据限制的结果；没有显示数据。请稍后重试。",
+        "UIA_TREE_LIMIT" => "目标界面超出固定检查范围；没有调用按钮。请指定更小或更明确的目标。",
         "UIA_AUTOMATION_ID_AMBIGUOUS" => "同一窗口中有多个相同控件标识；小K没有读取或写入。请指定唯一控件后再提交。",
         "UIA_CONDITION_NOT_MET" => "等待期间没有找到唯一且已启用的目标控件；没有点击或填写。请检查应用界面后再提交。",
-        "UIA_TARGET_IN_USE" => "目标应用正处于前台；为避免干扰当前编辑，小K没有写入文本。稍后再提交。",
+        "UIA_TARGET_IN_USE" => "目标应用正处于前台；为避免干扰当前操作，小K没有修改界面。稍后再提交。",
+        "UIA_FOREGROUND_UNKNOWN" => "无法核验当前前台窗口；小K没有调用按钮。请检查桌面状态后再提交。",
+        "UIA_FOREGROUND_CHANGED_BEFORE_ACTION" => "调用前检测到前台窗口变化；小K没有调用按钮。请确认应用状态后再提交。",
         "UIA_FOREGROUND_CHANGED_BEFORE_SET" => "写入前检测到前台窗口变化；小K没有写入文本。请确认目标应用状态后再提交。",
         "UIA_PROTECTED_APP_BLOCKED" => "该应用类型不允许使用通用后台填写；小K没有访问或修改界面。",
+        "UIA_BUTTON_NOT_FOUND" => "没有找到唯一、可见且启用的按钮；小K没有调用控件。请核对当前应用和 AutomationId。",
+        "UIA_BUTTON_NOT_INVOKABLE" => "目标控件不是受支持的按钮或不支持 Invoke；小K没有执行动作。",
+        "UIA_BUTTON_TARGET_BLOCKED" => "该应用属于消息/邮件客户端、浏览器、文件管理器或金融/凭证敏感应用；小K没有调用按钮。",
+        "UIA_BUTTON_ACTION_BLOCKED" => "按钮标识命中常见发送、删除、支付、权限或管理员操作；通用按钮工具不执行此类动作。",
+        "UIA_ACTION_CANCELLED_BEFORE_OPERATION" => "任务在按钮工作进程启动前取消；小K没有访问或调用控件。",
+        "UIA_ACTION_OUTCOME_UNCERTAIN" => "按钮操作可能已经触发，但最终界面状态无法确认。先检查目标应用，不要自动重试。",
         "FILE_RECYCLE_NOT_CONFIRMED" => "Windows 未确认回收站操作，且原文件仍在原位置。先检查回收站和原文件状态，再决定是否重新提交。",
         "ARCHIVE_OUTPUT_UNVERIFIABLE" => "压缩文件未能通过独立核验，没有发布到目标目录。请检查空间和目录权限后再重新提交。",
         "FOREGROUND_REQUIRED" => "该操作需要桌面前台；小K没有执行，也没有排队。你可以在方便时切到前台再重新提交。",
@@ -139,6 +150,8 @@ public static class TaskHistoryDisplayPolicy
         "CODE_PATCH_OUTCOME_UNCERTAIN" => "补丁应用结果无法确认。先检查隔离工作区和补丁状态，再决定下一步；小K不会自动重放。",
         "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_CHANGED_AFTER_SET" =>
             "目标应用中的文本写入结果无法确认。先检查相关文本是否已完整或部分更新，再决定是否重新操作；小K不会自动重试。",
+        "UIA_ACTION_OUTCOME_UNCERTAIN" =>
+            "按钮调用可能已经触发，但目标状态无法确认。先检查目标应用，再决定下一步；小K不会自动重试。",
         _ => "操作结果无法确认，可能已经产生副作用。先核对相关应用、文件或隔离工作区的实际状态，再决定下一步；小K不会自动重试。"
     };
 

@@ -78,7 +78,8 @@ public enum ToolExpectedOutcome
     XlsxWorkbookCreatedInConfiguredExport = 32,
     DocxDocumentCreatedInConfiguredExport = 33,
     PptxPresentationCreatedInConfiguredExport = 34,
-    ApplicationUiValueSet = 35
+    ApplicationUiValueSet = 35,
+    ApplicationUiActionInvoked = 36
 }
 
 public static class ApprovalAuditCatalog
@@ -88,6 +89,7 @@ public static class ApprovalAuditCatalog
     public const string CodePatchApplyAction = "code.patch.apply.v1";
     public const string FileRecycleAction = "file.delete.recycle-bin.v1";
     public const string ApplicationUiTextSetAction = "app.ui.set-text.v1";
+    public const string ApplicationUiButtonInvokeAction = "app.ui.invoke-button.v1";
     public const string Confirmed = "confirmed";
     public const string Declined = "declined";
     public const string RunDotNetTests = "run_dotnet_tests";
@@ -129,6 +131,13 @@ public interface IReadOnlyUiAutomationSnapshotReader
 public interface IBackgroundUiAutomationTextSetter
 {
     Task<ToolResult> SetTextAsync(string applicationId, string automationId, string value,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Invokes one unique visible button in an allowlisted non-sensitive app after explicit approval.</summary>
+public interface IBackgroundUiAutomationButtonInvoker
+{
+    Task<ToolResult> InvokeButtonAsync(string applicationId, string automationId,
         CancellationToken cancellationToken);
 }
 

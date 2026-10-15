@@ -6,7 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using XiaoK.Adapters.Windows;
 
-internal static class UiAutomationReadOnlyProbe
+internal static class UiAutomationWorkerProbe
 {
     private const string AutomationId = "xiaok-synthetic-readonly-button";
     private const string AccessibleName = "小K合成只读探针按钮";
@@ -19,6 +19,7 @@ internal static class UiAutomationReadOnlyProbe
 
         var created = new TaskCompletionSource<ProbeWindow>(TaskCreationOptions.RunContinuationsAsynchronously);
         var activationCount = 0;
+        var successfulInvocationCount = 0;
         var windowThread = new Thread(() =>
         {
             try
@@ -27,6 +28,9 @@ internal static class UiAutomationReadOnlyProbe
                 AutomationProperties.SetAutomationId(button, AutomationId);
                 AutomationProperties.SetName(button, AccessibleName);
                 button.Click += (_, _) => Interlocked.Increment(ref activationCount);
+                var invokableButton = new Button { Content = "合成可调用按钮", IsEnabled = true };
+                AutomationProperties.SetAutomationId(invokableButton, "xiaok-synthetic-invoke-button");
+                invokableButton.Click += (_, _) => Interlocked.Increment(ref successfulInvocationCount);
                 var waitButton = new Button { Content = "等待控件", IsEnabled = false };
                 AutomationProperties.SetAutomationId(waitButton, "xiaok-synthetic-never-enabled");
                 var duplicateWaitButton = new Button { Content = "重复目标", IsEnabled = true };
@@ -59,8 +63,8 @@ internal static class UiAutomationReadOnlyProbe
                     Title = "小K UIA 只读合成探针",
                     Width = 280,
                     Height = 160,
-                    Left = -32000,
-                    Top = -32000,
+                    Left = 24,
+                    Top = 24,
                     WindowStyle = WindowStyle.ToolWindow,
                     ShowInTaskbar = false,
                     ShowActivated = false,
@@ -68,7 +72,7 @@ internal static class UiAutomationReadOnlyProbe
                     {
                         Children =
                         {
-                            button, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
+                            button, invokableButton, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
                             wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope
                         }
                     }
@@ -96,7 +100,7 @@ internal static class UiAutomationReadOnlyProbe
         {
             probe = await created.Task.WaitAsync(TimeSpan.FromSeconds(10));
             if (GetForegroundWindow() != foregroundBefore)
-                throw new InvalidOperationException("显示离屏合成窗口改变了前台窗口。");
+                throw new InvalidOperationException("显示非激活合成窗口改变了前台窗口。");
 
             var result = await Task.Run(() => ReadOnlyInspect(probe.Handle)).WaitAsync(TimeSpan.FromSeconds(10));
             if (result.AutomationId != AutomationId || result.Name != AccessibleName || result.IsEnabled)
@@ -104,6 +108,23 @@ internal static class UiAutomationReadOnlyProbe
             var desktop = new WindowsDesktopTools(
                 [new DesktopApp("uia-probe", Environment.ProcessPath!)],
                 [], new SyntheticWindowProcessController(probe.Handle));
+            using var preCancelledAction = new CancellationTokenSource();
+            preCancelledAction.Cancel();
+            var preCancelledStarter = new BlockingWorkerProcessStarter();
+            var preCancelledResult = await new WindowsUiAutomationSnapshotAdapter(desktop, preCancelledStarter)
+                .InvokeButtonAsync("uia-probe", AutomationId, preCancelledAction.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            if (preCancelledResult.Success || preCancelledResult.ErrorCode != "UIA_ACTION_CANCELLED_BEFORE_OPERATION"
+                || preCancelledResult.FinalState != XiaoK.Core.TaskLifecycleState.Cancelled
+                || preCancelledStarter.Started.IsCompleted || Volatile.Read(ref activationCount) != 0)
+                throw new InvalidOperationException("工作进程启动前已取消的按钮调用没有明确报告未执行。");
+            var blockedButtonStarter = new BlockingWorkerProcessStarter();
+            var blockedButton = await new WindowsUiAutomationSnapshotAdapter(desktop, blockedButtonStarter)
+                .InvokeButtonAsync("uia-probe", "Button.DeleteItem", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            if (blockedButton.Success || blockedButton.ErrorCode != "UIA_BUTTON_ACTION_BLOCKED"
+                || blockedButtonStarter.Started.IsCompleted || Volatile.Read(ref activationCount) != 0)
+                throw new InvalidOperationException("高风险AutomationId没有在访问目标窗口或启动工作进程前被拒绝。");
             var unlisted = await new WindowsUiAutomationSnapshotAdapter(new WindowsDesktopTools([], []))
                 .WaitForEnabledControlAsync("uia-probe", AutomationId, CancellationToken.None);
             if (unlisted.Success || unlisted.ErrorCode != "APP_NOT_ALLOWLISTED")
@@ -115,6 +136,24 @@ internal static class UiAutomationReadOnlyProbe
                 || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal)
                 || !isolated.Data.Contains("禁用", StringComparison.Ordinal))
                 throw new InvalidOperationException($"隔离UIA工作进程未返回合成控件快照：{isolated.ErrorCode ?? isolated.Summary}");
+            var buttonAction = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .InvokeButtonAsync("uia-probe", AutomationId, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
+            if (buttonAction.Success || buttonAction.ErrorCode != "UIA_BUTTON_NOT_INVOKABLE"
+                || Volatile.Read(ref activationCount) != 0 || Volatile.Read(ref successfulInvocationCount) != 0
+                || GetForegroundWindow() != foregroundBefore)
+                throw new InvalidOperationException("隔离UIA worker没有拒绝禁用的合成按钮或改变了前台/控件状态。");
+            var ambiguousButton = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .InvokeButtonAsync("uia-probe", "xiaok-synthetic-duplicate", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+            if (ambiguousButton.Success || ambiguousButton.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS"
+                || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
+                throw new InvalidOperationException("隔离UIA worker没有拒绝重复AutomationId或改变了控件/前台状态。");
+            var invokedButton = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .InvokeButtonAsync("uia-probe", "xiaok-synthetic-invoke-button", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+            if (!invokedButton.Success || Volatile.Read(ref successfulInvocationCount) != 1
+                || GetForegroundWindow() != foregroundBefore)
+                throw new InvalidOperationException("隔离UIA worker没有恰好调用一次唯一、可见、启用的合成按钮，或改变了前台窗口。");
             var scoped = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-scope", "Group", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
@@ -179,12 +218,12 @@ internal static class UiAutomationReadOnlyProbe
             {
                 await probe.Dispatcher.InvokeAsync(probe.Window.Close);
                 if (!windowThread.Join(TimeSpan.FromSeconds(5)))
-                    throw new InvalidOperationException("离屏合成探针窗口未在限定时间内退出。");
+                    throw new InvalidOperationException("合成探针窗口未在限定时间内退出。");
             }
         }
 
         if (GetForegroundWindow() != foregroundBefore)
-            throw new InvalidOperationException("关闭离屏合成窗口后前台窗口句柄发生变化。");
+            throw new InvalidOperationException("关闭合成窗口后前台窗口句柄发生变化。");
     }
 
     private static (string AutomationId, string Name, bool IsEnabled) ReadOnlyInspect(IntPtr handle)
@@ -226,6 +265,30 @@ internal static class UiAutomationReadOnlyProbe
         if (timed.Success || timed.ErrorCode != "UIA_WORKER_TIMEOUT")
             throw new InvalidOperationException("无响应UIA子进程没有在5秒后被终止。");
         await RequireProcessExitedAsync(timeoutStarter.ProcessId);
+
+        var actionTimeoutStarter = new BlockingWorkerProcessStarter();
+        var actionTimeoutAdapter = new WindowsUiAutomationSnapshotAdapter(desktop, actionTimeoutStarter);
+        var actionTimeoutOperation = actionTimeoutAdapter.InvokeButtonAsync("uia-probe", AutomationId,
+            CancellationToken.None);
+        await actionTimeoutStarter.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        var uncertainAction = await actionTimeoutOperation.WaitAsync(TimeSpan.FromSeconds(8));
+        if (uncertainAction.Success || uncertainAction.ErrorCode != "UIA_ACTION_OUTCOME_UNCERTAIN"
+            || uncertainAction.FinalState != XiaoK.Core.TaskLifecycleState.OutcomeUncertain)
+            throw new InvalidOperationException("按钮工作进程无响应后没有将可能已开始的动作标记为结果待核对。");
+        await RequireProcessExitedAsync(actionTimeoutStarter.ProcessId);
+
+        var actionCancellationStarter = new BlockingWorkerProcessStarter();
+        var actionCancellationAdapter = new WindowsUiAutomationSnapshotAdapter(desktop, actionCancellationStarter);
+        using var actionCancellation = new CancellationTokenSource();
+        var actionCancellationOperation = actionCancellationAdapter.InvokeButtonAsync("uia-probe", AutomationId,
+            actionCancellation.Token);
+        await actionCancellationStarter.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        actionCancellation.Cancel();
+        var cancelledAction = await actionCancellationOperation.WaitAsync(TimeSpan.FromSeconds(5));
+        if (cancelledAction.Success || cancelledAction.ErrorCode != "UIA_ACTION_OUTCOME_UNCERTAIN"
+            || cancelledAction.FinalState != XiaoK.Core.TaskLifecycleState.OutcomeUncertain)
+            throw new InvalidOperationException("按钮调用开始后取消没有按结果待核对处理。");
+        await RequireProcessExitedAsync(actionCancellationStarter.ProcessId);
 
         await VerifyWorkerKilledWhenHostExitsAsync();
     }

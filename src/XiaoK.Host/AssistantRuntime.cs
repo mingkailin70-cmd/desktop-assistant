@@ -124,7 +124,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _broker = new ToolBroker(desktopTools, _inference, _models, approval,
             codeAgent, _settings.CodeProjectRoot, _settings.CodeWorkspaceRoot,
             approval as IMessageSendPreviewPresenter, publicWebPageReader, new PublicFileDownloader(), publicWebPageReader,
-            _browserSessions, new InteractionCoordinator(desktopTools), uiAutomation, uiAutomation);
+            _browserSessions, new InteractionCoordinator(desktopTools), uiAutomation, uiAutomation, uiAutomation);
         _userTaskWorker = Task.Run(ProcessUserTaskQueueAsync);
         _noticeAnalysisWorker = ProcessNoticeAnalysisQueueAsync();
     }
@@ -1064,6 +1064,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             return await ExecuteBackgroundAsync(proposal, token);
         }
 
+        if (category == "app-ui-invoke-button")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“点击界面按钮：应用名|唯一AutomationId”输入；只允许已登记普通应用中的唯一、可见、启用且支持 Invoke 的按钮，每次操作需确认。消息/邮件客户端、浏览器、文件管理器和金融/凭证敏感应用不允许使用该通用工具。", "UIA_BUTTON_TARGET_NOT_SUPPORTED");
+            return await ExecuteBackgroundAsync(proposal, token);
+        }
+
         if (category == "app-ui-wait-enabled")
         {
             var proposal = ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(request, GetConfiguredAppAliases());
@@ -1509,6 +1517,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     {
         var lower = request.ToLowerInvariant();
         if (ApplicationUiAutomationPolicy.IsSetTextUserRequest(request)) return "app-ui-set-text";
+        if (ApplicationUiAutomationPolicy.IsInvokeButtonUserRequest(request)) return "app-ui-invoke-button";
         if (ApplicationUiAutomationPolicy.IsWaitForEnabledUserRequest(request)) return "app-ui-wait-enabled";
         if (ApplicationUiAutomationPolicy.IsScopedSnapshotUserRequest(request)) return "app-ui-scoped-snapshot";
         if (ApplicationUiAutomationPolicy.IsUserRequest(request)) return "app-ui-snapshot";

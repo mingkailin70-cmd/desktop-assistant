@@ -101,11 +101,11 @@ if (args.Length == 1 && args[0] == "--only-notification-sample-bounds")
     Console.WriteLine("通过：通知队列、样本文本、正文聚合、去重键和保留时限均有界，超限路径失败关闭。");
     return;
 }
-if (args.Length == 1 && args[0] == "--only-ui-text-write-policy")
+if (args.Length == 1 && args[0] == "--only-ui-automation-policy")
 {
     await CheckUiTextWritePolicyAsync();
     await CheckMessagingUiSnapshotBlockedAsync();
-    Console.WriteLine("通过：UIA消息客户端快照封锁、指定容器元数据边界和文本写入确认策略。 ");
+    Console.WriteLine("通过：UIA隐私边界、指定容器元数据、经确认的文本写入与按钮操作策略。 ");
     return;
 }
 if (args.Length == 1 && args[0] == "--only-task-history-display-policy")
@@ -3768,12 +3768,20 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         ApprovalAuditCatalog.Declined, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.FileRecycleAction,
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiTextSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiTextSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
     const string untrustedAuditSentinel = "PRIVATE_APPROVAL_DETAILS_MUST_NOT_BE_STORED";
     var untrustedActionRejected = false;
     try { await store.AppendApprovalAuditAsync(untrustedAuditSentinel, "confirmed", CancellationToken.None); }
     catch (ArgumentException) { untrustedActionRejected = true; }
     var audit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
-    Require(untrustedActionRejected && audit.Count == 5
+    Require(untrustedActionRejected && audit.Count == 9
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodeTaskAction
             && row.Outcome == ApprovalAuditCatalog.RunDotNetTests)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.MessageSendAction
@@ -3784,6 +3792,8 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
             && row.Outcome == ApprovalAuditCatalog.Declined)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.FileRecycleAction
             && row.Outcome == ApprovalAuditCatalog.Confirmed)
+        && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction) == 2
+        && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2
         && DatabaseFilesOmitSentinel(databasePath, untrustedAuditSentinel),
         "审批审计接受了自由文本，或没有按固定动作/结果保存审核痕迹。");
 
@@ -3792,7 +3802,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
     var backedUpAudit = await backup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal"
-        && backedUpAudit.Count == 5,
+        && backedUpAudit.Count == 9,
         "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
     var changedAfterBackup = new ContactReplyStylePreference("Charlie", "casual",
@@ -3807,8 +3817,8 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var safetyPreferences = await safetyBackup.GetContactReplyStylesAsync(CancellationToken.None);
     var safetyAudit = await safetyBackup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(restoredPreferences.Count == 1 && restoredPreferences[0].ContactName == "Bob"
-        && restoredAudit.Count == 5 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
-        && safetyAudit.Count == 6,
+        && restoredAudit.Count == 9 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
+        && safetyAudit.Count == 10,
         "数据库恢复未恢复所选快照，或恢复前的活动数据库没有留下可用保护副本。");
 
     var incompatibleBackupPath = Path.Combine(directory, "incompatible.sqlite3");
@@ -4102,6 +4112,8 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-snapshot").Contains("只读", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-wait-enabled").Contains("不点击", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-text").Contains("逐次确认完整文本", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-invoke-button").Contains("唯一可见按钮", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-invoke-button").Contains("逐次确认", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file-delete").Contains("任务中心逐项确认", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-text").Contains("不模拟按键或改变前台", StringComparison.Ordinal)
@@ -4161,7 +4173,15 @@ static void CheckTaskHistoryDisplayPolicy()
         ("UIA_CONDITION_NOT_MET", "没有点击或填写"),
         ("UIA_TARGET_IN_USE", "没有写入文本"),
         ("UIA_FOREGROUND_CHANGED_BEFORE_SET", "没有写入文本"),
-        ("UIA_PROTECTED_APP_BLOCKED", "没有访问或修改界面")
+        ("UIA_PROTECTED_APP_BLOCKED", "没有访问或修改界面"),
+        ("UIA_BUTTON_TARGET_BLOCKED", "没有调用按钮"),
+        ("UIA_BUTTON_ACTION_BLOCKED", "常见发送、删除、支付、权限或管理员操作"),
+        ("UIA_ACTION_CANCELLED_BEFORE_OPERATION", "没有访问或调用控件"),
+        ("UIA_BUTTON_NOT_FOUND", "没有调用控件"),
+        ("UIA_BUTTON_NOT_INVOKABLE", "没有执行动作"),
+        ("UIA_FOREGROUND_UNKNOWN", "没有调用按钮"),
+        ("UIA_FOREGROUND_CHANGED_BEFORE_ACTION", "没有调用按钮"),
+        ("UIA_TREE_LIMIT", "超过固定检查范围")
     };
     Require(applicationFailureGuidance.All(item =>
         {
@@ -4186,6 +4206,7 @@ static void CheckTaskHistoryDisplayPolicy()
         ("XLSX_CREATE_OUTCOME_UNCERTAIN", "独立核验未完成"),
         ("CODE_PATCH_OUTCOME_UNCERTAIN", "隔离工作区和补丁状态"),
         ("UIA_VALUE_VERIFY_FAILED", "目标应用中的文本写入结果无法确认"),
+        ("UIA_ACTION_OUTCOME_UNCERTAIN", "按钮调用可能已经触发，但目标状态无法确认"),
         ("UIA_FOREGROUND_CHANGED_AFTER_SET", "目标应用中的文本写入结果无法确认")
     };
     Require(uncertainOutcomeGuidance.All(item =>
@@ -4204,6 +4225,7 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Queued).Contains("不会执行", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.Running).Contains("副作用", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.NextAction(TaskLifecycleState.OutcomeUncertain).Contains("不会自动重试", StringComparison.Ordinal)
+        && TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-invoke-button", routeStarted: true)
         && TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Queued)
         && TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Running)
         && !TaskHistoryDisplayPolicy.CanCancel(TaskLifecycleState.Running, cancellationRequested: true)
@@ -4707,7 +4729,11 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
                 [new KeyValuePair<string, string>("app_id", unregisteredId),
                  new KeyValuePair<string, string>("automation_id", "Editor.Text"),
                  new KeyValuePair<string, string>("value", "ordinary text")], unregisteredId,
-                ToolExpectedOutcome.ApplicationUiValueSet)
+                ToolExpectedOutcome.ApplicationUiValueSet),
+            ToolBroker.Proposal("app.ui.invoke-button.v1",
+                [new KeyValuePair<string, string>("app_id", unregisteredId),
+                 new KeyValuePair<string, string>("automation_id", "Button.Save")], unregisteredId,
+                ToolExpectedOutcome.ApplicationUiActionInvoked)
         };
         foreach (var unregisteredTarget in unregisteredTargets)
         {
@@ -4755,6 +4781,105 @@ static async Task CheckUiTextWritePolicyAsync()
     Require(ToolInteractionPolicy.GetMode("app.ui.set-text.v1") == ToolInteractionMode.Background
         && ToolInteractionPolicy.GetOperation("app.ui.set-text.v1") == ToolInteractionOperation.TargetStateChange,
         "UIA文本填写没有使用后台目标状态变更门控。 ");
+
+    var buttonProposal = ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal(
+        "点击界面按钮：记事本|Editor.SaveButton", apps);
+    Require(buttonProposal?.ToolId == ApplicationUiAutomationPolicy.InvokeButtonToolId
+        && buttonProposal.Target == notepadId
+        && buttonProposal.Arguments.GetValueOrDefault("automation_id") == "Editor.SaveButton"
+        && buttonProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiActionInvoked
+        && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.InvokeButtonToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.InvokeButtonToolId)
+            == ToolInteractionOperation.TargetStateChange,
+        "UIA按钮操作没有绑定唯一白名单应用/控件，或缺少状态变更协调和固定可观察结果。 ");
+    var duplicateIdAliases = new[]
+    {
+        new ConfiguredAppAlias(notepadId, "记事本"),
+        new ConfiguredAppAlias(notepadId, "文本编辑器")
+    };
+    Require(ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal(
+            "点击界面按钮：记事本|Editor.SaveButton", duplicateIdAliases)?.Target == notepadId,
+        "同一应用ID的多个有效显示别名导致UIA按钮提案抛错或被错误拒绝。 ");
+    Require(ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：微信|SendButton", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：QQ|SendButton", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：Edge|Submit", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：资源管理器|Delete", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：加密货币钱包|Transfer", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：记事本|SendButton", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：记事本|DeleteItem", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：记事本|Admin.GrantAccess", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：记事本|bad id", apps) is null
+        && ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal("点击界面按钮：记事本|Editor.SaveButton|extra", apps) is null,
+        "UIA按钮提案接受了消息客户端、受保护应用、无效 AutomationId 或扩展字段。 ");
+    Require(ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("slack", "Slack", null)
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("outlook", "Outlook", null)
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("wecom", "企业微信", null)
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("work-wechat", "企业微信", "C:\\Apps\\WXWork.exe")
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("browser", "Firefox", "C:\\Apps\\Firefox.exe")
+        && !ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("notepad", "记事本", "C:\\Windows\\notepad.exe"),
+        "通用按钮操作没有额外封锁通信/邮件客户端与非Edge浏览器，或误封普通文本应用。 ");
+    Require(ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked("settings", "设置", "C:\\Windows\\SystemSettings.exe")
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked("Button.DeleteSelected")
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked("Button.Send")
+        && ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked("Button.GrantPermission")
+        && !ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked("Editor.SaveButton"),
+        "通用按钮策略没有封锁系统管理应用及可识别的高风险动作标识，或误封普通保存按钮。 ");
+
+    var invoker = new RecordingBackgroundUiAutomationButtonInvoker();
+    var invokeApproval = new RecordingApprovalPresenter(true);
+    var invoked = await CreateBroker(invokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
+        InteractionTargetUsage.NotInUse, buttonInvoker: invoker)
+        .ExecuteBackgroundAsync(buttonProposal!, CancellationToken.None, Guid.NewGuid());
+    Require(invoked.Success && invoker.CallCount == 1 && invoker.ApplicationId == notepadId
+        && invoker.AutomationId == "Editor.SaveButton"
+        && invokeApproval.CallCount == 1
+        && invokeApproval.LastActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
+        && invokeApproval.LastDetails?.Contains("Editor.SaveButton", StringComparison.Ordinal) == true
+        && invokeApproval.LastDetails?.Contains("无法核对当前选中对象或预览最终内容", StringComparison.Ordinal) == true
+        && invokeApproval.LastDetails?.Contains("不读取控件名称、文本", StringComparison.Ordinal) == true,
+        "UIA按钮操作没有在每次确认后只调用一次固定 AutomationId，或确认提示未说明副作用/读取边界。 ");
+
+    var declinedInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
+    var declinedInvokeApproval = new RecordingApprovalPresenter(false);
+    var declinedInvoke = await CreateBroker(declinedInvokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
+        InteractionTargetUsage.NotInUse, buttonInvoker: declinedInvoker)
+        .ExecuteBackgroundAsync(buttonProposal!, CancellationToken.None);
+    Require(!declinedInvoke.Success && declinedInvoke.ErrorCode == "UIA_ACTION_DECLINED"
+        && declinedInvokeApproval.CallCount == 1 && declinedInvoker.CallCount == 0,
+        "拒绝应用按钮确认后仍调用了目标控件。 ");
+
+    var blockedButtonInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
+    var blockedButtonApproval = new RecordingApprovalPresenter(true);
+    var blockedButtonProposal = buttonProposal! with
+    {
+        Arguments = buttonProposal.Arguments.SetItem("app_id", "slack"),
+        Target = "slack"
+    };
+    var blockedButton = await CreateBroker(blockedButtonApproval, new RecordingBackgroundUiAutomationTextSetter(),
+        InteractionTargetUsage.NotInUse, CreateDesktop("slack", "Slack"), blockedButtonInvoker)
+        .ExecuteBackgroundAsync(blockedButtonProposal, CancellationToken.None);
+    Require(!blockedButton.Success && blockedButton.ErrorCode == "UIA_BUTTON_TARGET_BLOCKED"
+        && blockedButtonApproval.CallCount == 0 && blockedButtonInvoker.CallCount == 0,
+        "伪造UIA提案绕过了对第三方通信应用的拒绝或先创建了动作确认。 ");
+
+    var busyInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
+    var busyInvokeApproval = new RecordingApprovalPresenter(true);
+    var busyInvoke = await CreateBroker(busyInvokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
+        InteractionTargetUsage.InUse, buttonInvoker: busyInvoker)
+        .ExecuteBackgroundAsync(buttonProposal!, CancellationToken.None);
+    Require(!busyInvoke.Success && busyInvoke.ErrorCode == "TARGET_IN_USE"
+        && busyInvokeApproval.CallCount == 0 && busyInvoker.CallCount == 0,
+        "目标应用由用户使用时，按钮操作仍进入确认或调用 UIA。 ");
+
+    using var invokeCancellation = new CancellationTokenSource();
+    var cancelledInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
+    var cancelledInvoke = await CreateBroker(new CancelAfterApprovalPresenter(invokeCancellation),
+        new RecordingBackgroundUiAutomationTextSetter(), InteractionTargetUsage.NotInUse,
+        buttonInvoker: cancelledInvoker)
+        .ExecuteBackgroundAsync(buttonProposal!, invokeCancellation.Token);
+    Require(!cancelledInvoke.Success && cancelledInvoke.FinalState == TaskLifecycleState.Cancelled
+        && cancelledInvoker.CallCount == 0,
+        "用户在确认后取消仍执行了 UIA 按钮操作。 ");
 
     var writer = new RecordingBackgroundUiAutomationTextSetter();
     var approval = new RecordingApprovalPresenter(true);
@@ -4819,10 +4944,11 @@ static async Task CheckUiTextWritePolicyAsync()
         "伪造提案绕过了ToolBroker对钱包/金融敏感应用的拒绝。");
 
     ToolBroker CreateBroker(IApprovalPresenter presenter, IBackgroundUiAutomationTextSetter textWriter,
-        InteractionTargetUsage usage, WindowsDesktopTools? desktop = null) => new(desktop ?? CreateDesktop(notepadId, "记事本"),
+        InteractionTargetUsage usage, WindowsDesktopTools? desktop = null,
+        IBackgroundUiAutomationButtonInvoker? buttonInvoker = null) => new(desktop ?? CreateDesktop(notepadId, "记事本"),
         null!, new ModelBroker(), presenter,
         null!, "", "", interactionCoordinator: new InteractionCoordinator(new FixedTargetUsageProbe(usage)),
-        uiAutomationTextSetter: textWriter);
+        uiAutomationTextSetter: textWriter, uiAutomationButtonInvoker: buttonInvoker);
 
     static WindowsDesktopTools CreateDesktop(string appId, string displayName) => new(
         [new DesktopApp(appId, Environment.ProcessPath ?? throw new InvalidOperationException("测试可执行路径不可用。"),
@@ -4835,6 +4961,8 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
         "WindowsUiAutomationWorkerEntryPoint.cs"));
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadSnapshot");
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadScopedSnapshot");
+    RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "InvokeButton", "IsGenericButtonInvocationTargetBlocked");
+    RequireButtonInvocationChecksPrecedeSideEffect(workerSource);
 
     var coordinator = new InteractionCoordinator();
     var desktop = new WindowsDesktopTools(
@@ -4860,16 +4988,38 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
             "伪造UIA提案绕过消息客户端快照封锁或在拒绝前创建了目标锁。");
     }
 
-    static void RequireMessagingWorkerGuardPrecedesUiRead(string source, string methodName)
+    static void RequireMessagingWorkerGuardPrecedesUiRead(string source, string methodName,
+        string guardName = "IsMessagingClientTarget")
     {
         var methodStart = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse "
             + methodName + "(", StringComparison.Ordinal);
         var nextMethod = methodStart < 0 ? -1 : source.IndexOf("\n    private static ", methodStart + 1, StringComparison.Ordinal);
         var methodEnd = nextMethod < 0 ? source.Length : nextMethod;
-        var guard = methodStart < 0 ? -1 : source.IndexOf("IsMessagingClientTarget(", methodStart, StringComparison.Ordinal);
+        var guard = methodStart < 0 ? -1 : source.IndexOf(guardName + "(", methodStart, StringComparison.Ordinal);
         var uiRead = methodStart < 0 ? -1 : source.IndexOf("TryResolveRoot(", methodStart, StringComparison.Ordinal);
         Require(methodStart >= 0 && guard >= methodStart && guard < methodEnd && uiRead > guard && uiRead < methodEnd,
             $"隔离UIA工作进程的{methodName}没有在查询目标界面前独立拒绝消息客户端。");
+    }
+
+    static void RequireButtonInvocationChecksPrecedeSideEffect(string source)
+    {
+        var start = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse InvokeButton(",
+            StringComparison.Ordinal);
+        var end = start < 0 ? -1 : source.IndexOf("\n    private static ", start + 1, StringComparison.Ordinal);
+        if (end < 0) end = source.Length;
+        var method = start < 0 ? string.Empty : source[start..end];
+        var invoke = method.IndexOf("invokePattern.Invoke()", StringComparison.Ordinal);
+        var checks = new[]
+        {
+            "string.Equals(current.AutomationId, automationId", "current.ControlType != ControlType.Button",
+            "current.ProcessId != request.ProcessId", "!current.IsEnabled", "current.IsOffscreen",
+            "TryGetCurrentPattern(InvokePattern.Pattern", "GetForegroundWindow() != foregroundBefore"
+        };
+        Require(start >= 0 && invoke >= 0
+            && checks.All(check => method.IndexOf(check, StringComparison.Ordinal) is var index && index >= 0 && index < invoke)
+            && !method.Contains(".Current.Name", StringComparison.Ordinal)
+            && !method.Contains(".Current.Value", StringComparison.Ordinal),
+            "按钮调用缺少类型/可见性/启用/前台/Invoke 能力检查，或读取了控件名称/值。");
     }
 }
 
@@ -10793,6 +10943,23 @@ internal sealed class RecordingBackgroundUiAutomationTextSetter : IBackgroundUiA
         AutomationId = automationId;
         Value = value;
         return Task.FromResult(new ToolResult(true, "合成文本框已更新。", Data: "目标文本框已更新"));
+    }
+}
+
+internal sealed class RecordingBackgroundUiAutomationButtonInvoker : IBackgroundUiAutomationButtonInvoker
+{
+    public int CallCount { get; private set; }
+    public string? ApplicationId { get; private set; }
+    public string? AutomationId { get; private set; }
+
+    public Task<ToolResult> InvokeButtonAsync(string applicationId, string automationId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        ApplicationId = applicationId;
+        AutomationId = automationId;
+        return Task.FromResult(new ToolResult(true, "合成按钮已调用。", Data: "已调用目标按钮"));
     }
 }
 

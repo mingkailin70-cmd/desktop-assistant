@@ -11,7 +11,8 @@ using XiaoK.Core;
 namespace XiaoK.Adapters.Windows;
 
 /// <summary>Runs bounded UIA operations in a disposable helper process.</summary>
-public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSnapshotReader, IBackgroundUiAutomationTextSetter
+public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSnapshotReader,
+    IBackgroundUiAutomationTextSetter, IBackgroundUiAutomationButtonInvoker
 {
     private const int MaximumRequestBytes = 16 * 1024;
     private const int MaximumResponseBytes = 32 * 1024;
@@ -79,7 +80,6 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
             || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
             return new(false, "AutomationId 格式无效；没有访问应用界面。", "UIA_INVALID_SELECTOR");
-
         var (response, failure) = await RunWorkerAsync(applicationId,
             new WorkerCommand("wait_enabled", automationId, ControlWaitMilliseconds), cancellationToken)
             .ConfigureAwait(false);
@@ -125,13 +125,66 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             Data: "目标文本框已更新");
     }
 
+    public async Task<ToolResult> InvokeButtonAsync(string applicationId, string automationId,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return new(false, "按钮工作进程启动前任务已取消；没有访问或调用控件。",
+                "UIA_ACTION_CANCELLED_BEFORE_OPERATION", FinalState: TaskLifecycleState.Cancelled);
+        if (!_desktop.IsUiAutomationButtonTargetAllowed(applicationId))
+            return new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用按钮操作。", "UIA_BUTTON_TARGET_BLOCKED");
+        if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            return new(false, "AutomationId 格式无效；没有访问应用界面。", "UIA_INVALID_SELECTOR");
+        if (ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(automationId))
+            return new(false, "AutomationId 命中常见高风险按钮标记；没有访问或调用控件。", "UIA_BUTTON_ACTION_BLOCKED");
+
+        var (response, failure) = await RunWorkerAsync(applicationId,
+            new WorkerCommand("invoke_button", automationId, 0), cancellationToken).ConfigureAwait(false);
+        if (failure is not null) return failure;
+        if (response is null || !response.Success)
+        {
+            var error = response?.ErrorCode ?? "UIA_BUTTON_INVOKE_FAILED";
+            var uncertain = response?.OutcomeUncertain == true || error == "UIA_ACTION_OUTCOME_UNCERTAIN";
+            return new(false, uncertain
+                ? "按钮调用可能已经触发，但最终界面状态无法确认；请先检查目标应用，不要自动重试。"
+                : error == "UIA_TARGET_IN_USE"
+                    ? "目标应用正处于前台；为避免干扰你的操作，没有调用按钮。"
+                    : error == "UIA_FOREGROUND_UNKNOWN"
+                        ? "无法核验当前前台窗口；没有调用按钮。"
+                        : error == "UIA_FOREGROUND_CHANGED_BEFORE_ACTION"
+                            ? "调用前检测到前台窗口变化；没有调用按钮。"
+                            : error == "UIA_BUTTON_TARGET_BLOCKED"
+                                ? "目标应用属于消息/邮件客户端、浏览器、文件管理器或金融/凭证敏感应用；没有调用按钮。"
+                                : error == "UIA_BUTTON_ACTION_BLOCKED"
+                                    ? "按钮标识命中常见高风险操作；没有访问或调用控件。"
+                                    : error == "UIA_TARGET_CHANGED"
+                                        ? "目标窗口在检查期间发生变化；没有调用按钮。"
+                                        : error == "UIA_AUTOMATION_ID_AMBIGUOUS"
+                                            ? "同一窗口中存在多个相同 AutomationId；没有调用按钮。"
+                                            : error == "UIA_TREE_LIMIT"
+                                                ? "目标界面超出固定检查范围；没有调用按钮。"
+                                                : error == "UIA_BUTTON_NOT_INVOKABLE"
+                                                    ? "目标控件不是可用的 Invoke 按钮；没有执行动作。"
+                                                    : "没有找到唯一、可见且启用的 Invoke 按钮；没有执行动作。",
+                error, FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null);
+        }
+        return new(true, "已向唯一目标按钮发出一次 UI Automation Invoke；没有读取控件文本、模拟键鼠或主动切换前台。",
+            Data: "已调用目标按钮");
+    }
+
     private async Task<(WorkerResponse? Response, ToolResult? Failure)> RunWorkerAsync(string applicationId,
         WorkerCommand command, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
             return (null, new(false, "当前平台不支持 Windows UI Automation。", "UIA_UNAVAILABLE"));
         if (command.Mode == "set_text" && !_desktop.IsUiAutomationTextTargetAllowed(applicationId))
-            return (null, new(false, "目标应用不允许使用通用后台文本填写工具；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
+            return (null, new(false, "目标应用不允许使用通用后台文本填写；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
+        if (command.Mode == "invoke_button" && !_desktop.IsUiAutomationButtonTargetAllowed(applicationId))
+            return (null, new(false, "目标应用不允许使用通用按钮操作；没有调用控件。", "UIA_BUTTON_TARGET_BLOCKED"));
+        if (command.Mode == "invoke_button"
+            && ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(command.AutomationId))
+            return (null, new(false, "AutomationId 命中常见高风险按钮标记；没有访问或调用控件。", "UIA_BUTTON_ACTION_BLOCKED"));
         if (!_desktop.TryResolveUiAutomationTarget(applicationId, out var target, out var targetError))
             return (null, targetError switch
             {
@@ -143,7 +196,10 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
 
         if (command.Mode == "set_text" && ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(
             applicationId, target!.DisplayName, target.ExecutablePath))
-            return (null, new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用界面填写工具；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
+            return (null, new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用 UIA 文本填写；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
+        if (command.Mode == "invoke_button" && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(
+            applicationId, target!.DisplayName, target.ExecutablePath))
+            return (null, new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用 UIA 按钮操作；没有调用控件。", "UIA_BUTTON_TARGET_BLOCKED"));
 
         var executablePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
@@ -194,7 +250,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             outputTask = ReadBoundedOutputAsync(process.StandardOutput.BaseStream, MaximumResponseBytes, linked.Token);
             errorTask = DrainErrorAsync(process.StandardError.BaseStream);
-            mutationMayHaveStarted = command.Mode == "set_text";
+            mutationMayHaveStarted = command.Mode is "set_text" or "invoke_button";
             await process.StandardInput.BaseStream.WriteAsync(request, linked.Token).ConfigureAwait(false);
             await process.StandardInput.BaseStream.FlushAsync(linked.Token).ConfigureAwait(false);
             process.StandardInput.Close();
@@ -211,7 +267,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
             if (mutationMayHaveStarted)
-                return (new WorkerResponse(false, "UIA_VALUE_VERIFY_FAILED", [], OutcomeUncertain: true), null);
+                return (UncertainMutationResponse(command), null);
             throw;
         }
         catch (OperationCanceledException)
@@ -219,7 +275,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
             if (mutationMayHaveStarted)
-                return (new WorkerResponse(false, "UIA_VALUE_VERIFY_FAILED", [], OutcomeUncertain: true), null);
+                return (UncertainMutationResponse(command), null);
             return (null, new(false, "UIA 查询超过 5 秒，已终止隔离工作进程；没有执行控件动作。", "UIA_WORKER_TIMEOUT"));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException
@@ -229,7 +285,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             if (process is not null) TryKill(process);
             await ObserveWorkerAsync(outputTask, errorTask).ConfigureAwait(false);
             if (mutationMayHaveStarted)
-                return (new WorkerResponse(false, "UIA_VALUE_VERIFY_FAILED", [], OutcomeUncertain: true), null);
+                return (UncertainMutationResponse(command), null);
             return (null, new(false, "UIA 查询失败或返回内容超出限制；没有执行控件动作。", "UIA_WORKER_FAILED"));
         }
         finally { worker?.Dispose(); }
@@ -237,6 +293,10 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
 
     private sealed record WorkerCommand(string Mode, string? AutomationId, int WaitMilliseconds, string? Value = null,
         string? RootControlType = null);
+
+    private static WorkerResponse UncertainMutationResponse(WorkerCommand command) => new(false,
+        command.Mode == "invoke_button" ? "UIA_ACTION_OUTCOME_UNCERTAIN" : "UIA_VALUE_VERIFY_FAILED",
+        [], OutcomeUncertain: true);
 
     private static async Task<byte[]> ReadBoundedOutputAsync(Stream stream, int maximumBytes, CancellationToken token)
     {

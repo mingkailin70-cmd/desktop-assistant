@@ -10,7 +10,7 @@ public static class TaskFailureSafetyPolicy
     // Send is deliberately absent while the message tool only displays a preview; add it before wiring a sender.
     private static readonly HashSet<string> SideEffectCategories = new(StringComparer.Ordinal)
     {
-        "app", "window", "app-ui-set-text", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-create-pptx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download",
+        "app", "window", "app-ui-set-text", "app-ui-invoke-button", "file-create-text", "file-create-csv", "file-create-xlsx", "file-create-docx", "file-create-pptx", "file-copy", "file-rename", "file-move", "file-archive", "file-delete", "web-download",
         // These can mutate the isolated page's in-memory state even though outbound requests and form submits are blocked.
         "browser-session-click", "browser-session-fill", "code"
     };
@@ -37,5 +37,6 @@ public static class TaskFailureSafetyPolicy
         or "FILE_RENAME_OUTCOME_UNCERTAIN" or "FILE_RECYCLE_OUTCOME_UNCERTAIN"
         or "TEXT_FILE_CREATE_OUTCOME_UNCERTAIN" or "DOCX_CREATE_OUTCOME_UNCERTAIN"
         or "PPTX_CREATE_OUTCOME_UNCERTAIN" or "XLSX_CREATE_OUTCOME_UNCERTAIN"
-        or "CODE_PATCH_OUTCOME_UNCERTAIN" or "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_CHANGED_AFTER_SET";
+        or "CODE_PATCH_OUTCOME_UNCERTAIN" or "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_CHANGED_AFTER_SET"
+        or "UIA_ACTION_OUTCOME_UNCERTAIN";
 }

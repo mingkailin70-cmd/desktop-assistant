@@ -15,7 +15,8 @@ using System.Windows.Data;
 using System.Windows.Threading;
 using XiaoK.Adapters.Windows;
 
-if (args.Length == 2 && args[0] == "--uia-readonly-worker" && args[1] == "--test-block")
+if (args.Length == 2 && args[1] == "--test-block"
+    && (args[0] == "--uia-readonly-worker" || args[0] == "--uia-worker"))
 {
     await Task.Delay(Timeout.Infinite);
     return;
@@ -47,10 +48,16 @@ if (args.Length == 1 && args[0] == "--uia-readonly-worker")
     return;
 }
 
-if (args.Length == 1 && args[0] == "--only-uia-readonly-probe")
+if (args.Length == 1 && args[0] == "--uia-worker")
 {
-    await UiAutomationReadOnlyProbe.RunAsync();
-    Console.WriteLine("通过：离屏合成窗口的UIA只读探针未触发控件或前台；取消、5秒超时及所有者进程退出均回收工作进程。");
+    Environment.ExitCode = await WindowsUiAutomationWorkerEntryPoint.RunAsync();
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--only-uia-worker-probe")
+{
+    await UiAutomationWorkerProbe.RunAsync();
+    Console.WriteLine("通过：合成UIA worker的唯一按钮调用、拒绝条件、前台保护、取消/超时和进程回收均符合预期。");
     return;
 }
 
@@ -249,6 +256,8 @@ Require(TaskCategoryCatalog.TryGetLabel("app-ui-wait-enabled", out var uiWaitLab
     && uiWaitLabel == "等待界面控件状态", "任务中心没有显示UIA状态等待类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text", out var uiSetTextLabel)
     && uiSetTextLabel == "应用界面文本填写", "任务中心没有显示应用界面文本填写类别。");
+Require(TaskCategoryCatalog.TryGetLabel("app-ui-invoke-button", out var uiInvokeButtonLabel)
+    && uiInvokeButtonLabel == "应用按钮操作", "任务中心没有显示应用按钮操作类别。");
 Require(TaskCategoryCatalog.LabelOrConversation(null) == "本地对话"
     && TaskCategoryCatalog.LabelOrConversation("") == "本地对话"
     && TaskCategoryCatalog.LabelOrConversation("UNKNOWN_PRIVATE_CATEGORY") == "未分类任务",

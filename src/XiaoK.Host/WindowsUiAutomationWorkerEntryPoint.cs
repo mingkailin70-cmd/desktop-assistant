@@ -58,6 +58,8 @@ public static class WindowsUiAutomationWorkerEntryPoint
                         && request.WaitMilliseconds == 0 && request.Value is null => ReadScopedSnapshot(request),
                     "wait_enabled" when request.Value is null => WaitForEnabledControl(request),
                     "set_text" => SetTextValue(request),
+                    "invoke_button" when request.Value is null && request.RootControlType is null
+                        && request.WaitMilliseconds == 0 => InvokeButton(request),
                     _ => new(false, "UIA_INVALID_REQUEST", [])
                 };
         }
@@ -280,6 +282,71 @@ public static class WindowsUiAutomationWorkerEntryPoint
         return writeResult.Success
             ? new(true, null, [])
             : new(false, writeResult.ErrorCode, [], OutcomeUncertain: writeResult.OutcomeUncertain);
+    }
+
+    private static WindowsUiAutomationSnapshotAdapter.WorkerResponse InvokeButton(
+        WindowsUiAutomationSnapshotAdapter.WorkerRequest request)
+    {
+        var automationId = request.AutomationId;
+        if (automationId is null || automationId.Length is 0 or > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            return new(false, "UIA_INVALID_SELECTOR", []);
+        if (ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(automationId))
+            return new(false, "UIA_BUTTON_ACTION_BLOCKED", []);
+        if (ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(request.ApplicationId, request.DisplayName,
+            request.ExecutablePath))
+            return new(false, "UIA_BUTTON_TARGET_BLOCKED", []);
+        if (!TryResolveRoot(request, out var root, out var error)) return new(false, error, []);
+
+        var handle = new IntPtr(request.WindowHandle);
+        var foregroundBefore = GetForegroundWindow();
+        if (foregroundBefore == IntPtr.Zero)
+            return new(false, "UIA_FOREGROUND_UNKNOWN", []);
+        if (foregroundBefore == handle || GetWindowThreadProcessId(foregroundBefore, out var foregroundPid) != 0
+            && foregroundPid == (uint)request.ProcessId)
+            return new(false, "UIA_TARGET_IN_USE", []);
+
+        var searchResult = FindUniqueSafeControl(root, automationId, out var element);
+        if (searchResult == ControlSearchResult.Ambiguous)
+            return new(false, "UIA_AUTOMATION_ID_AMBIGUOUS", []);
+        if (searchResult == ControlSearchResult.TreeLimit)
+            return new(false, "UIA_TREE_LIMIT", []);
+        if (searchResult != ControlSearchResult.Unique || element is null)
+            return new(false, "UIA_BUTTON_NOT_FOUND", []);
+
+        var invokeMayHaveStarted = false;
+        try
+        {
+            if (!IsWindow(handle) || !IsWindowVisible(handle)
+                || GetWindowThreadProcessId(handle, out var processId) == 0 || processId != (uint)request.ProcessId)
+                return new(false, "UIA_TARGET_CHANGED", []);
+            if (GetForegroundWindow() != foregroundBefore)
+                return new(false, "UIA_FOREGROUND_CHANGED_BEFORE_ACTION", []);
+
+            var current = element.Current;
+            if (!string.Equals(current.AutomationId, automationId, StringComparison.Ordinal)
+                || current.ProcessId != request.ProcessId)
+                return new(false, "UIA_TARGET_CHANGED", []);
+            if (current.ControlType != ControlType.Button || !current.IsEnabled || current.IsOffscreen
+                || !element.TryGetCurrentPattern(InvokePattern.Pattern, out var patternObject)
+                || patternObject is not InvokePattern invokePattern)
+                return new(false, "UIA_BUTTON_NOT_INVOKABLE", []);
+            if (GetForegroundWindow() != foregroundBefore)
+                return new(false, "UIA_FOREGROUND_CHANGED_BEFORE_ACTION", []);
+
+            invokeMayHaveStarted = true;
+            invokePattern.Invoke();
+            if (GetForegroundWindow() != foregroundBefore)
+                return new(false, "UIA_ACTION_OUTCOME_UNCERTAIN", [], OutcomeUncertain: true);
+            return new(true, null, []);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or COMException
+            or ArgumentException or UnauthorizedAccessException or SecurityException or Win32Exception or NotSupportedException)
+        {
+            return invokeMayHaveStarted
+                ? new(false, "UIA_ACTION_OUTCOME_UNCERTAIN", [], OutcomeUncertain: true)
+                : new(false, "UIA_READ_FAILED", []);
+        }
     }
 
     private static bool TryResolveRoot(WindowsUiAutomationSnapshotAdapter.WorkerRequest request,
