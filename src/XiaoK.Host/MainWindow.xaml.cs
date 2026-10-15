@@ -1152,10 +1152,10 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
             return;
         }
 
-        var (horizontalDip, verticalDip) = PetWindowInteractionPolicy.GetKeyboardNudgeOffsetDip(direction);
-        var scale = GetEffectiveDpi(handle) / 96d;
-        var left = origin.Left + (int)Math.Round(horizontalDip * scale, MidpointRounding.AwayFromZero);
-        var top = origin.Top + (int)Math.Round(verticalDip * scale, MidpointRounding.AwayFromZero);
+        var (horizontalPixels, verticalPixels) = PetWindowInteractionPolicy.GetKeyboardNudgeOffsetPixels(
+            direction, GetEffectiveDpi(handle));
+        var left = origin.Left + horizontalPixels;
+        var top = origin.Top + verticalPixels;
         if (!SetWindowPosition(handle, left, top))
         {
             ReportWindowDragUnavailable();

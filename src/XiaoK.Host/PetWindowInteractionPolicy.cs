@@ -35,6 +35,17 @@ internal static class PetWindowInteractionPolicy
             _ => throw new ArgumentOutOfRangeException(nameof(direction))
         };
 
+    public static (int HorizontalPixels, int VerticalPixels) GetKeyboardNudgeOffsetPixels(
+        PetWindowNudgeDirection direction, uint effectiveDpi)
+    {
+        if (effectiveDpi == 0) throw new ArgumentOutOfRangeException(nameof(effectiveDpi));
+        var (horizontalDip, verticalDip) = GetKeyboardNudgeOffsetDip(direction);
+        return (ScaleToPixels(horizontalDip, effectiveDpi), ScaleToPixels(verticalDip, effectiveDpi));
+    }
+
+    private static int ScaleToPixels(int dip, uint effectiveDpi) =>
+        checked((int)Math.Round(dip * (double)effectiveDpi / 96d, MidpointRounding.AwayFromZero));
+
     public static PetWindowMoveCompletion GetCompletion(bool positionChanged, bool cancelled, bool expandOnClick)
     {
         if (positionChanged) return PetWindowMoveCompletion.SavePosition;

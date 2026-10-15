@@ -100,6 +100,27 @@ var petNudgeCases = new[]
 foreach (var testCase in petNudgeCases)
     Require(PetWindowInteractionPolicy.GetKeyboardNudgeOffsetDip(testCase.Direction) == testCase.Expected,
         "桌宠方向微移未提供对称的80-DIP位置调整。");
+var petNudgePixelSteps = new Dictionary<uint, int>
+{
+    [96] = 80,
+    [120] = 100,
+    [144] = 120,
+    [168] = 140,
+    [192] = 160
+};
+foreach (var (dpi, expectedStep) in petNudgePixelSteps)
+foreach (var testCase in petNudgeCases)
+{
+    var horizontalSign = Math.Sign(testCase.Expected.Item1);
+    var verticalSign = Math.Sign(testCase.Expected.Item2);
+    var expectedPixels = (horizontalSign * expectedStep, verticalSign * expectedStep);
+    Require(PetWindowInteractionPolicy.GetKeyboardNudgeOffsetPixels(testCase.Direction, dpi) == expectedPixels,
+        $"桌宠方向微移在{dpi} DPI下没有保持80 DIP的实际位移。");
+}
+var rejectedZeroDpi = false;
+try { _ = PetWindowInteractionPolicy.GetKeyboardNudgeOffsetPixels(PetWindowNudgeDirection.Right, 0); }
+catch (ArgumentOutOfRangeException) { rejectedZeroDpi = true; }
+Require(rejectedZeroDpi, "桌宠方向微移接受了无效的0 DPI。");
 
 Require(PetPosePresentationPolicy.FromStatus("正在采集麦克风") == XiaoKPetPose.Listening
     && PetPosePresentationPolicy.FromStatus("唤醒监听已开启") == XiaoKPetPose.Listening
@@ -258,8 +279,11 @@ Require(Regex.IsMatch(mainWindowXaml, "<Trigger Property=\"IsKeyboardFocused\" V
         .All(handler => mainWindowXaml.Contains($"Click=\"{handler}\"", StringComparison.Ordinal)
             && mainWindowCode.Contains($"private void {handler}", StringComparison.Ordinal))
     && mainWindowCode.Contains("CompactPetButton.ContextMenu = PetView.ContextMenu;", StringComparison.Ordinal)
+    && Regex.IsMatch(mainWindowCode,
+        @"GetKeyboardNudgeOffsetPixels\(\s*direction,\s*GetEffectiveDpi\(handle\)\)",
+        RegexOptions.CultureInvariant)
     && mainWindowCode.Contains("SwpNoSize | SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal),
-    "桌宠键盘焦点提示、上下左右微移菜单或不激活位置保存接线不完整。");
+    "桌宠键盘焦点提示、DPI感知的上下左右微移菜单或不激活位置保存接线不完整。");
 var assistantRuntimeSource = File.ReadAllText(Path.Combine(repositoryDirectory!.FullName,
     "src", "XiaoK.Host", "AssistantRuntime.cs"));
 var directToolRoutes = Regex.Matches(assistantRuntimeSource,
