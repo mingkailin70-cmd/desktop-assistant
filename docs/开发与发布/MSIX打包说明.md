@@ -2,7 +2,7 @@
 
 本文后续按版本排列的记录用于保留历史证据；旧版本段落中的命令不能自动视作当前操作步骤。尤其不得先卸载小K再安装较低版本，也不得直接对回滚包运行`Add-AppxPackage -ForceUpdateFromAnyVersion`。卸载可能清理包内应用数据，直接调用系统部署命令也绕过本仓库的版本、散列、身份和Host关闭核验。
 
-正常发布流程使用固定SDK脚本`tools\publish_xiaok.ps1`完成`10.0.401`锁定还原和自包含发布；随后用`tools\package_msix_validation.ps1 -CertificateThumbprint <本机证书指纹>`生成签名MSIX。打包只签名，不导入信任、不安装、不启动。使用`tools\install_xiaok_msix.ps1 -PackagePath <包路径>`先做只读预检；核对包版本、发布者、签名、SHA-256和证书结果后，才显式添加`-Install`安装到当前用户。安装脚本不会自动启动小K，并会在安装前对当前已安装Host作同会话、映像路径、PID和窗口标题核验，发送优雅关闭请求并等待正常退出；失败时不强杀。
+正常发布流程使用固定SDK脚本`tools\publish_xiaok.ps1`完成`10.0.401`锁定还原和自包含发布；随后用`tools\package_msix_validation.ps1 -CertificateThumbprint <本机证书指纹>`生成签名MSIX。打包只签名，不导入信任、不安装、不启动。使用`tools\install_xiaok_msix.ps1 -PackagePath <包路径>`先做只读预检；核对包版本、发布者、签名、SHA-256和证书结果后，才显式添加`-Install`安装到当前用户。安装脚本不会自动启动小K；安装前会在同一会话按Host进程逐个枚举隐藏或可见顶层窗口，仅当PID、映像路径和窗口标题核验后得到唯一目标时，才发送优雅关闭消息并等待正常退出。缺少窗口、标题歧义、会话/路径不匹配或超时均失败关闭，不强杀进程。
 
 安装证书的管理员要求取决于机器信任状态：若公钥已存在于`LocalMachine\TrustedPeople`，安装器不会改动信任，当前用户包安装不需要为证书导入而提升权限；若尚未受信任，安装器只在管理员上下文导入公钥到该存储后继续。不得导入到`Trusted Root Certification Authorities`。本机当前签名证书已受信任时，应记录“既有信任、未更改”，不可把该次更新描述成新导入证书。
 

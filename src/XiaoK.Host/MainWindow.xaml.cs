@@ -1338,7 +1338,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         PetStatusDot.Fill = new SolidColorBrush(color);
     }
 
-    private void PetEngineViewbox_Loaded(object sender, RoutedEventArgs e)
+    private void PetAnimationViewbox_Loaded(object sender, RoutedEventArgs e)
     {
         EnsurePetRendererInitialization();
     }
@@ -1350,7 +1350,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
 
     private void EnsurePetRendererInitialization()
     {
-        if (_exiting || !IsVisible || Opacity <= 0 || !PetEngineViewbox.IsLoaded
+        if (_exiting || !IsVisible || Opacity <= 0 || !PetAnimationViewbox.IsLoaded
             || _petRenderer is not null || _petRendererInitializationTask is not null) return;
         _petRendererInitializationTask = InitializePetRendererAsync();
     }
@@ -1360,7 +1360,7 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         IPetRenderer? renderer = null;
         try
         {
-            renderer = new VPetPortraitRuntime(Dispatcher, _runtime.CurrentSettings.DataRoot);
+            renderer = new PetSpriteAnimationRuntime(Dispatcher);
 
             await renderer.InitializeAsync(_petRendererCancellation.Token);
             if (_exiting)
@@ -1370,21 +1370,21 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                 return;
             }
 
-            PetEngineHost.Content = renderer.View;
+            PetAnimationHost.Content = renderer.View;
             _petRenderer = renderer;
             renderer = null;
             PetSpriteFallback.Visibility = Visibility.Collapsed;
-            PetEngineViewbox.Opacity = 1;
+            PetAnimationViewbox.Opacity = 1;
             UpdatePetPose(_currentStatus);
         }
         catch (OperationCanceledException) when (_exiting)
         {
-            PetEngineHost.Content = null;
+            PetAnimationHost.Content = null;
         }
         catch (Exception)
         {
-            PetEngineHost.Content = null;
-            PetEngineViewbox.Opacity = 0;
+            PetAnimationHost.Content = null;
+            PetAnimationViewbox.Opacity = 0;
             PetSpriteFallback.Visibility = Visibility.Visible;
             if (!_exiting) SetStatus("柯基动画暂不可用，继续显示静态形象");
         }
@@ -1411,9 +1411,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
                     PetPosePresentationPolicy.GetMotionProfile(pose));
 
             if (PetPosePresentationPolicy.ShouldAnimate(previousPose, pose,
-                    CanAnimatePetElement(PetEngineViewbox),
+                    CanAnimatePetElement(PetAnimationViewbox),
                     SystemParameters.ClientAreaAnimation))
-                PetPoseTransitionAnimator.Play(PetEnginePoseScale, PetEnginePoseOffset,
+                PetPoseTransitionAnimator.Play(PetAnimationPoseScale, PetAnimationPoseOffset,
                     PetPosePresentationPolicy.GetMotionProfile(pose));
         }
 
@@ -1426,9 +1426,9 @@ public partial class MainWindow : Window, IApprovalPresenter, ILiveApprovalState
         {
             var renderer = _petRenderer;
             _petRenderer = null;
-            PetEngineViewbox.Opacity = 0;
+            PetAnimationViewbox.Opacity = 0;
             PetSpriteFallback.Visibility = Visibility.Visible;
-            PetEngineHost.Content = null;
+            PetAnimationHost.Content = null;
             try { renderer.Dispose(); }
             catch (Exception) { }
         }

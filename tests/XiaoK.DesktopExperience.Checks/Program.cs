@@ -323,15 +323,18 @@ var taskCenterOpenStart = File.ReadAllText(Path.Combine(repositoryDirectory.Full
     "src", "XiaoK.Host", "MainWindow.xaml.cs"));
 Require(taskCenterOpenStart.Contains("IsVisibleChanged += MainWindow_IsVisibleChanged;", StringComparison.Ordinal)
     && taskCenterOpenStart.Contains("if (e.NewValue is true) EnsurePetRendererInitialization();", StringComparison.Ordinal)
-    && taskCenterOpenStart.Contains("!IsVisible || Opacity <= 0 || !PetEngineViewbox.IsLoaded", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("!IsVisible || Opacity <= 0 || !PetAnimationViewbox.IsLoaded", StringComparison.Ordinal)
     && taskCenterOpenStart.Contains("IsVisibleChanged -= MainWindow_IsVisibleChanged;", StringComparison.Ordinal),
     "启动隐藏或托盘驻留时不能初始化桌宠渲染器；主窗体之后可见时才启动，并在关闭时解除监听。 ");
-Require(taskCenterOpenStart.Contains("new VPetPortraitRuntime", StringComparison.Ordinal)
+Require(taskCenterOpenStart.Contains("new PetSpriteAnimationRuntime", StringComparison.Ordinal)
     && !taskCenterOpenStart.Contains("ThreeDPetRenderer.CreateAsync", StringComparison.Ordinal)
-    && taskCenterOpenStart.Contains("PetEngineHost.Content = renderer.View", StringComparison.Ordinal)
+    && taskCenterOpenStart.Contains("PetAnimationHost.Content = renderer.View", StringComparison.Ordinal)
     && taskCenterOpenStart.Contains("renderer?.Dispose();", StringComparison.Ordinal),
-    "正式Host应使用VPet动画柯基作为实际桌宠，并保留静态形象回退及释放路径。 ");
-var petLoadedHandlerStart = taskCenterOpenStart.IndexOf("private void PetEngineViewbox_Loaded", StringComparison.Ordinal);
+    "正式Host应使用有界WPF柯基帧动画作为实际桌宠，并保留静态形象回退及释放路径。 ");
+Require(!taskCenterOpenStart.Contains("VPetPortraitRuntime", StringComparison.Ordinal)
+    && !taskCenterOpenStart.Contains("PetEngine", StringComparison.Ordinal),
+    "Host不得将未裁剪的第三方宠物布局接入紧凑桌宠窗口。 ");
+var petLoadedHandlerStart = taskCenterOpenStart.IndexOf("private void PetAnimationViewbox_Loaded", StringComparison.Ordinal);
 var petLoadedHandlerEnd = taskCenterOpenStart.IndexOf("private void MainWindow_IsVisibleChanged", petLoadedHandlerStart, StringComparison.Ordinal);
 Require(petLoadedHandlerStart >= 0 && petLoadedHandlerEnd > petLoadedHandlerStart
     && taskCenterOpenStart[petLoadedHandlerStart..petLoadedHandlerEnd]
@@ -414,9 +417,9 @@ Require(true, "设置页初始化、保存、通知诊断与本地维护失败�
 foreach (var failure in XiaoK.DesktopExperience.Checks.PetPoseTransitionProbe.Run())
     Require(false, failure);
 Require(true, "桌宠姿态过渡离屏WPF检查通过。");
-foreach (var failure in XiaoK.DesktopExperience.Checks.PetVPetAnimationProbe.Run(repositoryDirectory!.FullName))
+foreach (var failure in XiaoK.DesktopExperience.Checks.PetSpriteAnimationProbe.Run(repositoryDirectory!.FullName))
     Require(false, failure);
-Require(true, "VPet柯基动画四态渲染、透明边缘、不激活前台与状态切换检查通过。");
+Require(true, "WPF柯基动画四态渲染、帧变化、透明边缘、不激活前台与有界视图检查通过。");
 foreach (var failure in XiaoK.DesktopExperience.Checks.PetWindowDragProbe.Run(repositoryDirectory!.FullName))
     Require(false, failure);
 Require(true, "桌宠移动手势阈值、轻点展开和预览事件接线检查通过。");
@@ -424,7 +427,7 @@ foreach (var failure in XiaoK.DesktopExperience.Checks.SherpaKwsWorkerIsolationP
     Require(false, failure);
 Require(true, "Sherpa KWS隔离worker帧边界、关键词白名单、作业回收与先停麦后停进程检查通过。");
 
-Console.WriteLine($"桌宠VPet动画渲染/姿态切换/移动与缩放/键盘位置微调/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复/Sherpa KWS worker隔离：{checks} 项通过。");
+Console.WriteLine($"桌宠柯基动画渲染/姿态切换/移动与缩放/键盘位置微调/后台交互策略/任务中心独立显示/WPF任务历史绑定与不激活刷新/取消按钮绑定/设置页异常恢复/Sherpa KWS worker隔离：{checks} 项通过。");
 
 sealed class CancelButtonState : INotifyPropertyChanged
 {

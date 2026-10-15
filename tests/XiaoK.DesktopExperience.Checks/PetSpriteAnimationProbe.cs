@@ -9,7 +9,7 @@ using XiaoK.Host;
 
 namespace XiaoK.DesktopExperience.Checks;
 
-internal static class PetVPetAnimationProbe
+internal static class PetSpriteAnimationProbe
 {
     public static IReadOnlyList<string> Run(string repositoryRoot)
     {
@@ -22,14 +22,14 @@ internal static class PetVPetAnimationProbe
         })
         {
             IsBackground = true,
-            Name = "XiaoK VPet Corgi animation offscreen check"
+            Name = "XiaoK corgi sprite animation offscreen check"
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         if (!thread.Join(TimeSpan.FromSeconds(20)))
-            return ["VPet柯基动画离屏检查超过20秒；后台STA窗口不会激活前台。"];
+            return ["柯基动画离屏检查超过20秒；后台STA窗口不会激活前台。"];
         if (threadFailure is not null)
-            return [$"VPet柯基动画离屏检查异常：{threadFailure.GetType().Name}"];
+            return [$"柯基动画离屏检查异常：{threadFailure.GetType().Name}"];
         return failures;
     }
 
@@ -39,8 +39,6 @@ internal static class PetVPetAnimationProbe
         var dispatcher = Dispatcher.CurrentDispatcher;
         var foregroundBefore = GetForegroundWindow();
         using var cancellation = new CancellationTokenSource();
-        var dataRoot = Path.Combine(Path.GetTempPath(), "XiaoK-corgi-pet-check-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dataRoot);
         var assetRoot = Path.Combine(repositoryRoot, "src", "XiaoK.Host", "Assets", "Pets");
         var window = new Window
         {
@@ -63,14 +61,14 @@ internal static class PetVPetAnimationProbe
         {
             watchdog.Stop();
             cancellation.Cancel();
-            failures.Add("VPet柯基动画离屏渲染未能在16秒内完成。");
+            failures.Add("柯基动画离屏渲染未能在16秒内完成。");
         };
         window.Loaded += async (_, _) =>
         {
-            VPetPortraitRuntime? renderer = null;
+            PetSpriteAnimationRuntime? renderer = null;
             try
             {
-                renderer = new VPetPortraitRuntime(dispatcher, dataRoot, assetRoot);
+                renderer = new PetSpriteAnimationRuntime(dispatcher, assetRoot);
                 await renderer.InitializeAsync(cancellation.Token);
                 window.Content = renderer.View;
                 renderer.View.Measure(new Size(360, 360));
@@ -79,16 +77,16 @@ internal static class PetVPetAnimationProbe
 
                 Require(renderer.View is FrameworkElement element
                         && !element.IsHitTestVisible && !element.Focusable,
-                    "VPet柯基动画视图可命中或可聚焦。", failures);
-                Require(renderer.View is System.Windows.Controls.Viewbox
-                        { Child: System.Windows.Controls.Grid { Children.Count: 2 } },
-                    "VPet柯基视图未隔离为两层宠物动画网格。", failures);
+                    "柯基动画视图可命中或可聚焦。", failures);
+                Require(renderer.View is System.Windows.Controls.Image
+                        { Width: 300, Height: 300, Stretch: Stretch.Uniform, Source: not null },
+                    "柯基动画没有被约束为单张300×300图像。", failures);
 
                 var hashes = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var pose in Enum.GetValues<XiaoKPetPose>())
                 {
                     renderer.SetPose(pose);
-                    await Task.Delay(450, cancellation.Token);
+                    await Task.Delay(40, cancellation.Token);
                     renderer.View.UpdateLayout();
                     var bitmap = new RenderTargetBitmap(360, 360, 96, 96, PixelFormats.Pbgra32);
                     bitmap.Render(renderer.View);
@@ -104,20 +102,30 @@ internal static class PetVPetAnimationProbe
                     };
                     var cornerLeakCount = CountCornerLeaks(pixels, 360, 360);
                     var surfaceNotFilled = visiblePixels < 360 * 360 * 98 / 100;
-                    hashes.Add(Convert.ToHexString(SHA256.HashData(pixels)));
-                    Require(renderer.CurrentPose == pose, $"VPet柯基桌宠状态切换没有保存 {pose}。", failures);
-                    Require(visiblePixels > 8_000, $"VPet柯基桌宠姿态 {pose} 没有渲染出完整主体。", failures);
+                    var firstHash = Convert.ToHexString(SHA256.HashData(pixels));
+                    hashes.Add(firstHash);
+                    Require(renderer.CurrentPose == pose, $"柯基桌宠状态切换没有保存 {pose}。", failures);
+                    Require(visiblePixels > 8_000, $"柯基桌宠姿态 {pose} 没有渲染出完整主体。", failures);
                     Require(surfaceNotFilled,
-                        $"VPet柯基桌宠姿态 {pose} 几乎填满整个画布，疑似渲染了不透明背景，非透明像素数={visiblePixels}。", failures);
+                        $"柯基桌宠姿态 {pose} 几乎填满整个画布，疑似渲染了不透明背景，非透明像素数={visiblePixels}。", failures);
                     Require(cornerLeakCount == 0,
-                        $"VPet柯基姿态 {pose} 的离屏渲染在四角12x12区域出现非透明像素，数量={cornerLeakCount}，角点alpha={string.Join(",", cornerAlpha)}。", failures);
+                        $"柯基姿态 {pose} 的离屏渲染在四角12x12区域出现非透明像素，数量={cornerLeakCount}，角点alpha={string.Join(",", cornerAlpha)}。", failures);
+
+                    await Task.Delay(500, cancellation.Token);
+                    renderer.View.UpdateLayout();
+                    var nextBitmap = new RenderTargetBitmap(360, 360, 96, 96, PixelFormats.Pbgra32);
+                    nextBitmap.Render(renderer.View);
+                    var nextPixels = new byte[360 * 360 * 4];
+                    nextBitmap.CopyPixels(nextPixels, 360 * 4, 0);
+                    var nextHash = Convert.ToHexString(SHA256.HashData(nextPixels));
+                    Require(nextHash != firstHash, $"柯基桌宠姿态 {pose} 没有按帧动画。", failures);
                 }
 
                 Require(hashes.Count == Enum.GetValues<XiaoKPetPose>().Length,
-                    "VPet柯基动画四种姿态的渲染结果没有全部区分开。", failures);
+                    "柯基动画四种姿态的渲染结果没有全部区分开。", failures);
                 renderer.SetPose(XiaoKPetPose.Idle);
                 await Task.Delay(120, cancellation.Token);
-                Require(renderer.CurrentPose == XiaoKPetPose.Idle, "VPet柯基动画没有恢复到待命姿态。", failures);
+                Require(renderer.CurrentPose == XiaoKPetPose.Idle, "柯基动画没有恢复到待命姿态。", failures);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
@@ -125,7 +133,7 @@ internal static class PetVPetAnimationProbe
             }
             catch (Exception exception)
             {
-                failures.Add($"VPet柯基动画渲染/切换失败：{exception.GetType().Name}");
+                failures.Add($"柯基动画渲染/切换失败：{exception.GetType().Name}");
             }
             finally
             {
@@ -137,15 +145,15 @@ internal static class PetVPetAnimationProbe
                         renderer.StopAnimations();
                         await Task.Delay(TimeSpan.FromMilliseconds(500));
                     }
-                    catch (Exception exception) { failures.Add($"VPet柯基动画停止失败：{exception.GetType().Name}"); }
+                    catch (Exception exception) { failures.Add($"柯基动画停止失败：{exception.GetType().Name}"); }
                     try { ClearImageSources(renderer.View); }
-                    catch (Exception exception) { failures.Add($"VPet柯基动画图片资源释放失败：{exception.GetType().Name}"); }
+                    catch (Exception exception) { failures.Add($"柯基动画图片资源释放失败：{exception.GetType().Name}"); }
                     try { renderer.Dispose(); }
-                    catch (Exception exception) { failures.Add($"VPet柯基动画释放失败：{exception.GetType().Name}"); }
+                    catch (Exception exception) { failures.Add($"柯基动画释放失败：{exception.GetType().Name}"); }
                 }
                 window.Content = null;
                 if (GetForegroundWindow() != foregroundBefore)
-                    failures.Add("VPet柯基动画离屏检查改变了前台窗口。");
+                    failures.Add("柯基动画离屏检查改变了前台窗口。");
                 window.Close();
             }
         };
@@ -161,8 +169,6 @@ internal static class PetVPetAnimationProbe
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            if (!TryDeleteDirectory(dataRoot, out var cleanupFailure))
-                failures.Add($"VPet柯基动画检查在Dispatcher关闭后仍未能清理临时缓存目录（{cleanupFailure}）。");
         }
     }
 
@@ -236,28 +242,6 @@ internal static class PetVPetAnimationProbe
     }
 
     private static byte GetAlpha(byte[] pixels, int width, int x, int y) => pixels[(y * width + x) * 4 + 3];
-
-    private static bool TryDeleteDirectory(string path, out string lastFailure)
-    {
-        lastFailure = "unknown";
-        for (var attempt = 0; attempt < 4; attempt++)
-        {
-            try
-            {
-                if (!Directory.Exists(path)) return true;
-                Directory.Delete(path, recursive: true);
-                return !Directory.Exists(path);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                lastFailure = exception.GetType().Name;
-                if (attempt == 3) return false;
-                Thread.Sleep(TimeSpan.FromMilliseconds(50 << attempt));
-            }
-        }
-
-        return false;
-    }
 
     private static nint GetForegroundWindow() => NativeMethods.GetForegroundWindow();
 

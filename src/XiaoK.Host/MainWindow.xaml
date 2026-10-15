@@ -343,18 +343,18 @@
                                     </TransformGroup>
                                 </Image.RenderTransform>
                             </Image>
-                            <Viewbox x:Name="PetEngineViewbox" Width="300" Height="300"
+                            <Viewbox x:Name="PetAnimationViewbox" Width="300" Height="300"
                                      Stretch="Uniform" Opacity="0" IsHitTestVisible="False"
                                      RenderTransformOrigin="0.5,0.88"
-                                     AutomationProperties.Name="VPet动画柯基桌宠小K"
-                                     Loaded="PetEngineViewbox_Loaded">
+                                     AutomationProperties.Name="柯基动画桌宠小K"
+                                     Loaded="PetAnimationViewbox_Loaded">
                                 <Viewbox.RenderTransform>
                                     <TransformGroup>
-                                        <ScaleTransform x:Name="PetEnginePoseScale"/>
-                                        <TranslateTransform x:Name="PetEnginePoseOffset"/>
+                                        <ScaleTransform x:Name="PetAnimationPoseScale"/>
+                                        <TranslateTransform x:Name="PetAnimationPoseOffset"/>
                                     </TransformGroup>
                                 </Viewbox.RenderTransform>
-                                <ContentControl x:Name="PetEngineHost" />
+                                <ContentControl x:Name="PetAnimationHost" />
                             </Viewbox>
                         </Grid>
                     </Button>

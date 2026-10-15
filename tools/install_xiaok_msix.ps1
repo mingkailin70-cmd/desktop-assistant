@@ -153,6 +153,7 @@ try {
             if (-not ('XiaoK.MsixInstaller.ShutdownWindowMessage' -as [type])) {
                 Add-Type -TypeDefinition @'
     using System;
+    using System.Collections.Generic;
     using System.Runtime.InteropServices;
     using System.Text;
 
@@ -173,7 +174,14 @@ try {
             [DllImport("user32.dll", SetLastError = true)]
             private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
-            public static bool TryRequestShutdown(IntPtr window, uint expectedProcessId, string expectedWindowTitle,
+            [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+            private delegate bool EnumWindowsCallback(IntPtr window, IntPtr state);
+
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
+
+            public static bool TryRequestShutdownForProcess(uint expectedProcessId, string expectedWindowTitle,
                 out bool windowFound, out uint windowProcessId, out int lastError)
             {
                 windowFound = false;
@@ -187,31 +195,56 @@ try {
                     return false;
                 }
 
-                if (window == IntPtr.Zero)
+                var candidates = new List<IntPtr>();
+                EnumWindowsCallback callback = (candidateWindow, _) =>
                 {
-                    lastError = 1168; // ERROR_NOT_FOUND
+                    if (GetWindowThreadProcessId(candidateWindow, out uint actualProcessId) == 0
+                        || actualProcessId != expectedProcessId)
+                    {
+                        return true;
+                    }
+
+                    var candidateTitle = new StringBuilder(256);
+                    if (GetWindowText(candidateWindow, candidateTitle, candidateTitle.Capacity) > 0
+                        && string.Equals(candidateTitle.ToString(), expectedWindowTitle, StringComparison.Ordinal))
+                    {
+                        candidates.Add(candidateWindow);
+                    }
+                    return true;
+                };
+
+                if (!EnumWindows(callback, IntPtr.Zero))
+                {
+                    lastError = Marshal.GetLastWin32Error();
+                    if (lastError == 0) lastError = 31; // ERROR_GEN_FAILURE
+                    return false;
+                }
+                GC.KeepAlive(callback);
+
+                if (candidates.Count != 1)
+                {
+                    windowFound = candidates.Count > 0;
+                    windowProcessId = windowFound ? expectedProcessId : 0;
+                    lastError = windowFound ? 183 : 1168; // ambiguous title or ERROR_NOT_FOUND
                     return false;
                 }
 
-                if (GetWindowThreadProcessId(window, out windowProcessId) == 0)
+                var window = candidates[0];
+                if (GetWindowThreadProcessId(window, out windowProcessId) == 0
+                    || windowProcessId != expectedProcessId)
                 {
-                    lastError = Marshal.GetLastWin32Error();
+                    windowFound = false;
+                    lastError = 1168; // ERROR_NOT_FOUND: window owner changed
                     return false;
                 }
 
                 windowFound = true;
-                if (windowProcessId != expectedProcessId)
-                {
-                    lastError = 183; // ERROR_ALREADY_EXISTS: unexpected window owner
-                    return false;
-                }
-
                 var title = new StringBuilder(256);
                 if (GetWindowText(window, title, title.Capacity) <= 0
                     || !string.Equals(title.ToString(), expectedWindowTitle, StringComparison.Ordinal))
                 {
                     windowFound = false;
-                    lastError = 1168; // ERROR_NOT_FOUND: title does not match
+                    lastError = 1168; // ERROR_NOT_FOUND: title changed
                     return false;
                 }
 
@@ -222,7 +255,7 @@ try {
             }
         }
     }
-    '@
+'@
             }
 
             $shutdownRequested = $false
@@ -235,8 +268,7 @@ try {
                 $candidateError = 0
                 $hostProcess.Refresh()
                 if ($hostProcess.HasExited) { continue }
-                $posted = [XiaoK.MsixInstaller.ShutdownWindowMessage]::TryRequestShutdown(
-                    $hostProcess.MainWindowHandle,
+                $posted = [XiaoK.MsixInstaller.ShutdownWindowMessage]::TryRequestShutdownForProcess(
                     [uint32]$hostProcess.Id,
                     $expectedWindowTitle,
                     [ref]$windowFound,
