@@ -1,5 +1,11 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-16 02:39 UIA按钮操作的社区实现思路（`.192.0`候选）
+
+继续沿用此前核验的[Microsoft WinApp CLI UI Automation设计](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)和[PowerToys UI测试实践](https://github.com/microsoft/PowerToys/blob/ccdd9b19ca980e9d383a42c235fa313a595ac712/doc/devdocs/development/ui-tests.md)：将只读发现和会改变应用状态的动作分开，使用稳定AutomationId与合成窗口测试，不把坐标或全局键鼠作为默认回退。小K新增的`app.ui.invoke-button.v1`按此思路只调用精确唯一的UIA Button/InvokePattern，并在隔离worker内执行；审查还发现同级遍历到64项后可能漏掉后续重复ID，现超限即失败为`UIA_TREE_LIMIT`，由65项合成树（重复ID位于首尾）覆盖。未复制第三方代码或添加依赖。
+
+此类通用Invoke操作无法从AutomationId推断业务语义。小K另对消息/邮件、浏览器、文件管理、金融/凭证及系统管理目标做阻断，对常见高风险按钮ID做有限匹配并要求逐次审批；匹配并不完整，因此该工具不能承担外发、删除、付款、权限或管理员操作。合成测试只验证UIA调用机制、隔离、超时、前台保护及超过同级搜索上限时失败关闭，不能证明真实第三方应用行为安全或首版验收完成。`.192.0`待新的远端CI验证，`.191.0`的未完成CI不作为通过证据。
+
 ## 2026-10-14 23:05 微信官方服务号与企业微信发送接口边界
 
 读取腾讯官方页面而非社区镜像：微信服务号客服消息使用服务号用户`OpenID`作为接收目标，并受用户互动场景/时限约束；企业微信向新外部联系人发送欢迎语须持有事件给出的`welcome_code`，20秒内单次有效；微信客服事件响应也绑定特定事件`code`和会话状态。它们属于服务号或企业产品场景，没有证据表明能以小K用户自己的个人微信身份给既有好友L发消息，因此不符合当前R0身份要求。未注册应用、申请token、操作客户端或发送消息。详见[R0边界核验](../验收与评测/R0基线与可行性闸门记录.md)。官方来源：[服务号客服消息](https://developers.weixin.qq.com/doc/service/api/customer/message/api_sendcustommessage)、[企业微信新客户欢迎语](https://open.work.weixin.qq.com/api/doc/90000/90135/92137)、[企业微信客服事件响应](https://open.work.weixin.qq.com/api/doc/90000/90135/95122)。

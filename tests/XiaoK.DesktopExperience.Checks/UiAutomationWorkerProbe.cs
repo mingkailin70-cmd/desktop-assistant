@@ -37,6 +37,14 @@ internal static class UiAutomationWorkerProbe
                 AutomationProperties.SetAutomationId(duplicateWaitButton, "xiaok-synthetic-duplicate");
                 var secondDuplicateWaitButton = new Button { Content = "重复目标二", IsEnabled = true };
                 AutomationProperties.SetAutomationId(secondDuplicateWaitButton, "xiaok-synthetic-duplicate");
+                var wideControlPanel = new StackPanel();
+                for (var index = 0; index < 65; index++)
+                {
+                    var wideButton = new Button { Content = $"宽树项目{index}", IsEnabled = true };
+                    if (index is 0 or 64)
+                        AutomationProperties.SetAutomationId(wideButton, "xiaok-synthetic-wide-duplicate");
+                    wideControlPanel.Children.Add(wideButton);
+                }
                 var scopedButton = new Button { Content = "SCOPED_TEXT_SENTINEL", IsEnabled = true };
                 AutomationProperties.SetAutomationId(scopedButton, "xiaok-synthetic-child-id");
                 AutomationProperties.SetName(scopedButton, "SCOPED_NAME_SENTINEL");
@@ -73,7 +81,7 @@ internal static class UiAutomationWorkerProbe
                         Children =
                         {
                             button, invokableButton, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
-                            wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope
+                            wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope, wideControlPanel
                         }
                     }
                 };
@@ -148,6 +156,12 @@ internal static class UiAutomationWorkerProbe
             if (ambiguousButton.Success || ambiguousButton.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS"
                 || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
                 throw new InvalidOperationException("隔离UIA worker没有拒绝重复AutomationId或改变了控件/前台状态。");
+            var oversizedSearch = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .InvokeButtonAsync("uia-probe", "xiaok-synthetic-wide-duplicate", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+            if (oversizedSearch.Success || oversizedSearch.ErrorCode != "UIA_TREE_LIMIT"
+                || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
+                throw new InvalidOperationException("UIA控件搜索超过同级上限时仍把被截断的AutomationId误判为唯一或改变了界面。");
             var invokedButton = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-invoke-button", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));

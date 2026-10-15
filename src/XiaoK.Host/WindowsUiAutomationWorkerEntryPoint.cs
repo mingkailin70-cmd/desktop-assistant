@@ -427,6 +427,7 @@ public static class WindowsUiAutomationWorkerEntryPoint
                 children.Add(child);
                 child = walker.GetNextSibling(child);
             }
+            if (child is not null) return ControlSearchResult.TreeLimit;
             for (var index = children.Count - 1; index >= 0; index--)
                 pending.Push((children[index], depth + 1));
         }
