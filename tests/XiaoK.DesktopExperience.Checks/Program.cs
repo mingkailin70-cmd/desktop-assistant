@@ -194,18 +194,27 @@ foreach (var tool in new[] { "app.launch.v1", "window.activate.v1" })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.ExplicitUserInteraction) is null,
         "阻止明确的用户交互。");
 }
-foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.archive.directory.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "browser.session.open.v1", "browser.session.navigate.v1", "browser.session.snapshot.v1", "browser.session.click-button.v1", "browser.session.fill-text.v1", "browser.session.close.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1", ApplicationUiAutomationPolicy.WaitForEnabledToolId })
+foreach (var tool in new[] { "file.search.v1", "file.copy.v1", "file.archive.single.v1", "file.archive.directory.v1", "file.rename.v1", "browser.read.public.v1", "browser.read.dynamic.public.v1", "browser.download.public.v1", "browser.session.open.v1", "browser.session.navigate.v1", "browser.session.snapshot.v1", "browser.session.click-button.v1", "browser.session.fill-text.v1", "browser.session.close.v1", "code.inspect.v1", "code.task.create.v1", "message.analyze.v1", "message.notice.analyze.v1", "message.draft.v1", "message.send.v1", ApplicationUiAutomationPolicy.WaitForEnabledToolId, ApplicationUiAutomationPolicy.ScopedSnapshotToolId })
     Require(ToolInteractionPolicy.Check(tool, ToolExecutionAccess.BackgroundOnly) is null, "阻止后台工具。");
 Require(ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.ToolId) == ToolInteractionOperation.ReadOnlyTarget
     && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.ToolId) == ToolInteractionMode.Background
     && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.ToolId, ToolExecutionAccess.BackgroundOnly) is null,
     "UIA只读快照没有进入同目标只读仲裁路径。");
-var uiSnapshotProposal = ApplicationUiAutomationPolicy.CreateUserToolProposal("读取界面控件：微信", []);
-Require(uiSnapshotProposal?.ToolId == ApplicationUiAutomationPolicy.ToolId
-    && uiSnapshotProposal.Target == "wechat"
-    && uiSnapshotProposal.Preconditions == (ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow)
-    && uiSnapshotProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiSnapshotReturned,
-    "显式微信UIA只读请求没有解析到固定白名单目标。");
+Require(ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.ScopedSnapshotToolId) == ToolInteractionOperation.ReadOnlyTarget
+    && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.ScopedSnapshotToolId) == ToolInteractionMode.Background
+    && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.ScopedSnapshotToolId, ToolExecutionAccess.BackgroundOnly) is null,
+    "窄范围UIA元数据检查没有进入同目标只读仲裁路径。");
+Require(ApplicationUiAutomationPolicy.CreateUserToolProposal("读取界面控件：微信", []) is null,
+    "消息客户端仍能通过通用整窗快照读取可能包含的会话内容。");
+var scopedSnapshotProposal = ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal(
+    "检查界面区域：Edge|Editor.Pane|Pane", []);
+Require(scopedSnapshotProposal?.ToolId == ApplicationUiAutomationPolicy.ScopedSnapshotToolId
+    && scopedSnapshotProposal.Target == "edge"
+    && scopedSnapshotProposal.Arguments.GetValueOrDefault("automation_id") == "Editor.Pane"
+    && scopedSnapshotProposal.Arguments.GetValueOrDefault("root_control_type") == "Pane"
+    && scopedSnapshotProposal.Preconditions == (ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow)
+    && scopedSnapshotProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiSnapshotReturned,
+    "明确容器控件的窄范围UIA提案没有绑定固定应用、ID和类型。");
 Require(ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.WaitForEnabledToolId) == ToolInteractionOperation.ReadOnlyTarget
     && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.WaitForEnabledToolId) == ToolInteractionMode.Background,
     "控件状态等待没有进入只读后台仲裁路径。");
@@ -226,8 +235,16 @@ Require(ApplicationUiAutomationPolicy.CreateWaitForEnabledToolProposal(
 Require(ApplicationUiAutomationPolicy.CreateUserToolProposal("读取界面控件：未知应用", []) is null
     && ApplicationUiAutomationPolicy.CreateUserToolProposal("读取界面控件：微信\n并打开网页", []) is null,
     "UIA快照接受了未知目标或多行扩展指令。");
+Require(ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal("检查界面区域：未知应用|Root|Pane", []) is null
+    && ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal("检查界面区域：Edge|bad id|Pane", []) is null
+    && ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal("检查界面区域：Edge|Root|Window", []) is null
+    && ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal("检查界面区域：Edge|Root|Pane|Other", []) is null
+    && ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal("检查界面区域：微信|Root|Pane", []) is null,
+    "窄范围UIA接受了未知应用、无效ID、不允许的根类型、歧义分隔符或消息客户端。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-snapshot", out var uiSnapshotLabel)
     && uiSnapshotLabel == "只读界面检查", "任务中心没有显示只读界面检查类别。");
+Require(TaskCategoryCatalog.TryGetLabel("app-ui-scoped-snapshot", out var scopedSnapshotLabel)
+    && scopedSnapshotLabel == "指定控件区域检查", "任务中心没有显示窄范围控件区域检查类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-wait-enabled", out var uiWaitLabel)
     && uiWaitLabel == "等待界面控件状态", "任务中心没有显示UIA状态等待类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text", out var uiSetTextLabel)

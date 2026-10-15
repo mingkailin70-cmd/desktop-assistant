@@ -214,6 +214,10 @@ public sealed partial class WindowsDesktopTools
         !string.IsNullOrWhiteSpace(appId) && _apps.TryGetValue(appId, out var app)
         && !ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(app.Id, app.DisplayName, app.Executable);
 
+    public bool IsUiAutomationSnapshotTargetAllowed(string appId) =>
+        !string.IsNullOrWhiteSpace(appId) && _apps.TryGetValue(appId, out var app)
+        && !ApplicationUiAutomationPolicy.IsMessagingClientTarget(app.Id, app.DisplayName, app.Executable);
+
     public async Task<ToolResult> LaunchAsync(ToolProposal proposal, CancellationToken cancellationToken)
     {
         if (!proposal.Arguments.TryGetValue("app_id", out var appId) || !_apps.TryGetValue(appId, out var app))

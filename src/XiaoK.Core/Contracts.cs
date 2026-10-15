@@ -119,6 +119,8 @@ public interface IDynamicPublicWebPageReader
 public interface IReadOnlyUiAutomationSnapshotReader
 {
     Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken);
+    Task<ToolResult> ReadScopedSnapshotAsync(string applicationId, string automationId, string rootControlType,
+        CancellationToken cancellationToken);
     Task<ToolResult> WaitForEnabledControlAsync(string applicationId, string automationId,
         CancellationToken cancellationToken);
 }

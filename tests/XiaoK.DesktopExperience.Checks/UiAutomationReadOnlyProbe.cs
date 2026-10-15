@@ -33,6 +33,26 @@ internal static class UiAutomationReadOnlyProbe
                 AutomationProperties.SetAutomationId(duplicateWaitButton, "xiaok-synthetic-duplicate");
                 var secondDuplicateWaitButton = new Button { Content = "重复目标二", IsEnabled = true };
                 AutomationProperties.SetAutomationId(secondDuplicateWaitButton, "xiaok-synthetic-duplicate");
+                var scopedButton = new Button { Content = "SCOPED_TEXT_SENTINEL", IsEnabled = true };
+                AutomationProperties.SetAutomationId(scopedButton, "xiaok-synthetic-child-id");
+                AutomationProperties.SetName(scopedButton, "SCOPED_NAME_SENTINEL");
+                var scopedRoot = new GroupBox
+                {
+                    Header = "SCOPED_HEADER_SENTINEL",
+                    Content = new StackPanel { Children = { scopedButton } }
+                };
+                AutomationProperties.SetAutomationId(scopedRoot, "xiaok-synthetic-scope");
+                var wrongTypeRoot = new Button { Content = "错误根类型" };
+                AutomationProperties.SetAutomationId(wrongTypeRoot, "xiaok-synthetic-wrong-root-type");
+                var duplicateScopeOne = new GroupBox { Header = "重复区域一", Content = new Button { Content = "A" } };
+                var duplicateScopeTwo = new GroupBox { Header = "重复区域二", Content = new Button { Content = "B" } };
+                AutomationProperties.SetAutomationId(duplicateScopeOne, "xiaok-synthetic-duplicate-scope");
+                AutomationProperties.SetAutomationId(duplicateScopeTwo, "xiaok-synthetic-duplicate-scope");
+                var oversizedChildren = new StackPanel();
+                for (var index = 0; index < 40; index++)
+                    oversizedChildren.Children.Add(new Button { Content = $"项目{index}" });
+                var oversizedScope = new GroupBox { Header = "超限区域", Content = oversizedChildren };
+                AutomationProperties.SetAutomationId(oversizedScope, "xiaok-synthetic-oversized-scope");
 
                 var window = new Window
                 {
@@ -44,7 +64,14 @@ internal static class UiAutomationReadOnlyProbe
                     WindowStyle = WindowStyle.ToolWindow,
                     ShowInTaskbar = false,
                     ShowActivated = false,
-                    Content = new StackPanel { Children = { button, waitButton, duplicateWaitButton, secondDuplicateWaitButton } }
+                    Content = new StackPanel
+                    {
+                        Children =
+                        {
+                            button, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
+                            wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope
+                        }
+                    }
                 };
                 var dispatcher = window.Dispatcher;
                 window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
@@ -88,6 +115,37 @@ internal static class UiAutomationReadOnlyProbe
                 || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal)
                 || !isolated.Data.Contains("禁用", StringComparison.Ordinal))
                 throw new InvalidOperationException($"隔离UIA工作进程未返回合成控件快照：{isolated.ErrorCode ?? isolated.Summary}");
+            var scoped = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-scope", "Group", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+            if (!scoped.Success || scoped.Data is null
+                || !scoped.Data.Contains("ControlType.Group", StringComparison.Ordinal)
+                || !scoped.Data.Contains("ControlType.Button", StringComparison.Ordinal)
+                || scoped.Data.Contains("SCOPED_TEXT_SENTINEL", StringComparison.Ordinal)
+                || scoped.Data.Contains("SCOPED_NAME_SENTINEL", StringComparison.Ordinal)
+                || scoped.Data.Contains("SCOPED_HEADER_SENTINEL", StringComparison.Ordinal)
+                || scoped.Data.Contains("xiaok-synthetic-child-id", StringComparison.Ordinal))
+                throw new InvalidOperationException($"窄范围UIA没有只返回控件类型和状态元数据：{scoped.ErrorCode ?? scoped.Summary}");
+            var missingScope = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-missing-scope", "Group", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            if (missingScope.Success || missingScope.ErrorCode != "UIA_SCOPED_ROOT_NOT_FOUND")
+                throw new InvalidOperationException("不存在的窄范围根控件没有失败关闭。");
+            var wrongRootType = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-wrong-root-type", "Group", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            if (wrongRootType.Success || wrongRootType.ErrorCode != "UIA_SCOPED_ROOT_TYPE_MISMATCH")
+                throw new InvalidOperationException("根控件类型与用户指定值不一致时没有失败关闭。");
+            var ambiguousScope = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-duplicate-scope", "Group", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            if (ambiguousScope.Success || ambiguousScope.ErrorCode != "UIA_SCOPED_ROOT_AMBIGUOUS")
+                throw new InvalidOperationException("重复根AutomationId没有失败关闭。");
+            var oversizedScopeResult = await new WindowsUiAutomationSnapshotAdapter(desktop)
+                .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-oversized-scope", "Group", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            if (oversizedScopeResult.Success || oversizedScopeResult.ErrorCode != "UIA_SCOPED_TREE_LIMIT")
+                throw new InvalidOperationException("超过有界子树限制时仍返回了部分UIA结果。");
             var enableSyntheticControl = Task.Run(async () =>
             {
                 await Task.Delay(350);

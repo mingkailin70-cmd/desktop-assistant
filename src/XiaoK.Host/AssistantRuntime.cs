@@ -1076,7 +1076,15 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             var proposal = ApplicationUiAutomationPolicy.CreateUserToolProposal(request, GetConfiguredAppAliases());
             if (proposal is null)
-                return new(false, "请按“读取界面控件：应用名”输入；目标必须是小K已登记的应用，且只能解析到一个当前可见窗口。", "UIA_TARGET_NOT_SUPPORTED");
+                return new(false, "请按“读取界面控件：应用名”输入；消息客户端不提供通用界面快照，其他目标必须是小K已登记应用且只能解析到一个当前可见窗口。", "UIA_TARGET_NOT_SUPPORTED");
+            return await ExecuteBackgroundAsync(proposal, token);
+        }
+
+        if (category == "app-ui-scoped-snapshot")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateScopedSnapshotToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“检查界面区域：应用名|根AutomationId|Pane/Group/Tab/List/Tree/DataGrid/Table”输入；只读取唯一容器的有限控件类型和状态，不读名称或文本；消息客户端不提供通用界面检查。", "UIA_SCOPED_TARGET_NOT_SUPPORTED");
             return await ExecuteBackgroundAsync(proposal, token);
         }
 
@@ -1502,6 +1510,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         var lower = request.ToLowerInvariant();
         if (ApplicationUiAutomationPolicy.IsSetTextUserRequest(request)) return "app-ui-set-text";
         if (ApplicationUiAutomationPolicy.IsWaitForEnabledUserRequest(request)) return "app-ui-wait-enabled";
+        if (ApplicationUiAutomationPolicy.IsScopedSnapshotUserRequest(request)) return "app-ui-scoped-snapshot";
         if (ApplicationUiAutomationPolicy.IsUserRequest(request)) return "app-ui-snapshot";
         if (AppLaunchIntentResolver.IsApplicationStatusRequest(request)) return "app-status";
         if (AppLaunchIntentResolver.IsWindowActivationRequest(request)) return "window";

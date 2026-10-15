@@ -18,6 +18,19 @@ public static class WindowsUiAutomationWorkerEntryPoint
     private const int MaximumElements = 64;
     private const int MaximumVisitedNodes = 256;
     private const int MaximumDepth = 4;
+    private const int MaximumScopedElements = 32;
+    private const int MaximumScopedVisitedNodes = 128;
+    private const int MaximumScopedDepth = 5;
+    private static readonly HashSet<ControlType> ScopedRootControlTypes =
+    [
+        ControlType.Pane,
+        ControlType.Group,
+        ControlType.Tab,
+        ControlType.List,
+        ControlType.Tree,
+        ControlType.DataGrid,
+        ControlType.Table
+    ];
     private static readonly HashSet<ControlType> SafeNamedControlTypes =
     [
         ControlType.Button,
@@ -41,6 +54,8 @@ public static class WindowsUiAutomationWorkerEntryPoint
                 response = request.Mode switch
                 {
                     "snapshot" when request.AutomationId is null && request.WaitMilliseconds == 0 && request.Value is null => ReadSnapshot(request),
+                    "scoped_snapshot" when request.AutomationId is not null && request.RootControlType is not null
+                        && request.WaitMilliseconds == 0 && request.Value is null => ReadScopedSnapshot(request),
                     "wait_enabled" when request.Value is null => WaitForEnabledControl(request),
                     "set_text" => SetTextValue(request),
                     _ => new(false, "UIA_INVALID_REQUEST", [])
@@ -70,6 +85,9 @@ public static class WindowsUiAutomationWorkerEntryPoint
     private static WindowsUiAutomationSnapshotAdapter.WorkerResponse ReadSnapshot(
         WindowsUiAutomationSnapshotAdapter.WorkerRequest request)
     {
+        if (ApplicationUiAutomationPolicy.IsMessagingClientTarget(request.ApplicationId,
+            request.DisplayName, request.ExecutablePath))
+            return new(false, "UIA_MESSAGING_APP_BLOCKED", []);
         if (!TryResolveRoot(request, out var root, out var error)) return new(false, error, []);
         var handle = new IntPtr(request.WindowHandle);
         var walker = TreeWalker.ControlViewWalker;
@@ -107,6 +125,93 @@ public static class WindowsUiAutomationWorkerEntryPoint
 
         if (!IsWindow(handle) || !IsWindowVisible(handle)) return new(false, "UIA_TARGET_CHANGED", []);
         return new(true, null, items.ToArray(), pending.Count > 0 || visitedNodes >= MaximumVisitedNodes);
+    }
+
+    private static WindowsUiAutomationSnapshotAdapter.WorkerResponse ReadScopedSnapshot(
+        WindowsUiAutomationSnapshotAdapter.WorkerRequest request)
+    {
+        if (ApplicationUiAutomationPolicy.IsMessagingClientTarget(request.ApplicationId,
+            request.DisplayName, request.ExecutablePath))
+            return new(false, "UIA_MESSAGING_APP_BLOCKED", []);
+        if (request.AutomationId is null || request.AutomationId.Length is 0 or > 96
+            || request.AutomationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || request.RootControlType is null || !TryGetScopedRootControlType(request.RootControlType, out var expectedRootType))
+            return new(false, "UIA_INVALID_SCOPED_SELECTOR", []);
+        if (!TryResolveRoot(request, out var windowRoot, out var error)) return new(false, error, []);
+
+        var searchResult = FindUniqueScopedRoot(windowRoot, request.AutomationId, out var scopedRoot);
+        if (searchResult == ControlSearchResult.TreeLimit)
+            return new(false, "UIA_SCOPED_SEARCH_LIMIT", []);
+        if (searchResult == ControlSearchResult.Ambiguous)
+            return new(false, "UIA_SCOPED_ROOT_AMBIGUOUS", []);
+        if (searchResult != ControlSearchResult.Unique || scopedRoot is null)
+            return new(false, "UIA_SCOPED_ROOT_NOT_FOUND", []);
+        if (scopedRoot.Current.ControlType != expectedRootType)
+            return new(false, "UIA_SCOPED_ROOT_TYPE_MISMATCH", []);
+        var scopedRootRuntimeId = scopedRoot.GetRuntimeId();
+        if (scopedRootRuntimeId.Length == 0) return new(false, "UIA_TARGET_CHANGED", []);
+
+        var handle = new IntPtr(request.WindowHandle);
+        var walker = TreeWalker.ControlViewWalker;
+        var pending = new Stack<(AutomationElement Element, int Depth)>();
+        var items = new List<UiAutomationSnapshotItem>(MaximumScopedElements);
+        pending.Push((scopedRoot, 0));
+        var visitedNodes = 0;
+        while (pending.Count > 0)
+        {
+            if (items.Count >= MaximumScopedElements || visitedNodes >= MaximumScopedVisitedNodes)
+                return new(false, "UIA_SCOPED_TREE_LIMIT", []);
+            var (element, depth) = pending.Pop();
+            if (depth > MaximumScopedDepth) return new(false, "UIA_SCOPED_TREE_LIMIT", []);
+            visitedNodes++;
+
+            var current = element.Current;
+            // Scoped mode intentionally never reads Name, Value, HelpText, or descendant AutomationIds.
+            items.Add(new UiAutomationSnapshotItem(string.Empty, current.ControlType.ProgrammaticName,
+                string.Empty, current.IsEnabled, current.IsOffscreen, depth));
+
+            var child = walker.GetFirstChild(element);
+            if (depth >= MaximumScopedDepth)
+            {
+                if (child is not null) return new(false, "UIA_SCOPED_TREE_LIMIT", []);
+                continue;
+            }
+
+            var children = new List<AutomationElement>(Math.Min(MaximumScopedElements, 16));
+            while (child is not null && children.Count <= MaximumScopedElements)
+            {
+                children.Add(child);
+                child = walker.GetNextSibling(child);
+            }
+            if (child is not null || items.Count + pending.Count + children.Count > MaximumScopedElements)
+                return new(false, "UIA_SCOPED_TREE_LIMIT", []);
+            for (var index = children.Count - 1; index >= 0; index--)
+                pending.Push((children[index], depth + 1));
+        }
+
+        if (!TryResolveRoot(request, out var currentWindowRoot, out _)
+            || FindUniqueScopedRoot(currentWindowRoot, request.AutomationId, out var currentScopedRoot) != ControlSearchResult.Unique
+            || currentScopedRoot is null || currentScopedRoot.Current.ControlType != expectedRootType
+            || !scopedRootRuntimeId.SequenceEqual(currentScopedRoot.GetRuntimeId())
+            || !IsWindow(handle) || !IsWindowVisible(handle))
+            return new(false, "UIA_TARGET_CHANGED", []);
+        return new(true, null, items.ToArray());
+    }
+
+    private static bool TryGetScopedRootControlType(string controlTypeName, out ControlType controlType)
+    {
+        controlType = controlTypeName switch
+        {
+            "Pane" => ControlType.Pane,
+            "Group" => ControlType.Group,
+            "Tab" => ControlType.Tab,
+            "List" => ControlType.List,
+            "Tree" => ControlType.Tree,
+            "DataGrid" => ControlType.DataGrid,
+            "Table" => ControlType.Table,
+            _ => null!
+        };
+        return controlType is not null && ScopedRootControlTypes.Contains(controlType);
     }
 
     private static bool IsEditableControl(ControlType controlType) =>
@@ -255,6 +360,46 @@ public static class WindowsUiAutomationWorkerEntryPoint
                 children.Add(child);
                 child = walker.GetNextSibling(child);
             }
+            for (var index = children.Count - 1; index >= 0; index--)
+                pending.Push((children[index], depth + 1));
+        }
+
+        if (pending.Count > 0 || visitedNodes >= MaximumVisitedNodes) return ControlSearchResult.TreeLimit;
+        return match is null ? ControlSearchResult.NotFound : ControlSearchResult.Unique;
+    }
+
+    private static ControlSearchResult FindUniqueScopedRoot(AutomationElement root, string automationId,
+        out AutomationElement? match)
+    {
+        var walker = TreeWalker.ControlViewWalker;
+        var pending = new Stack<(AutomationElement Element, int Depth)>();
+        pending.Push((root, 0));
+        var visitedNodes = 0;
+        match = null;
+        while (pending.Count > 0 && visitedNodes < MaximumVisitedNodes)
+        {
+            var (element, depth) = pending.Pop();
+            visitedNodes++;
+            var current = element.Current;
+            if (string.Equals(current.AutomationId, automationId, StringComparison.Ordinal))
+            {
+                if (match is not null) return ControlSearchResult.Ambiguous;
+                match = element;
+            }
+
+            if (depth >= MaximumDepth)
+            {
+                if (walker.GetFirstChild(element) is not null) return ControlSearchResult.TreeLimit;
+                continue;
+            }
+            var children = new List<AutomationElement>(32);
+            var child = walker.GetFirstChild(element);
+            while (child is not null && children.Count < MaximumElements)
+            {
+                children.Add(child);
+                child = walker.GetNextSibling(child);
+            }
+            if (child is not null) return ControlSearchResult.TreeLimit;
             for (var index = children.Count - 1; index >= 0; index--)
                 pending.Push((children[index], depth + 1));
         }

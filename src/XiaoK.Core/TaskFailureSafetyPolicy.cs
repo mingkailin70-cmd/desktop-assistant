@@ -19,7 +19,7 @@ public static class TaskFailureSafetyPolicy
     // newly added route cannot silently turn a cancelled or faulted operation into an apparently safe retry.
     private static readonly HashSet<string> ReadOnlyCategories = new(StringComparer.Ordinal)
     {
-        "app-status", "app-ui-snapshot", "app-ui-wait-enabled", "file", "file-content-search", "file-summary",
+        "app-status", "app-ui-snapshot", "app-ui-scoped-snapshot", "app-ui-wait-enabled", "file", "file-content-search", "file-summary",
         "file-classify", "web-read", "web-read-dynamic", "browser-session-open", "browser-session-navigate",
         "browser-session-snapshot", "browser-session-follow-link",
         "browser-session-close", "analyze", "draft", "send", "code-inspect", "chat"

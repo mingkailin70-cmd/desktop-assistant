@@ -69,11 +69,15 @@ public sealed class ToolBroker
         if (!Enum.IsDefined(operation))
             return new(false, "未知桌面操作类型已拒绝。", "UNKNOWN_INTERACTION_OPERATION");
         var isApplicationUiTool = proposal.ToolId is ApplicationUiAutomationPolicy.ToolId
+            or ApplicationUiAutomationPolicy.ScopedSnapshotToolId
             or ApplicationUiAutomationPolicy.WaitForEnabledToolId
             or ApplicationUiAutomationPolicy.SetTextToolId;
         if (isApplicationUiTool && !_desktop.IsApplicationRegistered(proposal.Arguments["app_id"]))
             return new(false, "目标应用未登记在本机允许列表；未创建界面协调租约，也没有访问窗口。",
                 "APP_NOT_ALLOWLISTED");
+        if ((proposal.ToolId is ApplicationUiAutomationPolicy.ToolId or ApplicationUiAutomationPolicy.ScopedSnapshotToolId)
+            && !_desktop.IsUiAutomationSnapshotTargetAllowed(proposal.Arguments["app_id"]))
+            return new(false, "消息客户端不允许使用通用 UIA 快照，避免读取会话内容；没有访问窗口。", "UIA_MESSAGING_APP_BLOCKED");
         var admission = await _interactionCoordinator.AcquireAsync(operation, access, proposal.Target, cancellationToken);
         if (admission.Denial is not null) return admission.Denial;
         await using var interactionLease = admission.Lease;
@@ -86,6 +90,10 @@ public sealed class ToolBroker
             "app.ui.snapshot.v1" => _uiAutomationSnapshots is null
                 ? new(false, "只读界面检查器未配置；没有访问应用界面。", "UIA_SNAPSHOT_UNAVAILABLE")
                 : await _uiAutomationSnapshots.ReadSnapshotAsync(proposal.Arguments["app_id"], cancellationToken),
+            "app.ui.snapshot-scoped.v1" => _uiAutomationSnapshots is null
+                ? new(false, "只读界面检查器未配置；没有访问应用界面。", "UIA_SNAPSHOT_UNAVAILABLE")
+                : await _uiAutomationSnapshots.ReadScopedSnapshotAsync(proposal.Arguments["app_id"],
+                    proposal.Arguments["automation_id"], proposal.Arguments["root_control_type"], cancellationToken),
             "app.ui.wait-enabled.v1" => _uiAutomationSnapshots is null
                 ? new(false, "只读界面检查器未配置；没有访问应用界面。", "UIA_SNAPSHOT_UNAVAILABLE")
                 : await _uiAutomationSnapshots.WaitForEnabledControlAsync(proposal.Arguments["app_id"],
@@ -174,6 +182,7 @@ public sealed class ToolBroker
             "app.launch.v1" => ValidateAppLaunch(proposal),
             "app.status.v1" => ValidateAppStatus(proposal),
             "app.ui.snapshot.v1" => ValidateApplicationUiSnapshot(proposal),
+            "app.ui.snapshot-scoped.v1" => ValidateApplicationUiScopedSnapshot(proposal),
             "app.ui.wait-enabled.v1" => ValidateApplicationUiWaitEnabled(proposal),
             "app.ui.set-text.v1" => ValidateApplicationUiSetText(proposal),
             "window.activate.v1" => ValidateWindowActivation(proposal),
@@ -250,6 +259,22 @@ public sealed class ToolBroker
             && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
                 ? null
                 : InvalidProposal("界面只读检查只接受一个已登记 app_id，且目标必须与 app_id 一致。");
+    }
+
+    private static ToolResult? ValidateApplicationUiScopedSnapshot(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var appId = args.GetValueOrDefault("app_id");
+        var automationId = args.GetValueOrDefault("automation_id");
+        var rootControlType = args.GetValueOrDefault("root_control_type");
+        return args.Count == 3 && args.ContainsKey("app_id") && args.ContainsKey("automation_id")
+            && args.ContainsKey("root_control_type") && !string.IsNullOrWhiteSpace(appId) && appId.Length <= 64
+            && !string.IsNullOrWhiteSpace(automationId) && automationId.Length <= 96
+            && automationId.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-')
+            && ApplicationUiAutomationPolicy.IsAllowedScopedRootControlType(rootControlType)
+            && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : InvalidProposal("控件区域检查只接受已登记应用、固定字符集的根 AutomationId 和容器类型；不读取名称或文本。");
     }
 
     private static ToolResult? ValidateApplicationUiWaitEnabled(ToolProposal proposal)
@@ -723,6 +748,7 @@ public sealed class ToolBroker
         "app.launch.v1" => ToolPrecondition.ApplicationAllowlisted,
         "app.status.v1" => ToolPrecondition.ApplicationAllowlisted,
         "app.ui.snapshot.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+        "app.ui.snapshot-scoped.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.wait-enabled.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.set-text.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
@@ -758,6 +784,7 @@ public sealed class ToolBroker
         "app.launch.v1" => ToolExpectedOutcome.ApplicationWindowVisible,
         "app.status.v1" => ToolExpectedOutcome.ApplicationStatusObserved,
         "app.ui.snapshot.v1" => ToolExpectedOutcome.ApplicationUiSnapshotReturned,
+        "app.ui.snapshot-scoped.v1" => ToolExpectedOutcome.ApplicationUiSnapshotReturned,
         "app.ui.wait-enabled.v1" => ToolExpectedOutcome.ApplicationUiConditionObserved,
         "app.ui.set-text.v1" => ToolExpectedOutcome.ApplicationUiValueSet,
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,

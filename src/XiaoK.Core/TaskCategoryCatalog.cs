@@ -8,6 +8,7 @@ public static class TaskCategoryCatalog
         ["app"] = "应用操作",
         ["app-status"] = "应用状态查询",
         ["app-ui-snapshot"] = "只读界面检查",
+        ["app-ui-scoped-snapshot"] = "指定控件区域检查",
         ["app-ui-wait-enabled"] = "等待界面控件状态",
         ["app-ui-set-text"] = "应用界面文本填写",
         ["window"] = "窗口切换",

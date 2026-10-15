@@ -17,6 +17,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     private const int MaximumResponseBytes = 32 * 1024;
     private static readonly TimeSpan WorkerTimeout = TimeSpan.FromSeconds(5);
     private const int ControlWaitMilliseconds = 2_500;
+    private const int MaximumScopedDepth = 5;
     private readonly WindowsDesktopTools _desktop;
     private readonly IUiAutomationWorkerProcessStarter _workerProcessStarter;
 
@@ -33,6 +34,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     public async Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (_desktop.IsApplicationRegistered(applicationId) && !_desktop.IsUiAutomationSnapshotTargetAllowed(applicationId))
+            return new(false, "消息客户端不允许使用会返回控件名称的通用 UIA 快照；没有访问窗口。", "UIA_MESSAGING_APP_BLOCKED");
         var (response, failure) = await RunWorkerAsync(applicationId, new WorkerCommand("snapshot", null, 0), cancellationToken)
             .ConfigureAwait(false);
         if (failure is not null) return failure;
@@ -41,6 +44,32 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
 
         var display = FormatSnapshot(response.Items ?? [], response.Truncated);
         return new(true, "已读取目标应用的有限 UIA 快照；没有点击、输入、读取剪贴板或切换窗口。", Data: display);
+    }
+
+    public async Task<ToolResult> ReadScopedSnapshotAsync(string applicationId, string automationId,
+        string rootControlType, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_desktop.IsApplicationRegistered(applicationId) && !_desktop.IsUiAutomationSnapshotTargetAllowed(applicationId))
+            return new(false, "消息客户端不允许使用通用 UIA 快照；没有访问窗口。", "UIA_MESSAGING_APP_BLOCKED");
+        if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || !ApplicationUiAutomationPolicy.IsAllowedScopedRootControlType(rootControlType))
+            return new(false, "根控件标识或容器类型无效；没有访问应用界面。", "UIA_INVALID_SCOPED_SELECTOR");
+
+        var (response, failure) = await RunWorkerAsync(applicationId,
+            new WorkerCommand("scoped_snapshot", automationId, 0, RootControlType: rootControlType), cancellationToken)
+            .ConfigureAwait(false);
+        if (failure is not null) return failure;
+        if (response is null || !response.Success)
+            return new(false, "无法读取指定控件区域；没有读取控件名称、文本或整窗快照。",
+                response?.ErrorCode ?? "UIA_READ_FAILED");
+        if (response.Truncated || response.Items.Any(item => item.AutomationId.Length != 0 || item.Name.Length != 0
+            || item.Depth is < 0 or > MaximumScopedDepth))
+            return new(false, "控件区域超出固定范围或返回了非元数据字段；没有显示部分结果。", "UIA_SCOPED_RESPONSE_INVALID");
+
+        return new(true, "已读取指定容器的有界控件类型和状态；未读取控件名称、文本或子控件标识，也没有点击、输入或切换窗口。",
+            Data: FormatScopedSnapshot(response.Items));
     }
 
     public async Task<ToolResult> WaitForEnabledControlAsync(string applicationId, string automationId,
@@ -130,7 +159,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         var request = JsonSerializer.SerializeToUtf8Bytes(new WorkerRequest(
             resolvedTarget.WindowHandle, resolvedTarget.ProcessId, resolvedTarget.ExecutablePath,
             command.Mode, command.AutomationId, command.WaitMilliseconds, command.Value,
-            ApplicationId: applicationId, DisplayName: resolvedTarget.DisplayName));
+            ApplicationId: applicationId, DisplayName: resolvedTarget.DisplayName,
+            RootControlType: command.RootControlType));
         if (request.Length > MaximumRequestBytes)
             return (null, new(false, "目标信息超出固定上限；没有访问窗口。", "UIA_REQUEST_TOO_LARGE"));
 
@@ -205,7 +235,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         finally { worker?.Dispose(); }
     }
 
-    private sealed record WorkerCommand(string Mode, string? AutomationId, int WaitMilliseconds, string? Value = null);
+    private sealed record WorkerCommand(string Mode, string? AutomationId, int WaitMilliseconds, string? Value = null,
+        string? RootControlType = null);
 
     private static async Task<byte[]> ReadBoundedOutputAsync(Stream stream, int maximumBytes, CancellationToken token)
     {
@@ -249,7 +280,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             if (parsed is null || parsed.Items is null || parsed.Items.Length > 64
                 || parsed.Items.Any(item => item is null || item.AutomationId is null || item.AutomationId.Length > 96
                     || item.ControlType is null || item.ControlType.Length > 48
-                    || item.Name is null || item.Name.Length > 160)) return false;
+                    || item.Name is null || item.Name.Length > 160 || item.Depth is < 0 or > MaximumScopedDepth)) return false;
             response = parsed;
             return true;
         }
@@ -274,9 +305,23 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         return builder.ToString();
     }
 
+    private static string FormatScopedSnapshot(IReadOnlyList<UiAutomationSnapshotItem> items)
+    {
+        if (items.Count == 0) return "指定容器中没有可报告的控件状态。";
+        var builder = new StringBuilder("指定容器的有限控件结构（仅控件类型、深度和状态；不含名称、文本或子控件标识）：");
+        foreach (var item in items)
+        {
+            builder.AppendLine();
+            builder.Append(' ', item.Depth * 2).Append("- ").Append(item.ControlType);
+            builder.Append(" | ").Append(item.IsEnabled ? "可用" : "禁用");
+            if (item.IsOffscreen) builder.Append(" | 当前不可见");
+        }
+        return builder.ToString();
+    }
+
     public sealed record WorkerRequest(long WindowHandle, int ProcessId, string ExecutablePath,
         string Mode = "snapshot", string? AutomationId = null, int WaitMilliseconds = 0, string? Value = null,
-        string? ApplicationId = null, string? DisplayName = null);
+        string? ApplicationId = null, string? DisplayName = null, string? RootControlType = null);
     public sealed record WorkerResponse(bool Success, string? ErrorCode, UiAutomationSnapshotItem[] Items,
         bool Truncated = false, bool? ConditionMet = null, bool? OutcomeUncertain = null);
 }
@@ -417,4 +462,4 @@ internal sealed class UiAutomationWorkerProcess(Process process, IDisposable job
 }
 
 public sealed record UiAutomationSnapshotItem(string AutomationId, string ControlType, string Name,
-    bool IsEnabled, bool IsOffscreen);
+    bool IsEnabled, bool IsOffscreen, int Depth = 0);

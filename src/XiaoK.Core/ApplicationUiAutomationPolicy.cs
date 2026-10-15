@@ -6,14 +6,26 @@ namespace XiaoK.Core;
 public static class ApplicationUiAutomationPolicy
 {
     public const string ToolId = "app.ui.snapshot.v1";
+    public const string ScopedSnapshotToolId = "app.ui.snapshot-scoped.v1";
     public const string WaitForEnabledToolId = "app.ui.wait-enabled.v1";
     public const string SetTextToolId = "app.ui.set-text.v1";
     private static readonly string[] Prefixes = ["读取界面控件：", "检查界面控件：", "查看界面控件："];
+    private const string ScopedSnapshotPrefix = "检查界面区域：";
+    private static readonly ImmutableHashSet<string> ScopedRootControlTypes = ImmutableHashSet.Create(
+        StringComparer.Ordinal,
+        "Pane", "Group", "Tab", "List", "Tree", "DataGrid", "Table");
     private const string WaitForEnabledPrefix = "等待界面控件可用：";
     private const string SetTextPrefix = "设置界面文本：";
 
     public static bool IsUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
-        && Prefixes.Any(prefix => request.TrimStart().StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        && (Prefixes.Any(prefix => request.TrimStart().StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            || IsScopedSnapshotUserRequest(request));
+
+    public static bool IsScopedSnapshotUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
+        && request.TrimStart().StartsWith(ScopedSnapshotPrefix, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsAllowedScopedRootControlType(string? controlType) =>
+        controlType is not null && ScopedRootControlTypes.Contains(controlType);
 
     public static bool IsWaitForEnabledUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
         && request.TrimStart().StartsWith(WaitForEnabledPrefix, StringComparison.OrdinalIgnoreCase);
@@ -63,6 +75,26 @@ public static class ApplicationUiAutomationPolicy
     public static bool IsMessagingClient(string? applicationId) => applicationId is not null
         && (applicationId.Equals("wechat", StringComparison.OrdinalIgnoreCase)
             || applicationId.Equals("qq", StringComparison.OrdinalIgnoreCase));
+
+    public static bool IsMessagingClientTarget(string? applicationId, string? displayName, string? executablePath)
+    {
+        if (IsMessagingClient(applicationId)) return true;
+        var normalizedName = displayName?.Trim();
+        if (normalizedName is not null && (normalizedName.Equals("微信", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("WeChat", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("Weixin", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("QQ", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("腾讯QQ", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("企业微信", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("WeCom", StringComparison.OrdinalIgnoreCase)
+            || normalizedName.Equals("WeChat Work", StringComparison.OrdinalIgnoreCase))) return true;
+        var executableName = string.IsNullOrWhiteSpace(executablePath) ? string.Empty : Path.GetFileName(executablePath);
+        return executableName.Equals("Weixin.exe", StringComparison.OrdinalIgnoreCase)
+            || executableName.Equals("WeChat.exe", StringComparison.OrdinalIgnoreCase)
+            || executableName.Equals("QQ.exe", StringComparison.OrdinalIgnoreCase)
+            || executableName.Equals("WXWork.exe", StringComparison.OrdinalIgnoreCase)
+            || executableName.Equals("WXWorkLocal.exe", StringComparison.OrdinalIgnoreCase);
+    }
 
     public static bool IsTextEntryBlockedApplication(string? applicationId) => IsMessagingClient(applicationId)
         || applicationId is not null && (applicationId.Equals("edge", StringComparison.OrdinalIgnoreCase)
@@ -114,6 +146,7 @@ public static class ApplicationUiAutomationPolicy
     {
         ArgumentNullException.ThrowIfNull(configuredApps);
         if (string.IsNullOrWhiteSpace(request)) return null;
+        var appAliases = configuredApps.ToArray();
 
         var trimmed = request.Trim();
         var prefix = Prefixes.FirstOrDefault(candidate => trimmed.StartsWith(candidate, StringComparison.OrdinalIgnoreCase));
@@ -121,11 +154,49 @@ public static class ApplicationUiAutomationPolicy
         var appName = trimmed[prefix.Length..].Trim(' ', '\t', '：', ':', '“', '”', '"');
         if (appName.Length is 0 or > 96 || appName.Contains('\n') || appName.Contains('\r')) return null;
 
-        var intent = AppLaunchIntentResolver.ResolveApplicationStatus("检查应用：" + appName, configuredApps);
-        if (intent is null) return null;
+        var intent = AppLaunchIntentResolver.ResolveApplicationStatus("检查应用：" + appName, appAliases);
+        var displayName = intent is null ? null : appAliases.SingleOrDefault(alias =>
+            string.Equals(alias.AppId, intent.AppId, StringComparison.OrdinalIgnoreCase))?.DisplayName;
+        if (intent is null || IsMessagingClientTarget(intent.AppId, displayName, null)) return null;
 
         return new ToolProposal(ToolId,
             ImmutableDictionary<string, string>.Empty.Add("app_id", intent.AppId), intent.AppId,
+            ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+            ToolExpectedOutcome.ApplicationUiSnapshotReturned);
+    }
+
+    public static ToolProposal? CreateScopedSnapshotToolProposal(string request,
+        IEnumerable<ConfiguredAppAlias> configuredApps)
+    {
+        ArgumentNullException.ThrowIfNull(configuredApps);
+        if (string.IsNullOrWhiteSpace(request)) return null;
+        var appAliases = configuredApps.ToArray();
+
+        var command = request.TrimStart();
+        if (!command.StartsWith(ScopedSnapshotPrefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var target = command[ScopedSnapshotPrefix.Length..].Trim();
+        var first = target.IndexOf('|');
+        var second = first < 0 ? -1 : target.IndexOf('|', first + 1);
+        if (first <= 0 || second <= first + 1 || second != target.LastIndexOf('|')) return null;
+
+        var appName = target[..first].Trim();
+        var automationId = target[(first + 1)..second].Trim();
+        var controlType = target[(second + 1)..].Trim();
+        if (appName.Length is 0 or > 96 || automationId.Length is 0 or > 96
+            || appName.Contains('\n') || appName.Contains('\r')
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || !IsAllowedScopedRootControlType(controlType)) return null;
+
+        var intent = AppLaunchIntentResolver.ResolveApplicationStatus("检查应用：" + appName, appAliases);
+        var displayName = intent is null ? null : appAliases.SingleOrDefault(alias =>
+            string.Equals(alias.AppId, intent.AppId, StringComparison.OrdinalIgnoreCase))?.DisplayName;
+        if (intent is null || IsMessagingClientTarget(intent.AppId, displayName, null)) return null;
+
+        return new ToolProposal(ScopedSnapshotToolId,
+            ImmutableDictionary<string, string>.Empty
+                .Add("app_id", intent.AppId)
+                .Add("automation_id", automationId)
+                .Add("root_control_type", controlType), intent.AppId,
             ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
             ToolExpectedOutcome.ApplicationUiSnapshotReturned);
     }
