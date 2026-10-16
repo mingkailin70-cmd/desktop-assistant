@@ -1,5 +1,15 @@
 # GitHub开源项目借鉴记录
 
+## 2026-10-16 Luna复核：Siri、Windows通知与跨应用桌面能力边界
+
+只读核对微软、Apple官方文档及开源仓库后，首版能力应按来源分层：Windows通知监听仅读取送入Windows通知系统、且用户授权可见的通知；UI Automation仅能查看/操作目标应用通过控件提供程序暴露的界面；正式API/插件/Intent由应用自己定义数据和动作。微软文档分别说明[通知监听器](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/notification-listener)、[UI Automation](https://learn.microsoft.com/en-us/windows/win32/winauto/entry-uiauto-win32)和[控件提供程序](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-providersoverview)的范围。由此可推断：应用只在自身窗口画出的提示不会自动成为Windows Toast；若提示控件也没有暴露为可访问元素，系统监听和UIA都无法凭空取得它。这是API边界推断，不是对微信内部实现的新增断言。
+
+iPhone Siri同样不代表能任意读取、控制所有第三方应用。Apple的[App Intents](https://developer.apple.com/documentation/AppIntents)要求应用提供可发现的语义动作；[Announce Notifications](https://support.apple.com/en-lamr/guide/iphone/iph838fd6fd4/ios)播报的是系统管理、且按应用/通知类别配置的通知。Siri的可用能力来自系统通知入口和各应用主动提供的Intent，不是任意访问私有界面的通用授权。
+
+社区实现可借鉴架构，不等同于目标应用接口：[Microsoft UFO²](https://github.com/microsoft/UFO)的[HostUIExecutor](https://github.com/microsoft/UFO/blob/main/documents/docs/mcp/servers/host_ui_executor.md)与[AppUIExecutor](https://github.com/microsoft/UFO/blob/main/documents/docs/mcp/servers/app_ui_executor.md)把桌面级窗口选择和单应用控件操作分层；[pywinauto](https://github.com/pywinauto/pywinauto)展示UIA/Win32后端抽象与按进程连接；[AutoHotkey](https://github.com/AutoHotkey/AutoHotkey)适合借鉴用户显式触发的快捷键。UIA缺少控件时退回坐标、全局键鼠或连续截图会增加焦点干扰和隐私范围；这些项目不能证明微信私有提示可见，也不作为个人账号消息接口。
+
+给小K的可迁移结论是：按应用登记“系统通知、正式API、UIA控件、需显式前台输入、暂不支持”能力；对每项动作定义用户触发、目标确认和可观察结果；没有Toast/API/可访问控件的来源应明确报告不可用。当前用户已确认微信提示仅在微信窗口内，AUMID未确认；现有隐私限制继续有效，不能靠社区桌面代理跳过它。本次只查公开资料，未操作任何客户端、通知或模型。
+
 ## 2026-10-16 Luna补充调研：应用动作、输入边界与个人消息通道
 
 只读查阅官方文档与维护者仓库，按“接口契约”和“项目实现”区分：

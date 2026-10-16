@@ -461,8 +461,9 @@ if (bindingFailure is not null)
 foreach (var result in bindingResults)
     Require(result.Passed, result.Message);
 
-foreach (var failure in XiaoK.DesktopExperience.Checks.TaskHistoryWindowUiProbe.Run())
-    Require(false, failure);
+var taskHistoryProbeFailures = XiaoK.DesktopExperience.Checks.TaskHistoryWindowUiProbe.Run();
+if (taskHistoryProbeFailures.Count > 0)
+    Require(false, string.Join("；", taskHistoryProbeFailures));
 Require(true, "任务中心离屏WPF检查通过。");
 foreach (var failure in XiaoK.DesktopExperience.Checks.SettingsWindowResilienceProbe.Run())
 {
