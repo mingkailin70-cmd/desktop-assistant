@@ -80,7 +80,7 @@ internal static class UiAutomationWorkerProbe
                     {
                         Children =
                         {
-                            button, invokableButton, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
+                            button, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
                             wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope
                         }
                     }
@@ -97,23 +97,35 @@ internal static class UiAutomationWorkerProbe
                     ShowActivated = false,
                     Content = wideControlPanel
                 };
+                var invokeWindow = new Window
+                {
+                    Title = "小K UIA 按钮调用合成探针",
+                    Width = 280,
+                    Height = 120,
+                    Left = 620,
+                    Top = 24,
+                    WindowStyle = WindowStyle.ToolWindow,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                    Content = invokableButton
+                };
                 var dispatcher = window.Dispatcher;
-                window.Closed += (_, _) =>
+                void ShutdownWhenAllWindowsClose()
                 {
-                    if (!wideWindow.IsVisible)
+                    if (!window.IsVisible && !wideWindow.IsVisible && !invokeWindow.IsVisible)
                         dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
-                };
-                wideWindow.Closed += (_, _) =>
-                {
-                    if (!window.IsVisible)
-                        dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
-                };
+                }
+                window.Closed += (_, _) => ShutdownWhenAllWindowsClose();
+                wideWindow.Closed += (_, _) => ShutdownWhenAllWindowsClose();
+                invokeWindow.Closed += (_, _) => ShutdownWhenAllWindowsClose();
                 IntPtr mainHandle = IntPtr.Zero;
                 IntPtr wideHandle = IntPtr.Zero;
+                IntPtr invokeHandle = IntPtr.Zero;
                 void CompleteWhenReady()
                 {
-                    if (mainHandle != IntPtr.Zero && wideHandle != IntPtr.Zero)
-                        created.TrySetResult(new ProbeWindow(mainHandle, wideHandle, dispatcher, window, wideWindow, button));
+                    if (mainHandle != IntPtr.Zero && wideHandle != IntPtr.Zero && invokeHandle != IntPtr.Zero)
+                        created.TrySetResult(new ProbeWindow(mainHandle, wideHandle, invokeHandle, dispatcher, window,
+                            wideWindow, invokeWindow, button));
                 }
                 window.SourceInitialized += (_, _) =>
                 {
@@ -125,8 +137,14 @@ internal static class UiAutomationWorkerProbe
                     wideHandle = new System.Windows.Interop.WindowInteropHelper(wideWindow).Handle;
                     CompleteWhenReady();
                 };
+                invokeWindow.SourceInitialized += (_, _) =>
+                {
+                    invokeHandle = new System.Windows.Interop.WindowInteropHelper(invokeWindow).Handle;
+                    CompleteWhenReady();
+                };
                 window.Show();
                 wideWindow.Show();
+                invokeWindow.Show();
                 Dispatcher.Run();
             }
             catch (Exception exception)
@@ -199,12 +217,19 @@ internal static class UiAutomationWorkerProbe
             if (oversizedSearch.Success || oversizedSearch.ErrorCode != "UIA_TREE_LIMIT"
                 || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
                 throw new InvalidOperationException($"UIA控件搜索超过同级上限时仍把被截断的AutomationId误判为唯一或改变了界面：{oversizedSearch.ErrorCode ?? oversizedSearch.Summary}");
-            var invokedButton = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            var invokeDesktop = new WindowsDesktopTools(
+                [new DesktopApp("uia-probe", Environment.ProcessPath!)],
+                [], new SyntheticWindowProcessController(probe.InvokeHandle));
+            var invokedButton = await new WindowsUiAutomationSnapshotAdapter(invokeDesktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-invoke-button", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
-            if (!invokedButton.Success || Volatile.Read(ref successfulInvocationCount) != 1
-                || GetForegroundWindow() != foregroundBefore)
-                throw new InvalidOperationException("隔离UIA worker没有恰好调用一次唯一、可见、启用的合成按钮，或改变了前台窗口。");
+            var invocationCount = Volatile.Read(ref successfulInvocationCount);
+            var foregroundUnchanged = GetForegroundWindow() == foregroundBefore;
+            if (!invokedButton.Success || invocationCount != 1 || !foregroundUnchanged)
+                throw new InvalidOperationException(
+                    $"隔离UIA worker唯一可见按钮调用检查失败：error={invokedButton.ErrorCode ?? "NONE"}; "
+                    + $"state={invokedButton.FinalState}; calls={invocationCount}; "
+                    + $"foregroundUnchanged={foregroundUnchanged}; summary={invokedButton.Summary}");
             var scoped = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .ReadScopedSnapshotAsync("uia-probe", "xiaok-synthetic-scope", "Group", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
@@ -269,6 +294,7 @@ internal static class UiAutomationWorkerProbe
             {
                 await probe.Dispatcher.InvokeAsync(() =>
                 {
+                    if (probe.InvokeWindow.IsVisible) probe.InvokeWindow.Close();
                     if (probe.WideWindow.IsVisible) probe.WideWindow.Close();
                     if (probe.Window.IsVisible) probe.Window.Close();
                 });
@@ -441,6 +467,6 @@ internal static class UiAutomationWorkerProbe
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
-    private sealed record ProbeWindow(IntPtr Handle, IntPtr WideHandle, Dispatcher Dispatcher, Window Window,
-        Window WideWindow, Button Button);
+    private sealed record ProbeWindow(IntPtr Handle, IntPtr WideHandle, IntPtr InvokeHandle, Dispatcher Dispatcher,
+        Window Window, Window WideWindow, Window InvokeWindow, Button Button);
 }
