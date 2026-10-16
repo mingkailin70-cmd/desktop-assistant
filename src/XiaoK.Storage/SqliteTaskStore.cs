@@ -12,7 +12,7 @@ namespace XiaoK.Storage;
 /// </summary>
 public sealed class SqliteTaskStore : ITaskStore
 {
-    private const int CurrentSchemaVersion = 8;
+    private const int CurrentSchemaVersion = 9;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private const string TasksJsonMigrationMarker = "tasks-json-v1";
@@ -197,7 +197,7 @@ public sealed class SqliteTaskStore : ITaskStore
                     + "CREATE INDEX IF NOT EXISTS ix_tasks_updated ON tasks(updated_utc_ticks DESC);"
                     + "CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY NOT NULL, completed_utc_ticks INTEGER NOT NULL);"
                     + CreateContactReplyStylesTableSql()
-                    + CreateApprovalAuditTableV8Sql()
+                    + CreateApprovalAuditTableV9Sql()
                     + $"PRAGMA user_version={CurrentSchemaVersion};");
                 database.Execute("COMMIT;");
             }
@@ -357,6 +357,28 @@ public sealed class SqliteTaskStore : ITaskStore
             }
         }
 
+        if (version == 8)
+        {
+            database.Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                database.Execute("DROP INDEX IF EXISTS ix_approval_audit_created;"
+                    + "ALTER TABLE approval_audit RENAME TO approval_audit_v8;"
+                    + CreateApprovalAuditTableV9Sql()
+                    + "INSERT INTO approval_audit(id,action_id,outcome,created_utc_ticks) "
+                    + "SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v8;"
+                    + "DROP TABLE approval_audit_v8;"
+                    + "PRAGMA user_version=9;");
+                database.Execute("COMMIT;");
+                version = 9;
+            }
+            catch
+            {
+                TryRollback(database);
+                throw;
+            }
+        }
+
         MigrateLegacyJson(database);
         MigrateLegacyContactReplyStyles(database);
     }
@@ -395,6 +417,17 @@ public sealed class SqliteTaskStore : ITaskStore
         + "OR (action_id='file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')) "
         + "OR (action_id='app.ui.set-text.v1' AND outcome IN ('confirmed','declined')) "
         + "OR (action_id='app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined'))));"
+        + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
+
+    private static string CreateApprovalAuditTableV9Sql() => "CREATE TABLE IF NOT EXISTS approval_audit ("
+        + "id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+        + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed') "
+        + "OR (action_id='file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text-foreground.v1' AND outcome IN ('confirmed','declined'))));"
         + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
 
     private void MigrateLegacyJson(SqliteDatabase database)
@@ -536,6 +569,8 @@ public sealed class SqliteTaskStore : ITaskStore
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
             || actionId == ApprovalAuditCatalog.ApplicationUiTextSetAction
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+            || actionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction
+                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
             || actionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
         if (!isKnownPair) throw new ArgumentException("审批审计只接受已登记动作及其固定结果。", nameof(actionId));
@@ -588,6 +623,8 @@ public sealed class SqliteTaskStore : ITaskStore
                         ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
                         : actionId == ApprovalAuditCatalog.ApplicationUiTextSetAction
                             ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+                            : actionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction
+                                ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
                             : actionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
                                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
 
@@ -830,7 +867,7 @@ public sealed class SqliteTaskStore : ITaskStore
     {
         if (database.ScalarInt32("PRAGMA user_version;") != CurrentSchemaVersion
             || !string.Equals(database.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v8 备份；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v9 备份；活动数据库未替换。");
 
         if (database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';") != 4
             || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger','view');") != 0
@@ -848,13 +885,14 @@ public sealed class SqliteTaskStore : ITaskStore
         var taskSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='tasks';");
         if (taskSql is null || !taskSql.Contains(
                 $"checkpoint_stage BETWEEN 0 AND {(int)TaskCheckpointStage.Terminal}", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件的任务检查点约束与 SQLite v8 不匹配；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件的任务检查点约束与 SQLite v9 不匹配；活动数据库未替换。");
         var auditSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='approval_audit';");
         if (auditSql is null || !auditSql.Contains("'code.patch.apply.v1' AND outcome='confirmed'", StringComparison.Ordinal)
             || !auditSql.Contains("'file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
             || !auditSql.Contains("'app.ui.set-text.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
-            || !auditSql.Contains("'app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v8 不匹配；活动数据库未替换。");
+            || !auditSql.Contains("'app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
+            || !auditSql.Contains("'app.ui.set-text-foreground.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal))
+            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v9 不匹配；活动数据库未替换。");
     }
 
     private static void ValidateColumnLayout(SqliteDatabase database, string table, string expectedColumns)

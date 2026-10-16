@@ -98,7 +98,7 @@
                     <TextBox x:Name="QQExecutableBox" MinHeight="32" Padding="7,5"/>
                 </DockPanel>
                 <TextBlock Text="自定义应用白名单" FontSize="13" FontWeight="SemiBold" Foreground="#343A50" Margin="0,0,0,5"/>
-                <TextBlock Text="添加你自己选择的本机 .exe，并为它设置唯一名称。小K只会用固定名称启动程序或切换到唯一匹配的窗口；不传入命令行参数，不运行脚本、命令解释器或网络路径。启动应用可能显示到桌面前台，因此只响应你明确提出的打开/切换请求。最多20个，保存并重启生效。"
+                <TextBlock Text="添加你自己选择的本机 .exe，并为它设置唯一名称。小K只会用固定名称启动程序或访问唯一匹配的窗口；不传入命令行参数，不运行脚本、命令解释器或网络路径。符合应用 UI Automation 能力的控件可逐次确认后检查、填写或操作；具体支持取决于应用实际公开的控件，登记本身不代表兼容。最多20个，保存并重启生效。"
                            FontSize="11" Foreground="#68728A" TextWrapping="Wrap" Margin="0,0,0,7"/>
                 <TextBlock Text="应用名称" FontSize="11"/>
                 <TextBox x:Name="CustomApplicationNameBox" MinHeight="32" Padding="7,5" Margin="0,3,0,6"/>

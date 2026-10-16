@@ -128,6 +128,57 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             Data: "目标文本框已更新");
     }
 
+    public async Task<ToolResult> SetTextInForegroundAsync(string applicationId, string automationId, string value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_desktop.IsUiAutomationTextTargetAllowed(applicationId))
+            return new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用界面填写工具；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED");
+        if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || ApplicationUiAutomationPolicy.IsSensitiveTextEntryField(automationId)
+            || !ApplicationUiAutomationPolicy.IsAllowedText(value))
+            return new(false, "控件标识或文本不符合固定限制；没有访问应用界面。", "UIA_INVALID_TEXT_REQUEST");
+
+        (WorkerResponse? Response, ToolResult? Failure) result;
+        try
+        {
+            result = await RunWorkerAsync(applicationId,
+                new WorkerCommand("set_text_foreground", automationId, 0, value), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(false, "等待目标应用前台期间任务已取消；没有启动写入工作进程，也没有修改文本框。",
+                "UIA_FOREGROUND_TEXT_CANCELLED_BEFORE_OPERATION", FinalState: TaskLifecycleState.Cancelled);
+        }
+        if (result.Failure is not null) return result.Failure;
+        if (result.Response is null || !result.Response.Success)
+        {
+            var error = result.Response?.ErrorCode ?? "UIA_TEXT_SET_FAILED";
+            var uncertain = result.Response?.OutcomeUncertain == true
+                || error is "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_SET";
+            return new(false, uncertain
+                ? "文本框写入后无法确认最终状态；请先人工检查目标应用，不要自动重试。"
+                : error switch
+                {
+                    "UIA_TARGET_NOT_FOREGROUND" => "批准后15秒内目标窗口没有成为前台；小K没有切换窗口或写入文本。",
+                    "UIA_FOREGROUND_UNKNOWN" => "无法核验当前前台窗口；没有写入文本。",
+                    "UIA_FOCUS_NOT_TARGET" => "目标窗口已在前台，但指定文本框没有键盘焦点；小K没有移动焦点或写入文本。",
+                    "UIA_FOREGROUND_CHANGED_BEFORE_SET" => "写入前检测到前台窗口发生变化；没有写入文本。",
+                    "UIA_TARGET_CHANGED" => "目标窗口在检查期间发生变化；没有写入文本。",
+                    "UIA_AUTOMATION_ID_AMBIGUOUS" => "目标控件标识不唯一；没有写入文本。",
+                    "UIA_TREE_LIMIT" => "目标界面超出固定检查范围；没有写入文本。",
+                    "UIA_PROTECTED_APP_BLOCKED" => "目标应用类型不允许使用通用文本填写；没有写入文本。",
+                    "UIA_CONTROL_NOT_WRITABLE" => "目标不是唯一、可见、启用的普通可写文本框；没有写入文本。",
+                    _ => "没有找到唯一、可见且可写的普通文本框；没有写入文本。"
+                },
+                error, FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null);
+        }
+        return new(true, "已在目标应用前台且文本框拥有焦点时写入并核对完整文本；没有切换窗口、移动焦点或模拟键鼠。",
+            Data: "目标文本框已更新");
+    }
+
     public async Task<ToolResult> InvokeButtonAsync(string applicationId, string automationId,
         CancellationToken cancellationToken)
     {
@@ -181,8 +232,9 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     {
         if (!OperatingSystem.IsWindows())
             return (null, new(false, "当前平台不支持 Windows UI Automation。", "UIA_UNAVAILABLE"));
-        if (command.Mode == "set_text" && !_desktop.IsUiAutomationTextTargetAllowed(applicationId))
-            return (null, new(false, "目标应用不允许使用通用后台文本填写；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
+        if ((command.Mode is "set_text" or "set_text_foreground")
+            && !_desktop.IsUiAutomationTextTargetAllowed(applicationId))
+            return (null, new(false, "目标应用不允许使用通用文本填写；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
         if (command.Mode == "invoke_button" && !_desktop.IsUiAutomationButtonTargetAllowed(applicationId))
             return (null, new(false, "目标应用不允许使用通用按钮操作；没有调用控件。", "UIA_BUTTON_TARGET_BLOCKED"));
         if (command.Mode == "invoke_button"
@@ -197,7 +249,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
                 _ => new(false, "无法核验该应用窗口的进程身份；没有访问窗口。", targetError)
             });
 
-        if (command.Mode == "set_text" && ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(
+        if ((command.Mode is "set_text" or "set_text_foreground")
+            && ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(
             applicationId, target!.DisplayName, target.ExecutablePath))
             return (null, new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用 UIA 文本填写；没有修改控件。", "UIA_PROTECTED_APP_BLOCKED"));
         if (command.Mode == "invoke_button" && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(
@@ -215,7 +268,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             return (null, new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
 
         var resolvedTarget = target!;
-        if (command.Mode == "invoke_button")
+        if (command.Mode is "invoke_button" or "set_text_foreground")
         {
             var targetWindow = new IntPtr(resolvedTarget.WindowHandle);
             var foregroundWait = Stopwatch.StartNew();
@@ -223,9 +276,13 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!IsWindow(targetWindow) || !IsWindowVisible(targetWindow))
-                    return (null, new(false, "目标窗口在等待前台期间关闭或变化；没有调用按钮。", "UIA_TARGET_CHANGED"));
+                    return (null, new(false, command.Mode == "set_text_foreground"
+                        ? "目标窗口在等待前台期间关闭或变化；没有写入文本。"
+                        : "目标窗口在等待前台期间关闭或变化；没有调用按钮。", "UIA_TARGET_CHANGED"));
                 if (foregroundWait.Elapsed >= _targetForegroundWait)
-                    return (null, new(false, "确认后15秒内目标窗口没有成为前台；没有调用按钮。", "UIA_TARGET_NOT_FOREGROUND"));
+                    return (null, new(false, command.Mode == "set_text_foreground"
+                        ? "确认后15秒内目标窗口没有成为前台；没有写入文本。"
+                        : "确认后15秒内目标窗口没有成为前台；没有调用按钮。", "UIA_TARGET_NOT_FOREGROUND"));
                 await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -267,7 +324,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             outputTask = ReadBoundedOutputAsync(process.StandardOutput.BaseStream, MaximumResponseBytes, linked.Token);
             errorTask = DrainErrorAsync(process.StandardError.BaseStream);
-            mutationMayHaveStarted = command.Mode is "set_text" or "invoke_button";
+            mutationMayHaveStarted = command.Mode is "set_text" or "set_text_foreground" or "invoke_button";
             await process.StandardInput.BaseStream.WriteAsync(request, linked.Token).ConfigureAwait(false);
             await process.StandardInput.BaseStream.FlushAsync(linked.Token).ConfigureAwait(false);
             process.StandardInput.Close();

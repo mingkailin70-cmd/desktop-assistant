@@ -256,6 +256,8 @@ Require(TaskCategoryCatalog.TryGetLabel("app-ui-wait-enabled", out var uiWaitLab
     && uiWaitLabel == "等待界面控件状态", "任务中心没有显示UIA状态等待类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text", out var uiSetTextLabel)
     && uiSetTextLabel == "应用界面文本填写", "任务中心没有显示应用界面文本填写类别。");
+Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text-foreground", out var uiForegroundSetTextLabel)
+    && uiForegroundSetTextLabel == "前台应用文本填写", "任务中心没有显示前台应用文本填写类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-invoke-button", out var uiInvokeButtonLabel)
     && uiInvokeButtonLabel == "应用按钮操作", "任务中心没有显示应用按钮操作类别。");
 Require(TaskCategoryCatalog.LabelOrConversation(null) == "本地对话"

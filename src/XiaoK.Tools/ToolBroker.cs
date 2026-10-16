@@ -75,6 +75,7 @@ public sealed class ToolBroker
             or ApplicationUiAutomationPolicy.ScopedSnapshotToolId
             or ApplicationUiAutomationPolicy.WaitForEnabledToolId
             or ApplicationUiAutomationPolicy.SetTextToolId
+            or ApplicationUiAutomationPolicy.ForegroundSetTextToolId
             or ApplicationUiAutomationPolicy.InvokeButtonToolId;
         if (isApplicationUiTool && !_desktop.IsApplicationRegistered(proposal.Arguments["app_id"]))
             return new(false, "目标应用未登记在本机允许列表；未创建界面协调租约，也没有访问窗口。",
@@ -82,7 +83,8 @@ public sealed class ToolBroker
         if ((proposal.ToolId is ApplicationUiAutomationPolicy.ToolId or ApplicationUiAutomationPolicy.ScopedSnapshotToolId)
             && !_desktop.IsUiAutomationSnapshotTargetAllowed(proposal.Arguments["app_id"]))
             return new(false, "消息客户端不允许使用通用 UIA 快照，避免读取会话内容；没有访问窗口。", "UIA_MESSAGING_APP_BLOCKED");
-        if (proposal.ToolId == ApplicationUiAutomationPolicy.SetTextToolId
+        if ((proposal.ToolId is ApplicationUiAutomationPolicy.SetTextToolId
+                or ApplicationUiAutomationPolicy.ForegroundSetTextToolId)
             && !_desktop.IsUiAutomationTextTargetAllowed(proposal.Arguments["app_id"]))
             return new(false, "消息客户端、浏览器、系统文件管理器及金融/凭证敏感应用不允许使用通用 UIA 文本填写；没有访问窗口或创建协调租约。",
                 "UIA_PROTECTED_APP_BLOCKED");
@@ -111,6 +113,7 @@ public sealed class ToolBroker
                 : await _uiAutomationSnapshots.WaitForEnabledControlAsync(proposal.Arguments["app_id"],
                     proposal.Arguments["automation_id"], cancellationToken),
             "app.ui.set-text.v1" => await SetApplicationUiTextAsync(proposal, cancellationToken, taskId),
+            "app.ui.set-text-foreground.v1" => await SetApplicationUiTextInForegroundAsync(proposal, cancellationToken, taskId),
             "app.ui.invoke-button.v1" => await InvokeApplicationUiButtonAsync(proposal, cancellationToken, taskId),
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
@@ -198,6 +201,7 @@ public sealed class ToolBroker
             "app.ui.snapshot-scoped.v1" => ValidateApplicationUiScopedSnapshot(proposal),
             "app.ui.wait-enabled.v1" => ValidateApplicationUiWaitEnabled(proposal),
             "app.ui.set-text.v1" => ValidateApplicationUiSetText(proposal),
+            "app.ui.set-text-foreground.v1" => ValidateApplicationUiSetText(proposal),
             "app.ui.invoke-button.v1" => ValidateApplicationUiInvokeButton(proposal),
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
@@ -369,6 +373,44 @@ public sealed class ToolBroker
             return new(false, "确认后、写入前任务已取消；文本框未修改。", "UIA_TEXT_SET_CANCELLED_BEFORE_OPERATION",
                 FinalState: TaskLifecycleState.Cancelled);
         return await _uiAutomationTextSetter.SetTextAsync(appId, automationId, value, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<ToolResult> SetApplicationUiTextInForegroundAsync(ToolProposal proposal,
+        CancellationToken cancellationToken, Guid? taskId)
+    {
+        if (_uiAutomationTextSetter is null)
+            return new(false, "前台文本填写器未配置；没有访问或修改应用界面。", "UIA_FOREGROUND_TEXT_SETTER_UNAVAILABLE");
+        var appId = proposal.Arguments["app_id"];
+        var automationId = proposal.Arguments["automation_id"];
+        var value = proposal.Arguments["value"];
+        if (!_desktop.IsUiAutomationTextTargetAllowed(appId))
+            return new(false, "该应用属于消息客户端、浏览器、系统文件管理器或金融/凭证敏感应用；通用前台文本填写已拒绝。", "UIA_PROTECTED_APP_BLOCKED");
+
+        var details = $"目标应用：{appId}{Environment.NewLine}文本框 AutomationId：{automationId}"
+            + $"{Environment.NewLine}{Environment.NewLine}将以以下完整文本替换唯一匹配的普通文本框内容："
+            + $"{Environment.NewLine}{Environment.NewLine}{value}"
+            + $"{Environment.NewLine}{Environment.NewLine}注意：应用可能在文本写入时立即执行搜索、自动保存或其他响应；请先确认当前应用状态和这个字段适合写入。"
+            + $"{Environment.NewLine}{Environment.NewLine}批准后请在15秒内手动切到目标应用，并亲自把键盘焦点放在这个文本框。"
+            + $"{Environment.NewLine}小K只会在该精确应用窗口处于前台、且该唯一文本框本身拥有键盘焦点时，通过 UI Automation 写入并核对文本。"
+            + $"{Environment.NewLine}不会切换窗口、移动焦点、点击、模拟按键或读取剪贴板；结果不确定时不会重试。"
+            + $"{Environment.NewLine}消息客户端、浏览器、系统文件管理器、钱包/金融/凭证应用及密码/验证码/密钥字段不允许使用。请选择批准或拒绝。";
+        bool confirmed;
+        try
+        {
+            confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
+                "确认前台填写文本", details, cancellationToken, taskId).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(false, "等待前台填写确认时任务已取消；文本框未修改。", "UIA_FOREGROUND_TEXT_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        }
+        if (!confirmed) return new(false, "已拒绝前台填写；文本框未修改。", "UIA_FOREGROUND_TEXT_DECLINED");
+        if (cancellationToken.IsCancellationRequested)
+            return new(false, "确认后、写入前任务已取消；文本框未修改。", "UIA_FOREGROUND_TEXT_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        return await _uiAutomationTextSetter.SetTextInForegroundAsync(appId, automationId, value, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -816,6 +858,7 @@ public sealed class ToolBroker
         "app.ui.snapshot-scoped.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.wait-enabled.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.set-text.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+        "app.ui.set-text-foreground.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.invoke-button.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
@@ -853,6 +896,7 @@ public sealed class ToolBroker
         "app.ui.snapshot-scoped.v1" => ToolExpectedOutcome.ApplicationUiSnapshotReturned,
         "app.ui.wait-enabled.v1" => ToolExpectedOutcome.ApplicationUiConditionObserved,
         "app.ui.set-text.v1" => ToolExpectedOutcome.ApplicationUiValueSet,
+        "app.ui.set-text-foreground.v1" => ToolExpectedOutcome.ApplicationUiValueSet,
         "app.ui.invoke-button.v1" => ToolExpectedOutcome.ApplicationUiActionInvoked,
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,

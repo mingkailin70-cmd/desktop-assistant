@@ -550,3 +550,11 @@ GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现�
 - 本机固定SDK 10.0.401 Release全解决方案构建0警告/0错误；生产共享写入组件在隔离跨进程WinForms合成窗中实测通过，确认写值准确、AutoSetFocus仍为0、前台和焦点不变。未对真实应用做写入，未重新签名/安装MSIX；真实UIA Provider、目标应用并发状态、取消与锁屏还需分别验收。
 
 **当前决定：** 限定的普通UIA Edit写入已作为有审批的Host工具实现，但安装版与真实应用尚未验收。它不改变消息适配器要求：QQ/微信发送仍须逐条展示平台、稳定收件人、完整正文和附件并再次明确确认；当前没有真实发送适配器。参考微软[AutoSetFocus](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomation2-get_autosetfocus)与[ValuePattern.SetValue](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)文档。
+
+## 2026-10-16 WinAppCli 前台文本操作与测试方式
+
+只读复核微软维护的 [WinAppCli UI Automation 指南](https://github.com/microsoft/WinAppCli/blob/main/docs/ui-automation.md)。它把控件定位、写值、等待属性达到预期值拆成显式步骤；选择器不唯一或元素已过期时停止。小K沿用这些约束，并比通用 CLI 更窄：只接受登记普通应用中唯一、可见、启用、非只读的 Edit `ValuePattern`；要求用户逐次确认完整替换文本、手动切到目标窗口并聚焦字段，worker执行前后复核身份、前台和焦点。不增加键盘输入或其他Pattern回退，也不复制第三方代码或引入依赖。富文本、现代控件或自定义Provider没有可写ValuePattern时会失败关闭。
+
+WinAppCli 的写后 `wait-for` 属性/值断言可用于指导小K的合成检查：写入后核对目标值，而不把API调用返回当作业务成功。写入也可能立即触发实时搜索、自动保存或其他应用响应；AutomationId无法识别字段语义，因此审批与用户指南现在提醒用户避开命令框、实时搜索框和其他即时副作用字段。此策略仍不证明第三方应用行为或业务结果。
+
+来源：[WinAppCli UI Automation指南](https://github.com/microsoft/WinAppCli/blob/main/docs/ui-automation.md)、[Microsoft ValuePattern.SetValue契约](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)。仓库说明与上游页面用于设计参考；没有克隆、构建、运行或复制WinAppCli代码。

@@ -14,6 +14,7 @@ public static class ToolInteractionPolicy
         _ when toolId is ApplicationUiAutomationPolicy.SetTextToolId
             => ToolInteractionOperation.TargetStateChange,
         _ when toolId is ApplicationUiAutomationPolicy.InvokeButtonToolId
+            or ApplicationUiAutomationPolicy.ForegroundSetTextToolId
             => ToolInteractionOperation.DesktopExclusive,
         ToolInteractionMode.Background => ToolInteractionOperation.NonInteractive,
         ToolInteractionMode.Foreground => ToolInteractionOperation.DesktopExclusive,
@@ -36,8 +37,9 @@ public static class ToolInteractionPolicy
             or ApplicationUiAutomationPolicy.WaitForEnabledToolId
             or ApplicationUiAutomationPolicy.SetTextToolId
             => ToolInteractionMode.Background,
-        // 启动程序、切换窗口和调用应用按钮会影响当前桌面状态，只能由明确用户交互触发。
+        // 启动程序、切换窗口和显式前台控件操作只能由明确用户交互触发。
         "app.launch.v1" or "window.activate.v1" or ApplicationUiAutomationPolicy.InvokeButtonToolId
+            or ApplicationUiAutomationPolicy.ForegroundSetTextToolId
             => ToolInteractionMode.Foreground,
         _ => ToolInteractionMode.Unknown
     };

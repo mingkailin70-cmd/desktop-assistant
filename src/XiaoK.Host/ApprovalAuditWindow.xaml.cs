@@ -17,6 +17,7 @@ public partial class ApprovalAuditWindow : Window
                 ApprovalAuditCatalog.CodePatchApplyAction => "隔离补丁应用",
                 ApprovalAuditCatalog.FileRecycleAction => "文件移入回收站",
                 ApprovalAuditCatalog.ApplicationUiTextSetAction => "应用文本填写",
+                ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction => "前台应用文本填写",
                 ApprovalAuditCatalog.ApplicationUiButtonInvokeAction => "应用按钮操作",
                 _ => "未知动作"
             },

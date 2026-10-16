@@ -89,6 +89,7 @@ public static class ApprovalAuditCatalog
     public const string CodePatchApplyAction = "code.patch.apply.v1";
     public const string FileRecycleAction = "file.delete.recycle-bin.v1";
     public const string ApplicationUiTextSetAction = "app.ui.set-text.v1";
+    public const string ApplicationUiForegroundTextSetAction = "app.ui.set-text-foreground.v1";
     public const string ApplicationUiButtonInvokeAction = "app.ui.invoke-button.v1";
     public const string Confirmed = "confirmed";
     public const string Declined = "declined";
@@ -127,11 +128,15 @@ public interface IReadOnlyUiAutomationSnapshotReader
         CancellationToken cancellationToken);
 }
 
-/// <summary>Writes an explicitly confirmed value to one unique non-password edit control without activating its window.</summary>
+/// <summary>Writes an explicitly confirmed value to one unique non-password edit control.</summary>
 public interface IBackgroundUiAutomationTextSetter
 {
     Task<ToolResult> SetTextAsync(string applicationId, string automationId, string value,
         CancellationToken cancellationToken);
+
+    Task<ToolResult> SetTextInForegroundAsync(string applicationId, string automationId, string value,
+        CancellationToken cancellationToken) => Task.FromResult(new ToolResult(false,
+            "前台文本填写器未配置；没有访问或修改应用界面。", "UIA_FOREGROUND_TEXT_SETTER_UNAVAILABLE"));
 }
 
 /// <summary>Invokes one unique visible button in an allowlisted non-sensitive app after explicit approval.</summary>

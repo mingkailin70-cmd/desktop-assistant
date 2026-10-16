@@ -782,8 +782,11 @@ try
     await CheckSqliteV6ToV7CheckpointMigrationAsync(tempRoot);
     passed.Add("SQLite v6 到 v7 迁移保守标记旧任务，并能往返保存脱敏执行检查点");
 
-    await CheckSqliteV7ToV8ApprovalAuditMigrationAsync(tempRoot);
-    passed.Add("SQLite v7 到 v8 迁移保留既有审计并允许固定UIA审批结果");
+    await CheckSqliteV7ToV9ApprovalAuditMigrationAsync(tempRoot);
+    passed.Add("SQLite v7 到 v9 迁移保留既有审计并允许固定UIA审批结果");
+
+    await CheckSqliteV8ToV9ForegroundAuditMigrationAsync(tempRoot);
+    passed.Add("SQLite v8 到 v9 迁移保留既有审计并允许前台文本审批结果");
 
     await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
@@ -3721,7 +3724,7 @@ static async Task CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(string root)
         "旧结果正文哨兵被复制进 SQLite 数据库。");
 }
 
-static async Task CheckSqliteV7ToV8ApprovalAuditMigrationAsync(string root)
+static async Task CheckSqliteV7ToV9ApprovalAuditMigrationAsync(string root)
 {
     var directory = Path.Combine(root, "sqlite-v7-to-v8-approval-audit");
     Directory.CreateDirectory(directory);
@@ -3756,7 +3759,39 @@ static async Task CheckSqliteV7ToV8ApprovalAuditMigrationAsync(string root)
         && migratedAudit.Count == 6 && reopenedAudit.Count == 6
         && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction) == 2
         && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2,
-        "SQLite v7 到 v8 迁移没有先备份、保留原审计并持久化固定UIA批准/拒绝结果。");
+        "SQLite v7 到 v9 迁移没有先备份、保留原审计并持久化固定UIA批准/拒绝结果。");
+}
+
+static async Task CheckSqliteV8ToV9ForegroundAuditMigrationAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-v8-to-v9-foreground-audit");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var originalStore = new SqliteTaskStore(databasePath);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    var originalAudit = await originalStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+
+    SqliteSchemaFixture.RevertToVersionEight(databasePath);
+    var migratedStore = new SqliteTaskStore(databasePath);
+    var migrationBackupExists = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").Any();
+    var preservedAudit = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    var migratedAudit = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    var reopenedAudit = await new SqliteTaskStore(databasePath).GetRecentApprovalAuditAsync(20, CancellationToken.None);
+
+    Require(migrationBackupExists && originalAudit.Count == 2 && preservedAudit.Count == 2
+        && originalAudit.All(original => preservedAudit.Any(preserved => preserved.Id == original.Id
+            && preserved.ActionId == original.ActionId && preserved.Outcome == original.Outcome
+            && preserved.CreatedAtUtc == original.CreatedAtUtc))
+        && migratedAudit.Count == 4 && reopenedAudit.Count == 4
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction) == 2,
+        "SQLite v8 到 v9 迁移没有先备份、保留现有审计并持久化固定前台文本批准/拒绝结果。");
 }
 
 static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
@@ -3813,6 +3848,10 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiTextSetAction,
         ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
@@ -3822,7 +3861,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     try { await store.AppendApprovalAuditAsync(untrustedAuditSentinel, "confirmed", CancellationToken.None); }
     catch (ArgumentException) { untrustedActionRejected = true; }
     var audit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
-    Require(untrustedActionRejected && audit.Count == 9
+    Require(untrustedActionRejected && audit.Count == 11
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodeTaskAction
             && row.Outcome == ApprovalAuditCatalog.RunDotNetTests)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.MessageSendAction
@@ -3834,6 +3873,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.FileRecycleAction
             && row.Outcome == ApprovalAuditCatalog.Confirmed)
         && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction) == 2
+        && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction) == 2
         && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2
         && DatabaseFilesOmitSentinel(databasePath, untrustedAuditSentinel),
         "审批审计接受了自由文本，或没有按固定动作/结果保存审核痕迹。");
@@ -3843,7 +3883,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
     var backedUpAudit = await backup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal"
-        && backedUpAudit.Count == 9,
+        && backedUpAudit.Count == 11,
         "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
     var changedAfterBackup = new ContactReplyStylePreference("Charlie", "casual",
@@ -3858,8 +3898,8 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var safetyPreferences = await safetyBackup.GetContactReplyStylesAsync(CancellationToken.None);
     var safetyAudit = await safetyBackup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(restoredPreferences.Count == 1 && restoredPreferences[0].ContactName == "Bob"
-        && restoredAudit.Count == 9 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
-        && safetyAudit.Count == 10,
+        && restoredAudit.Count == 11 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
+        && safetyAudit.Count == 12,
         "数据库恢复未恢复所选快照，或恢复前的活动数据库没有留下可用保护副本。");
 
     var incompatibleBackupPath = Path.Combine(directory, "incompatible.sqlite3");
@@ -4153,11 +4193,14 @@ static void CheckTaskHistoryDisplayPolicy()
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-snapshot").Contains("只读", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-wait-enabled").Contains("不点击", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-text").Contains("逐次确认完整文本", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-text-foreground").Contains("手动聚焦", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-invoke-button").Contains("唯一可见按钮", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-invoke-button").Contains("前台交互", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-invoke-button").Contains("逐次确认", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.TargetScope("code").Contains("隔离工作区", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file-delete").Contains("任务中心逐项确认", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-text").Contains("不模拟按键或改变前台", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-text-foreground").Contains("不移动焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("window").Contains("改变焦点", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("file").Contains("不改变前台窗口", StringComparison.Ordinal),
         "任务中心没有显示准确的固定目标范围或执行模式。");
@@ -4214,6 +4257,9 @@ static void CheckTaskHistoryDisplayPolicy()
         ("UIA_CONDITION_NOT_MET", "没有点击或填写"),
         ("UIA_TARGET_IN_USE", "没有写入文本"),
         ("UIA_FOREGROUND_CHANGED_BEFORE_SET", "没有写入文本"),
+        ("UIA_FOCUS_CHANGED_BEFORE_SET", "没有写入文本"),
+        ("UIA_AUTO_SET_FOCUS_DISABLE_FAILED", "没有写入文本"),
+        ("UIA_CONTROL_NOT_WRITABLE", "没有写入文本"),
         ("UIA_PROTECTED_APP_BLOCKED", "没有访问或修改界面"),
         ("UIA_BUTTON_TARGET_BLOCKED", "没有调用按钮"),
         ("UIA_BUTTON_ACTION_BLOCKED", "常见发送、删除、支付、权限或管理员操作"),
@@ -4221,7 +4267,7 @@ static void CheckTaskHistoryDisplayPolicy()
         ("UIA_BUTTON_NOT_FOUND", "没有调用控件"),
         ("UIA_BUTTON_NOT_INVOKABLE", "没有执行动作"),
         ("UIA_FOREGROUND_UNKNOWN", "没有调用按钮"),
-        ("UIA_TARGET_NOT_FOREGROUND", "没有切换窗口，也没有调用按钮"),
+        ("UIA_TARGET_NOT_FOREGROUND", "没有切换窗口，也没有执行控件操作"),
         ("UIA_FOREGROUND_CHANGED_BEFORE_ACTION", "没有调用按钮"),
         ("UIA_TREE_LIMIT", "超过固定检查范围")
     };
@@ -4285,6 +4331,7 @@ static void CheckTaskHistoryDisplayPolicy()
     Require(TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("file-delete", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text", routeStarted: true)
+        && TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text-foreground", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("app", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("code", routeStarted: true)
         && TaskFailureSafetyPolicy.RequiresManualVerification("future-unknown-category", routeStarted: true)
@@ -4297,9 +4344,11 @@ static void CheckTaskHistoryDisplayPolicy()
         && !TaskFailureSafetyPolicy.RequiresManualVerification("send", routeStarted: true)
         && !TaskFailureSafetyPolicy.RequiresManualVerification("file-move", routeStarted: false)
         && !TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text", routeStarted: false)
+        && !TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text-foreground", routeStarted: false)
         && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.CancelledOutcomeUncertainErrorCode)
         && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.TimedOutOutcomeUncertainErrorCode)
         && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode(TaskFailureSafetyPolicy.ExceptionOutcomeUncertainErrorCode)
+        && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode("UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_SET")
         && !TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode("INTERNAL"),
         "可能已产生副作用的工具异常未被要求人工核对，或只读/路由前失败被误标为结果不确定。");
 
@@ -4328,6 +4377,7 @@ static void CheckTaskHistoryDisplayPolicy()
         && codeAgent.Contains("testTarget, commandPreview, cancellationToken, taskId)", StringComparison.Ordinal)
         && host.Contains("TaskFailureSafetyPolicy.RequiresManualVerification(work.Category, routeStarted)", StringComparison.Ordinal)
         && host.Contains("if (category == \"app-ui-set-text\")", StringComparison.Ordinal)
+        && host.Contains("if (category == \"app-ui-set-text-foreground\")", StringComparison.Ordinal)
         && host.Contains("return \"app-ui-set-text\";", StringComparison.Ordinal)
         && uiAutomationAdapter.Contains("UIA_VALUE_VERIFY_FAILED\" or \"UIA_FOREGROUND_CHANGED_AFTER_SET", StringComparison.Ordinal)
         && uiAutomationAdapter.Contains("FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null", StringComparison.Ordinal)
@@ -4811,12 +4861,24 @@ static async Task CheckUiTextWritePolicyAsync()
         && proposal.Target == notepadId && proposal.Arguments["automation_id"] == "Editor.Compose"
         && proposal.Arguments["value"] == value,
         "UIA文本填写语法没有精确保留文本中的分隔符和换行。 ");
+    var foregroundProposal = ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal(
+        "前台设置界面文本：记事本|Editor.Compose|" + value, apps);
+    Require(foregroundProposal is not null && foregroundProposal.ToolId == "app.ui.set-text-foreground.v1"
+        && foregroundProposal.Target == notepadId && foregroundProposal.Arguments["automation_id"] == "Editor.Compose"
+        && foregroundProposal.Arguments["value"] == value,
+        "前台UIA文本填写语法没有精确保留替换文本或绑定固定应用/AutomationId。 ");
     Require(ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：微信|MessageEdit|你好", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：QQ|MessageEdit|你好", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：Edge|Address|example.com", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：资源管理器|Address|D:\\", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：加密货币钱包|SendTo|地址", apps) is null,
         "通用UIA文本工具没有封锁消息客户端、浏览器、资源管理器或钱包。 ");
+    Require(ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal("前台设置界面文本：微信|MessageEdit|你好", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal("前台设置界面文本：QQ|MessageEdit|你好", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal("前台设置界面文本：Edge|Address|example.com", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal("前台设置界面文本：资源管理器|Address|D:\\", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal("前台设置界面文本：加密货币钱包|SendTo|地址", apps) is null,
+        "前台UIA文本工具没有封锁消息客户端、浏览器、资源管理器或钱包。 ");
     Require(ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|bad id|你好", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|Editor.Compose|", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：记事本|PasswordBox|secret", apps) is null
@@ -4826,6 +4888,29 @@ static async Task CheckUiTextWritePolicyAsync()
     Require(ToolInteractionPolicy.GetMode("app.ui.set-text.v1") == ToolInteractionMode.Background
         && ToolInteractionPolicy.GetOperation("app.ui.set-text.v1") == ToolInteractionOperation.TargetStateChange,
         "UIA文本填写没有使用后台目标状态变更门控。 ");
+    Require(ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.ForegroundSetTextToolId) == ToolInteractionMode.Foreground
+        && ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.ForegroundSetTextToolId)
+            == ToolInteractionOperation.DesktopExclusive
+        && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.ForegroundSetTextToolId,
+            ToolExecutionAccess.BackgroundOnly)?.ErrorCode == "FOREGROUND_REQUIRED"
+        && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.ForegroundSetTextToolId,
+            ToolExecutionAccess.ExplicitUserInteraction) is null
+        && TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-text-foreground", routeStarted: true)
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-text-foreground").Contains("手动聚焦", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-text-foreground").Contains("不移动焦点", StringComparison.Ordinal),
+        "前台UIA文本填写未执行桌面独占/显式交互准入，或任务中心未披露副作用范围。 ");
+
+    var assistantSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    var foregroundRouteStart = assistantSource.IndexOf("if (category == \"app-ui-set-text-foreground\")", StringComparison.Ordinal);
+    var foregroundRouteEnd = foregroundRouteStart < 0 ? -1 : assistantSource.IndexOf("if (category == \"app-ui-set-text\")",
+        foregroundRouteStart, StringComparison.Ordinal);
+    var foregroundRoute = foregroundRouteStart >= 0 && foregroundRouteEnd > foregroundRouteStart
+        ? assistantSource[foregroundRouteStart..foregroundRouteEnd]
+        : string.Empty;
+    Require(foregroundRoute.Contains("_broker.ExecuteAsync(proposal, token)", StringComparison.Ordinal)
+        && !foregroundRoute.Contains("ExecuteBackgroundAsync", StringComparison.Ordinal)
+        && assistantSource.Contains("IsForegroundSetTextUserRequest(request)) return \"app-ui-set-text-foreground\";", StringComparison.Ordinal),
+        "前台文本指令没有以单独的显式交互路径路由，或误入后台队列。 ");
 
     var buttonProposal = ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal(
         "点击界面按钮：记事本|Editor.SaveButton", apps);
@@ -4874,7 +4959,6 @@ static async Task CheckUiTextWritePolicyAsync()
         && !ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked("Editor.SaveButton"),
         "通用按钮策略没有封锁系统管理应用及可识别的高风险动作标识，或误封普通保存按钮。 ");
 
-    var assistantSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "AssistantRuntime.cs"));
     var invokeRouteStart = assistantSource.IndexOf("if (category == \"app-ui-invoke-button\")", StringComparison.Ordinal);
     var invokeRouteEnd = invokeRouteStart < 0 ? -1 : assistantSource.IndexOf("if (category == \"app-ui-wait-enabled\")",
         invokeRouteStart, StringComparison.Ordinal);
@@ -4978,6 +5062,49 @@ static async Task CheckUiTextWritePolicyAsync()
     Require(!canceled.Success && canceled.FinalState == TaskLifecycleState.Cancelled
         && cancelWriter.CallCount == 0,
         "确认后取消没有阻止UIA文本写入。 ");
+
+    var foregroundWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var foregroundApproval = new RecordingApprovalPresenter(true);
+    var foregroundBroker = CreateBroker(foregroundApproval, foregroundWriter, InteractionTargetUsage.NotInUse);
+    var foregroundResult = await foregroundBroker.ExecuteAsync(foregroundProposal!,
+        ToolExecutionAccess.ExplicitUserInteraction, CancellationToken.None, Guid.NewGuid());
+    Require(foregroundResult.Success && foregroundWriter.ForegroundCallCount == 1
+        && foregroundWriter.ForegroundApplicationId == notepadId
+        && foregroundWriter.ForegroundAutomationId == "Editor.Compose"
+        && foregroundWriter.ForegroundValue == value
+        && foregroundApproval.CallCount == 1
+        && foregroundApproval.LastActionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction
+        && foregroundApproval.LastDetails?.Contains(value, StringComparison.Ordinal) == true
+        && foregroundApproval.LastDetails?.Contains("可能在文本写入时立即执行搜索、自动保存或其他响应", StringComparison.Ordinal) == true
+        && foregroundApproval.LastDetails?.Contains("15秒内手动切到目标应用，并亲自把键盘焦点放在这个文本框", StringComparison.Ordinal) == true
+        && foregroundApproval.LastDetails?.Contains("不会切换窗口、移动焦点", StringComparison.Ordinal) == true,
+        "前台UIA文本没有逐次确认完整替换值/手动焦点要求，或没有只调用一次前台写入适配器。 ");
+
+    var backgroundForegroundWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var backgroundForegroundApproval = new RecordingApprovalPresenter(true);
+    var backgroundForeground = await CreateBroker(backgroundForegroundApproval, backgroundForegroundWriter,
+        InteractionTargetUsage.NotInUse).ExecuteBackgroundAsync(foregroundProposal!, CancellationToken.None);
+    Require(!backgroundForeground.Success && backgroundForeground.ErrorCode == "FOREGROUND_REQUIRED"
+        && backgroundForegroundApproval.CallCount == 0 && backgroundForegroundWriter.ForegroundCallCount == 0,
+        "后台任务绕过前台文本填写的桌面交互门控。 ");
+
+    var declinedForegroundWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var declinedForegroundApproval = new RecordingApprovalPresenter(false);
+    var declinedForeground = await CreateBroker(declinedForegroundApproval, declinedForegroundWriter,
+        InteractionTargetUsage.NotInUse).ExecuteAsync(foregroundProposal!, ToolExecutionAccess.ExplicitUserInteraction,
+            CancellationToken.None);
+    Require(!declinedForeground.Success && declinedForeground.ErrorCode == "UIA_FOREGROUND_TEXT_DECLINED"
+        && declinedForegroundWriter.ForegroundCallCount == 0,
+        "拒绝前台文本填写后仍调用了UIA写入适配器。 ");
+
+    using var foregroundCancellation = new CancellationTokenSource();
+    var foregroundCancelWriter = new RecordingBackgroundUiAutomationTextSetter();
+    var foregroundCancel = await CreateBroker(new CancelAfterApprovalPresenter(foregroundCancellation),
+        foregroundCancelWriter, InteractionTargetUsage.NotInUse)
+        .ExecuteAsync(foregroundProposal!, ToolExecutionAccess.ExplicitUserInteraction, foregroundCancellation.Token);
+    Require(!foregroundCancel.Success && foregroundCancel.FinalState == TaskLifecycleState.Cancelled
+        && foregroundCancelWriter.ForegroundCallCount == 0,
+        "确认后取消没有阻止前台文本写入。 ");
 
     var protectedProposal = proposal! with
     {
@@ -11031,6 +11158,10 @@ internal sealed class RecordingBackgroundUiAutomationTextSetter : IBackgroundUiA
     public string? ApplicationId { get; private set; }
     public string? AutomationId { get; private set; }
     public string? Value { get; private set; }
+    public int ForegroundCallCount { get; private set; }
+    public string? ForegroundApplicationId { get; private set; }
+    public string? ForegroundAutomationId { get; private set; }
+    public string? ForegroundValue { get; private set; }
 
     public Task<ToolResult> SetTextAsync(string applicationId, string automationId, string value,
         CancellationToken cancellationToken)
@@ -11041,6 +11172,17 @@ internal sealed class RecordingBackgroundUiAutomationTextSetter : IBackgroundUiA
         AutomationId = automationId;
         Value = value;
         return Task.FromResult(new ToolResult(true, "合成文本框已更新。", Data: "目标文本框已更新"));
+    }
+
+    public Task<ToolResult> SetTextInForegroundAsync(string applicationId, string automationId, string value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ForegroundCallCount++;
+        ForegroundApplicationId = applicationId;
+        ForegroundAutomationId = automationId;
+        ForegroundValue = value;
+        return Task.FromResult(new ToolResult(true, "合成前台文本框已更新。", Data: "目标文本框已更新"));
     }
 }
 
@@ -11479,6 +11621,21 @@ internal static class SqliteSchemaFixture
         + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
         + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v8; "
         + "DROP TABLE approval_audit_v8; PRAGMA user_version=7; COMMIT;");
+
+    public static void RevertToVersionEight(string databasePath) => Execute(databasePath,
+        "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
+        + "ALTER TABLE approval_audit RENAME TO approval_audit_v9; "
+        + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
+        + "outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+        + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed') "
+        + "OR (action_id='file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')))); "
+        + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
+        + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v9; "
+        + "DROP TABLE approval_audit_v9; PRAGMA user_version=8; COMMIT;");
 
     public static void RevertToVersionTwo(string databasePath)
     {

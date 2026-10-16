@@ -11,6 +11,7 @@ public static class TaskCategoryCatalog
         ["app-ui-scoped-snapshot"] = "指定控件区域检查",
         ["app-ui-wait-enabled"] = "等待界面控件状态",
         ["app-ui-set-text"] = "应用界面文本填写",
+        ["app-ui-set-text-foreground"] = "前台应用文本填写",
         ["app-ui-invoke-button"] = "应用按钮操作",
         ["window"] = "窗口切换",
         ["file"] = "文件查找",

@@ -58,6 +58,7 @@ public static class WindowsUiAutomationWorkerEntryPoint
                         && request.WaitMilliseconds == 0 && request.Value is null => ReadScopedSnapshot(request),
                     "wait_enabled" when request.Value is null => WaitForEnabledControl(request),
                     "set_text" => SetTextValue(request),
+                    "set_text_foreground" => SetTextValueInForeground(request),
                     "invoke_button" when request.Value is null && request.RootControlType is null
                         && request.WaitMilliseconds == 0 => InvokeButton(request),
                     _ => new(false, "UIA_INVALID_REQUEST", [])
@@ -279,6 +280,33 @@ public static class WindowsUiAutomationWorkerEntryPoint
 
         var writeResult = SafeUiAutomationTextWriter.SetValue(
             handle, request.ProcessId, automationId, value!, foregroundBefore);
+        return writeResult.Success
+            ? new(true, null, [])
+            : new(false, writeResult.ErrorCode, [], OutcomeUncertain: writeResult.OutcomeUncertain);
+    }
+
+    private static WindowsUiAutomationSnapshotAdapter.WorkerResponse SetTextValueInForeground(
+        WindowsUiAutomationSnapshotAdapter.WorkerRequest request)
+    {
+        var automationId = request.AutomationId;
+        var value = request.Value;
+        if (automationId is null || automationId.Length is 0 or > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || !ApplicationUiAutomationPolicy.IsAllowedText(value)
+            || request.WaitMilliseconds != 0 || request.RootControlType is not null)
+            return new(false, "UIA_INVALID_TEXT_REQUEST", []);
+        if (ApplicationUiAutomationPolicy.IsTextEntryTargetBlocked(request.ApplicationId, request.DisplayName,
+            request.ExecutablePath))
+            return new(false, "UIA_PROTECTED_APP_BLOCKED", []);
+
+        var handle = new IntPtr(request.WindowHandle);
+        var foregroundBefore = GetForegroundWindow();
+        if (foregroundBefore == IntPtr.Zero) return new(false, "UIA_FOREGROUND_UNKNOWN", []);
+        if (foregroundBefore != handle) return new(false, "UIA_TARGET_NOT_FOREGROUND", []);
+        if (!TryResolveRoot(request, out _, out var error)) return new(false, error, []);
+
+        var writeResult = SafeUiAutomationTextWriter.SetValueInForeground(
+            handle, request.ProcessId, automationId, value!);
         return writeResult.Success
             ? new(true, null, [])
             : new(false, writeResult.ErrorCode, [], OutcomeUncertain: writeResult.OutcomeUncertain);

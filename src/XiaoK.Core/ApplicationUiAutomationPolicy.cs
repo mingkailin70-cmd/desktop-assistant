@@ -9,6 +9,7 @@ public static class ApplicationUiAutomationPolicy
     public const string ScopedSnapshotToolId = "app.ui.snapshot-scoped.v1";
     public const string WaitForEnabledToolId = "app.ui.wait-enabled.v1";
     public const string SetTextToolId = "app.ui.set-text.v1";
+    public const string ForegroundSetTextToolId = "app.ui.set-text-foreground.v1";
     public const string InvokeButtonToolId = "app.ui.invoke-button.v1";
     private static readonly string[] Prefixes = ["读取界面控件：", "检查界面控件：", "查看界面控件："];
     private static readonly string[] GenericButtonBlockedMarkers =
@@ -36,6 +37,7 @@ public static class ApplicationUiAutomationPolicy
         "Pane", "Group", "Tab", "List", "Tree", "DataGrid", "Table");
     private const string WaitForEnabledPrefix = "等待界面控件可用：";
     private const string SetTextPrefix = "设置界面文本：";
+    private const string ForegroundSetTextPrefix = "前台设置界面文本：";
     private const string InvokeButtonPrefix = "点击界面按钮：";
 
     public static bool IsUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
@@ -54,18 +56,29 @@ public static class ApplicationUiAutomationPolicy
     public static bool IsSetTextUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
         && request.TrimStart().StartsWith(SetTextPrefix, StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsForegroundSetTextUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
+        && request.TrimStart().StartsWith(ForegroundSetTextPrefix, StringComparison.OrdinalIgnoreCase);
+
     public static bool IsInvokeButtonUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
         && request.TrimStart().StartsWith(InvokeButtonPrefix, StringComparison.OrdinalIgnoreCase);
 
     public static ToolProposal? CreateSetTextToolProposal(string request,
         IEnumerable<ConfiguredAppAlias> configuredApps)
+        => CreateTextToolProposal(request, configuredApps, SetTextPrefix, SetTextToolId);
+
+    public static ToolProposal? CreateForegroundSetTextToolProposal(string request,
+        IEnumerable<ConfiguredAppAlias> configuredApps)
+        => CreateTextToolProposal(request, configuredApps, ForegroundSetTextPrefix, ForegroundSetTextToolId);
+
+    private static ToolProposal? CreateTextToolProposal(string request,
+        IEnumerable<ConfiguredAppAlias> configuredApps, string prefix, string toolId)
     {
         ArgumentNullException.ThrowIfNull(configuredApps);
         if (string.IsNullOrWhiteSpace(request)) return null;
         var appAliases = configuredApps.ToArray();
         var command = request.TrimStart();
-        if (!command.StartsWith(SetTextPrefix, StringComparison.OrdinalIgnoreCase)) return null;
-        var target = command[SetTextPrefix.Length..];
+        if (!command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var target = command[prefix.Length..];
         var first = target.IndexOf('|');
         var second = first < 0 ? -1 : target.IndexOf('|', first + 1);
         if (first <= 0 || second <= first + 1) return null;
@@ -83,7 +96,7 @@ public static class ApplicationUiAutomationPolicy
         if (intent is null || IsTextEntryTargetBlocked(intent.AppId, displayName, null)) return null;
         if (IsSensitiveTextEntryField(automationId)) return null;
 
-        return new ToolProposal(SetTextToolId,
+        return new ToolProposal(toolId,
             ImmutableDictionary<string, string>.Empty
                 .Add("app_id", intent.AppId)
                 .Add("automation_id", automationId)

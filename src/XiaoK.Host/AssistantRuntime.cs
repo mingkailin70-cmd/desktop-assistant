@@ -1056,6 +1056,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId);
 
         var lower = request.ToLowerInvariant();
+        if (category == "app-ui-set-text-foreground")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“前台设置界面文本：应用名|唯一AutomationId|完整替换文本”输入。只允许已登记普通应用的唯一可写文本框；确认后需在15秒内手动切到目标窗口并亲自聚焦该框。小K不会切换窗口、移动焦点或模拟键鼠；消息客户端、浏览器、系统文件管理器、金融/凭证应用及敏感字段会被拒绝。", "UIA_FOREGROUND_TEXT_TARGET_NOT_SUPPORTED");
+            return await _broker.ExecuteAsync(proposal, token);
+        }
+
         if (category == "app-ui-set-text")
         {
             var proposal = ApplicationUiAutomationPolicy.CreateSetTextToolProposal(request, GetConfiguredAppAliases());
@@ -1516,6 +1524,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (ApplicationUiAutomationPolicy.IsForegroundSetTextUserRequest(request)) return "app-ui-set-text-foreground";
         if (ApplicationUiAutomationPolicy.IsSetTextUserRequest(request)) return "app-ui-set-text";
         if (ApplicationUiAutomationPolicy.IsInvokeButtonUserRequest(request)) return "app-ui-invoke-button";
         if (ApplicationUiAutomationPolicy.IsWaitForEnabledUserRequest(request)) return "app-ui-wait-enabled";

@@ -31,6 +31,10 @@ internal static class UiAutomationWorkerProbe
                 var invokableButton = new Button { Content = "合成可调用按钮", IsEnabled = true };
                 AutomationProperties.SetAutomationId(invokableButton, "xiaok-synthetic-invoke-button");
                 invokableButton.Click += (_, _) => Interlocked.Increment(ref successfulInvocationCount);
+                var foregroundTextBox = new TextBox { Text = "旧值", Width = 180 };
+                AutomationProperties.SetAutomationId(foregroundTextBox, "xiaok-synthetic-foreground-textbox");
+                var foregroundTextDecoy = new Button { Content = "其他焦点目标" };
+                AutomationProperties.SetAutomationId(foregroundTextDecoy, "xiaok-synthetic-foreground-decoy");
                 var waitButton = new Button { Content = "等待控件", IsEnabled = false };
                 AutomationProperties.SetAutomationId(waitButton, "xiaok-synthetic-never-enabled");
                 var duplicateWaitButton = new Button { Content = "重复目标", IsEnabled = true };
@@ -109,23 +113,39 @@ internal static class UiAutomationWorkerProbe
                     ShowActivated = false,
                     Content = invokableButton
                 };
+                var foregroundTextWindow = new Window
+                {
+                    Title = "小K UIA 前台文本合成探针",
+                    Width = 280,
+                    Height = 120,
+                    Left = 24,
+                    Top = 220,
+                    WindowStyle = WindowStyle.ToolWindow,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                    Content = new StackPanel { Children = { foregroundTextBox, foregroundTextDecoy } }
+                };
                 var dispatcher = window.Dispatcher;
                 void ShutdownWhenAllWindowsClose()
                 {
-                    if (!window.IsVisible && !wideWindow.IsVisible && !invokeWindow.IsVisible)
+                    if (!window.IsVisible && !wideWindow.IsVisible && !invokeWindow.IsVisible && !foregroundTextWindow.IsVisible)
                         dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
                 }
                 window.Closed += (_, _) => ShutdownWhenAllWindowsClose();
                 wideWindow.Closed += (_, _) => ShutdownWhenAllWindowsClose();
                 invokeWindow.Closed += (_, _) => ShutdownWhenAllWindowsClose();
+                foregroundTextWindow.Closed += (_, _) => ShutdownWhenAllWindowsClose();
                 IntPtr mainHandle = IntPtr.Zero;
                 IntPtr wideHandle = IntPtr.Zero;
                 IntPtr invokeHandle = IntPtr.Zero;
+                IntPtr foregroundTextHandle = IntPtr.Zero;
                 void CompleteWhenReady()
                 {
-                    if (mainHandle != IntPtr.Zero && wideHandle != IntPtr.Zero && invokeHandle != IntPtr.Zero)
+                    if (mainHandle != IntPtr.Zero && wideHandle != IntPtr.Zero && invokeHandle != IntPtr.Zero
+                        && foregroundTextHandle != IntPtr.Zero)
                         created.TrySetResult(new ProbeWindow(mainHandle, wideHandle, invokeHandle, dispatcher, window,
-                            wideWindow, invokeWindow, button));
+                            wideWindow, invokeWindow, foregroundTextHandle, foregroundTextWindow, foregroundTextBox,
+                            foregroundTextDecoy, button));
                 }
                 window.SourceInitialized += (_, _) =>
                 {
@@ -142,9 +162,15 @@ internal static class UiAutomationWorkerProbe
                     invokeHandle = new System.Windows.Interop.WindowInteropHelper(invokeWindow).Handle;
                     CompleteWhenReady();
                 };
+                foregroundTextWindow.SourceInitialized += (_, _) =>
+                {
+                    foregroundTextHandle = new System.Windows.Interop.WindowInteropHelper(foregroundTextWindow).Handle;
+                    CompleteWhenReady();
+                };
                 window.Show();
                 wideWindow.Show();
                 invokeWindow.Show();
+                foregroundTextWindow.Show();
                 Dispatcher.Run();
             }
             catch (Exception exception)
@@ -297,10 +323,11 @@ internal static class UiAutomationWorkerProbe
             if (ambiguousCondition.Success || ambiguousCondition.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS")
                 throw new InvalidOperationException($"重复AutomationId没有失败关闭：{ambiguousCondition.ErrorCode ?? "NO_ERROR"} / {ambiguousCondition.Summary}");
             await VerifyWorkerCancellationAndTimeoutAsync(desktop, probe);
+            await VerifyForegroundTextSetAsync(probe);
             if (Volatile.Read(ref activationCount) != 0)
                 throw new InvalidOperationException("只读UIA查询触发了合成控件动作。");
-            if (GetForegroundWindow() != probe.Handle)
-                throw new InvalidOperationException("UIA worker取消/超时回归改变了合成目标前台窗口。");
+            if (GetForegroundWindow() != probe.ForegroundTextHandle)
+                throw new InvalidOperationException("前台UIA文本写入后目标应用没有保持在前台。");
         }
         finally
         {
@@ -309,6 +336,7 @@ internal static class UiAutomationWorkerProbe
                 await probe.Dispatcher.InvokeAsync(() =>
                 {
                     if (probe.InvokeWindow.IsVisible) probe.InvokeWindow.Close();
+                    if (probe.ForegroundTextWindow.IsVisible) probe.ForegroundTextWindow.Close();
                     if (probe.WideWindow.IsVisible) probe.WideWindow.Close();
                     if (probe.Window.IsVisible) probe.Window.Close();
                 });
@@ -338,6 +366,72 @@ internal static class UiAutomationWorkerProbe
         }
         if (GetForegroundWindow() != handle)
             throw new InvalidOperationException("合成探针无法在测试环境将自己的目标窗口设为前台。");
+    }
+
+    private static async Task VerifyForegroundTextSetAsync(ProbeWindow probe)
+    {
+        var desktop = new WindowsDesktopTools(
+            [new DesktopApp("uia-probe", Environment.ProcessPath!)],
+            [], new SyntheticWindowProcessController(probe.ForegroundTextHandle));
+        var notForegroundStarter = new BlockingWorkerProcessStarter();
+        var notForeground = await new WindowsUiAutomationSnapshotAdapter(desktop, notForegroundStarter,
+                TimeSpan.FromMilliseconds(150))
+            .SetTextInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-textbox", "新值", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        if (notForeground.Success || notForeground.ErrorCode != "UIA_TARGET_NOT_FOREGROUND"
+            || notForegroundStarter.Started.IsCompleted
+            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.Text) != "旧值")
+            throw new InvalidOperationException("目标应用不在前台时，前台文本写入仍启动worker或修改了文本框。");
+
+        using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150)))
+        {
+            var cancellationStarter = new BlockingWorkerProcessStarter();
+            var cancelled = await new WindowsUiAutomationSnapshotAdapter(desktop, cancellationStarter,
+                    TimeSpan.FromSeconds(2))
+                .SetTextInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-textbox", "新值", cancellation.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            if (cancelled.Success || cancelled.ErrorCode != "UIA_FOREGROUND_TEXT_CANCELLED_BEFORE_OPERATION"
+                || cancelled.FinalState != XiaoK.Core.TaskLifecycleState.Cancelled
+                || cancellationStarter.Started.IsCompleted
+                || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.Text) != "旧值")
+                throw new InvalidOperationException("等待前台期间取消没有在worker启动前停止文本写入。");
+        }
+
+        await ActivateWindowAsync(probe, probe.ForegroundTextWindow, probe.ForegroundTextHandle);
+        await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextDecoy.Focus());
+        var unfocused = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetTextInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-textbox", "新值", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (unfocused.Success || unfocused.ErrorCode != "UIA_FOCUS_NOT_TARGET"
+            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.Text) != "旧值"
+            || GetForegroundWindow() != probe.ForegroundTextHandle)
+            throw new InvalidOperationException("目标文本框没有键盘焦点时UIA worker未停止或改变了文本/前台。");
+
+        await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.Focus());
+        var focusedBefore = await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.IsKeyboardFocused);
+        if (!focusedBefore) throw new InvalidOperationException("合成目标文本框没有获得测试用的明确键盘焦点。");
+        var write = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetTextInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-textbox", "已确认的新值", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        var valueAfter = await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.Text);
+        var focusedAfter = await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.IsKeyboardFocused);
+        if (!write.Success || valueAfter != "已确认的新值" || !focusedAfter
+            || GetForegroundWindow() != probe.ForegroundTextHandle)
+            throw new InvalidOperationException($"前台唯一聚焦文本框写入失败或改变了焦点：error={write.ErrorCode ?? "NONE"}; valueMatched={valueAfter == "已确认的新值"}; focusPreserved={focusedAfter}; summary={write.Summary}");
+
+        await probe.Dispatcher.InvokeAsync(() =>
+            probe.ForegroundTextBox.TextChanged += (_, _) => probe.ForegroundTextDecoy.Focus());
+        var focusChangedAfterWrite = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetTextInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-textbox", "写入后焦点改变", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        var valueAfterFocusChange = await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextBox.Text);
+        var decoyFocused = await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextDecoy.IsKeyboardFocused);
+        if (focusChangedAfterWrite.Success
+            || focusChangedAfterWrite.ErrorCode != "UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_SET"
+            || focusChangedAfterWrite.FinalState != XiaoK.Core.TaskLifecycleState.OutcomeUncertain
+            || valueAfterFocusChange != "写入后焦点改变" || !decoyFocused
+            || GetForegroundWindow() != probe.ForegroundTextHandle)
+            throw new InvalidOperationException($"写入后焦点改变没有被标记为需人工核对的结果不确定状态：error={focusChangedAfterWrite.ErrorCode ?? "NONE"}; state={focusChangedAfterWrite.FinalState}; valueMatched={valueAfterFocusChange == "写入后焦点改变"}; decoyFocused={decoyFocused}");
     }
 
     private static (string AutomationId, string Name, bool IsEnabled) ReadOnlyInspect(IntPtr handle)
@@ -505,5 +599,6 @@ internal static class UiAutomationWorkerProbe
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private sealed record ProbeWindow(IntPtr Handle, IntPtr WideHandle, IntPtr InvokeHandle, Dispatcher Dispatcher,
-        Window Window, Window WideWindow, Window InvokeWindow, Button Button);
+        Window Window, Window WideWindow, Window InvokeWindow, IntPtr ForegroundTextHandle,
+        Window ForegroundTextWindow, TextBox ForegroundTextBox, Button ForegroundTextDecoy, Button Button);
 }

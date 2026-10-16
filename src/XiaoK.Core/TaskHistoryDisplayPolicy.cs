@@ -23,6 +23,7 @@ public static class TaskHistoryDisplayPolicy
         "app-ui-scoped-snapshot" => "允许列表应用中唯一匹配容器的有界控件子树（只含类型和状态元数据）",
         "app-ui-wait-enabled" => "允许列表应用中指定的唯一可见控件（只等待状态，不点击）",
         "app-ui-set-text" => "允许列表应用中的唯一普通文本框（逐次确认完整文本）",
+        "app-ui-set-text-foreground" => "允许列表应用中的唯一普通文本框（逐次确认完整文本并由用户手动聚焦）",
         "app-ui-invoke-button" => "允许列表应用中的唯一可见按钮（逐次确认，结果不确定时不自动重试）",
         "window" => "已打开且唯一匹配的允许列表窗口",
         "file" => "用户配置的本机搜索根",
@@ -62,7 +63,8 @@ public static class TaskHistoryDisplayPolicy
         "app-ui-scoped-snapshot" => "后台读取指定控件子树的有限类型/状态元数据；不读取名称、文本或子控件标识，不改变前台",
         "app-ui-wait-enabled" => "后台等待控件状态；不点击、不输入、不改变前台窗口",
         "app-ui-set-text" => "后台写入唯一普通文本框；逐次确认完整文本，不模拟按键或改变前台",
-        "app-ui-invoke-button" => "后台调用唯一可见按钮；逐次确认，应用可能产生外部副作用",
+        "app-ui-set-text-foreground" => "前台交互：逐次确认完整替换文本；用户切换并聚焦目标框，小K不移动焦点或模拟键鼠",
+        "app-ui-invoke-button" => "前台交互：用户切回目标窗口后调用唯一可见按钮；逐次确认，应用可能产生外部副作用",
         "file-create-text" or "file-create-csv" or "file-create-xlsx" or "file-create-docx" or "file-create-pptx" =>
             "后台在固定导出目录中新建文件；不覆盖现有文件或改变前台窗口",
         "file-delete" => "后台执行；任务中心逐项确认，文件目标变化时停止",
@@ -103,11 +105,18 @@ public static class TaskHistoryDisplayPolicy
         "UIA_AUTOMATION_ID_AMBIGUOUS" => "同一窗口中有多个相同控件标识；小K没有读取或写入。请指定唯一控件后再提交。",
         "UIA_CONDITION_NOT_MET" => "等待期间没有找到唯一且已启用的目标控件；没有点击或填写。请检查应用界面后再提交。",
         "UIA_TARGET_IN_USE" => "目标应用正处于前台；为避免干扰，小K没有写入文本或调用按钮，也没有修改界面。稍后再提交。",
-        "UIA_TARGET_NOT_FOREGROUND" => "确认后15秒内目标窗口没有成为前台；小K没有切换窗口，也没有调用按钮。准备好后可重新提交。",
+        "UIA_TARGET_NOT_FOREGROUND" => "确认后15秒内目标窗口没有成为前台；小K没有切换窗口，也没有执行控件操作。准备好后可重新提交。",
+        "UIA_FOCUS_NOT_TARGET" => "目标窗口已在前台，但你尚未把键盘焦点放在指定文本框；小K没有写入。请确认控件后再提交。",
+        "UIA_FOCUS_CHANGED_BEFORE_SET" => "键盘焦点在核验期间发生变化；小K没有写入文本。请在确认目标字段后保持焦点并重新提交。",
+        "UIA_AUTO_SET_FOCUS_DISABLE_FAILED" => "无法确保 UI Automation 不会自动移动焦点；小K没有写入文本。请检查应用状态后再决定下一步。",
+        "UIA_CONTROL_NOT_WRITABLE" => "目标不是唯一、可见、启用且可写的普通文本框；小K没有写入文本。请核对当前控件后再提交。",
+        "UIA_FOREGROUND_TEXT_CANCELLED_BEFORE_OPERATION" => "前台文本操作在写入前取消；小K没有修改文本框。",
+        "UIA_FOREGROUND_TEXT_DECLINED" => "你拒绝了前台文本操作；小K没有修改文本框。",
+        "UIA_FOREGROUND_TEXT_TARGET_NOT_SUPPORTED" => "请求未匹配固定格式，或目标应用/控件不受支持；小K没有访问或修改界面。",
         "UIA_FOREGROUND_UNKNOWN" => "无法核验当前前台窗口；小K没有调用按钮。请检查桌面状态后再提交。",
         "UIA_FOREGROUND_CHANGED_BEFORE_ACTION" => "调用前检测到前台窗口变化；小K没有调用按钮。请确认应用状态后再提交。",
         "UIA_FOREGROUND_CHANGED_BEFORE_SET" => "写入前检测到前台窗口变化；小K没有写入文本。请确认目标应用状态后再提交。",
-        "UIA_PROTECTED_APP_BLOCKED" => "该应用类型不允许使用通用后台填写；小K没有访问或修改界面。",
+        "UIA_PROTECTED_APP_BLOCKED" => "该应用类型不允许使用通用文本填写；小K没有访问或修改界面。",
         "UIA_BUTTON_NOT_FOUND" => "没有找到唯一、可见且启用的按钮；小K没有调用控件。请核对当前应用和 AutomationId。",
         "UIA_BUTTON_NOT_INVOKABLE" => "目标控件不是受支持的按钮或不支持 Invoke；小K没有执行动作。",
         "UIA_BUTTON_TARGET_BLOCKED" => "该应用属于消息/邮件客户端、浏览器、文件管理器或金融/凭证敏感应用；小K没有调用按钮。",
@@ -149,7 +158,7 @@ public static class TaskHistoryDisplayPolicy
             or "PPTX_CREATE_OUTCOME_UNCERTAIN" or "XLSX_CREATE_OUTCOME_UNCERTAIN" =>
             "文件可能已创建，但独立核验未完成。先检查导出目录中的目标文件，再决定是否重新提交；小K不会自动重试。",
         "CODE_PATCH_OUTCOME_UNCERTAIN" => "补丁应用结果无法确认。先检查隔离工作区和补丁状态，再决定下一步；小K不会自动重放。",
-        "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_CHANGED_AFTER_SET" =>
+        "UIA_VALUE_VERIFY_FAILED" or "UIA_FOREGROUND_CHANGED_AFTER_SET" or "UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_SET" =>
             "目标应用中的文本写入结果无法确认。先检查相关文本是否已完整或部分更新，再决定是否重新操作；小K不会自动重试。",
         "UIA_ACTION_OUTCOME_UNCERTAIN" =>
             "按钮调用可能已经触发，但目标状态无法确认。先检查目标应用，再决定下一步；小K不会自动重试。",
