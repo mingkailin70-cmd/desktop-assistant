@@ -4886,7 +4886,8 @@ static async Task CheckUiTextWritePolicyAsync()
     var invokeApproval = new RecordingApprovalPresenter(true);
     var invoked = await CreateBroker(invokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
         InteractionTargetUsage.NotInUse, buttonInvoker: invoker)
-        .ExecuteAsync(buttonProposal!, CancellationToken.None, Guid.NewGuid());
+        .ExecuteAsync(buttonProposal!, ToolExecutionAccess.ExplicitUserInteraction, CancellationToken.None,
+            Guid.NewGuid());
     Require(invoked.Success && invoker.CallCount == 1 && invoker.ApplicationId == notepadId
         && invoker.AutomationId == "Editor.SaveButton"
         && invokeApproval.CallCount == 1
