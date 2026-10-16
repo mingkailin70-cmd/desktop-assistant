@@ -558,3 +558,11 @@ GitHub CI补充：阶段提交`b5e55d8`的Build #509在无缓存Runner上发现�
 WinAppCli 的写后 `wait-for` 属性/值断言可用于指导小K的合成检查：写入后核对目标值，而不把API调用返回当作业务成功。写入也可能立即触发实时搜索、自动保存或其他应用响应；AutomationId无法识别字段语义，因此审批与用户指南现在提醒用户避开命令框、实时搜索框和其他即时副作用字段。此策略仍不证明第三方应用行为或业务结果。
 
 来源：[WinAppCli UI Automation指南](https://github.com/microsoft/WinAppCli/blob/main/docs/ui-automation.md)、[Microsoft ValuePattern.SetValue契约](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationvaluepattern-setvalue)。仓库说明与上游页面用于设计参考；没有克隆、构建、运行或复制WinAppCli代码。
+
+## 2026-10-16 Siri 集成边界与 UIA 复选框状态操作
+
+复核 Apple 与 Microsoft 的官方能力后，确认 iPhone 上的 Siri 不是任意窗口读取器。Apple 的通知播报设置按应用开启，文档明确写的是 Messages 等应用与“支持的第三方应用”；应用动作则由应用通过 App Intents 以结构化方式提供给 Siri、Shortcuts 等系统功能。Windows 的 User Notification Listener 也需要用户许可，读取范围是系统 app notifications/Toast；UI Automation 则只提供目标控件实际公开的 control pattern。于是微信仅在窗口内出现的提示既不属于当前可用的 Toast 路径，也没有已知的个人账号官方消息接口可以补齐 R0。
+
+本轮借鉴固定版 Microsoft WinAppCli v0.7.1 UI Automation 文档中的窄选择器、单次操作与状态后验核对的组织方式，并以固定提交 e3cd0b94f3e7b776ac51ba0564f4908094e979b5 锁定参考版本。小K新增的前台复选框操作只接受一个普通登记应用、唯一可见且启用的 CheckBox、当前用户焦点和明确目标态；先核验当前态，再仅在不一致时调用 Toggle 并核验结果。Microsoft 的 TogglePattern 只提供循环切换而不提供 Set 状态接口，三态控件还可能经过 Indeterminate，因此小K拒绝当前 Indeterminate、保留逐次审批，并在无法验证或结果不确定时停止且不重试。AutomationId 不表达语义，有限关键词拒绝不等于完整安全分类；不将该通用入口用于发送、删除、付款、权限或管理员操作。
+
+来源：[Apple 通知播报说明](https://support.apple.com/en-gb/guide/iphone/iph838fd6fd4/26/ios/26)、[Apple App Intents](https://developer.apple.com/documentation/AppIntents)、[Microsoft Notification Listener](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/app-notifications/notification-listener)、[Microsoft UI Automation Control Patterns](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-controlpatternsoverview)、[Microsoft TogglePattern::Toggle](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationtogglepattern-toggle)。仅作公开资料与设计参考；没有复制或接入 WinAppCli 代码，也没有访问任何应用的消息内容。
