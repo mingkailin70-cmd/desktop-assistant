@@ -99,7 +99,7 @@ public static class TaskHistoryDisplayPolicy
         "UIA_SCOPED_ROOT_TYPE_MISMATCH" => "找到的控件类型与请求的容器类型不一致；没有读取部分内容。请核对容器类型。",
         "UIA_SCOPED_SEARCH_LIMIT" or "UIA_SCOPED_TREE_LIMIT" => "目标界面超出固定检查范围；没有显示部分结果。请指定更小的容器区域。",
         "UIA_SCOPED_RESPONSE_INVALID" => "隔离检查器返回了不符合元数据限制的结果；没有显示数据。请稍后重试。",
-        "UIA_TREE_LIMIT" => "目标界面超出固定检查范围；没有调用按钮。请指定更小或更明确的目标。",
+        "UIA_TREE_LIMIT" => "目标界面超过固定检查范围；没有调用按钮。请指定更小或更明确的目标。",
         "UIA_AUTOMATION_ID_AMBIGUOUS" => "同一窗口中有多个相同控件标识；小K没有读取或写入。请指定唯一控件后再提交。",
         "UIA_CONDITION_NOT_MET" => "等待期间没有找到唯一且已启用的目标控件；没有点击或填写。请检查应用界面后再提交。",
         "UIA_TARGET_IN_USE" => "目标应用正处于前台；为避免干扰当前操作，小K没有修改界面。稍后再提交。",

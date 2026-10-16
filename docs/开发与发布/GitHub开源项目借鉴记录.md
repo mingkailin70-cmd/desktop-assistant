@@ -1,10 +1,18 @@
 # GitHub开源项目借鉴记录
 
-## 2026-10-16 02:39 UIA按钮操作的社区实现思路（`.192.0`候选）
+## 2026-10-16 Windows语义动作和UIA的适用边界
+
+Luna只读查阅了微软维护的GitHub文档后，补充更适合长期跨应用路线的参考：[Windows App Actions概览](https://github.com/MicrosoftDocs/windows-ai-docs/blob/docs/docs/app-actions/index.md)将其定义为由应用注册的原子功能，允许Windows或其他应用发现/调用；动作定义带输入、输出和元数据，并要求应用具有包身份、提供manifest/schema和provider。可执行借鉴是：小K自身功能可逐步提供类型化语义动作；第三方只有在自己登记或提供正式API时才可安全调用，不能假定任意软件都接入。
+
+[微软UIA Invoke规范](https://github.com/MicrosoftDocs/win32/blob/docs/desktop-src/WinAuto/uiauto-implementinginvoke.md)把Invoke限定为“单一、明确的控件动作”，并明确提示副作用、用户交互/模态阻塞和调用后控件从树中消失等情况。UIA是可访问性与自动化控件契约，不是第三方业务API；事件或Invoke返回也不保证外部业务已完成。故`.192.0`唯一目标/失败关闭/逐次确认/不重试是窄范围回退，不能据此开放通用发送、删除、付款或管理员动作。
+
+Windows App Notifications与UIA通知事件是不同层次：[Windows App Notifications文档](https://github.com/MicrosoftDocs/windows-dev-docs/blob/docs/hub/apps/develop/notifications/app-notifications/index.md)描述应用发布的系统通知和启动/激活流程，不表示监听器能够读取每个应用内提示。小K继续只处理已核验来源且获授权的Toast元数据/样本；微信窗口内提示不能替代Toast AUMID。Microsoft WinApp CLI更广的任意应用UIA动作和截图推理功能仅作研究参照，不照搬其宽泛动作面或数据流。
+
+## 2026-10-16 09:06 UIA按钮操作的社区实现思路（`.193.0`候选）
 
 继续沿用此前核验的[Microsoft WinApp CLI UI Automation设计](https://github.com/microsoft/winappCli/blob/main/docs/ui-automation.md)和[PowerToys UI测试实践](https://github.com/microsoft/PowerToys/blob/ccdd9b19ca980e9d383a42c235fa313a595ac712/doc/devdocs/development/ui-tests.md)：将只读发现和会改变应用状态的动作分开，使用稳定AutomationId与合成窗口测试，不把坐标或全局键鼠作为默认回退。小K新增的`app.ui.invoke-button.v1`按此思路只调用精确唯一的UIA Button/InvokePattern，并在隔离worker内执行；审查还发现同级遍历到64项后可能漏掉后续重复ID，现超限即失败为`UIA_TREE_LIMIT`，由65项合成树（重复ID位于首尾）覆盖。未复制第三方代码或添加依赖。
 
-此类通用Invoke操作无法从AutomationId推断业务语义。小K另对消息/邮件、浏览器、文件管理、金融/凭证及系统管理目标做阻断，对常见高风险按钮ID做有限匹配并要求逐次审批；匹配并不完整，因此该工具不能承担外发、删除、付款、权限或管理员操作。合成测试只验证UIA调用机制、隔离、超时、前台保护及超过同级搜索上限时失败关闭，不能证明真实第三方应用行为安全或首版验收完成。`.192.0`待新的远端CI验证，`.191.0`的未完成CI不作为通过证据。
+此类通用Invoke操作无法从AutomationId推断业务语义。小K另对消息/邮件、浏览器、文件管理、金融/凭证及系统管理目标做阻断，对常见高风险按钮ID做有限匹配并要求逐次审批；匹配并不完整，因此该工具不能承担外发、删除、付款、权限或管理员操作。合成测试只验证UIA调用机制、隔离、超时、前台保护及超过同级搜索上限时失败关闭，不能证明真实第三方应用行为安全或首版验收完成。`.191.0`和`.192.0`的完整安全CI失败；`.193.0`修正恢复提示文案后等待新的远端CI。
 
 ## 2026-10-14 23:05 微信官方服务号与企业微信发送接口边界
 
