@@ -2,7 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="小K任务中心" Height="460" Width="600" MinHeight="320" MinWidth="440"
-        WindowStartupLocation="CenterScreen" ResizeMode="CanResize">
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        AutomationProperties.Name="小K任务中心"
+        AutomationProperties.HelpText="查看本地任务状态、取消任务并处理待办确认。">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
     </Window.Resources>
@@ -17,10 +19,20 @@
             <TextBlock Text="任务状态每3秒刷新。排队/运行任务可逐项取消；审批和消息预览留在待办页，不抢焦点。正文与结果不会写入历史。"
                        Margin="0,5,0,0" Foreground="#68728A" TextWrapping="Wrap"/>
         </StackPanel>
-        <TabControl Grid.Row="1">
+        <TabControl x:Name="TaskTabs" Grid.Row="1"
+                    AutomationProperties.Name="任务中心分类"
+                    AutomationProperties.HelpText="在任务历史与待办确认之间切换。">
             <TabItem Header="任务">
                 <Grid Margin="0,8,0,0">
-                    <ListBox x:Name="HistoryList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5">
+                    <ListBox x:Name="HistoryList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5"
+                             AutomationProperties.Name="任务历史"
+                             AutomationProperties.HelpText="使用方向键选择记录，Tab 键查看说明或取消仍可取消的任务。">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Title}"/>
+                                <Setter Property="AutomationProperties.HelpText" Value="{Binding State}"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border BorderBrush="#E7EAF1" BorderThickness="0,0,0,1" Padding="8">
@@ -28,7 +40,9 @@
                                         <DockPanel>
                                             <Button Content="取消" Tag="{Binding TaskId}" IsEnabled="{Binding CanCancel}"
                                                     DockPanel.Dock="Right" Click="CancelTask_Click" MinWidth="52" Height="25"
-                                                    Margin="8,0,0,0" Padding="6,0"/>
+                                                    Margin="8,0,0,0" Padding="6,0"
+                                                    AutomationProperties.Name="取消此任务"
+                                                    AutomationProperties.HelpText="仅对仍在排队或运行中的任务可用。"/>
                                             <TextBlock Text="{Binding State}" DockPanel.Dock="Right" Foreground="#3758A6" Margin="12,0,0,0"/>
                                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="#293149" TextWrapping="Wrap"/>
                                         </DockPanel>
@@ -45,7 +59,8 @@
                                         </TextBlock>
                                         <TextBox Text="{Binding Detail}" FontSize="11" Foreground="#68728A"
                                                  TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent"
-                                                 IsTabStop="True" Margin="-5,0,-5,-4" Padding="5,4"/>
+                                                 IsTabStop="True" Margin="-5,0,-5,-4" Padding="5,4"
+                                                 AutomationProperties.Name="任务状态说明"/>
                                         <TextBlock FontSize="11" Foreground="#425274" TextWrapping="Wrap" Margin="0,3,0,0">
                                             <Run Text="下一步："/><Run Text="{Binding NextAction}"/>
                                         </TextBlock>
@@ -55,12 +70,21 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock x:Name="EmptyText" Text="暂无可显示的本地任务记录。" Foreground="#68728A"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
+                               AutomationProperties.LiveSetting="Polite"/>
                 </Grid>
             </TabItem>
             <TabItem x:Name="ApprovalTab" Header="待办确认">
                 <Grid Margin="0,8,0,0">
-                    <ListBox x:Name="ApprovalList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5">
+                    <ListBox x:Name="ApprovalList" BorderBrush="#E7EAF1" BorderThickness="1" Padding="5"
+                             AutomationProperties.Name="待办确认列表"
+                             AutomationProperties.HelpText="查看待处理说明，并使用当前项目提供的批准、拒绝或其他操作。">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Title}"/>
+                                <Setter Property="AutomationProperties.HelpText" Value="待处理的审批或预览。"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <Border BorderBrush="#E7EAF1" BorderThickness="0,0,0,1" Padding="8">
@@ -70,19 +94,26 @@
                                                    FontSize="11" Foreground="#68728A" Margin="0,3,0,4"/>
                                         <TextBox Text="{Binding Details}" FontSize="11" Foreground="#4E586F"
                                                  TextWrapping="Wrap" IsReadOnly="True" AcceptsReturn="True" MaxHeight="190"
-                                                 VerticalScrollBarVisibility="Auto" BorderBrush="#E7EAF1" Padding="6"/>
+                                                 VerticalScrollBarVisibility="Auto" BorderBrush="#E7EAF1" Padding="6"
+                                                 AutomationProperties.Name="待办详细说明"/>
                                         <WrapPanel Margin="0,6,0,0">
                                             <Button Content="批准" Tag="Approve" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    AutomationProperties.Name="批准当前请求"
                                                     Visibility="{Binding CanApprove, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                             <Button Content="拒绝" Tag="Decline" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    AutomationProperties.Name="拒绝当前请求"
                                                     Visibility="{Binding CanDecline, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                             <Button Content="保留补丁" Tag="KeepPatch" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    AutomationProperties.Name="保留当前补丁"
                                                     Visibility="{Binding CanKeepPatch, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                             <Button Content="批准固定测试" Tag="RunDotNetTests" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    AutomationProperties.Name="批准运行固定测试"
                                                     Visibility="{Binding CanRunDotNetTests, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                             <Button Content="批准应用补丁" Tag="ApplyPatch" Click="ResolveApproval_Click" Margin="0,0,6,0"
+                                                    AutomationProperties.Name="批准应用当前补丁"
                                                     Visibility="{Binding CanApplyPatch, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                             <Button Content="完成预览" Tag="DismissPreview" Click="ResolveApproval_Click"
+                                                    AutomationProperties.Name="关闭消息预览，不会发送消息"
                                                     Visibility="{Binding CanDismissPreview, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                         </WrapPanel>
                                     </StackPanel>
@@ -91,13 +122,16 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock x:Name="EmptyApprovalsText" Text="没有待处理的审批或预览。" Foreground="#68728A"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
+                               AutomationProperties.LiveSetting="Polite"/>
                 </Grid>
             </TabItem>
         </TabControl>
         <DockPanel Grid.Row="2" Margin="0,12,0,0">
             <TextBlock x:Name="RefreshStatus" DockPanel.Dock="Left" VerticalAlignment="Center"
-                       FontSize="11" Foreground="#68728A" Text="正在读取任务状态…"/>
+                       FontSize="11" Foreground="#68728A" Text="正在读取任务状态…"
+                       AutomationProperties.Name="任务中心更新状态"
+                       AutomationProperties.LiveSetting="Polite"/>
             <Button Content="关闭" IsCancel="True" MinWidth="90" HorizontalAlignment="Right"/>
         </DockPanel>
     </Grid>

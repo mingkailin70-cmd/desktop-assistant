@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
@@ -74,7 +75,8 @@ internal static class TaskHistoryWindowUiProbe
         {
             approvalCalls++;
             if (failApprovalResolution) throw new InvalidOperationException("APPROVAL_PRIVATE_PATH");
-            return false;
+            activeApproval = null;
+            return true;
         }
 
         var window = new TaskHistoryWindow(LoadHistory, CancelTask,
@@ -112,6 +114,14 @@ internal static class TaskHistoryWindowUiProbe
                     failures.Add("任务中心没有找到任务列表控件。");
                     return;
                 }
+                var refreshStatusProbe = window.FindName("RefreshStatus") as TextBlock;
+                if (AutomationProperties.GetName(historyList) != "任务历史"
+                    || string.IsNullOrWhiteSpace(AutomationProperties.GetHelpText(historyList))
+                    || refreshStatusProbe is null
+                    || AutomationProperties.GetLiveSetting(refreshStatusProbe) != AutomationLiveSetting.Polite)
+                    failures.Add("任务列表或刷新状态缺少可访问名称、操作说明或礼貌级实时播报标记。");
+                if (!ReferenceEquals(FocusManager.GetFocusedElement(window), historyList))
+                    failures.Add("初次打开任务中心后，键盘逻辑焦点没有落在任务列表。");
 
                 historyList.UpdateLayout();
                 var item = historyList.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
@@ -146,6 +156,23 @@ internal static class TaskHistoryWindowUiProbe
                     failures.Add("可取消任务没有显示已启用的取消按钮。");
                     return;
                 }
+                if (AutomationProperties.GetName(cancelButton) != "取消此任务")
+                    failures.Add("任务取消按钮没有可访问名称。");
+                FocusManager.SetFocusedElement(window, cancelButton);
+                currentSample = sample with { CurrentStep = "合成步骤已更新" };
+                window.RefreshImmediately();
+                window.UpdateLayout();
+                historyList.UpdateLayout();
+                item = historyList.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
+                var refreshedCancelButton = item is null ? null : Descendants(item).OfType<Button>()
+                    .FirstOrDefault(button => button.Tag is Guid);
+                if (item?.DataContext is not TaskHistoryEntry refreshedTask
+                    || refreshedTask.EntryKey != sample.EntryKey
+                    || !string.Equals(refreshedTask.CurrentStep, "合成步骤已更新", StringComparison.Ordinal)
+                    || refreshedCancelButton is null
+                    || !ReferenceEquals(FocusManager.GetFocusedElement(window), refreshedCancelButton))
+                    failures.Add("稳定任务条目刷新后没有保留选择并将键盘焦点还原到同一可用操作。");
+                if (refreshedCancelButton is not null) cancelButton = refreshedCancelButton;
                 cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cancelButton));
                 if (cancelCalls != 1 || cancelledTaskId != sample.TaskId)
                     failures.Add("取消按钮没有把正确任务ID交给取消入口。");
@@ -153,6 +180,13 @@ internal static class TaskHistoryWindowUiProbe
                     || refreshed.SingleOrDefault()?.State != "取消请求中"
                     || refreshed.SingleOrDefault()?.CanCancel != false)
                     failures.Add("取消回调后任务列表没有刷新到当前取消状态。");
+                if (!ReferenceEquals(FocusManager.GetFocusedElement(window), historyList))
+                    failures.Add("任务变为不可取消后，键盘焦点没有回到任务列表。");
+                var cancellationStatus = window.FindName("RefreshStatus") as TextBlock;
+                if (cancellationStatus is null
+                    || !cancellationStatus.Text.Contains("已接受取消请求", StringComparison.Ordinal)
+                    || !cancellationStatus.Text.Contains("任务列表已刷新", StringComparison.Ordinal))
+                    failures.Add("取消结果提示被自动刷新状态覆盖，或没有说明刷新结果。");
 
                 failCancellation = true;
                 currentSample = sample;
@@ -192,6 +226,30 @@ internal static class TaskHistoryWindowUiProbe
                     || !refreshStatus.Text.Contains("状态已刷新", StringComparison.Ordinal)
                     || refreshStatus.Text.Contains("APPROVAL_PRIVATE_PATH", StringComparison.Ordinal))
                     failures.Add("审批回调异常没有被限制在任务中心内，或异常细节泄露到界面。");
+
+                failApprovalResolution = false;
+                activeApproval = new ApprovalInboxEntry(Guid.NewGuid(), ApprovalInboxKind.Confirmation,
+                    "合成成功审批", "合成成功审批详情", DateTimeOffset.UtcNow, false, sample.TaskId);
+                window.RefreshImmediately();
+                if (tabs is not null) tabs.SelectedIndex = 1;
+                window.UpdateLayout();
+                approvalList?.UpdateLayout();
+                approvalItem = approvalList?.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
+                approveButton = approvalItem is null ? null : Descendants(approvalItem).OfType<Button>()
+                    .FirstOrDefault(button => string.Equals(button.Content as string, "批准", StringComparison.Ordinal));
+                if (approveButton is null || AutomationProperties.GetName(approveButton) != "批准当前请求")
+                    failures.Add("待办批准按钮没有提供明确的可访问名称。");
+                if (approveButton is not null)
+                {
+                    FocusManager.SetFocusedElement(window, approveButton);
+                    approveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
+                }
+                var emptyApprovals = window.FindName("EmptyApprovalsText") as TextBlock;
+                if (approvalCalls != 2 || approvalList?.Items.Count != 0
+                    || emptyApprovals?.Visibility != Visibility.Visible
+                    || !ReferenceEquals(FocusManager.GetFocusedElement(window), approvalList)
+                    || refreshStatus is null || !refreshStatus.Text.Contains("已处理待办", StringComparison.Ordinal))
+                    failures.Add("待办处理后没有显示空状态、更新反馈并把键盘焦点送回列表。");
 
                 if (GetForegroundWindow() != foregroundBefore)
                     failures.Add("打开离屏任务中心改变了前台窗口。");
