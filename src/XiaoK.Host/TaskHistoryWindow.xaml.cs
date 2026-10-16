@@ -1,9 +1,11 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.Windows.Automation.Peers;
+using System.Runtime.InteropServices;
 using WpfButton = System.Windows.Controls.Button;
 using WpfFocusManager = System.Windows.Input.FocusManager;
 using WpfListBox = System.Windows.Controls.ListBox;
@@ -212,14 +214,16 @@ public partial class TaskHistoryWindow : Window
 
     private void SetInitialKeyboardFocus()
     {
-        if (IsActive)
-        {
-            if (HistoryList.Focus()) return;
-            WpfFocusManager.SetFocusedElement(this, HistoryList);
-            return;
-        }
+        if (OwnsForegroundFocus() && HistoryList.Focus()) return;
         if (WpfFocusManager.GetFocusedElement(this) is null)
             WpfFocusManager.SetFocusedElement(this, HistoryList);
+    }
+
+    private bool OwnsForegroundFocus()
+    {
+        if (!IsActive) return false;
+        var handle = new WindowInteropHelper(this).Handle;
+        return handle != IntPtr.Zero && GetForegroundWindow() == handle;
     }
 
     private FocusSnapshot? CaptureListFocus(WpfListBox list, Func<object, string?> getEntryKey)
@@ -251,7 +255,7 @@ public partial class TaskHistoryWindow : Window
         if (!target.IsEnabled || !target.IsVisible || !target.Focusable) target = list;
         try
         {
-            if (IsActive)
+            if (OwnsForegroundFocus())
             {
                 if (!target.Focus())
                 {
@@ -268,7 +272,7 @@ public partial class TaskHistoryWindow : Window
         catch (InvalidOperationException)
         {
             WpfFocusManager.SetFocusedElement(this, list);
-            if (IsActive) _ = list.Focus();
+            if (OwnsForegroundFocus()) _ = list.Focus();
         }
     }
 
@@ -344,6 +348,9 @@ public partial class TaskHistoryWindow : Window
         }
         return null;
     }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     private sealed record FocusSnapshot(string? EntryKey, string FocusRole);
 }
