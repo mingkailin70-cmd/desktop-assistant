@@ -513,12 +513,13 @@ internal static class UiAutomationWorkerProbe
             || Volatile.Read(ref changes) != 1 || GetForegroundWindow() != probe.ForegroundTextHandle)
             throw new InvalidOperationException($"前台唯一聚焦复选框没有设为On或焦点/前台改变：error={enabled.ErrorCode ?? "NONE"}; changes={changes}");
 
+        await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.Focus());
         var alreadyEnabled = await new WindowsUiAutomationSnapshotAdapter(desktop)
             .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(10));
-        if (!alreadyEnabled.Success || Volatile.Read(ref changes) != 1
-            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsKeyboardFocused))
-            throw new InvalidOperationException("复选框已是目标状态时重复调用Toggle，或丢失了用户焦点。");
+        var alreadyEnabledFocus = await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsKeyboardFocused);
+        if (!alreadyEnabled.Success || Volatile.Read(ref changes) != 1 || !alreadyEnabledFocus)
+            throw new InvalidOperationException($"幂等复选框操作重复调用Toggle或改变了用户焦点：error={alreadyEnabled.ErrorCode ?? "NONE"}; changes={changes}; focus={alreadyEnabledFocus}");
 
         await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.Focus());
         var disabled = await new WindowsUiAutomationSnapshotAdapter(desktop)
