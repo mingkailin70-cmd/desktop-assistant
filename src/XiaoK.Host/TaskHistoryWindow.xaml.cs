@@ -35,15 +35,24 @@ public partial class TaskHistoryWindow : Window
         _resolveApproval = resolveApproval ?? throw new ArgumentNullException(nameof(resolveApproval));
         _refreshTimer.Tick += RefreshTimer_Tick;
         Loaded += Window_Loaded;
+        Activated += Window_Activated;
         Closed += Window_Closed;
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        SetInitialKeyboardFocus();
         await RefreshAsync();
         if (_lifetime.IsCancellationRequested) return;
         _refreshTimer.Start();
+    }
+
+    private void Window_Activated(object? sender, EventArgs e)
+    {
+        if (!OwnsForegroundFocus()) return;
+        var list = TaskTabs.SelectedIndex == 1 ? ApprovalList : HistoryList;
+        var focused = WpfFocusManager.GetFocusedElement(this) as DependencyObject;
+        if (focused is UIElement element && element.IsEnabled && element.Focusable && IsInList(list, focused)) return;
+        _ = list.Focus();
     }
 
     private async void RefreshTimer_Tick(object? sender, EventArgs e) => await RefreshAsync();
@@ -207,16 +216,10 @@ public partial class TaskHistoryWindow : Window
         _refreshTimer.Stop();
         _refreshTimer.Tick -= RefreshTimer_Tick;
         Loaded -= Window_Loaded;
+        Activated -= Window_Activated;
         Closed -= Window_Closed;
         _lifetime.Cancel();
         _lifetime.Dispose();
-    }
-
-    private void SetInitialKeyboardFocus()
-    {
-        if (OwnsForegroundFocus() && HistoryList.Focus()) return;
-        if (WpfFocusManager.GetFocusedElement(this) is null)
-            WpfFocusManager.SetFocusedElement(this, HistoryList);
     }
 
     private bool OwnsForegroundFocus()
@@ -239,7 +242,7 @@ public partial class TaskHistoryWindow : Window
     private void RestoreListFocus(WpfListBox list, IReadOnlyList<object> items,
         Func<object, string?> getEntryKey, FocusSnapshot? snapshot)
     {
-        if (snapshot is null || !list.IsVisible) return;
+        if (snapshot is null || !list.IsVisible || !OwnsForegroundFocus()) return;
 
         UIElement target = list;
         if (snapshot.EntryKey is not null)
@@ -259,20 +262,17 @@ public partial class TaskHistoryWindow : Window
             {
                 if (!target.Focus())
                 {
+                    if (!OwnsForegroundFocus()) return;
                     WpfFocusManager.SetFocusedElement(this, list);
                     _ = list.Focus();
                 }
             }
-            else
-            {
-                // Keep only WPF logical focus while inactive; a background refresh must not activate this window.
-                WpfFocusManager.SetFocusedElement(this, target);
-            }
         }
         catch (InvalidOperationException)
         {
+            if (!OwnsForegroundFocus()) return;
             WpfFocusManager.SetFocusedElement(this, list);
-            if (OwnsForegroundFocus()) _ = list.Focus();
+            _ = list.Focus();
         }
     }
 

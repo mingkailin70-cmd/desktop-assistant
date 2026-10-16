@@ -391,6 +391,35 @@ Require(taskCenterSource.Contains("SetCurrentValue(UIElement.IsEnabledProperty, 
 Require(taskCenterSource.Contains("if (!AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;", StringComparison.Ordinal)
     && taskCenterSource.Contains("peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);", StringComparison.Ordinal),
     "任务中心只在UI Automation监听实时区域事件时创建peer并发出播报。");
+var taskCenterActivationStart = taskCenterSource.IndexOf("private void Window_Activated", StringComparison.Ordinal);
+var taskCenterActivationEnd = taskCenterActivationStart < 0 ? -1
+    : taskCenterSource.IndexOf("private async void RefreshTimer_Tick", taskCenterActivationStart, StringComparison.Ordinal);
+var taskCenterLoadedStart = taskCenterSource.IndexOf("private async void Window_Loaded", StringComparison.Ordinal);
+var taskCenterLoadedEnd = taskCenterLoadedStart < 0 ? -1
+    : taskCenterSource.IndexOf("private void Window_Activated", taskCenterLoadedStart, StringComparison.Ordinal);
+var taskCenterRestoreStart = taskCenterSource.IndexOf("private void RestoreListFocus", StringComparison.Ordinal);
+var taskCenterRestoreEnd = taskCenterRestoreStart < 0 ? -1
+    : taskCenterSource.IndexOf("private static UIElement? ResolveFocusTarget", taskCenterRestoreStart, StringComparison.Ordinal);
+var taskCenterActivation = taskCenterActivationStart >= 0 && taskCenterActivationEnd > taskCenterActivationStart
+    ? taskCenterSource[taskCenterActivationStart..taskCenterActivationEnd] : string.Empty;
+var taskCenterLoaded = taskCenterLoadedStart >= 0 && taskCenterLoadedEnd > taskCenterLoadedStart
+    ? taskCenterSource[taskCenterLoadedStart..taskCenterLoadedEnd] : string.Empty;
+var taskCenterRestore = taskCenterRestoreStart >= 0 && taskCenterRestoreEnd > taskCenterRestoreStart
+    ? taskCenterSource[taskCenterRestoreStart..taskCenterRestoreEnd] : string.Empty;
+var firstLogicalFocusWrite = taskCenterRestore.IndexOf("WpfFocusManager.SetFocusedElement", StringComparison.Ordinal);
+var secondLogicalFocusWrite = firstLogicalFocusWrite < 0 ? -1
+    : taskCenterRestore.IndexOf("WpfFocusManager.SetFocusedElement", firstLogicalFocusWrite + 1, StringComparison.Ordinal);
+var guardBeforeSecondLogicalFocusWrite = secondLogicalFocusWrite < 0 ? -1
+    : taskCenterRestore.LastIndexOf("if (!OwnsForegroundFocus()) return;", secondLogicalFocusWrite, StringComparison.Ordinal);
+Require(taskCenterSource.Contains("Activated += Window_Activated;", StringComparison.Ordinal)
+    && taskCenterActivation.Contains("if (!OwnsForegroundFocus()) return;", StringComparison.Ordinal)
+    && taskCenterActivation.Contains("_ = list.Focus();", StringComparison.Ordinal)
+    && !taskCenterLoaded.Contains("Focus()", StringComparison.Ordinal)
+    && firstLogicalFocusWrite > 0 && secondLogicalFocusWrite > firstLogicalFocusWrite
+    && taskCenterRestore[..firstLogicalFocusWrite].Contains("if (!OwnsForegroundFocus()) return;", StringComparison.Ordinal)
+    && taskCenterRestore[(firstLogicalFocusWrite + 1)..secondLogicalFocusWrite].Contains("if (!OwnsForegroundFocus()) return;", StringComparison.Ordinal)
+    && guardBeforeSecondLogicalFocusWrite > firstLogicalFocusWrite,
+    "任务中心只能在真实拥有前台窗口时写入键盘焦点；后台打开或刷新不得设置WPF焦点。");
 
 var bindingResults = new List<(bool Passed, string Message)>();
 Exception? bindingFailure = null;

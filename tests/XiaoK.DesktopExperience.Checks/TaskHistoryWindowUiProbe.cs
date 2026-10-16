@@ -93,6 +93,13 @@ internal static class TaskHistoryWindowUiProbe
         };
 
         var foregroundBefore = GetForegroundWindow();
+        var foregroundChanges = new List<string>();
+        void TrackForeground(string stage)
+        {
+            var current = GetForegroundWindow();
+            if (current != foregroundBefore && foregroundChanges.Count == 0)
+                foregroundChanges.Add($"{stage}: 0x{foregroundBefore.ToInt64():X} -> 0x{current.ToInt64():X}");
+        }
         var completed = false;
         var watchdog = new DispatcherTimer(DispatcherPriority.ApplicationIdle, dispatcher)
         {
@@ -108,7 +115,9 @@ internal static class TaskHistoryWindowUiProbe
         {
             try
             {
+                TrackForeground("Loaded 回调开始");
                 window.UpdateLayout();
+                TrackForeground("初次 UpdateLayout 后");
                 var historyList = window.FindName("HistoryList") as ListBox;
                 if (historyList is null)
                 {
@@ -160,10 +169,13 @@ internal static class TaskHistoryWindowUiProbe
                 if (AutomationProperties.GetName(cancelButton) != "取消此任务")
                     failures.Add("任务取消按钮没有可访问名称。");
                 WpfFocusManager.SetFocusedElement(window, cancelButton);
+                TrackForeground("设置取消按钮逻辑焦点后");
                 currentSample = sample with { CurrentStep = "合成步骤已更新" };
                 window.RefreshImmediately();
+                TrackForeground("任务列表刷新后");
                 window.UpdateLayout();
                 historyList.UpdateLayout();
+                TrackForeground("任务列表布局更新后");
                 item = historyList.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
                 var refreshedCancelButton = item is null ? null : Descendants(item).OfType<Button>()
                     .FirstOrDefault(button => button.Tag is Guid);
@@ -175,6 +187,7 @@ internal static class TaskHistoryWindowUiProbe
                     failures.Add("稳定任务条目刷新后没有保留选择并将键盘焦点还原到同一可用操作。");
                 if (refreshedCancelButton is not null) cancelButton = refreshedCancelButton;
                 cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cancelButton));
+                TrackForeground("取消按钮回调后");
                 if (cancelCalls != 1 || cancelledTaskId != sample.TaskId)
                     failures.Add("取消按钮没有把正确任务ID交给取消入口。");
                 if (historyList.ItemsSource is not IEnumerable<TaskHistoryEntry> refreshed
@@ -213,15 +226,18 @@ internal static class TaskHistoryWindowUiProbe
                     "合成审批", "合成审批详情", DateTimeOffset.UtcNow, false, sample.TaskId);
                 failApprovalResolution = true;
                 window.RefreshImmediately();
+                TrackForeground("待办列表刷新后");
                 var tabs = Descendants(window).OfType<TabControl>().FirstOrDefault();
                 if (tabs is not null) tabs.SelectedIndex = 1;
                 window.UpdateLayout();
+                TrackForeground("切换待办标签并布局后");
                 var approvalList = window.FindName("ApprovalList") as ListBox;
                 approvalList?.UpdateLayout();
                 var approvalItem = approvalList?.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem;
                 var approveButton = approvalItem is null ? null : Descendants(approvalItem).OfType<Button>()
                     .FirstOrDefault(button => string.Equals(button.Content as string, "批准", StringComparison.Ordinal));
                 approveButton?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
+                TrackForeground("审批失败回调后");
                 if (approvalCalls != 1 || approveButton is null || refreshStatus is null
                     || !refreshStatus.Text.Contains("待办处理结果待核对", StringComparison.Ordinal)
                     || !refreshStatus.Text.Contains("状态已刷新", StringComparison.Ordinal)
@@ -232,6 +248,7 @@ internal static class TaskHistoryWindowUiProbe
                 activeApproval = new ApprovalInboxEntry(Guid.NewGuid(), ApprovalInboxKind.Confirmation,
                     "合成成功审批", "合成成功审批详情", DateTimeOffset.UtcNow, false, sample.TaskId);
                 window.RefreshImmediately();
+                TrackForeground("成功待办刷新后");
                 if (tabs is not null) tabs.SelectedIndex = 1;
                 window.UpdateLayout();
                 approvalList?.UpdateLayout();
@@ -243,7 +260,9 @@ internal static class TaskHistoryWindowUiProbe
                 if (approveButton is not null)
                 {
                     WpfFocusManager.SetFocusedElement(window, approveButton);
+                    TrackForeground("设置批准按钮逻辑焦点后");
                     approveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
+                    TrackForeground("审批成功回调后");
                 }
                 var emptyApprovals = window.FindName("EmptyApprovalsText") as TextBlock;
                 if (approvalCalls != 2 || approvalList?.Items.Count != 0
@@ -252,11 +271,13 @@ internal static class TaskHistoryWindowUiProbe
                     || refreshStatus is null || !refreshStatus.Text.Contains("已处理待办", StringComparison.Ordinal))
                     failures.Add("待办处理后没有显示空状态、更新反馈并把键盘焦点送回列表。");
 
-                if (GetForegroundWindow() != foregroundBefore)
-                    failures.Add("打开离屏任务中心改变了前台窗口。");
+                TrackForeground("探针完成前");
+                if (foregroundChanges.Count > 0)
+                    failures.Add($"打开离屏任务中心改变了前台窗口（{foregroundChanges[0]}）。");
                 window.RefreshImmediately();
-                if (GetForegroundWindow() != foregroundBefore)
-                    failures.Add("后台刷新任务中心改变了前台窗口。");
+                TrackForeground("后台刷新后");
+                if (foregroundChanges.Count > 0)
+                    failures.Add($"打开或后台刷新任务中心改变了前台窗口（{foregroundChanges[0]}）。");
                 completed = true;
             }
             catch (Exception exception)
@@ -271,6 +292,7 @@ internal static class TaskHistoryWindowUiProbe
         }));
         window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
         window.Show();
+        TrackForeground("Show 返回后");
         // Exclude synchronous HWND creation from the Loaded-event deadline.
         watchdog.Start();
         Dispatcher.Run();
