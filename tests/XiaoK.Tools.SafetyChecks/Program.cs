@@ -4779,7 +4779,10 @@ static async Task CheckToolProposalPreconditionsAreTypedAsync()
         };
         foreach (var unregisteredTarget in unregisteredTargets)
         {
-            var result = await broker.ExecuteBackgroundAsync(unregisteredTarget, CancellationToken.None);
+            var access = unregisteredTarget.ToolId == ApplicationUiAutomationPolicy.InvokeButtonToolId
+                ? ToolExecutionAccess.ExplicitUserInteraction
+                : ToolExecutionAccess.BackgroundOnly;
+            var result = await broker.ExecuteAsync(unregisteredTarget, access, CancellationToken.None);
             Require(!result.Success && result.ErrorCode == "APP_NOT_ALLOWLISTED",
                 "未登记应用的UIA提案没有在目标锁分配前被拒绝。");
         }
