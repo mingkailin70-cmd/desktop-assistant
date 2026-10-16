@@ -384,10 +384,11 @@ public sealed class ToolBroker
 
         var details = $"目标应用：{appId}{Environment.NewLine}按钮 AutomationId：{automationId}"
             + $"{Environment.NewLine}{Environment.NewLine}将对当前唯一、可见、已启用且支持 Invoke 的按钮执行一次系统 UI Automation 调用。"
-            + $"{Environment.NewLine}只检查有限范围内的控件标识/类型/状态；不读取控件名称、文本、剪贴板或消息正文；不发送键盘/鼠标输入，也不主动切换前台。"
+            + $"{Environment.NewLine}批准后请在15秒内手动切回目标窗口。小K只在核实该精确窗口已处于前台后继续；不会替你切换或恢复窗口，也不会发送键盘/鼠标输入。"
+            + $"{Environment.NewLine}只检查有限范围内的控件标识/类型/状态；不读取控件名称、文本、剪贴板或消息正文。"
             + $"{Environment.NewLine}AutomationId 不说明按钮实际含义；小K无法核对当前选中对象或预览最终内容。常见发送、删除、付款、权限和管理员控件已封锁；这些动作必须走专用确认流程。只在你已独立确认该普通按钮及应用状态安全时批准。"
             + $"{Environment.NewLine}按钮可能改变应用状态或产生外部副作用；消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用。"
-            + $"{Environment.NewLine}如果目标应用正由你使用、目标不唯一或操作结果无法确认，小K会停止且不会自动重试。请选择批准或拒绝。";
+            + $"{Environment.NewLine}如果15秒内没有手动切回该唯一窗口、目标发生变化，或操作结果无法确认，小K会停止且不会自动重试。请选择批准或拒绝。";
         bool confirmed;
         try
         {

@@ -9,7 +9,11 @@
 - [Tencent `openclaw-weixin`项目](https://github.com/Tencent/openclaw-weixin)的README描述经用户扫码授权的独立收发通道，但其[协议说明](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)明确基于客户端实现观察，不能视为完整的官方服务端契约。它既不是Windows Toast/AUMID证明，也没有授权小K接入个人账号；二维码登录、令牌缓存和收发链路不纳入当前实现。
 - [腾讯QQ Bot消息文档](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)约束的是机器人身份和事件回复，不是个人QQ好友身份或个人账号发送路径；不能用Bot `openid`替代用户指定的K。
 
-据此，首版先收敛已有`.194.0`受限UIA按钮候选并等待完整CI；其后优先验证小K自有类型化动作和目标应用正式接口，再考虑经明确授权的受限UIA。微信当前只有窗口内提示且Toast来源未确认，仍不打开/聚焦微信、不查客户端数据库、不读取正文、不发测试消息、不启用监听。没有接口契约和授权时，消息读取/发送路径应明确报告为不可用，不能以开源插件的存在宣称已经打通。
+据此，首版先收敛`.198.0`受限UIA按钮候选并等待完整CI；其后优先验证小K自有类型化动作和目标应用正式接口，再考虑经明确授权的受限UIA。微信当前只有窗口内提示且Toast来源未确认，仍不打开/聚焦微信、不查客户端数据库、不读取正文、不发测试消息、不启用监听。没有接口契约和授权时，消息读取/发送路径应明确报告为不可用，不能以开源插件的存在宣称已经打通。
+
+## 2026-10-16 Luna补充：用任务阶段和可观察结果约束桌面操作
+
+只读浏览维护者仓库：[OpenAdapt Desktop](https://github.com/OpenAdaptAI/openadapt-desktop)把重复操作拆成“先核对当前记录/目标、再执行、最后读回结果”；界面与预期不符时停下来交给用户。 [BrowserGym](https://github.com/ServiceNow/BrowserGym)把网页任务放入明确的环境、动作和终止/成功条件中供评测。小K可借鉴为端到端验收合同：固定初始状态、用户授权、单一动作、独立可观察结果和失败终止条件；只看到按钮调用成功不等于业务完成。`.198.0`仍无法读取控件名称或正文，所以只确认前台与一次Invoke，结果语义交还用户确认；不复制代码、不增加依赖、不把这些项目作为微信消息接口或任意应用控制的依据。
 
 ## 2026-10-16 Windows语义动作和UIA的适用边界
 

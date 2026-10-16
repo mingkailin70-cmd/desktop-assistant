@@ -4221,6 +4221,7 @@ static void CheckTaskHistoryDisplayPolicy()
         ("UIA_BUTTON_NOT_FOUND", "没有调用控件"),
         ("UIA_BUTTON_NOT_INVOKABLE", "没有执行动作"),
         ("UIA_FOREGROUND_UNKNOWN", "没有调用按钮"),
+        ("UIA_TARGET_NOT_FOREGROUND", "没有切换窗口，也没有调用按钮"),
         ("UIA_FOREGROUND_CHANGED_BEFORE_ACTION", "没有调用按钮"),
         ("UIA_TREE_LIMIT", "超过固定检查范围")
     };
@@ -4829,10 +4830,14 @@ static async Task CheckUiTextWritePolicyAsync()
         && buttonProposal.Target == notepadId
         && buttonProposal.Arguments.GetValueOrDefault("automation_id") == "Editor.SaveButton"
         && buttonProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiActionInvoked
-        && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.InvokeButtonToolId) == ToolInteractionMode.Background
+        && ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.InvokeButtonToolId) == ToolInteractionMode.Foreground
         && ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.InvokeButtonToolId)
-            == ToolInteractionOperation.TargetStateChange,
-        "UIA按钮操作没有绑定唯一白名单应用/控件，或缺少状态变更协调和固定可观察结果。 ");
+            == ToolInteractionOperation.DesktopExclusive
+        && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.InvokeButtonToolId,
+            ToolExecutionAccess.BackgroundOnly)?.ErrorCode == "FOREGROUND_REQUIRED"
+        && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.InvokeButtonToolId,
+            ToolExecutionAccess.ExplicitUserInteraction) is null,
+        "UIA按钮操作没有绑定唯一白名单应用/控件，或没有强制前台交互、桌面独占和固定可观察结果。 ");
     var duplicateIdAliases = new[]
     {
         new ConfiguredAppAlias(notepadId, "记事本"),
@@ -4866,16 +4871,29 @@ static async Task CheckUiTextWritePolicyAsync()
         && !ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked("Editor.SaveButton"),
         "通用按钮策略没有封锁系统管理应用及可识别的高风险动作标识，或误封普通保存按钮。 ");
 
+    var assistantSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "AssistantRuntime.cs"));
+    var invokeRouteStart = assistantSource.IndexOf("if (category == \"app-ui-invoke-button\")", StringComparison.Ordinal);
+    var invokeRouteEnd = invokeRouteStart < 0 ? -1 : assistantSource.IndexOf("if (category == \"app-ui-wait-enabled\")",
+        invokeRouteStart, StringComparison.Ordinal);
+    var invokeRoute = invokeRouteStart >= 0 && invokeRouteEnd > invokeRouteStart
+        ? assistantSource[invokeRouteStart..invokeRouteEnd]
+        : string.Empty;
+    Require(invokeRoute.Contains("_broker.ExecuteAsync(proposal, token)", StringComparison.Ordinal)
+        && !invokeRoute.Contains("ExecuteBackgroundAsync", StringComparison.Ordinal),
+        "用户明确请求的按钮操作没有走前台交互入口，或被错误放入后台工具队列。 ");
+
     var invoker = new RecordingBackgroundUiAutomationButtonInvoker();
     var invokeApproval = new RecordingApprovalPresenter(true);
     var invoked = await CreateBroker(invokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
         InteractionTargetUsage.NotInUse, buttonInvoker: invoker)
-        .ExecuteBackgroundAsync(buttonProposal!, CancellationToken.None, Guid.NewGuid());
+        .ExecuteAsync(buttonProposal!, CancellationToken.None, Guid.NewGuid());
     Require(invoked.Success && invoker.CallCount == 1 && invoker.ApplicationId == notepadId
         && invoker.AutomationId == "Editor.SaveButton"
         && invokeApproval.CallCount == 1
         && invokeApproval.LastActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
         && invokeApproval.LastDetails?.Contains("Editor.SaveButton", StringComparison.Ordinal) == true
+        && invokeApproval.LastDetails?.Contains("15秒内手动切回目标窗口", StringComparison.Ordinal) == true
+        && invokeApproval.LastDetails?.Contains("不会替你切换或恢复窗口", StringComparison.Ordinal) == true
         && invokeApproval.LastDetails?.Contains("无法核对当前选中对象或预览最终内容", StringComparison.Ordinal) == true
         && invokeApproval.LastDetails?.Contains("不读取控件名称、文本", StringComparison.Ordinal) == true,
         "UIA按钮操作没有在每次确认后只调用一次固定 AutomationId，或确认提示未说明副作用/读取边界。 ");
@@ -4884,7 +4902,7 @@ static async Task CheckUiTextWritePolicyAsync()
     var declinedInvokeApproval = new RecordingApprovalPresenter(false);
     var declinedInvoke = await CreateBroker(declinedInvokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
         InteractionTargetUsage.NotInUse, buttonInvoker: declinedInvoker)
-        .ExecuteBackgroundAsync(buttonProposal!, CancellationToken.None);
+        .ExecuteAsync(buttonProposal!, CancellationToken.None);
     Require(!declinedInvoke.Success && declinedInvoke.ErrorCode == "UIA_ACTION_DECLINED"
         && declinedInvokeApproval.CallCount == 1 && declinedInvoker.CallCount == 0,
         "拒绝应用按钮确认后仍调用了目标控件。 ");
@@ -4898,26 +4916,26 @@ static async Task CheckUiTextWritePolicyAsync()
     };
     var blockedButton = await CreateBroker(blockedButtonApproval, new RecordingBackgroundUiAutomationTextSetter(),
         InteractionTargetUsage.NotInUse, CreateDesktop("slack", "Slack"), blockedButtonInvoker)
-        .ExecuteBackgroundAsync(blockedButtonProposal, CancellationToken.None);
+        .ExecuteAsync(blockedButtonProposal, CancellationToken.None);
     Require(!blockedButton.Success && blockedButton.ErrorCode == "UIA_BUTTON_TARGET_BLOCKED"
         && blockedButtonApproval.CallCount == 0 && blockedButtonInvoker.CallCount == 0,
         "伪造UIA提案绕过了对第三方通信应用的拒绝或先创建了动作确认。 ");
 
-    var busyInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
-    var busyInvokeApproval = new RecordingApprovalPresenter(true);
-    var busyInvoke = await CreateBroker(busyInvokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
-        InteractionTargetUsage.InUse, buttonInvoker: busyInvoker)
+    var backgroundInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
+    var backgroundInvokeApproval = new RecordingApprovalPresenter(true);
+    var backgroundInvoke = await CreateBroker(backgroundInvokeApproval, new RecordingBackgroundUiAutomationTextSetter(),
+        InteractionTargetUsage.NotInUse, buttonInvoker: backgroundInvoker)
         .ExecuteBackgroundAsync(buttonProposal!, CancellationToken.None);
-    Require(!busyInvoke.Success && busyInvoke.ErrorCode == "TARGET_IN_USE"
-        && busyInvokeApproval.CallCount == 0 && busyInvoker.CallCount == 0,
-        "目标应用由用户使用时，按钮操作仍进入确认或调用 UIA。 ");
+    Require(!backgroundInvoke.Success && backgroundInvoke.ErrorCode == "FOREGROUND_REQUIRED"
+        && backgroundInvokeApproval.CallCount == 0 && backgroundInvoker.CallCount == 0,
+        "后台任务绕过了按钮操作的前台交互门控。 ");
 
     using var invokeCancellation = new CancellationTokenSource();
     var cancelledInvoker = new RecordingBackgroundUiAutomationButtonInvoker();
     var cancelledInvoke = await CreateBroker(new CancelAfterApprovalPresenter(invokeCancellation),
         new RecordingBackgroundUiAutomationTextSetter(), InteractionTargetUsage.NotInUse,
         buttonInvoker: cancelledInvoker)
-        .ExecuteBackgroundAsync(buttonProposal!, invokeCancellation.Token);
+        .ExecuteAsync(buttonProposal!, invokeCancellation.Token);
     Require(!cancelledInvoke.Success && cancelledInvoke.FinalState == TaskLifecycleState.Cancelled
         && cancelledInvoker.CallCount == 0,
         "用户在确认后取消仍执行了 UIA 按钮操作。 ");
@@ -5003,7 +5021,11 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadSnapshot");
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadScopedSnapshot");
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "InvokeButton", "IsGenericButtonInvocationTargetBlocked");
+    RequireButtonForegroundCheckPrecedesUiRead(workerSource);
     RequireButtonInvocationChecksPrecedeSideEffect(workerSource);
+    var adapterSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Adapters.Windows",
+        "WindowsUiAutomationSnapshotAdapter.cs"));
+    RequireButtonForegroundGatePrecedesWorker(adapterSource);
 
     var coordinator = new InteractionCoordinator();
     var desktop = new WindowsDesktopTools(
@@ -5054,13 +5076,44 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
         {
             "string.Equals(current.AutomationId, automationId", "current.ControlType != ControlType.Button",
             "current.ProcessId != request.ProcessId", "!current.IsEnabled", "current.IsOffscreen",
-            "TryGetCurrentPattern(InvokePattern.Pattern", "GetForegroundWindow() != foregroundBefore"
+            "TryGetCurrentPattern(InvokePattern.Pattern", "foregroundBefore != handle",
+            "GetForegroundWindow() != foregroundBefore"
         };
         Require(start >= 0 && invoke >= 0
             && checks.All(check => method.IndexOf(check, StringComparison.Ordinal) is var index && index >= 0 && index < invoke)
             && !method.Contains(".Current.Name", StringComparison.Ordinal)
             && !method.Contains(".Current.Value", StringComparison.Ordinal),
             "按钮调用缺少类型/可见性/启用/前台/Invoke 能力检查，或读取了控件名称/值。");
+    }
+
+    static void RequireButtonForegroundCheckPrecedesUiRead(string source)
+    {
+        var start = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse InvokeButton(",
+            StringComparison.Ordinal);
+        var end = start < 0 ? -1 : source.IndexOf("\n    private static ", start + 1, StringComparison.Ordinal);
+        if (end < 0) end = source.Length;
+        var method = start < 0 ? string.Empty : source[start..end];
+        var foregroundGuard = method.IndexOf("if (foregroundBefore != handle)", StringComparison.Ordinal);
+        var uiRead = method.IndexOf("TryResolveRoot(request", StringComparison.Ordinal);
+        Require(start >= 0 && foregroundGuard >= 0 && uiRead > foregroundGuard,
+            "隔离worker没有在访问目标UIA Provider前确认精确目标窗口已经在前台。");
+    }
+
+    static void RequireButtonForegroundGatePrecedesWorker(string source)
+    {
+        var methodStart = source.IndexOf("private async Task<(WorkerResponse? Response, ToolResult? Failure)> RunWorkerAsync(",
+            StringComparison.Ordinal);
+        var gate = methodStart < 0 ? -1 : source.IndexOf("while (GetForegroundWindow() != targetWindow)",
+            methodStart, StringComparison.Ordinal);
+        var timeout = gate < 0 ? -1 : source.IndexOf("UIA_TARGET_NOT_FOREGROUND", gate, StringComparison.Ordinal);
+        var workerStart = methodStart < 0 ? -1 : source.IndexOf("_workerProcessStarter.Start(startInfo)",
+            methodStart, StringComparison.Ordinal);
+        var mutationGuard = workerStart < 0 ? -1 : source.IndexOf("mutationMayHaveStarted = command.Mode is", workerStart,
+            StringComparison.Ordinal);
+        Require(methodStart >= 0 && gate > methodStart && timeout > gate && workerStart > timeout
+            && mutationGuard > workerStart
+            && source.Contains("if (!IsWindow(targetWindow) || !IsWindowVisible(targetWindow))", StringComparison.Ordinal),
+            "UIA按钮操作没有在启动worker及标记副作用前等待并验证精确目标前台窗口。");
     }
 }
 

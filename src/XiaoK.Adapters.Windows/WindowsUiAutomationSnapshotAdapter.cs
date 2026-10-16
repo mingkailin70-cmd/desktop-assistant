@@ -17,19 +17,22 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
     private const int MaximumRequestBytes = 16 * 1024;
     private const int MaximumResponseBytes = 32 * 1024;
     private static readonly TimeSpan WorkerTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan TargetForegroundWait = TimeSpan.FromSeconds(15);
     private const int ControlWaitMilliseconds = 2_500;
     private const int MaximumScopedDepth = 5;
     private readonly WindowsDesktopTools _desktop;
     private readonly IUiAutomationWorkerProcessStarter _workerProcessStarter;
+    private readonly TimeSpan _targetForegroundWait;
 
     public WindowsUiAutomationSnapshotAdapter(WindowsDesktopTools desktop)
-        : this(desktop, new SystemUiAutomationWorkerProcessStarter()) { }
+        : this(desktop, new SystemUiAutomationWorkerProcessStarter(), TargetForegroundWait) { }
 
     internal WindowsUiAutomationSnapshotAdapter(WindowsDesktopTools desktop,
-        IUiAutomationWorkerProcessStarter workerProcessStarter)
+        IUiAutomationWorkerProcessStarter workerProcessStarter, TimeSpan? targetForegroundWait = null)
     {
         _desktop = desktop;
         _workerProcessStarter = workerProcessStarter;
+        _targetForegroundWait = targetForegroundWait ?? TargetForegroundWait;
     }
 
     public async Task<ToolResult> ReadSnapshotAsync(string applicationId, CancellationToken cancellationToken)
@@ -148,8 +151,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             var uncertain = response?.OutcomeUncertain == true || error == "UIA_ACTION_OUTCOME_UNCERTAIN";
             return new(false, uncertain
                 ? "按钮调用可能已经触发，但最终界面状态无法确认；请先检查目标应用，不要自动重试。"
-                : error == "UIA_TARGET_IN_USE"
-                    ? "目标应用正处于前台；为避免干扰你的操作，没有调用按钮。"
+                : error == "UIA_TARGET_NOT_FOREGROUND"
+                    ? "确认后请在15秒内手动切回目标窗口；小K没有切换窗口，也没有调用按钮。"
                     : error == "UIA_FOREGROUND_UNKNOWN"
                         ? "无法核验当前前台窗口；没有调用按钮。"
                         : error == "UIA_FOREGROUND_CHANGED_BEFORE_ACTION"
@@ -169,7 +172,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
                                                     : "没有找到唯一、可见且启用的 Invoke 按钮；没有执行动作。",
                 error, FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null);
         }
-        return new(true, "已向唯一目标按钮发出一次 UI Automation Invoke；没有读取控件文本、模拟键鼠或主动切换前台。",
+        return new(true, "已在目标窗口处于前台时向唯一按钮发出一次 UI Automation Invoke；没有读取控件文本、模拟键鼠或主动切换前台。",
             Data: "已调用目标按钮");
     }
 
@@ -212,6 +215,20 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             return (null, new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
 
         var resolvedTarget = target!;
+        if (command.Mode == "invoke_button")
+        {
+            var targetWindow = new IntPtr(resolvedTarget.WindowHandle);
+            var foregroundWait = Stopwatch.StartNew();
+            while (GetForegroundWindow() != targetWindow)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsWindow(targetWindow) || !IsWindowVisible(targetWindow))
+                    return (null, new(false, "目标窗口在等待前台期间关闭或变化；没有调用按钮。", "UIA_TARGET_CHANGED"));
+                if (foregroundWait.Elapsed >= _targetForegroundWait)
+                    return (null, new(false, "确认后15秒内目标窗口没有成为前台；没有调用按钮。", "UIA_TARGET_NOT_FOREGROUND"));
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
+        }
         var request = JsonSerializer.SerializeToUtf8Bytes(new WorkerRequest(
             resolvedTarget.WindowHandle, resolvedTarget.ProcessId, resolvedTarget.ExecutablePath,
             command.Mode, command.AutomationId, command.WaitMilliseconds, command.Value,
@@ -324,6 +341,15 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         try { if (errorTask is not null) await errorTask.ConfigureAwait(false); }
         catch (Exception exception) when (exception is IOException or OperationCanceledException or ObjectDisposedException) { }
     }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
 
     private static void TryKill(Process process)
     {

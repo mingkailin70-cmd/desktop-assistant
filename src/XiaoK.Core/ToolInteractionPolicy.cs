@@ -11,8 +11,10 @@ public static class ToolInteractionPolicy
         _ when toolId is ApplicationUiAutomationPolicy.ToolId or ApplicationUiAutomationPolicy.ScopedSnapshotToolId
             or ApplicationUiAutomationPolicy.WaitForEnabledToolId
             => ToolInteractionOperation.ReadOnlyTarget,
-        _ when toolId is ApplicationUiAutomationPolicy.SetTextToolId or ApplicationUiAutomationPolicy.InvokeButtonToolId
+        _ when toolId is ApplicationUiAutomationPolicy.SetTextToolId
             => ToolInteractionOperation.TargetStateChange,
+        _ when toolId is ApplicationUiAutomationPolicy.InvokeButtonToolId
+            => ToolInteractionOperation.DesktopExclusive,
         ToolInteractionMode.Background => ToolInteractionOperation.NonInteractive,
         ToolInteractionMode.Foreground => ToolInteractionOperation.DesktopExclusive,
         _ => ToolInteractionOperation.Unknown
@@ -32,10 +34,11 @@ public static class ToolInteractionPolicy
             or "message.notice.analyze.v1" or "message.draft.v1" or "message.send.v1"
             or "app.status.v1" or ApplicationUiAutomationPolicy.ToolId or ApplicationUiAutomationPolicy.ScopedSnapshotToolId
             or ApplicationUiAutomationPolicy.WaitForEnabledToolId
-            or ApplicationUiAutomationPolicy.SetTextToolId or ApplicationUiAutomationPolicy.InvokeButtonToolId
+            or ApplicationUiAutomationPolicy.SetTextToolId
             => ToolInteractionMode.Background,
-        // 启动程序和切换窗口会改变用户当前桌面状态，只能由明确用户交互触发。
-        "app.launch.v1" or "window.activate.v1" => ToolInteractionMode.Foreground,
+        // 启动程序、切换窗口和调用应用按钮会影响当前桌面状态，只能由明确用户交互触发。
+        "app.launch.v1" or "window.activate.v1" or ApplicationUiAutomationPolicy.InvokeButtonToolId
+            => ToolInteractionMode.Foreground,
         _ => ToolInteractionMode.Unknown
     };
 

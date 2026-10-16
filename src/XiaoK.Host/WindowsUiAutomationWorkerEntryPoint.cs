@@ -296,15 +296,16 @@ public static class WindowsUiAutomationWorkerEntryPoint
         if (ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(request.ApplicationId, request.DisplayName,
             request.ExecutablePath))
             return new(false, "UIA_BUTTON_TARGET_BLOCKED", []);
-        if (!TryResolveRoot(request, out var root, out var error)) return new(false, error, []);
 
         var handle = new IntPtr(request.WindowHandle);
         var foregroundBefore = GetForegroundWindow();
         if (foregroundBefore == IntPtr.Zero)
             return new(false, "UIA_FOREGROUND_UNKNOWN", []);
-        if (foregroundBefore == handle || GetWindowThreadProcessId(foregroundBefore, out var foregroundPid) != 0
-            && foregroundPid == (uint)request.ProcessId)
-            return new(false, "UIA_TARGET_IN_USE", []);
+        if (foregroundBefore != handle)
+            return new(false, "UIA_TARGET_NOT_FOREGROUND", []);
+        if (!TryResolveRoot(request, out var root, out var error)) return new(false, error, []);
+        if (GetForegroundWindow() != foregroundBefore)
+            return new(false, "UIA_FOREGROUND_CHANGED_BEFORE_ACTION", []);
 
         var searchResult = FindUniqueSafeControl(root, automationId, out var element);
         if (searchResult == ControlSearchResult.Ambiguous)

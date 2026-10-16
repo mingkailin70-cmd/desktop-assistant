@@ -196,35 +196,47 @@ internal static class UiAutomationWorkerProbe
                 || !isolated.Data.Contains(AccessibleName, StringComparison.Ordinal)
                 || !isolated.Data.Contains("禁用", StringComparison.Ordinal))
                 throw new InvalidOperationException($"隔离UIA工作进程未返回合成控件快照：{isolated.ErrorCode ?? isolated.Summary}");
+            await ActivateWindowAsync(probe, probe.Window, probe.Handle);
             var buttonAction = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .InvokeButtonAsync("uia-probe", AutomationId, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15));
             if (buttonAction.Success || buttonAction.ErrorCode != "UIA_BUTTON_NOT_INVOKABLE"
                 || Volatile.Read(ref activationCount) != 0 || Volatile.Read(ref successfulInvocationCount) != 0
-                || GetForegroundWindow() != foregroundBefore)
+                || GetForegroundWindow() != probe.Handle)
                 throw new InvalidOperationException("隔离UIA worker没有拒绝禁用的合成按钮或改变了前台/控件状态。");
             var ambiguousButton = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-duplicate", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
             if (ambiguousButton.Success || ambiguousButton.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS"
-                || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
+                || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != probe.Handle)
                 throw new InvalidOperationException("隔离UIA worker没有拒绝重复AutomationId或改变了控件/前台状态。");
             var wideDesktop = new WindowsDesktopTools(
                 [new DesktopApp("uia-probe", Environment.ProcessPath!)],
                 [], new SyntheticWindowProcessController(probe.WideHandle));
+            await ActivateWindowAsync(probe, probe.WideWindow, probe.WideHandle);
             var oversizedSearch = await new WindowsUiAutomationSnapshotAdapter(wideDesktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-wide-duplicate", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
             if (oversizedSearch.Success || oversizedSearch.ErrorCode != "UIA_TREE_LIMIT"
-                || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
+                || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != probe.WideHandle)
                 throw new InvalidOperationException($"UIA控件搜索超过同级上限时仍把被截断的AutomationId误判为唯一或改变了界面：{oversizedSearch.ErrorCode ?? oversizedSearch.Summary}");
             var invokeDesktop = new WindowsDesktopTools(
                 [new DesktopApp("uia-probe", Environment.ProcessPath!)],
                 [], new SyntheticWindowProcessController(probe.InvokeHandle));
+            var notForegroundStarter = new BlockingWorkerProcessStarter();
+            var notForeground = await new WindowsUiAutomationSnapshotAdapter(invokeDesktop, notForegroundStarter,
+                    TimeSpan.FromMilliseconds(150))
+                .InvokeButtonAsync("uia-probe", "xiaok-synthetic-invoke-button", CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            if (notForeground.Success || notForeground.ErrorCode != "UIA_TARGET_NOT_FOREGROUND"
+                || notForegroundStarter.Started.IsCompleted || Volatile.Read(ref successfulInvocationCount) != 0
+                || GetForegroundWindow() != probe.WideHandle)
+                throw new InvalidOperationException("目标窗口不在前台时没有在启动worker前停止，或改变了桌面状态。");
+            await ActivateWindowAsync(probe, probe.InvokeWindow, probe.InvokeHandle);
             var invokedButton = await new WindowsUiAutomationSnapshotAdapter(invokeDesktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-invoke-button", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
             var invocationCount = Volatile.Read(ref successfulInvocationCount);
-            var foregroundUnchanged = GetForegroundWindow() == foregroundBefore;
+            var foregroundUnchanged = GetForegroundWindow() == probe.InvokeHandle;
             if (!invokedButton.Success || invocationCount != 1 || !foregroundUnchanged)
                 throw new InvalidOperationException(
                     $"隔离UIA worker唯一可见按钮调用检查失败：error={invokedButton.ErrorCode ?? "NONE"}; "
@@ -261,6 +273,8 @@ internal static class UiAutomationWorkerProbe
                 .WaitAsync(TimeSpan.FromSeconds(10));
             if (oversizedScopeResult.Success || oversizedScopeResult.ErrorCode != "UIA_SCOPED_TREE_LIMIT")
                 throw new InvalidOperationException("超过有界子树限制时仍返回了部分UIA结果。");
+            if (GetForegroundWindow() != probe.InvokeHandle)
+                throw new InvalidOperationException("UIA只读查询改变了已激活的合成目标窗口。");
             var enableSyntheticControl = Task.Run(async () =>
             {
                 await Task.Delay(350);
@@ -282,11 +296,11 @@ internal static class UiAutomationWorkerProbe
                 .WaitAsync(TimeSpan.FromSeconds(8));
             if (ambiguousCondition.Success || ambiguousCondition.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS")
                 throw new InvalidOperationException($"重复AutomationId没有失败关闭：{ambiguousCondition.ErrorCode ?? "NO_ERROR"} / {ambiguousCondition.Summary}");
-            await VerifyWorkerCancellationAndTimeoutAsync(desktop);
+            await VerifyWorkerCancellationAndTimeoutAsync(desktop, probe);
             if (Volatile.Read(ref activationCount) != 0)
                 throw new InvalidOperationException("只读UIA查询触发了合成控件动作。");
-            if (GetForegroundWindow() != foregroundBefore)
-                throw new InvalidOperationException("UIA只读查询改变了前台窗口。");
+            if (GetForegroundWindow() != probe.Handle)
+                throw new InvalidOperationException("UIA worker取消/超时回归改变了合成目标前台窗口。");
         }
         finally
         {
@@ -303,8 +317,27 @@ internal static class UiAutomationWorkerProbe
             }
         }
 
+        var restore = Stopwatch.StartNew();
+        while (GetForegroundWindow() != foregroundBefore && restore.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            SetForegroundWindow(foregroundBefore);
+            await Task.Delay(50);
+        }
         if (GetForegroundWindow() != foregroundBefore)
             throw new InvalidOperationException("关闭合成窗口后前台窗口句柄发生变化。");
+    }
+
+    private static async Task ActivateWindowAsync(ProbeWindow probe, Window window, IntPtr handle)
+    {
+        await probe.Dispatcher.InvokeAsync(() => window.Activate());
+        var activation = Stopwatch.StartNew();
+        while (GetForegroundWindow() != handle && activation.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            SetForegroundWindow(handle);
+            await Task.Delay(50);
+        }
+        if (GetForegroundWindow() != handle)
+            throw new InvalidOperationException("合成探针无法在测试环境将自己的目标窗口设为前台。");
     }
 
     private static (string AutomationId, string Name, bool IsEnabled) ReadOnlyInspect(IntPtr handle)
@@ -322,8 +355,9 @@ internal static class UiAutomationWorkerProbe
         public IReadOnlyCollection<IntPtr> GetVisibleWindowHandles(DesktopApp app) => [handle];
     }
 
-    private static async Task VerifyWorkerCancellationAndTimeoutAsync(WindowsDesktopTools desktop)
+    private static async Task VerifyWorkerCancellationAndTimeoutAsync(WindowsDesktopTools desktop, ProbeWindow probe)
     {
+        await ActivateWindowAsync(probe, probe.Window, probe.Handle);
         var cancellationStarter = new BlockingWorkerProcessStarter();
         var cancellationAdapter = new WindowsUiAutomationSnapshotAdapter(desktop, cancellationStarter);
         using (var cancellation = new CancellationTokenSource())
@@ -466,6 +500,9 @@ internal static class UiAutomationWorkerProbe
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     private sealed record ProbeWindow(IntPtr Handle, IntPtr WideHandle, IntPtr InvokeHandle, Dispatcher Dispatcher,
         Window Window, Window WideWindow, Window InvokeWindow, Button Button);

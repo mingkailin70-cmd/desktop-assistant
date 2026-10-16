@@ -103,6 +103,7 @@ public static class TaskHistoryDisplayPolicy
         "UIA_AUTOMATION_ID_AMBIGUOUS" => "同一窗口中有多个相同控件标识；小K没有读取或写入。请指定唯一控件后再提交。",
         "UIA_CONDITION_NOT_MET" => "等待期间没有找到唯一且已启用的目标控件；没有点击或填写。请检查应用界面后再提交。",
         "UIA_TARGET_IN_USE" => "目标应用正处于前台；为避免干扰，小K没有写入文本或调用按钮，也没有修改界面。稍后再提交。",
+        "UIA_TARGET_NOT_FOREGROUND" => "确认后15秒内目标窗口没有成为前台；小K没有切换窗口，也没有调用按钮。准备好后可重新提交。",
         "UIA_FOREGROUND_UNKNOWN" => "无法核验当前前台窗口；小K没有调用按钮。请检查桌面状态后再提交。",
         "UIA_FOREGROUND_CHANGED_BEFORE_ACTION" => "调用前检测到前台窗口变化；小K没有调用按钮。请确认应用状态后再提交。",
         "UIA_FOREGROUND_CHANGED_BEFORE_SET" => "写入前检测到前台窗口变化；小K没有写入文本。请确认目标应用状态后再提交。",

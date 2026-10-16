@@ -25,7 +25,7 @@ public sealed record InteractionAdmission(ToolResult? Denial, IAsyncDisposable L
 
 /// <summary>
 /// Coordinates UI work initiated through ToolBroker. This does not lock out the user or
-/// third-party UIA clients; adapters must still prove their own non-activation behavior.
+/// third-party UIA clients; adapters must still enforce their own activation and focus contract.
 /// </summary>
 public sealed class InteractionCoordinator
 {

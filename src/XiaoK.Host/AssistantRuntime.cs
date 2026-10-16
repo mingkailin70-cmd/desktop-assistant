@@ -1068,8 +1068,8 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         {
             var proposal = ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal(request, GetConfiguredAppAliases());
             if (proposal is null)
-                return new(false, "请按“点击界面按钮：应用名|唯一AutomationId”输入；只允许已登记普通应用中的唯一、可见、启用且支持 Invoke 的按钮，每次操作需确认。消息/邮件客户端、浏览器、文件管理器和金融/凭证敏感应用不允许使用该通用工具。", "UIA_BUTTON_TARGET_NOT_SUPPORTED");
-            return await ExecuteBackgroundAsync(proposal, token);
+                return new(false, "请按“点击界面按钮：应用名|唯一AutomationId”输入；只允许已登记普通应用中的唯一、可见、启用且支持 Invoke 的按钮。每次操作需单独确认；确认后请在15秒内手动切回目标窗口，小K只在该窗口已经处于前台时调用，绝不替你切换窗口。消息/邮件客户端、浏览器、文件管理器和金融/凭证敏感应用不允许使用该通用工具。", "UIA_BUTTON_TARGET_NOT_SUPPORTED");
+            return await _broker.ExecuteAsync(proposal, token);
         }
 
         if (category == "app-ui-wait-enabled")
