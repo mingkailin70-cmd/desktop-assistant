@@ -782,6 +782,9 @@ try
     await CheckSqliteV6ToV7CheckpointMigrationAsync(tempRoot);
     passed.Add("SQLite v6 到 v7 迁移保守标记旧任务，并能往返保存脱敏执行检查点");
 
+    await CheckSqliteV7ToV8ApprovalAuditMigrationAsync(tempRoot);
+    passed.Add("SQLite v7 到 v8 迁移保留既有审计并允许固定UIA审批结果");
+
     await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
 
@@ -3716,6 +3719,44 @@ static async Task CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(string root)
 
     Require(DatabaseFilesOmitSentinel(databasePath, privateSentinel),
         "旧结果正文哨兵被复制进 SQLite 数据库。");
+}
+
+static async Task CheckSqliteV7ToV8ApprovalAuditMigrationAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-v7-to-v8-approval-audit");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var originalStore = new SqliteTaskStore(databasePath);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.FileRecycleAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    var originalAudit = await originalStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+
+    SqliteSchemaFixture.RevertToVersionSeven(databasePath);
+    var migratedStore = new SqliteTaskStore(databasePath);
+    var migrationBackupExists = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").Any();
+    var preservedAudit = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiTextSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiTextSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    var migratedAudit = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    var reopenedStore = new SqliteTaskStore(databasePath);
+    var reopenedAudit = await reopenedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+
+    Require(migrationBackupExists && originalAudit.Count == 2 && preservedAudit.Count == 2
+        && originalAudit.All(original => preservedAudit.Any(preserved => preserved.Id == original.Id
+            && preserved.ActionId == original.ActionId && preserved.Outcome == original.Outcome
+            && preserved.CreatedAtUtc == original.CreatedAtUtc))
+        && migratedAudit.Count == 6 && reopenedAudit.Count == 6
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction) == 2
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2,
+        "SQLite v7 到 v8 迁移没有先备份、保留原审计并持久化固定UIA批准/拒绝结果。");
 }
 
 static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
@@ -11368,6 +11409,19 @@ internal static class SqliteSchemaFixture
         + "SELECT id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id FROM tasks_v7; "
         + "DROP TABLE tasks_v7; CREATE INDEX ix_tasks_updated ON tasks(updated_utc_ticks DESC); "
         + "PRAGMA user_version=6; COMMIT;");
+
+    public static void RevertToVersionSeven(string databasePath) => Execute(databasePath,
+        "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
+        + "ALTER TABLE approval_audit RENAME TO approval_audit_v8; "
+        + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
+        + "outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+        + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed') "
+        + "OR (action_id='file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')))); "
+        + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
+        + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v8; "
+        + "DROP TABLE approval_audit_v8; PRAGMA user_version=7; COMMIT;");
 
     public static void RevertToVersionTwo(string databasePath)
     {
