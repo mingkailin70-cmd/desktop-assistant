@@ -4,6 +4,7 @@ using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.Windows.Automation.Peers;
+using WpfListBox = System.Windows.Controls.ListBox;
 using XiaoK.Core;
 
 namespace XiaoK.Host;
@@ -217,7 +218,7 @@ public partial class TaskHistoryWindow : Window
             FocusManager.SetFocusedElement(this, HistoryList);
     }
 
-    private FocusSnapshot? CaptureListFocus(ListBox list, Func<object, string?> getEntryKey)
+    private FocusSnapshot? CaptureListFocus(WpfListBox list, Func<object, string?> getEntryKey)
     {
         var focused = FocusManager.GetFocusedElement(this) as DependencyObject
             ?? (IsActive ? System.Windows.Input.Keyboard.FocusedElement as DependencyObject : null);
@@ -227,7 +228,7 @@ public partial class TaskHistoryWindow : Window
         return new FocusSnapshot(entryKey, GetFocusRole(focused, list));
     }
 
-    private void RestoreListFocus(ListBox list, IReadOnlyList<object> items,
+    private void RestoreListFocus(WpfListBox list, IReadOnlyList<object> items,
         Func<object, string?> getEntryKey, FocusSnapshot? snapshot)
     {
         if (snapshot is null || !list.IsVisible) return;
@@ -289,7 +290,7 @@ public partial class TaskHistoryWindow : Window
         return null;
     }
 
-    private static string GetFocusRole(DependencyObject focused, ListBox list)
+    private static string GetFocusRole(DependencyObject focused, WpfListBox list)
     {
         if (ReferenceEquals(focused, list)) return "list";
         if (focused is Button { Tag: Guid }) return "button:cancel";
@@ -308,7 +309,7 @@ public partial class TaskHistoryWindow : Window
         return "list";
     }
 
-    private static bool IsInList(ListBox list, DependencyObject element) =>
+    private static bool IsInList(WpfListBox list, DependencyObject element) =>
         ReferenceEquals(element, list) || ItemsControl.ContainerFromElement(list, element) is not null;
 
     private static string? GetHistoryEntryKey(object item) =>
