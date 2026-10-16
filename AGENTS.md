@@ -1,5 +1,7 @@
 # 小K项目：AI 协作者入门
 
+2026-10-16 10:26补充：对MeloTTS上游再作只读来源核验。官方GitHub `myshell-ai/MeloTTS`当前main指向提交`209145371cff8fc3bd60d7be902ea69cbdb7965a`，仓库README/LICENSE标MIT，但固定版本`docs/training.md`只说明自备音频与元数据的自定义训练流程，没有说明发布版中文权重的语料来源/各语料许可；`MeloTTS-Chinese`模型卡也只标MIT。官方issue #215仍开放，提问者询问中文混英文模型具体训练数据，维护者未给出数据清单或权利说明。结论仍是训练数据来源/许可未核实，Sherpa转换权重不晋级生产，未下载或加载新模型。详见语音报告与[固定上游训练说明](https://github.com/myshell-ai/MeloTTS/blob/209145371cff8fc3bd60d7be902ea69cbdb7965a/docs/training.md)。
+
 2026-10-16 10:22补充：`.198.0`前台UIA按钮源码随`9464eaf`推送后，Build `38838753233`先因测试重载参数错误未通过；`2c771ce`修正后Build `38839047627`在未登记按钮的旧测试夹具访问模式不匹配处失败；`3d24217`修正合成访问模式并完成最终候选CI。GitHub Actions [Build 38839557497](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38839557497)全步骤成功：Release构建0警告/0错误、安全137项通过/0跳过、UIA隐私/策略、桌面体验145项、隔离worker前台调用/拒绝/取消/超时/回收探针、AISHELL-3超时合同、模型锁定、长测停止协议36项与MSIX策略20项通过；AISHELL只测合同、未加载模型。候选`.198.0`仍未本机编译/测试/安装，也不代表第三方应用或端到端验收。安装`.189.0`、Host PID`51400`不触碰；微信仍无Toast/AUMID；模型/TTS未加载；中断24小时观察不通过，清理暂停；R0及首版端到端仍未完成。
 
 2026-10-16 10:15补充：修正后的Build `38839047627`固定SDK Release构建通过（0警告/0错误），完整安全检查随后在未登记UIA目标回归失败，旧断言将新增的前台专用`app.ui.invoke-button.v1`也放在`BackgroundOnly`访问下，因此策略层先正确返回`FOREGROUND_REQUIRED`，断言却要求`APP_NOT_ALLOWLISTED`。其余UIA隐私、桌面体验、worker和AISHELL步骤跳过。现调整合成用例：仅按钮提案用显式用户交互访问以验证应用白名单早于目标锁；独立回归仍验证后台按钮拒绝。未改产品运行时代码，未本机运行测试；待本修正与进度记录推送后再进行一次完整CI。
