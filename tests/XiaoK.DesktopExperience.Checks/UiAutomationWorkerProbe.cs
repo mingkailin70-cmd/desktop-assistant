@@ -81,18 +81,52 @@ internal static class UiAutomationWorkerProbe
                         Children =
                         {
                             button, invokableButton, waitButton, duplicateWaitButton, secondDuplicateWaitButton, scopedRoot,
-                            wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope, wideControlPanel
+                            wrongTypeRoot, duplicateScopeOne, duplicateScopeTwo, oversizedScope
                         }
                     }
                 };
+                var wideWindow = new Window
+                {
+                    Title = "小K UIA 宽树合成探针",
+                    Width = 280,
+                    Height = 160,
+                    Left = 320,
+                    Top = 24,
+                    WindowStyle = WindowStyle.ToolWindow,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                    Content = wideControlPanel
+                };
                 var dispatcher = window.Dispatcher;
-                window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                window.Closed += (_, _) =>
+                {
+                    if (!wideWindow.IsVisible)
+                        dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                };
+                wideWindow.Closed += (_, _) =>
+                {
+                    if (!window.IsVisible)
+                        dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                };
+                IntPtr mainHandle = IntPtr.Zero;
+                IntPtr wideHandle = IntPtr.Zero;
+                void CompleteWhenReady()
+                {
+                    if (mainHandle != IntPtr.Zero && wideHandle != IntPtr.Zero)
+                        created.TrySetResult(new ProbeWindow(mainHandle, wideHandle, dispatcher, window, wideWindow, button));
+                }
                 window.SourceInitialized += (_, _) =>
                 {
-                    var handle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
-                    created.TrySetResult(new ProbeWindow(handle, dispatcher, window, button));
+                    mainHandle = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+                    CompleteWhenReady();
+                };
+                wideWindow.SourceInitialized += (_, _) =>
+                {
+                    wideHandle = new System.Windows.Interop.WindowInteropHelper(wideWindow).Handle;
+                    CompleteWhenReady();
                 };
                 window.Show();
+                wideWindow.Show();
                 Dispatcher.Run();
             }
             catch (Exception exception)
@@ -156,12 +190,15 @@ internal static class UiAutomationWorkerProbe
             if (ambiguousButton.Success || ambiguousButton.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS"
                 || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
                 throw new InvalidOperationException("隔离UIA worker没有拒绝重复AutomationId或改变了控件/前台状态。");
-            var oversizedSearch = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            var wideDesktop = new WindowsDesktopTools(
+                [new DesktopApp("uia-probe", Environment.ProcessPath!)],
+                [], new SyntheticWindowProcessController(probe.WideHandle));
+            var oversizedSearch = await new WindowsUiAutomationSnapshotAdapter(wideDesktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-wide-duplicate", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
             if (oversizedSearch.Success || oversizedSearch.ErrorCode != "UIA_TREE_LIMIT"
                 || Volatile.Read(ref successfulInvocationCount) != 0 || GetForegroundWindow() != foregroundBefore)
-                throw new InvalidOperationException("UIA控件搜索超过同级上限时仍把被截断的AutomationId误判为唯一或改变了界面。");
+                throw new InvalidOperationException($"UIA控件搜索超过同级上限时仍把被截断的AutomationId误判为唯一或改变了界面：{oversizedSearch.ErrorCode ?? oversizedSearch.Summary}");
             var invokedButton = await new WindowsUiAutomationSnapshotAdapter(desktop)
                 .InvokeButtonAsync("uia-probe", "xiaok-synthetic-invoke-button", CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(15));
@@ -230,7 +267,11 @@ internal static class UiAutomationWorkerProbe
         {
             if (probe is not null)
             {
-                await probe.Dispatcher.InvokeAsync(probe.Window.Close);
+                await probe.Dispatcher.InvokeAsync(() =>
+                {
+                    if (probe.WideWindow.IsVisible) probe.WideWindow.Close();
+                    if (probe.Window.IsVisible) probe.Window.Close();
+                });
                 if (!windowThread.Join(TimeSpan.FromSeconds(5)))
                     throw new InvalidOperationException("合成探针窗口未在限定时间内退出。");
             }
@@ -400,5 +441,6 @@ internal static class UiAutomationWorkerProbe
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
-    private sealed record ProbeWindow(IntPtr Handle, Dispatcher Dispatcher, Window Window, Button Button);
+    private sealed record ProbeWindow(IntPtr Handle, IntPtr WideHandle, Dispatcher Dispatcher, Window Window,
+        Window WideWindow, Button Button);
 }
