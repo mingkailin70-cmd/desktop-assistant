@@ -378,11 +378,12 @@ Require(!openTaskCenter.Contains("RestoreFromTray()", StringComparison.Ordinal)
     && taskCenterXaml.Contains("WindowStartupLocation=\"CenterScreen\"", StringComparison.Ordinal),
     "从托盘打开任务中心时不应先展开/聚焦桌宠主面板；任务中心应独立显示。 ");
 Require(taskCenterSource.Contains("var selectedEntryKey = (HistoryList.SelectedItem as TaskHistoryEntry)?.EntryKey;", StringComparison.Ordinal)
-    && taskCenterSource.Contains("item.EntryKey == selectedEntryKey", StringComparison.Ordinal)
+    && taskCenterSource.Contains("var keyToPreserve = selectedEntryKey ?? focus?.EntryKey;", StringComparison.Ordinal)
+    && taskCenterSource.Contains("history.FirstOrDefault(item => item.EntryKey == keyToPreserve)", StringComparison.Ordinal)
     && !taskCenterSource.Contains("selectedTitle", StringComparison.Ordinal)
     && assistantRuntimeSource.Contains("$\"task:{record.Id:N}\"", StringComparison.Ordinal)
     && assistantRuntimeSource.Contains("$\"code:{task.TaskId}\"", StringComparison.Ordinal),
-    "任务中心刷新必须按稳定任务键保留所选任务，不能用显示标题关联记录。");
+    "任务中心刷新必须优先按稳定任务键保留所选项或焦点项，不能用显示标题关联记录。");
 Require(taskCenterSource.Contains("SetCurrentValue(UIElement.IsEnabledProperty, false)", StringComparison.Ordinal)
     && taskCenterSource.Contains("button.SetCurrentValue(UIElement.IsEnabledProperty,", StringComparison.Ordinal)
     && !taskCenterSource.Contains("button.IsEnabled =", StringComparison.Ordinal),

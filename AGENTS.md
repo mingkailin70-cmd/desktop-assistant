@@ -1,5 +1,7 @@
 # 小K项目：AI 协作者入门
 
+2026-10-16 11:01补充：`.201.0`的GitHub Actions [Build 38843075836](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38843075836) Release构建、完整安全和UIA隐私策略均通过；桌面体验检查因一条过时的静态源码契约失败。该契约只识别原有“按选中EntryKey恢复”，未覆盖新增的“选中键优先，否则按当前焦点条目的稳定EntryKey恢复”；运行时离屏检查尚未到达。现更新契约检查且仍禁止按标题关联，包候选升为`.202.0`，等待完整CI。
+
 2026-10-16 10:56补充：`.200.0`的[Build 38842569106](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38842569106)仍在Release构建阶段失败：WPF/WinForms `Button`、`TextBox`歧义（CS0104），以及未导入`System.Windows.Input`导致`FocusManager`未定义（CS0103）；此前的`ListBox`歧义已被别名修复。现对焦点辅助区统一使用WPF控件及WPF焦点管理器别名，候选升为`.201.0`，待推送后验证。安全/桌面等后续检查未运行；未本机测试或触碰Host。
 
 2026-10-16 10:52补充：已修复`.199.0`首轮CI的WPF/WinForms `ListBox` 歧义；辅助函数统一使用WPF类型别名，包候选升为`.200.0`。该候选与CI失败记录一起推送，之前的`38842047136`只代表编译失败。现在等待新的Release/安全/UIA/桌面/worker完整CI；未在本机测试或安装，也未操作Host。
