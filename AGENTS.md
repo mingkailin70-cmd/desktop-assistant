@@ -1,5 +1,7 @@
 # 小K项目：AI 协作者入门
 
+2026-10-16 11:10补充：`.202.0`的Build `38843585784` Release构建、完整安全与UIA隐私策略检查通过；桌面体验WPF离屏任务中心探针超出20秒期限，后续检查未运行，日志没有托管堆栈。新代码唯有新增同步实时区域peer播报路径；为避免无监听者时创建peer和发事件，现先要求`AutomationPeer.ListenerExists(LiveRegionChanged)`，并由源码合同锁定此守卫。此为针对超时的性能修正，待`.203.0`验证，不将推测写成已证实的挂起根因。本机未编译/测试/安装，Host未触碰。
+
 2026-10-16 11:01补充：`.201.0`的GitHub Actions [Build 38843075836](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38843075836) Release构建、完整安全和UIA隐私策略均通过；桌面体验检查因一条过时的静态源码契约失败。该契约只识别原有“按选中EntryKey恢复”，未覆盖新增的“选中键优先，否则按当前焦点条目的稳定EntryKey恢复”；运行时离屏检查尚未到达。现更新契约检查且仍禁止按标题关联，包候选升为`.202.0`，等待完整CI。
 
 2026-10-16 10:56补充：`.200.0`的[Build 38842569106](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38842569106)仍在Release构建阶段失败：WPF/WinForms `Button`、`TextBox`歧义（CS0104），以及未导入`System.Windows.Input`导致`FocusManager`未定义（CS0103）；此前的`ListBox`歧义已被别名修复。现对焦点辅助区统一使用WPF控件及WPF焦点管理器别名，候选升为`.201.0`，待推送后验证。安全/桌面等后续检查未运行；未本机测试或触碰Host。

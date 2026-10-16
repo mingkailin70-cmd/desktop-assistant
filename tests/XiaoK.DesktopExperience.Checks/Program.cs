@@ -388,6 +388,9 @@ Require(taskCenterSource.Contains("SetCurrentValue(UIElement.IsEnabledProperty, 
     && taskCenterSource.Contains("button.SetCurrentValue(UIElement.IsEnabledProperty,", StringComparison.Ordinal)
     && !taskCenterSource.Contains("button.IsEnabled =", StringComparison.Ordinal),
     "任务中心取消按钮应临时更新有效状态并保留CanCancel绑定，避免任务完成后按钮仍可点击。");
+Require(taskCenterSource.Contains("if (!AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;", StringComparison.Ordinal)
+    && taskCenterSource.Contains("peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);", StringComparison.Ordinal),
+    "任务中心只在UI Automation监听实时区域事件时创建peer并发出播报。");
 
 var bindingResults = new List<(bool Passed, string Message)>();
 Exception? bindingFailure = null;

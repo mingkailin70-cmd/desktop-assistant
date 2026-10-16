@@ -195,6 +195,7 @@ public partial class TaskHistoryWindow : Window
 
     private static void RaiseLiveRegionChanged(FrameworkElement element)
     {
+        if (!AutomationPeer.ListenerExists(AutomationEvents.LiveRegionChanged)) return;
         var peer = UIElementAutomationPeer.CreatePeerForElement(element);
         peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
