@@ -3946,8 +3946,8 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var safetyPreferences = await safetyBackup.GetContactReplyStylesAsync(CancellationToken.None);
     var safetyAudit = await safetyBackup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(restoredPreferences.Count == 1 && restoredPreferences[0].ContactName == "Bob"
-        && restoredAudit.Count == 11 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
-        && safetyAudit.Count == 12,
+        && restoredAudit.Count == 13 && safetyPreferences.Count == 1 && safetyPreferences[0].ContactName == "Charlie"
+        && safetyAudit.Count == 14,
         "数据库恢复未恢复所选快照，或恢复前的活动数据库没有留下可用保护副本。");
 
     var incompatibleBackupPath = Path.Combine(directory, "incompatible.sqlite3");
