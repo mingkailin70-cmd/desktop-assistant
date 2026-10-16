@@ -15,6 +15,7 @@ public static class ToolInteractionPolicy
             => ToolInteractionOperation.TargetStateChange,
         _ when toolId is ApplicationUiAutomationPolicy.InvokeButtonToolId
             or ApplicationUiAutomationPolicy.ForegroundSetTextToolId
+            or ApplicationUiAutomationPolicy.ForegroundSetToggleToolId
             => ToolInteractionOperation.DesktopExclusive,
         ToolInteractionMode.Background => ToolInteractionOperation.NonInteractive,
         ToolInteractionMode.Foreground => ToolInteractionOperation.DesktopExclusive,
@@ -40,6 +41,7 @@ public static class ToolInteractionPolicy
         // 启动程序、切换窗口和显式前台控件操作只能由明确用户交互触发。
         "app.launch.v1" or "window.activate.v1" or ApplicationUiAutomationPolicy.InvokeButtonToolId
             or ApplicationUiAutomationPolicy.ForegroundSetTextToolId
+            or ApplicationUiAutomationPolicy.ForegroundSetToggleToolId
             => ToolInteractionMode.Foreground,
         _ => ToolInteractionMode.Unknown
     };

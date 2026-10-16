@@ -79,7 +79,8 @@ public enum ToolExpectedOutcome
     DocxDocumentCreatedInConfiguredExport = 33,
     PptxPresentationCreatedInConfiguredExport = 34,
     ApplicationUiValueSet = 35,
-    ApplicationUiActionInvoked = 36
+    ApplicationUiActionInvoked = 36,
+    ApplicationUiToggleStateSet = 37
 }
 
 public static class ApprovalAuditCatalog
@@ -91,6 +92,7 @@ public static class ApprovalAuditCatalog
     public const string ApplicationUiTextSetAction = "app.ui.set-text.v1";
     public const string ApplicationUiForegroundTextSetAction = "app.ui.set-text-foreground.v1";
     public const string ApplicationUiButtonInvokeAction = "app.ui.invoke-button.v1";
+    public const string ApplicationUiForegroundToggleSetAction = "app.ui.set-toggle-foreground.v1";
     public const string Confirmed = "confirmed";
     public const string Declined = "declined";
     public const string RunDotNetTests = "run_dotnet_tests";
@@ -144,6 +146,14 @@ public interface IBackgroundUiAutomationButtonInvoker
 {
     Task<ToolResult> InvokeButtonAsync(string applicationId, string automationId,
         CancellationToken cancellationToken);
+}
+
+/// <summary>Sets one uniquely identified ordinary checkbox to an explicit state in the user-focused foreground app.</summary>
+public interface IBackgroundUiAutomationToggleSetter
+{
+    Task<ToolResult> SetToggleStateInForegroundAsync(string applicationId, string automationId, string state,
+        CancellationToken cancellationToken) => Task.FromResult(new ToolResult(false,
+            "前台复选框设置器未配置；没有访问或修改应用界面。", "UIA_FOREGROUND_TOGGLE_SETTER_UNAVAILABLE"));
 }
 
 /// <summary>短时、无用户浏览器登录态的受限网页会话；状态只保留在进程内存中。</summary>

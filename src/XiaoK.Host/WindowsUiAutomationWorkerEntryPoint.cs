@@ -59,6 +59,8 @@ public static class WindowsUiAutomationWorkerEntryPoint
                     "wait_enabled" when request.Value is null => WaitForEnabledControl(request),
                     "set_text" => SetTextValue(request),
                     "set_text_foreground" => SetTextValueInForeground(request),
+                    "set_toggle_foreground" when request.RootControlType is null && request.WaitMilliseconds == 0
+                        => SetToggleStateInForeground(request),
                     "invoke_button" when request.Value is null && request.RootControlType is null
                         && request.WaitMilliseconds == 0 => InvokeButton(request),
                     _ => new(false, "UIA_INVALID_REQUEST", [])
@@ -376,6 +378,34 @@ public static class WindowsUiAutomationWorkerEntryPoint
                 ? new(false, "UIA_ACTION_OUTCOME_UNCERTAIN", [], OutcomeUncertain: true)
                 : new(false, "UIA_READ_FAILED", []);
         }
+    }
+
+    private static WindowsUiAutomationSnapshotAdapter.WorkerResponse SetToggleStateInForeground(
+        WindowsUiAutomationSnapshotAdapter.WorkerRequest request)
+    {
+        var automationId = request.AutomationId;
+        var state = request.Value;
+        if (automationId is null || automationId.Length is 0 or > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(automationId)
+            || state is not ("On" or "Off"))
+            return new(false, "UIA_INVALID_TOGGLE_REQUEST", []);
+        if (ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(request.ApplicationId,
+            request.DisplayName, request.ExecutablePath))
+            return new(false, "UIA_BUTTON_TARGET_BLOCKED", []);
+
+        var handle = new IntPtr(request.WindowHandle);
+        var foregroundBefore = GetForegroundWindow();
+        if (foregroundBefore == IntPtr.Zero) return new(false, "UIA_FOREGROUND_UNKNOWN", []);
+        if (foregroundBefore != handle) return new(false, "UIA_TARGET_NOT_FOREGROUND", []);
+        if (!TryResolveRoot(request, out _, out var error)) return new(false, error, []);
+        if (GetForegroundWindow() != foregroundBefore)
+            return new(false, "UIA_FOREGROUND_CHANGED_BEFORE_TOGGLE", []);
+
+        var result = SafeUiAutomationToggleWriter.SetStateInForeground(handle, request.ProcessId, automationId, state);
+        return result.Success
+            ? new(true, null, [])
+            : new(false, result.ErrorCode, [], OutcomeUncertain: result.OutcomeUncertain);
     }
 
     private static bool TryResolveRoot(WindowsUiAutomationSnapshotAdapter.WorkerRequest request,

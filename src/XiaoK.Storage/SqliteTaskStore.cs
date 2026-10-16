@@ -12,7 +12,7 @@ namespace XiaoK.Storage;
 /// </summary>
 public sealed class SqliteTaskStore : ITaskStore
 {
-    private const int CurrentSchemaVersion = 9;
+    private const int CurrentSchemaVersion = 10;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private const string TasksJsonMigrationMarker = "tasks-json-v1";
@@ -197,7 +197,7 @@ public sealed class SqliteTaskStore : ITaskStore
                     + "CREATE INDEX IF NOT EXISTS ix_tasks_updated ON tasks(updated_utc_ticks DESC);"
                     + "CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY NOT NULL, completed_utc_ticks INTEGER NOT NULL);"
                     + CreateContactReplyStylesTableSql()
-                    + CreateApprovalAuditTableV9Sql()
+                    + CreateApprovalAuditTableV10Sql()
                     + $"PRAGMA user_version={CurrentSchemaVersion};");
                 database.Execute("COMMIT;");
             }
@@ -379,6 +379,28 @@ public sealed class SqliteTaskStore : ITaskStore
             }
         }
 
+        if (version == 9)
+        {
+            database.Execute("BEGIN IMMEDIATE;");
+            try
+            {
+                database.Execute("DROP INDEX IF EXISTS ix_approval_audit_created;"
+                    + "ALTER TABLE approval_audit RENAME TO approval_audit_v9;"
+                    + CreateApprovalAuditTableV10Sql()
+                    + "INSERT INTO approval_audit(id,action_id,outcome,created_utc_ticks) "
+                    + "SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v9;"
+                    + "DROP TABLE approval_audit_v9;"
+                    + "PRAGMA user_version=10;");
+                database.Execute("COMMIT;");
+                version = 10;
+            }
+            catch
+            {
+                TryRollback(database);
+                throw;
+            }
+        }
+
         MigrateLegacyJson(database);
         MigrateLegacyContactReplyStyles(database);
     }
@@ -428,6 +450,18 @@ public sealed class SqliteTaskStore : ITaskStore
         + "OR (action_id='app.ui.set-text.v1' AND outcome IN ('confirmed','declined')) "
         + "OR (action_id='app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')) "
         + "OR (action_id='app.ui.set-text-foreground.v1' AND outcome IN ('confirmed','declined'))));"
+        + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
+
+    private static string CreateApprovalAuditTableV10Sql() => "CREATE TABLE IF NOT EXISTS approval_audit ("
+        + "id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+        + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed') "
+        + "OR (action_id='file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text-foreground.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-toggle-foreground.v1' AND outcome IN ('confirmed','declined'))));"
         + "CREATE INDEX IF NOT EXISTS ix_approval_audit_created ON approval_audit(created_utc_ticks DESC);";
 
     private void MigrateLegacyJson(SqliteDatabase database)
@@ -572,6 +606,8 @@ public sealed class SqliteTaskStore : ITaskStore
             || actionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
             || actionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
+                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+            || actionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction
                 && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
         if (!isKnownPair) throw new ArgumentException("审批审计只接受已登记动作及其固定结果。", nameof(actionId));
         return new ApprovalAuditRecord(Guid.NewGuid(), actionId, outcome, DateTimeOffset.UtcNow);
@@ -626,7 +662,9 @@ public sealed class SqliteTaskStore : ITaskStore
                             : actionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction
                                 ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
                             : actionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction
-                                && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
+                                ? outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined
+                                : actionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction
+                                    && outcome is ApprovalAuditCatalog.Confirmed or ApprovalAuditCatalog.Declined;
 
     private static void InsertContactReplyStyle(SqliteDatabase database, ContactReplyStylePreference preference, bool ignoreExisting)
     {

@@ -35,6 +35,14 @@ internal static class UiAutomationWorkerProbe
                 AutomationProperties.SetAutomationId(foregroundTextBox, "xiaok-synthetic-foreground-textbox");
                 var foregroundTextDecoy = new Button { Content = "其他焦点目标" };
                 AutomationProperties.SetAutomationId(foregroundTextDecoy, "xiaok-synthetic-foreground-decoy");
+                var foregroundToggle = new CheckBox { Content = "合成开关", IsThreeState = false, IsChecked = false };
+                AutomationProperties.SetAutomationId(foregroundToggle, "xiaok-synthetic-foreground-toggle");
+                var indeterminateToggle = new CheckBox { Content = "未确定开关", IsThreeState = true, IsChecked = null };
+                AutomationProperties.SetAutomationId(indeterminateToggle, "xiaok-synthetic-indeterminate-toggle");
+                var duplicateToggleOne = new CheckBox { Content = "重复开关一", IsChecked = false };
+                var duplicateToggleTwo = new CheckBox { Content = "重复开关二", IsChecked = false };
+                AutomationProperties.SetAutomationId(duplicateToggleOne, "xiaok-synthetic-duplicate-toggle");
+                AutomationProperties.SetAutomationId(duplicateToggleTwo, "xiaok-synthetic-duplicate-toggle");
                 var waitButton = new Button { Content = "等待控件", IsEnabled = false };
                 AutomationProperties.SetAutomationId(waitButton, "xiaok-synthetic-never-enabled");
                 var duplicateWaitButton = new Button { Content = "重复目标", IsEnabled = true };
@@ -105,7 +113,7 @@ internal static class UiAutomationWorkerProbe
                 {
                     Title = "小K UIA 按钮调用合成探针",
                     Width = 280,
-                    Height = 120,
+                    Height = 180,
                     Left = 620,
                     Top = 24,
                     WindowStyle = WindowStyle.ToolWindow,
@@ -123,7 +131,14 @@ internal static class UiAutomationWorkerProbe
                     WindowStyle = WindowStyle.ToolWindow,
                     ShowInTaskbar = false,
                     ShowActivated = false,
-                    Content = new StackPanel { Children = { foregroundTextBox, foregroundTextDecoy } }
+                    Content = new StackPanel
+                    {
+                        Children =
+                        {
+                            foregroundTextBox, foregroundTextDecoy, foregroundToggle, indeterminateToggle,
+                            duplicateToggleOne, duplicateToggleTwo
+                        }
+                    }
                 };
                 var dispatcher = window.Dispatcher;
                 void ShutdownWhenAllWindowsClose()
@@ -145,7 +160,8 @@ internal static class UiAutomationWorkerProbe
                         && foregroundTextHandle != IntPtr.Zero)
                         created.TrySetResult(new ProbeWindow(mainHandle, wideHandle, invokeHandle, dispatcher, window,
                             wideWindow, invokeWindow, foregroundTextHandle, foregroundTextWindow, foregroundTextBox,
-                            foregroundTextDecoy, button));
+                            foregroundTextDecoy, foregroundToggle, indeterminateToggle, duplicateToggleOne,
+                            duplicateToggleTwo, button));
                 }
                 window.SourceInitialized += (_, _) =>
                 {
@@ -324,6 +340,7 @@ internal static class UiAutomationWorkerProbe
                 throw new InvalidOperationException($"重复AutomationId没有失败关闭：{ambiguousCondition.ErrorCode ?? "NO_ERROR"} / {ambiguousCondition.Summary}");
             await VerifyWorkerCancellationAndTimeoutAsync(desktop, probe);
             await VerifyForegroundTextSetAsync(probe);
+            await VerifyForegroundToggleSetAsync(probe);
             if (Volatile.Read(ref activationCount) != 0)
                 throw new InvalidOperationException("只读UIA查询触发了合成控件动作。");
             if (GetForegroundWindow() != probe.ForegroundTextHandle)
@@ -432,6 +449,107 @@ internal static class UiAutomationWorkerProbe
             || valueAfterFocusChange != "写入后焦点改变" || !decoyFocused
             || GetForegroundWindow() != probe.ForegroundTextHandle)
             throw new InvalidOperationException($"写入后焦点改变没有被标记为需人工核对的结果不确定状态：error={focusChangedAfterWrite.ErrorCode ?? "NONE"}; state={focusChangedAfterWrite.FinalState}; valueMatched={valueAfterFocusChange == "写入后焦点改变"}; decoyFocused={decoyFocused}");
+    }
+
+    private static async Task VerifyForegroundToggleSetAsync(ProbeWindow probe)
+    {
+        var desktop = new WindowsDesktopTools(
+            [new DesktopApp("uia-probe", Environment.ProcessPath!)],
+            [], new SyntheticWindowProcessController(probe.ForegroundTextHandle));
+        await ActivateWindowAsync(probe, probe.InvokeWindow, probe.InvokeHandle);
+        var notForegroundStarter = new BlockingWorkerProcessStarter();
+        var notForeground = await new WindowsUiAutomationSnapshotAdapter(desktop, notForegroundStarter,
+                TimeSpan.FromMilliseconds(150))
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        if (notForeground.Success || notForeground.ErrorCode != "UIA_TARGET_NOT_FOREGROUND"
+            || notForegroundStarter.Started.IsCompleted
+            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsChecked) != false)
+            throw new InvalidOperationException("目标应用不在前台时，复选框操作仍启动worker或改变了状态。");
+
+        using (var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150)))
+        {
+            var cancellationStarter = new BlockingWorkerProcessStarter();
+            var cancelled = await new WindowsUiAutomationSnapshotAdapter(desktop, cancellationStarter,
+                    TimeSpan.FromSeconds(2))
+                .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", cancellation.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            if (cancelled.Success || cancelled.ErrorCode != "UIA_FOREGROUND_TOGGLE_CANCELLED_BEFORE_OPERATION"
+                || cancelled.FinalState != XiaoK.Core.TaskLifecycleState.Cancelled
+                || cancellationStarter.Started.IsCompleted
+                || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsChecked) != false)
+                throw new InvalidOperationException("等待目标前台期间取消没有在worker启动前停止复选框操作。");
+        }
+
+        await ActivateWindowAsync(probe, probe.ForegroundTextWindow, probe.ForegroundTextHandle);
+        await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextDecoy.Focus());
+        var unfocused = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (unfocused.Success || unfocused.ErrorCode != "UIA_FOCUS_NOT_TOGGLE_TARGET"
+            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsChecked) != false
+            || GetForegroundWindow() != probe.ForegroundTextHandle)
+            throw new InvalidOperationException("目标复选框没有焦点时worker仍修改了状态或改变了前台。");
+
+        var duplicate = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-duplicate-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (duplicate.Success || duplicate.ErrorCode != "UIA_AUTOMATION_ID_AMBIGUOUS"
+            || await probe.Dispatcher.InvokeAsync(() => probe.DuplicateToggleOne.IsChecked == true || probe.DuplicateToggleTwo.IsChecked == true))
+            throw new InvalidOperationException("复选框AutomationId重复时没有拒绝操作或改变了重复控件。");
+
+        await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.Focus());
+        var changes = 0;
+        await probe.Dispatcher.InvokeAsync(() =>
+        {
+            probe.ForegroundToggle.Checked += (_, _) => Interlocked.Increment(ref changes);
+            probe.ForegroundToggle.Unchecked += (_, _) => Interlocked.Increment(ref changes);
+        });
+        var enabled = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (!enabled.Success || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsChecked) != true
+            || await probe.Dispatcher.InvokeAsync(() => !probe.ForegroundToggle.IsKeyboardFocused)
+            || Volatile.Read(ref changes) != 1 || GetForegroundWindow() != probe.ForegroundTextHandle)
+            throw new InvalidOperationException($"前台唯一聚焦复选框没有设为On或焦点/前台改变：error={enabled.ErrorCode ?? "NONE"}; changes={changes}");
+
+        var alreadyEnabled = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (!alreadyEnabled.Success || Volatile.Read(ref changes) != 1
+            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsKeyboardFocused))
+            throw new InvalidOperationException("复选框已是目标状态时重复调用Toggle，或丢失了用户焦点。");
+
+        await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.Focus());
+        var disabled = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "Off", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (!disabled.Success || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsChecked) != false
+            || Volatile.Read(ref changes) != 2 || !await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsKeyboardFocused))
+            throw new InvalidOperationException("复选框没有通过一次状态切换设为Off并保留焦点。");
+
+        await probe.Dispatcher.InvokeAsync(() => probe.IndeterminateToggle.Focus());
+        var indeterminate = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-indeterminate-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (indeterminate.Success || indeterminate.ErrorCode != "UIA_TOGGLE_STATE_UNSUPPORTED"
+            || await probe.Dispatcher.InvokeAsync(() => probe.IndeterminateToggle.IsChecked) is not null)
+            throw new InvalidOperationException("未确定状态复选框没有失败关闭或被修改。");
+
+        await probe.Dispatcher.InvokeAsync(() =>
+        {
+            probe.ForegroundToggle.Checked += (_, _) => probe.ForegroundTextDecoy.Focus();
+            probe.ForegroundToggle.Focus();
+        });
+        var uncertain = await new WindowsUiAutomationSnapshotAdapter(desktop)
+            .SetToggleStateInForegroundAsync("uia-probe", "xiaok-synthetic-foreground-toggle", "On", CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        if (uncertain.Success || uncertain.ErrorCode != "UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_TOGGLE"
+            || uncertain.FinalState != XiaoK.Core.TaskLifecycleState.OutcomeUncertain
+            || await probe.Dispatcher.InvokeAsync(() => probe.ForegroundToggle.IsChecked) != true
+            || !await probe.Dispatcher.InvokeAsync(() => probe.ForegroundTextDecoy.IsKeyboardFocused)
+            || GetForegroundWindow() != probe.ForegroundTextHandle)
+            throw new InvalidOperationException("切换后焦点变化没有被保守地报告为结果不确定。");
     }
 
     private static (string AutomationId, string Name, bool IsEnabled) ReadOnlyInspect(IntPtr handle)
@@ -600,5 +718,6 @@ internal static class UiAutomationWorkerProbe
 
     private sealed record ProbeWindow(IntPtr Handle, IntPtr WideHandle, IntPtr InvokeHandle, Dispatcher Dispatcher,
         Window Window, Window WideWindow, Window InvokeWindow, IntPtr ForegroundTextHandle,
-        Window ForegroundTextWindow, TextBox ForegroundTextBox, Button ForegroundTextDecoy, Button Button);
+        Window ForegroundTextWindow, TextBox ForegroundTextBox, Button ForegroundTextDecoy, CheckBox ForegroundToggle,
+        CheckBox IndeterminateToggle, CheckBox DuplicateToggleOne, CheckBox DuplicateToggleTwo, Button Button);
 }

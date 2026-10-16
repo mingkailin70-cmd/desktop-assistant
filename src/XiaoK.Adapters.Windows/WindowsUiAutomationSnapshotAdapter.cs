@@ -12,7 +12,7 @@ namespace XiaoK.Adapters.Windows;
 
 /// <summary>Runs bounded UIA operations in a disposable helper process.</summary>
 public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSnapshotReader,
-    IBackgroundUiAutomationTextSetter, IBackgroundUiAutomationButtonInvoker
+    IBackgroundUiAutomationTextSetter, IBackgroundUiAutomationButtonInvoker, IBackgroundUiAutomationToggleSetter
 {
     private const int MaximumRequestBytes = 16 * 1024;
     private const int MaximumResponseBytes = 32 * 1024;
@@ -227,6 +227,60 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             Data: "已调用目标按钮");
     }
 
+    public async Task<ToolResult> SetToggleStateInForegroundAsync(string applicationId, string automationId,
+        string state, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return new(false, "复选框工作进程启动前任务已取消；没有访问或修改控件。",
+                "UIA_FOREGROUND_TOGGLE_CANCELLED_BEFORE_OPERATION", FinalState: TaskLifecycleState.Cancelled);
+        if (!_desktop.IsUiAutomationButtonTargetAllowed(applicationId))
+            return new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用复选框操作。", "UIA_BUTTON_TARGET_BLOCKED");
+        if (string.IsNullOrWhiteSpace(automationId) || automationId.Length > 96
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))
+            || ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(automationId)
+            || state is not ("On" or "Off"))
+            return new(false, "AutomationId 或开关状态不符合固定限制；没有访问应用界面。", "UIA_INVALID_TOGGLE_REQUEST");
+
+        (WorkerResponse? Response, ToolResult? Failure) result;
+        try
+        {
+            result = await RunWorkerAsync(applicationId,
+                new WorkerCommand("set_toggle_foreground", automationId, 0, state), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(false, "等待目标应用前台期间任务已取消；没有启动复选框工作进程，也没有修改状态。",
+                "UIA_FOREGROUND_TOGGLE_CANCELLED_BEFORE_OPERATION", FinalState: TaskLifecycleState.Cancelled);
+        }
+        if (result.Failure is not null) return result.Failure;
+        if (result.Response is null || !result.Response.Success)
+        {
+            var error = result.Response?.ErrorCode ?? "UIA_TOGGLE_SET_FAILED";
+            var uncertain = result.Response?.OutcomeUncertain == true
+                || error is "UIA_TOGGLE_VERIFY_FAILED" or "UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_TOGGLE";
+            var detail = uncertain
+                ? "复选框操作后无法确认最终状态；请先人工检查目标应用，不要自动重试。"
+                : error switch
+                {
+                    "UIA_TARGET_NOT_FOREGROUND" => "批准后15秒内目标窗口没有成为前台；小K没有切换窗口或修改复选框。",
+                    "UIA_FOREGROUND_UNKNOWN" => "无法核验当前前台窗口；没有修改复选框。",
+                    "UIA_FOCUS_NOT_TOGGLE_TARGET" => "目标窗口已在前台，但指定复选框没有键盘焦点；小K没有移动焦点或修改状态。",
+                    "UIA_FOREGROUND_CHANGED_BEFORE_TOGGLE" => "修改前检测到前台窗口变化；没有修改复选框。",
+                    "UIA_TARGET_CHANGED" => "目标窗口在检查期间发生变化；没有修改复选框。",
+                    "UIA_AUTOMATION_ID_AMBIGUOUS" => "目标控件标识不唯一；没有修改复选框。",
+                    "UIA_TREE_LIMIT" => "目标界面超出固定检查范围；没有修改复选框。",
+                    "UIA_TOGGLE_STATE_UNSUPPORTED" => "目标不是唯一、可见、启用且状态明确的普通复选框；没有修改状态。",
+                    "UIA_TOGGLE_STATE_CHANGED_BEFORE_ACTION" => "复选框在操作前自行改变；小K没有继续切换，请先人工核对。",
+                    "UIA_BUTTON_TARGET_BLOCKED" => "目标应用类型不允许使用通用复选框操作；没有修改状态。",
+                    _ => "没有找到唯一、可见、启用且支持 Toggle 的普通复选框；没有修改状态。"
+                };
+            return new(false, detail, error, FinalState: uncertain ? TaskLifecycleState.OutcomeUncertain : null);
+        }
+        return new(true, "已核对前台目标复选框达到指定状态；如果原本已符合要求则没有切换。小K没有切换窗口、移动焦点或模拟键鼠。",
+            Data: "复选框状态已核对");
+    }
+
     private async Task<(WorkerResponse? Response, ToolResult? Failure)> RunWorkerAsync(string applicationId,
         WorkerCommand command, CancellationToken cancellationToken)
     {
@@ -240,6 +294,12 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         if (command.Mode == "invoke_button"
             && ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(command.AutomationId))
             return (null, new(false, "AutomationId 命中常见高风险按钮标记；没有访问或调用控件。", "UIA_BUTTON_ACTION_BLOCKED"));
+        if (command.Mode == "set_toggle_foreground" && !_desktop.IsUiAutomationButtonTargetAllowed(applicationId))
+            return (null, new(false, "目标应用不允许使用通用复选框操作；没有修改控件。", "UIA_BUTTON_TARGET_BLOCKED"));
+        if (command.Mode == "set_toggle_foreground"
+            && (ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(command.AutomationId)
+                || command.Value is not ("On" or "Off")))
+            return (null, new(false, "复选框标识或开关状态无效；没有访问或修改控件。", "UIA_INVALID_TOGGLE_REQUEST"));
         if (!_desktop.TryResolveUiAutomationTarget(applicationId, out var target, out var targetError))
             return (null, targetError switch
             {
@@ -256,6 +316,9 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         if (command.Mode == "invoke_button" && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(
             applicationId, target!.DisplayName, target.ExecutablePath))
             return (null, new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用 UIA 按钮操作；没有调用控件。", "UIA_BUTTON_TARGET_BLOCKED"));
+        if (command.Mode == "set_toggle_foreground" && ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(
+            applicationId, target!.DisplayName, target.ExecutablePath))
+            return (null, new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用 UIA 复选框操作；没有修改控件。", "UIA_BUTTON_TARGET_BLOCKED"));
 
         var executablePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath))
@@ -268,7 +331,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             return (null, new(false, "只读 UIA 工作进程不可用；没有访问窗口。", "UIA_WORKER_UNAVAILABLE"));
 
         var resolvedTarget = target!;
-        if (command.Mode is "invoke_button" or "set_text_foreground")
+        if (command.Mode is "invoke_button" or "set_text_foreground" or "set_toggle_foreground")
         {
             var targetWindow = new IntPtr(resolvedTarget.WindowHandle);
             var foregroundWait = Stopwatch.StartNew();
@@ -276,13 +339,19 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!IsWindow(targetWindow) || !IsWindowVisible(targetWindow))
-                    return (null, new(false, command.Mode == "set_text_foreground"
-                        ? "目标窗口在等待前台期间关闭或变化；没有写入文本。"
-                        : "目标窗口在等待前台期间关闭或变化；没有调用按钮。", "UIA_TARGET_CHANGED"));
+                    return (null, new(false, command.Mode switch
+                    {
+                        "set_text_foreground" => "目标窗口在等待前台期间关闭或变化；没有写入文本。",
+                        "set_toggle_foreground" => "目标窗口在等待前台期间关闭或变化；没有修改复选框。",
+                        _ => "目标窗口在等待前台期间关闭或变化；没有调用按钮。"
+                    }, "UIA_TARGET_CHANGED"));
                 if (foregroundWait.Elapsed >= _targetForegroundWait)
-                    return (null, new(false, command.Mode == "set_text_foreground"
-                        ? "确认后15秒内目标窗口没有成为前台；没有写入文本。"
-                        : "确认后15秒内目标窗口没有成为前台；没有调用按钮。", "UIA_TARGET_NOT_FOREGROUND"));
+                    return (null, new(false, command.Mode switch
+                    {
+                        "set_text_foreground" => "确认后15秒内目标窗口没有成为前台；没有写入文本。",
+                        "set_toggle_foreground" => "确认后15秒内目标窗口没有成为前台；没有修改复选框。",
+                        _ => "确认后15秒内目标窗口没有成为前台；没有调用按钮。"
+                    }, "UIA_TARGET_NOT_FOREGROUND"));
                 await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -324,7 +393,7 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             outputTask = ReadBoundedOutputAsync(process.StandardOutput.BaseStream, MaximumResponseBytes, linked.Token);
             errorTask = DrainErrorAsync(process.StandardError.BaseStream);
-            mutationMayHaveStarted = command.Mode is "set_text" or "set_text_foreground" or "invoke_button";
+            mutationMayHaveStarted = command.Mode is "set_text" or "set_text_foreground" or "invoke_button" or "set_toggle_foreground";
             await process.StandardInput.BaseStream.WriteAsync(request, linked.Token).ConfigureAwait(false);
             await process.StandardInput.BaseStream.FlushAsync(linked.Token).ConfigureAwait(false);
             process.StandardInput.Close();
@@ -369,7 +438,8 @@ public sealed class WindowsUiAutomationSnapshotAdapter : IReadOnlyUiAutomationSn
         string? RootControlType = null);
 
     private static WorkerResponse UncertainMutationResponse(WorkerCommand command) => new(false,
-        command.Mode == "invoke_button" ? "UIA_ACTION_OUTCOME_UNCERTAIN" : "UIA_VALUE_VERIFY_FAILED",
+        command.Mode == "invoke_button" ? "UIA_ACTION_OUTCOME_UNCERTAIN"
+            : command.Mode == "set_toggle_foreground" ? "UIA_TOGGLE_VERIFY_FAILED" : "UIA_VALUE_VERIFY_FAILED",
         [], OutcomeUncertain: true);
 
     private static async Task<byte[]> ReadBoundedOutputAsync(Stream stream, int maximumBytes, CancellationToken token)

@@ -783,10 +783,13 @@ try
     passed.Add("SQLite v6 到 v7 迁移保守标记旧任务，并能往返保存脱敏执行检查点");
 
     await CheckSqliteV7ToV9ApprovalAuditMigrationAsync(tempRoot);
-    passed.Add("SQLite v7 到 v9 迁移保留既有审计并允许固定UIA审批结果");
+    passed.Add("SQLite v7 到 v10 迁移保留既有审计并允许固定UIA审批结果");
 
     await CheckSqliteV8ToV9ForegroundAuditMigrationAsync(tempRoot);
-    passed.Add("SQLite v8 到 v9 迁移保留既有审计并允许前台文本审批结果");
+    passed.Add("SQLite v8 到 v10 迁移保留既有审计并允许前台文本/复选框审批结果");
+
+    await CheckSqliteV9ToV10ToggleAuditMigrationAsync(tempRoot);
+    passed.Add("SQLite v9 到 v10 事务迁移保留旧审计并开放固定复选框审批结果");
 
     await CheckSqliteLegacyMigrationOmitsUntrustedTextAsync(tempRoot);
     passed.Add("旧 JSON 任务迁移保留源文件但不迁移结果正文或自由文本摘要");
@@ -3748,6 +3751,10 @@ static async Task CheckSqliteV7ToV9ApprovalAuditMigrationAsync(string root)
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
         ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
     var migratedAudit = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     var reopenedStore = new SqliteTaskStore(databasePath);
     var reopenedAudit = await reopenedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
@@ -3756,10 +3763,11 @@ static async Task CheckSqliteV7ToV9ApprovalAuditMigrationAsync(string root)
         && originalAudit.All(original => preservedAudit.Any(preserved => preserved.Id == original.Id
             && preserved.ActionId == original.ActionId && preserved.Outcome == original.Outcome
             && preserved.CreatedAtUtc == original.CreatedAtUtc))
-        && migratedAudit.Count == 6 && reopenedAudit.Count == 6
+        && migratedAudit.Count == 8 && reopenedAudit.Count == 8
         && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction) == 2
-        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2,
-        "SQLite v7 到 v9 迁移没有先备份、保留原审计并持久化固定UIA批准/拒绝结果。");
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction) == 2,
+        "SQLite v7 到 v10 迁移没有先备份、保留原审计并持久化固定UIA批准/拒绝结果。");
 }
 
 static async Task CheckSqliteV8ToV9ForegroundAuditMigrationAsync(string root)
@@ -3782,6 +3790,10 @@ static async Task CheckSqliteV8ToV9ForegroundAuditMigrationAsync(string root)
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
         ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
     var migratedAudit = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     var reopenedAudit = await new SqliteTaskStore(databasePath).GetRecentApprovalAuditAsync(20, CancellationToken.None);
 
@@ -3789,9 +3801,40 @@ static async Task CheckSqliteV8ToV9ForegroundAuditMigrationAsync(string root)
         && originalAudit.All(original => preservedAudit.Any(preserved => preserved.Id == original.Id
             && preserved.ActionId == original.ActionId && preserved.Outcome == original.Outcome
             && preserved.CreatedAtUtc == original.CreatedAtUtc))
-        && migratedAudit.Count == 4 && reopenedAudit.Count == 4
-        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction) == 2,
-        "SQLite v8 到 v9 迁移没有先备份、保留现有审计并持久化固定前台文本批准/拒绝结果。");
+        && migratedAudit.Count == 6 && reopenedAudit.Count == 6
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction) == 2
+        && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction) == 2,
+        "SQLite v8 到 v10 迁移没有先备份、保留现有审计并持久化固定前台文本/复选框批准/拒绝结果。");
+}
+
+static async Task CheckSqliteV9ToV10ToggleAuditMigrationAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-v9-to-v10-toggle-audit");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var originalStore = new SqliteTaskStore(databasePath);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    var originalAudit = await originalStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+
+    SqliteSchemaFixture.RevertToVersionNine(databasePath);
+    var migratedStore = new SqliteTaskStore(databasePath);
+    var migrationBackupExists = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").Any();
+    var migratedAuditBeforeAppend = await migratedStore.GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await migratedStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
+    var reopenedAudit = await new SqliteTaskStore(databasePath).GetRecentApprovalAuditAsync(20, CancellationToken.None);
+    Require(migrationBackupExists && originalAudit.Count == 2 && migratedAuditBeforeAppend.Count == 2
+        && originalAudit.All(original => migratedAuditBeforeAppend.Any(preserved => preserved.Id == original.Id
+            && preserved.ActionId == original.ActionId && preserved.Outcome == original.Outcome
+            && preserved.CreatedAtUtc == original.CreatedAtUtc))
+        && reopenedAudit.Count == 4
+        && reopenedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction) == 2,
+        "SQLite v9 到 v10 迁移没有事务升级、先备份、保留旧审计并持久化复选框批准/拒绝结果。");
 }
 
 static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
@@ -3856,12 +3899,16 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         ApprovalAuditCatalog.Confirmed, CancellationToken.None);
     await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiButtonInvokeAction,
         ApprovalAuditCatalog.Declined, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+    await store.AppendApprovalAuditAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+        ApprovalAuditCatalog.Declined, CancellationToken.None);
     const string untrustedAuditSentinel = "PRIVATE_APPROVAL_DETAILS_MUST_NOT_BE_STORED";
     var untrustedActionRejected = false;
     try { await store.AppendApprovalAuditAsync(untrustedAuditSentinel, "confirmed", CancellationToken.None); }
     catch (ArgumentException) { untrustedActionRejected = true; }
     var audit = await store.GetRecentApprovalAuditAsync(20, CancellationToken.None);
-    Require(untrustedActionRejected && audit.Count == 11
+    Require(untrustedActionRejected && audit.Count == 13
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.CodeTaskAction
             && row.Outcome == ApprovalAuditCatalog.RunDotNetTests)
         && audit.Any(row => row.ActionId == ApprovalAuditCatalog.MessageSendAction
@@ -3875,6 +3922,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
         && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiTextSetAction) == 2
         && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundTextSetAction) == 2
         && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2
+        && audit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction) == 2
         && DatabaseFilesOmitSentinel(databasePath, untrustedAuditSentinel),
         "审批审计接受了自由文本，或没有按固定动作/结果保存审核痕迹。");
 
@@ -3883,7 +3931,7 @@ static async Task CheckSqliteContactReplyStyleMigrationAsync(string root)
     var backedUp = await backup.GetContactReplyStylesAsync(CancellationToken.None);
     var backedUpAudit = await backup.GetRecentApprovalAuditAsync(20, CancellationToken.None);
     Require(backedUp.Count == 1 && backedUp[0].ContactName == "Bob" && backedUp[0].StyleId == "formal"
-        && backedUpAudit.Count == 11,
+        && backedUpAudit.Count == 13,
         "SQLite 一致性备份没有包含联系人回复风格或审批审计记录。");
 
     var changedAfterBackup = new ContactReplyStylePreference("Charlie", "casual",
@@ -4867,6 +4915,25 @@ static async Task CheckUiTextWritePolicyAsync()
         && foregroundProposal.Target == notepadId && foregroundProposal.Arguments["automation_id"] == "Editor.Compose"
         && foregroundProposal.Arguments["value"] == value,
         "前台UIA文本填写语法没有精确保留替换文本或绑定固定应用/AutomationId。 ");
+    var toggleProposal = ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal(
+        "前台设置界面复选框：记事本|Settings.AutoSave|开启", apps);
+    Require(toggleProposal is not null && toggleProposal.ToolId == ApplicationUiAutomationPolicy.ForegroundSetToggleToolId
+        && toggleProposal.Target == notepadId && toggleProposal.Arguments["automation_id"] == "Settings.AutoSave"
+        && toggleProposal.Arguments["state"] == "On"
+        && toggleProposal.ExpectedOutcome == ToolExpectedOutcome.ApplicationUiToggleStateSet,
+        "前台复选框命令没有精确绑定应用、AutomationId 和明确的On状态。 ");
+    var turnOffToggleProposal = ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal(
+        "前台设置界面复选框：记事本|Settings.AutoSave|关闭", apps);
+    Require(turnOffToggleProposal?.Arguments.GetValueOrDefault("state") == "Off"
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：记事本|Settings.AutoSave|切换", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：微信|MessageEdit|开启", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：QQ|MessageEdit|关闭", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：Edge|Privacy|开启", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：资源管理器|HiddenFiles|开启", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：加密货币钱包|SendTo|开启", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：记事本|Button.DeleteSelected|开启", apps) is null
+        && ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal("前台设置界面复选框：记事本|bad id|开启", apps) is null,
+        "复选框指令接受了非明确状态、受保护应用或可识别的高风险/无效目标。 ");
     Require(ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：微信|MessageEdit|你好", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：QQ|MessageEdit|你好", apps) is null
         && ApplicationUiAutomationPolicy.CreateSetTextToolProposal("设置界面文本：Edge|Address|example.com", apps) is null
@@ -4899,6 +4966,18 @@ static async Task CheckUiTextWritePolicyAsync()
         && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-text-foreground").Contains("手动聚焦", StringComparison.Ordinal)
         && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-text-foreground").Contains("不移动焦点", StringComparison.Ordinal),
         "前台UIA文本填写未执行桌面独占/显式交互准入，或任务中心未披露副作用范围。 ");
+    Require(ToolInteractionPolicy.GetMode(ApplicationUiAutomationPolicy.ForegroundSetToggleToolId) == ToolInteractionMode.Foreground
+        && ToolInteractionPolicy.GetOperation(ApplicationUiAutomationPolicy.ForegroundSetToggleToolId)
+            == ToolInteractionOperation.DesktopExclusive
+        && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.ForegroundSetToggleToolId,
+            ToolExecutionAccess.BackgroundOnly)?.ErrorCode == "FOREGROUND_REQUIRED"
+        && ToolInteractionPolicy.Check(ApplicationUiAutomationPolicy.ForegroundSetToggleToolId,
+            ToolExecutionAccess.ExplicitUserInteraction) is null
+        && TaskFailureSafetyPolicy.RequiresManualVerification("app-ui-set-toggle-foreground", routeStarted: true)
+        && TaskFailureSafetyPolicy.IsUncertainOutcomeErrorCode("UIA_TOGGLE_VERIFY_FAILED")
+        && TaskHistoryDisplayPolicy.TargetScope("app-ui-set-toggle-foreground").Contains("手动聚焦", StringComparison.Ordinal)
+        && TaskHistoryDisplayPolicy.ExecutionMode("app-ui-set-toggle-foreground").Contains("不移动焦点", StringComparison.Ordinal),
+        "前台复选框没有强制桌面独占、显式交互、结果核验及历史提示。 ");
 
     var assistantSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host", "AssistantRuntime.cs"));
     var foregroundRouteStart = assistantSource.IndexOf("if (category == \"app-ui-set-text-foreground\")", StringComparison.Ordinal);
@@ -4911,6 +4990,16 @@ static async Task CheckUiTextWritePolicyAsync()
         && !foregroundRoute.Contains("ExecuteBackgroundAsync", StringComparison.Ordinal)
         && assistantSource.Contains("IsForegroundSetTextUserRequest(request)) return \"app-ui-set-text-foreground\";", StringComparison.Ordinal),
         "前台文本指令没有以单独的显式交互路径路由，或误入后台队列。 ");
+    var toggleRouteStart = assistantSource.IndexOf("if (category == \"app-ui-set-toggle-foreground\")", StringComparison.Ordinal);
+    var toggleRouteEnd = toggleRouteStart < 0 ? -1 : assistantSource.IndexOf("if (category == \"app-ui-set-text-foreground\")",
+        toggleRouteStart, StringComparison.Ordinal);
+    var toggleRoute = toggleRouteStart >= 0 && toggleRouteEnd > toggleRouteStart
+        ? assistantSource[toggleRouteStart..toggleRouteEnd]
+        : string.Empty;
+    Require(toggleRoute.Contains("_broker.ExecuteAsync(proposal, token)", StringComparison.Ordinal)
+        && !toggleRoute.Contains("ExecuteBackgroundAsync", StringComparison.Ordinal)
+        && assistantSource.Contains("IsForegroundSetToggleUserRequest(request)) return \"app-ui-set-toggle-foreground\";", StringComparison.Ordinal),
+        "前台复选框指令没有走单独显式交互路径，或误入后台工具队列。 ");
 
     var buttonProposal = ApplicationUiAutomationPolicy.CreateInvokeButtonToolProposal(
         "点击界面按钮：记事本|Editor.SaveButton", apps);
@@ -5028,6 +5117,48 @@ static async Task CheckUiTextWritePolicyAsync()
         && cancelledInvoker.CallCount == 0,
         "用户在确认后取消仍执行了 UIA 按钮操作。 ");
 
+    var toggleSetter = new RecordingBackgroundUiAutomationToggleSetter();
+    var toggleApproval = new RecordingApprovalPresenter(true);
+    var toggleResult = await CreateBroker(toggleApproval, new RecordingBackgroundUiAutomationTextSetter(),
+        InteractionTargetUsage.NotInUse, toggleSetter: toggleSetter)
+        .ExecuteAsync(toggleProposal!, ToolExecutionAccess.ExplicitUserInteraction, CancellationToken.None, Guid.NewGuid());
+    Require(toggleResult.Success && toggleSetter.CallCount == 1 && toggleSetter.ApplicationId == notepadId
+        && toggleSetter.AutomationId == "Settings.AutoSave" && toggleSetter.State == "On"
+        && toggleApproval.CallCount == 1
+        && toggleApproval.LastActionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction
+        && toggleApproval.LastDetails?.Contains("Settings.AutoSave", StringComparison.Ordinal) == true
+        && toggleApproval.LastDetails?.Contains("指定状态：开启", StringComparison.Ordinal) == true
+        && toggleApproval.LastDetails?.Contains("15秒内手动切到目标应用", StringComparison.Ordinal) == true
+        && toggleApproval.LastDetails?.Contains("可能会立即应用设置", StringComparison.Ordinal) == true
+        && toggleApproval.LastDetails?.Contains("不会切换窗口、移动焦点", StringComparison.Ordinal) == true,
+        "前台复选框没有在精确审批后对唯一目标执行一次明确状态设置。 ");
+
+    var declinedToggleSetter = new RecordingBackgroundUiAutomationToggleSetter();
+    var declinedToggle = await CreateBroker(new RecordingApprovalPresenter(false),
+        new RecordingBackgroundUiAutomationTextSetter(), InteractionTargetUsage.NotInUse,
+        toggleSetter: declinedToggleSetter).ExecuteAsync(toggleProposal!, CancellationToken.None);
+    Require(!declinedToggle.Success && declinedToggle.ErrorCode == "UIA_FOREGROUND_TOGGLE_DECLINED"
+        && declinedToggleSetter.CallCount == 0,
+        "拒绝前台复选框确认后仍修改了控件。 ");
+
+    var backgroundToggleSetter = new RecordingBackgroundUiAutomationToggleSetter();
+    var backgroundToggleApproval = new RecordingApprovalPresenter(true);
+    var backgroundToggle = await CreateBroker(backgroundToggleApproval,
+        new RecordingBackgroundUiAutomationTextSetter(), InteractionTargetUsage.NotInUse,
+        toggleSetter: backgroundToggleSetter).ExecuteBackgroundAsync(toggleProposal!, CancellationToken.None);
+    Require(!backgroundToggle.Success && backgroundToggle.ErrorCode == "FOREGROUND_REQUIRED"
+        && backgroundToggleApproval.CallCount == 0 && backgroundToggleSetter.CallCount == 0,
+        "后台任务绕过前台复选框操作门控。 ");
+
+    using var toggleCancellation = new CancellationTokenSource();
+    var cancelledToggleSetter = new RecordingBackgroundUiAutomationToggleSetter();
+    var cancelledToggle = await CreateBroker(new CancelAfterApprovalPresenter(toggleCancellation),
+        new RecordingBackgroundUiAutomationTextSetter(), InteractionTargetUsage.NotInUse,
+        toggleSetter: cancelledToggleSetter).ExecuteAsync(toggleProposal!, toggleCancellation.Token);
+    Require(!cancelledToggle.Success && cancelledToggle.FinalState == TaskLifecycleState.Cancelled
+        && cancelledToggleSetter.CallCount == 0,
+        "用户在确认后取消仍执行了前台复选框操作。 ");
+
     var writer = new RecordingBackgroundUiAutomationTextSetter();
     var approval = new RecordingApprovalPresenter(true);
     var broker = CreateBroker(approval, writer, InteractionTargetUsage.NotInUse);
@@ -5135,10 +5266,12 @@ static async Task CheckUiTextWritePolicyAsync()
 
     ToolBroker CreateBroker(IApprovalPresenter presenter, IBackgroundUiAutomationTextSetter textWriter,
         InteractionTargetUsage usage, WindowsDesktopTools? desktop = null,
-        IBackgroundUiAutomationButtonInvoker? buttonInvoker = null) => new(desktop ?? CreateDesktop(notepadId, "记事本"),
+        IBackgroundUiAutomationButtonInvoker? buttonInvoker = null,
+        IBackgroundUiAutomationToggleSetter? toggleSetter = null) => new(desktop ?? CreateDesktop(notepadId, "记事本"),
         null!, new ModelBroker(), presenter,
         null!, "", "", interactionCoordinator: new InteractionCoordinator(new FixedTargetUsageProbe(usage)),
-        uiAutomationTextSetter: textWriter, uiAutomationButtonInvoker: buttonInvoker);
+        uiAutomationTextSetter: textWriter, uiAutomationButtonInvoker: buttonInvoker,
+        uiAutomationToggleSetter: toggleSetter);
 
     static WindowsDesktopTools CreateDesktop(string appId, string displayName) => new(
         [new DesktopApp(appId, Environment.ProcessPath ?? throw new InvalidOperationException("测试可执行路径不可用。"),
@@ -5149,11 +5282,15 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
 {
     var workerSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Host",
         "WindowsUiAutomationWorkerEntryPoint.cs"));
+    var toggleWriterSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.UiAutomation",
+        "SafeUiAutomationToggleWriter.cs"));
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadSnapshot");
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "ReadScopedSnapshot");
     RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "InvokeButton", "IsGenericButtonInvocationTargetBlocked");
+    RequireMessagingWorkerGuardPrecedesUiRead(workerSource, "SetToggleStateInForeground", "IsGenericButtonInvocationTargetBlocked");
     RequireButtonForegroundCheckPrecedesUiRead(workerSource);
     RequireButtonInvocationChecksPrecedeSideEffect(workerSource);
+    RequireToggleChecksPrecedeSideEffect(workerSource, toggleWriterSource);
     var adapterSource = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "XiaoK.Adapters.Windows",
         "WindowsUiAutomationSnapshotAdapter.cs"));
     RequireButtonForegroundGatePrecedesWorker(adapterSource);
@@ -5217,6 +5354,30 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
             "按钮调用缺少类型/可见性/启用/前台/Invoke 能力检查，或读取了控件名称/值。");
     }
 
+    static void RequireToggleChecksPrecedeSideEffect(string source, string toggleWriterSource)
+    {
+        var start = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse SetToggleStateInForeground(",
+            StringComparison.Ordinal);
+        var end = start < 0 ? -1 : source.IndexOf("\n    private static ", start + 1, StringComparison.Ordinal);
+        if (end < 0) end = source.Length;
+        var method = start < 0 ? string.Empty : source[start..end];
+        var toggle = method.IndexOf("SafeUiAutomationToggleWriter.SetStateInForeground(", StringComparison.Ordinal);
+        var checks = new[]
+        {
+            "IsGenericButtonInvocationSelectorBlocked(automationId)", "state is not (\"On\" or \"Off\")",
+            "IsGenericButtonInvocationTargetBlocked(request.ApplicationId", "foregroundBefore == IntPtr.Zero",
+            "foregroundBefore != handle", "TryResolveRoot(request", "GetForegroundWindow() != foregroundBefore"
+        };
+        Require(start >= 0 && toggle >= 0
+            && checks.All(check => method.IndexOf(check, StringComparison.Ordinal) is var index && index >= 0 && index < toggle)
+            && !method.Contains("Current.Name", StringComparison.Ordinal)
+            && !method.Contains("CurrentValue", StringComparison.Ordinal)
+            && toggleWriterSource.Contains("UIA_CheckBoxControlTypeId", StringComparison.Ordinal)
+            && toggleWriterSource.Contains("UIA_FOREGROUND_OR_FOCUS_CHANGED_AFTER_TOGGLE", StringComparison.Ordinal)
+            && toggleWriterSource.Contains("UIA_PATTERN_ID.UIA_TogglePatternId", StringComparison.Ordinal),
+            "前台复选框worker缺少保护目标、明确状态、前台和控件类型校验，或读取了名称/正文。");
+    }
+
     static void RequireButtonForegroundCheckPrecedesUiRead(string source)
     {
         var start = source.IndexOf("private static WindowsUiAutomationSnapshotAdapter.WorkerResponse InvokeButton(",
@@ -5243,8 +5404,9 @@ static async Task CheckMessagingUiSnapshotBlockedAsync()
             StringComparison.Ordinal);
         Require(methodStart >= 0 && gate > methodStart && timeout > gate && workerStart > timeout
             && mutationGuard > workerStart
+            && source.Contains("command.Mode is \"invoke_button\" or \"set_text_foreground\" or \"set_toggle_foreground\"", StringComparison.Ordinal)
             && source.Contains("if (!IsWindow(targetWindow) || !IsWindowVisible(targetWindow))", StringComparison.Ordinal),
-            "UIA按钮操作没有在启动worker及标记副作用前等待并验证精确目标前台窗口。");
+            "前台UIA按钮/文本/复选框操作没有在启动worker及标记副作用前等待并验证精确目标前台窗口。");
     }
 }
 
@@ -11203,6 +11365,25 @@ internal sealed class RecordingBackgroundUiAutomationButtonInvoker : IBackground
     }
 }
 
+internal sealed class RecordingBackgroundUiAutomationToggleSetter : IBackgroundUiAutomationToggleSetter
+{
+    public int CallCount { get; private set; }
+    public string? ApplicationId { get; private set; }
+    public string? AutomationId { get; private set; }
+    public string? State { get; private set; }
+
+    public Task<ToolResult> SetToggleStateInForegroundAsync(string applicationId, string automationId, string state,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CallCount++;
+        ApplicationId = applicationId;
+        AutomationId = automationId;
+        State = state;
+        return Task.FromResult(new ToolResult(true, "合成复选框状态已核对。", Data: "复选框状态已核对"));
+    }
+}
+
 internal sealed class FixedTargetUsageProbe(InteractionTargetUsage usage) : IInteractionTargetUsageProbe
 {
     public ValueTask<InteractionTargetUsage> GetUsageAsync(string targetId, CancellationToken cancellationToken)
@@ -11636,6 +11817,22 @@ internal static class SqliteSchemaFixture
         + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
         + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v9; "
         + "DROP TABLE approval_audit_v9; PRAGMA user_version=8; COMMIT;");
+
+    public static void RevertToVersionNine(string databasePath) => Execute(databasePath,
+        "BEGIN IMMEDIATE; DROP INDEX IF EXISTS ix_approval_audit_created; "
+        + "ALTER TABLE approval_audit RENAME TO approval_audit_v10; "
+        + "CREATE TABLE approval_audit (id TEXT PRIMARY KEY NOT NULL, action_id TEXT NOT NULL, "
+        + "outcome TEXT NOT NULL, created_utc_ticks INTEGER NOT NULL, "
+        + "CHECK((action_id='message.send.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='code.task.create.v1' AND outcome='run_dotnet_tests') "
+        + "OR (action_id='code.patch.apply.v1' AND outcome='confirmed') "
+        + "OR (action_id='file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')) "
+        + "OR (action_id='app.ui.set-text-foreground.v1' AND outcome IN ('confirmed','declined')))); "
+        + "CREATE INDEX ix_approval_audit_created ON approval_audit(created_utc_ticks DESC); "
+        + "INSERT INTO approval_audit SELECT id,action_id,outcome,created_utc_ticks FROM approval_audit_v10; "
+        + "DROP TABLE approval_audit_v10; PRAGMA user_version=9; COMMIT;");
 
     public static void RevertToVersionTwo(string databasePath)
     {

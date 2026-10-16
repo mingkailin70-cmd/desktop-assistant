@@ -258,6 +258,8 @@ Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text", out var uiSetTextLabe
     && uiSetTextLabel == "应用界面文本填写", "任务中心没有显示应用界面文本填写类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-text-foreground", out var uiForegroundSetTextLabel)
     && uiForegroundSetTextLabel == "前台应用文本填写", "任务中心没有显示前台应用文本填写类别。");
+Require(TaskCategoryCatalog.TryGetLabel("app-ui-set-toggle-foreground", out var uiForegroundSetToggleLabel)
+    && uiForegroundSetToggleLabel == "前台应用复选框设置", "任务中心没有显示前台应用复选框设置类别。");
 Require(TaskCategoryCatalog.TryGetLabel("app-ui-invoke-button", out var uiInvokeButtonLabel)
     && uiInvokeButtonLabel == "应用按钮操作", "任务中心没有显示应用按钮操作类别。");
 Require(TaskCategoryCatalog.LabelOrConversation(null) == "本地对话"

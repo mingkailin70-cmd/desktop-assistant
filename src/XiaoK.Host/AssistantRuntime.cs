@@ -1056,6 +1056,14 @@ internal sealed class AssistantRuntime : IAsyncDisposable
             _broker.ExecuteBackgroundAsync(proposal, cancellationToken, taskId);
 
         var lower = request.ToLowerInvariant();
+        if (category == "app-ui-set-toggle-foreground")
+        {
+            var proposal = ApplicationUiAutomationPolicy.CreateForegroundSetToggleToolProposal(request, GetConfiguredAppAliases());
+            if (proposal is null)
+                return new(false, "请按“前台设置界面复选框：应用名|唯一AutomationId|开启/关闭”输入。只允许已登记普通应用的唯一、可见、启用 CheckBox；每次操作需确认。确认后15秒内请手动切到目标窗口并聚焦复选框，小K不会切换窗口、移动焦点或模拟键鼠。消息/邮件客户端、浏览器、文件管理器、金融/凭证应用及常见高风险控件会被拒绝。", "UIA_FOREGROUND_TOGGLE_TARGET_NOT_SUPPORTED");
+            return await _broker.ExecuteAsync(proposal, token);
+        }
+
         if (category == "app-ui-set-text-foreground")
         {
             var proposal = ApplicationUiAutomationPolicy.CreateForegroundSetTextToolProposal(request, GetConfiguredAppAliases());
@@ -1524,6 +1532,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private static string Classify(string request)
     {
         var lower = request.ToLowerInvariant();
+        if (ApplicationUiAutomationPolicy.IsForegroundSetToggleUserRequest(request)) return "app-ui-set-toggle-foreground";
         if (ApplicationUiAutomationPolicy.IsForegroundSetTextUserRequest(request)) return "app-ui-set-text-foreground";
         if (ApplicationUiAutomationPolicy.IsSetTextUserRequest(request)) return "app-ui-set-text";
         if (ApplicationUiAutomationPolicy.IsInvokeButtonUserRequest(request)) return "app-ui-invoke-button";

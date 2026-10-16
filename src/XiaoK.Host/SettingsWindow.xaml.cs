@@ -221,12 +221,12 @@ public partial class SettingsWindow : Window
         var selectedPath = Path.GetFullPath(dialog.FileName);
         if (string.Equals(selectedPath, Path.GetFullPath(_activeDatabasePath), StringComparison.OrdinalIgnoreCase))
         {
-            DatabaseMaintenanceStatusText.Text = "请选择单独的 v9 备份文件；不能把活动数据库自身作为恢复源。";
+            DatabaseMaintenanceStatusText.Text = "请选择单独的 v10 备份文件；不能把活动数据库自身作为恢复源。";
             return;
         }
         var confirmation = System.Windows.MessageBox.Show(
             this,
-            $"将用以下 SQLite v9 备份替换当前本地数据库：\n\n{selectedPath}\n\n当前数据库会先生成一个旁置保护备份。恢复后只恢复脱敏任务状态、联系人回复风格、审批审计和固定执行检查点；不会恢复或重放运行中的任务、命令或外发操作。操作期间不能有其他任务运行。要继续吗？",
+            $"将用以下 SQLite v10 备份替换当前本地数据库：\n\n{selectedPath}\n\n当前数据库会先生成一个旁置保护备份。恢复后只恢复脱敏任务状态、联系人回复风格、审批审计和固定执行检查点；不会恢复或重放运行中的任务、命令或外发操作。操作期间不能有其他任务运行。要继续吗？",
             "确认恢复本地数据库",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,

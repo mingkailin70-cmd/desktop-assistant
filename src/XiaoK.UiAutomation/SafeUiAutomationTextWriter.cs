@@ -179,7 +179,7 @@ public static class SafeUiAutomationTextWriter
         PInvoke.IsWindow(handle).Value != 0 && PInvoke.IsWindowVisible(handle).Value != 0
         && NativeMethods.GetWindowThreadProcessId(handle, out var targetPid) != 0 && targetPid == (uint)processId;
 
-    private static SearchResult FindUniqueByAutomationId(IUIAutomation client, IUIAutomationElement root,
+    internal static SearchResult FindUniqueByAutomationId(IUIAutomation client, IUIAutomationElement root,
         string automationId, out IUIAutomationElement? match)
     {
         var walker = client.get_ControlViewWalker();
@@ -218,7 +218,7 @@ public static class SafeUiAutomationTextWriter
     private static UiAutomationTextWriteResult Fail(string errorCode, bool outcomeUncertain = false) =>
         new(false, errorCode, outcomeUncertain);
 
-    private enum SearchResult { NotFound, Unique, Ambiguous, TreeLimit }
+    internal enum SearchResult { NotFound, Unique, Ambiguous, TreeLimit }
 }
 
 internal static partial class NativeMethods

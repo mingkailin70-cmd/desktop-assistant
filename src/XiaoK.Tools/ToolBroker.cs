@@ -21,6 +21,7 @@ public sealed class ToolBroker
     private readonly IReadOnlyUiAutomationSnapshotReader? _uiAutomationSnapshots;
     private readonly IBackgroundUiAutomationTextSetter? _uiAutomationTextSetter;
     private readonly IBackgroundUiAutomationButtonInvoker? _uiAutomationButtonInvoker;
+    private readonly IBackgroundUiAutomationToggleSetter? _uiAutomationToggleSetter;
     private readonly InteractionCoordinator _interactionCoordinator;
 
     public ToolBroker(XiaoK.Adapters.Windows.WindowsDesktopTools desktop, IInferenceClient inference, ModelBroker models,
@@ -32,7 +33,8 @@ public sealed class ToolBroker
         InteractionCoordinator? interactionCoordinator = null,
         IReadOnlyUiAutomationSnapshotReader? uiAutomationSnapshots = null,
         IBackgroundUiAutomationTextSetter? uiAutomationTextSetter = null,
-        IBackgroundUiAutomationButtonInvoker? uiAutomationButtonInvoker = null)
+        IBackgroundUiAutomationButtonInvoker? uiAutomationButtonInvoker = null,
+        IBackgroundUiAutomationToggleSetter? uiAutomationToggleSetter = null)
     {
         _desktop = desktop;
         _inference = inference;
@@ -49,6 +51,7 @@ public sealed class ToolBroker
         _uiAutomationSnapshots = uiAutomationSnapshots;
         _uiAutomationTextSetter = uiAutomationTextSetter;
         _uiAutomationButtonInvoker = uiAutomationButtonInvoker;
+        _uiAutomationToggleSetter = uiAutomationToggleSetter;
         _interactionCoordinator = interactionCoordinator ?? new InteractionCoordinator();
     }
 
@@ -76,7 +79,8 @@ public sealed class ToolBroker
             or ApplicationUiAutomationPolicy.WaitForEnabledToolId
             or ApplicationUiAutomationPolicy.SetTextToolId
             or ApplicationUiAutomationPolicy.ForegroundSetTextToolId
-            or ApplicationUiAutomationPolicy.InvokeButtonToolId;
+            or ApplicationUiAutomationPolicy.InvokeButtonToolId
+            or ApplicationUiAutomationPolicy.ForegroundSetToggleToolId;
         if (isApplicationUiTool && !_desktop.IsApplicationRegistered(proposal.Arguments["app_id"]))
             return new(false, "目标应用未登记在本机允许列表；未创建界面协调租约，也没有访问窗口。",
                 "APP_NOT_ALLOWLISTED");
@@ -91,6 +95,10 @@ public sealed class ToolBroker
         if (proposal.ToolId == ApplicationUiAutomationPolicy.InvokeButtonToolId
             && !_desktop.IsUiAutomationButtonTargetAllowed(proposal.Arguments["app_id"]))
             return new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用按钮操作；没有访问窗口或创建协调租约。",
+                "UIA_BUTTON_TARGET_BLOCKED");
+        if (proposal.ToolId == ApplicationUiAutomationPolicy.ForegroundSetToggleToolId
+            && !_desktop.IsUiAutomationButtonTargetAllowed(proposal.Arguments["app_id"]))
+            return new(false, "消息/邮件客户端、浏览器、文件管理器及金融/凭证敏感应用不允许使用通用复选框操作；没有访问窗口。",
                 "UIA_BUTTON_TARGET_BLOCKED");
         var admission = await _interactionCoordinator.AcquireAsync(operation, access, proposal.Target, cancellationToken);
         if (admission.Denial is not null) return admission.Denial;
@@ -115,6 +123,7 @@ public sealed class ToolBroker
             "app.ui.set-text.v1" => await SetApplicationUiTextAsync(proposal, cancellationToken, taskId),
             "app.ui.set-text-foreground.v1" => await SetApplicationUiTextInForegroundAsync(proposal, cancellationToken, taskId),
             "app.ui.invoke-button.v1" => await InvokeApplicationUiButtonAsync(proposal, cancellationToken, taskId),
+            "app.ui.set-toggle-foreground.v1" => await SetApplicationUiToggleInForegroundAsync(proposal, cancellationToken, taskId),
             "window.activate.v1" => await _desktop.ActivateWindowAsync(proposal, cancellationToken),
             "file.search.v1" => await _desktop.SearchFilesAsync(proposal, cancellationToken),
             "file.search.content.v1" => await _desktop.SearchFileContentsAsync(proposal, cancellationToken),
@@ -203,6 +212,7 @@ public sealed class ToolBroker
             "app.ui.set-text.v1" => ValidateApplicationUiSetText(proposal),
             "app.ui.set-text-foreground.v1" => ValidateApplicationUiSetText(proposal),
             "app.ui.invoke-button.v1" => ValidateApplicationUiInvokeButton(proposal),
+            "app.ui.set-toggle-foreground.v1" => ValidateApplicationUiToggleSet(proposal),
             "window.activate.v1" => ValidateWindowActivation(proposal),
             "file.search.v1" => ValidateFileSearch(proposal),
             "file.search.content.v1" => ValidateFileContentSearch(proposal),
@@ -342,6 +352,24 @@ public sealed class ToolBroker
                 : InvalidProposal("按钮操作只接受登记的普通应用和唯一普通按钮 AutomationId；消息客户端、浏览器、文件管理器、金融/凭证应用及可识别的高风险按钮均拒绝。");
     }
 
+    private static ToolResult? ValidateApplicationUiToggleSet(ToolProposal proposal)
+    {
+        var args = proposal.Arguments;
+        var appId = args.GetValueOrDefault("app_id");
+        var automationId = args.GetValueOrDefault("automation_id");
+        var state = args.GetValueOrDefault("state");
+        return args.Count == 3 && args.ContainsKey("app_id") && args.ContainsKey("automation_id")
+            && args.ContainsKey("state") && !string.IsNullOrWhiteSpace(appId) && appId.Length <= 64
+            && !ApplicationUiAutomationPolicy.IsGenericButtonInvocationTargetBlocked(appId, null, null)
+            && !string.IsNullOrWhiteSpace(automationId) && automationId.Length <= 96
+            && automationId.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-')
+            && !ApplicationUiAutomationPolicy.IsGenericButtonInvocationSelectorBlocked(automationId)
+            && state is "On" or "Off"
+            && string.Equals(proposal.Target, appId, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : InvalidProposal("前台复选框操作只接受已登记普通应用、唯一普通复选框 AutomationId 和明确的 On/Off 状态；敏感目标及常见高风险控件均拒绝。");
+    }
+
     private async Task<ToolResult> SetApplicationUiTextAsync(ToolProposal proposal,
         CancellationToken cancellationToken, Guid? taskId)
     {
@@ -447,6 +475,45 @@ public sealed class ToolBroker
             return new(false, "确认后、调用前任务已取消；没有调用控件。", "UIA_ACTION_CANCELLED_BEFORE_OPERATION",
                 FinalState: TaskLifecycleState.Cancelled);
         return await _uiAutomationButtonInvoker.InvokeButtonAsync(appId, automationId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<ToolResult> SetApplicationUiToggleInForegroundAsync(ToolProposal proposal,
+        CancellationToken cancellationToken, Guid? taskId)
+    {
+        if (_uiAutomationToggleSetter is null)
+            return new(false, "前台复选框设置器未配置；没有访问或修改应用界面。", "UIA_FOREGROUND_TOGGLE_SETTER_UNAVAILABLE");
+        var appId = proposal.Arguments["app_id"];
+        var automationId = proposal.Arguments["automation_id"];
+        var state = proposal.Arguments["state"];
+        if (!_desktop.IsUiAutomationButtonTargetAllowed(appId))
+            return new(false, "该应用属于消息/邮件客户端、浏览器、文件管理器或金融/凭证敏感应用；通用复选框操作已拒绝。", "UIA_BUTTON_TARGET_BLOCKED");
+
+        var stateLabel = state == "On" ? "开启" : "关闭";
+        var details = $"目标应用：{appId}{Environment.NewLine}复选框 AutomationId：{automationId}"
+            + $"{Environment.NewLine}指定状态：{stateLabel}"
+            + $"{Environment.NewLine}{Environment.NewLine}复选框可能会立即应用设置或触发其他应用响应。"
+            + $"{Environment.NewLine}批准后请在15秒内手动切到目标应用，并亲自把键盘焦点放在这个复选框。"
+            + $"{Environment.NewLine}小K只会核验唯一、可见、启用的普通 CheckBox，并在当前状态不同于“{stateLabel}”时调用一次 UI Automation Toggle，再核验最终状态。"
+            + $"{Environment.NewLine}不会切换窗口、移动焦点、点击、模拟按键或读取控件名称/正文。未确定状态、目标变化或无法核验时停止；结果不确定不会自动重试。"
+            + $"{Environment.NewLine}AutomationId不能证明控件用途；关键词拦截范围有限。请先独立确认这是普通设置项，绝不要用于安全、权限、发送、删除、付款或管理员操作。"
+            + $"{Environment.NewLine}消息客户端、浏览器、文件管理器、金融/凭证应用以及可识别的高风险控件不允许使用。请选择批准或拒绝。";
+        bool confirmed;
+        try
+        {
+            confirmed = await _approval.ConfirmAsync(ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction,
+                "确认前台设置复选框", details, cancellationToken, taskId).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(false, "等待前台复选框确认时任务已取消；没有修改应用设置。", "UIA_FOREGROUND_TOGGLE_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        }
+        if (!confirmed) return new(false, "已拒绝前台复选框操作；应用设置未修改。", "UIA_FOREGROUND_TOGGLE_DECLINED");
+        if (cancellationToken.IsCancellationRequested)
+            return new(false, "确认后、操作前任务已取消；应用设置未修改。", "UIA_FOREGROUND_TOGGLE_CANCELLED_BEFORE_OPERATION",
+                FinalState: TaskLifecycleState.Cancelled);
+        return await _uiAutomationToggleSetter.SetToggleStateInForegroundAsync(appId, automationId, state, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -860,6 +927,7 @@ public sealed class ToolBroker
         "app.ui.set-text.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.set-text-foreground.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "app.ui.invoke-button.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+        "app.ui.set-toggle-foreground.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "window.activate.v1" => ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
         "file.search.v1" => ToolPrecondition.ConfiguredSearchRoot,
         "file.search.content.v1" => ToolPrecondition.ConfiguredSearchRoot,
@@ -898,6 +966,7 @@ public sealed class ToolBroker
         "app.ui.set-text.v1" => ToolExpectedOutcome.ApplicationUiValueSet,
         "app.ui.set-text-foreground.v1" => ToolExpectedOutcome.ApplicationUiValueSet,
         "app.ui.invoke-button.v1" => ToolExpectedOutcome.ApplicationUiActionInvoked,
+        "app.ui.set-toggle-foreground.v1" => ToolExpectedOutcome.ApplicationUiToggleStateSet,
         "window.activate.v1" => ToolExpectedOutcome.TargetWindowInForeground,
         "file.search.v1" => ToolExpectedOutcome.MatchingFilesListed,
         "file.search.content.v1" => ToolExpectedOutcome.MatchingFileContentLocationsListed,

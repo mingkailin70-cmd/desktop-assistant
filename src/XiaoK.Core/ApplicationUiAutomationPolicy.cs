@@ -11,6 +11,7 @@ public static class ApplicationUiAutomationPolicy
     public const string SetTextToolId = "app.ui.set-text.v1";
     public const string ForegroundSetTextToolId = "app.ui.set-text-foreground.v1";
     public const string InvokeButtonToolId = "app.ui.invoke-button.v1";
+    public const string ForegroundSetToggleToolId = "app.ui.set-toggle-foreground.v1";
     private static readonly string[] Prefixes = ["读取界面控件：", "检查界面控件：", "查看界面控件："];
     private static readonly string[] GenericButtonBlockedMarkers =
     [
@@ -39,6 +40,7 @@ public static class ApplicationUiAutomationPolicy
     private const string SetTextPrefix = "设置界面文本：";
     private const string ForegroundSetTextPrefix = "前台设置界面文本：";
     private const string InvokeButtonPrefix = "点击界面按钮：";
+    private const string ForegroundSetTogglePrefix = "前台设置界面复选框：";
 
     public static bool IsUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
         && (Prefixes.Any(prefix => request.TrimStart().StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -59,6 +61,9 @@ public static class ApplicationUiAutomationPolicy
     public static bool IsForegroundSetTextUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
         && request.TrimStart().StartsWith(ForegroundSetTextPrefix, StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsForegroundSetToggleUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
+        && request.TrimStart().StartsWith(ForegroundSetTogglePrefix, StringComparison.OrdinalIgnoreCase);
+
     public static bool IsInvokeButtonUserRequest(string? request) => !string.IsNullOrWhiteSpace(request)
         && request.TrimStart().StartsWith(InvokeButtonPrefix, StringComparison.OrdinalIgnoreCase);
 
@@ -69,6 +74,48 @@ public static class ApplicationUiAutomationPolicy
     public static ToolProposal? CreateForegroundSetTextToolProposal(string request,
         IEnumerable<ConfiguredAppAlias> configuredApps)
         => CreateTextToolProposal(request, configuredApps, ForegroundSetTextPrefix, ForegroundSetTextToolId);
+
+    public static ToolProposal? CreateForegroundSetToggleToolProposal(string request,
+        IEnumerable<ConfiguredAppAlias> configuredApps)
+    {
+        ArgumentNullException.ThrowIfNull(configuredApps);
+        if (string.IsNullOrWhiteSpace(request)) return null;
+        var command = request.TrimStart();
+        if (!command.StartsWith(ForegroundSetTogglePrefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var target = command[ForegroundSetTogglePrefix.Length..].Trim();
+        var first = target.IndexOf('|');
+        var second = first < 0 ? -1 : target.IndexOf('|', first + 1);
+        if (first <= 0 || second <= first + 1 || second != target.LastIndexOf('|')) return null;
+
+        var appName = target[..first].Trim();
+        var automationId = target[(first + 1)..second].Trim();
+        var requestedState = target[(second + 1)..].Trim();
+        var state = requestedState switch
+        {
+            "开启" => "On",
+            "关闭" => "Off",
+            _ => null
+        };
+        if (appName.Length is 0 or > 96 || automationId.Length is 0 or > 96 || state is null
+            || appName.Contains('\n') || appName.Contains('\r')
+            || automationId.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            return null;
+
+        var appAliases = configuredApps.ToArray();
+        var intent = AppLaunchIntentResolver.ResolveApplicationStatus("检查应用：" + appName, appAliases);
+        var displayName = intent is null ? null : appAliases.FirstOrDefault(alias =>
+            string.Equals(alias.AppId, intent.AppId, StringComparison.OrdinalIgnoreCase))?.DisplayName;
+        if (intent is null || IsGenericButtonInvocationTargetBlocked(intent.AppId, displayName, null)
+            || IsGenericButtonInvocationSelectorBlocked(automationId) || IsSensitiveTextEntryField(automationId)) return null;
+
+        return new ToolProposal(ForegroundSetToggleToolId,
+            ImmutableDictionary<string, string>.Empty
+                .Add("app_id", intent.AppId)
+                .Add("automation_id", automationId)
+                .Add("state", state), intent.AppId,
+            ToolPrecondition.ApplicationAllowlisted | ToolPrecondition.ExistingWindow,
+            ToolExpectedOutcome.ApplicationUiToggleStateSet);
+    }
 
     private static ToolProposal? CreateTextToolProposal(string request,
         IEnumerable<ConfiguredAppAlias> configuredApps, string prefix, string toolId)
