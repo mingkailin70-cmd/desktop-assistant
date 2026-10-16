@@ -174,8 +174,6 @@ internal static class TaskHistoryWindowUiProbe
                 }
                 if (AutomationProperties.GetName(cancelButton) != "取消此任务")
                     failures.Add("任务取消按钮没有可访问名称。");
-                WpfFocusManager.SetFocusedElement(window, cancelButton);
-                TrackForeground("设置取消按钮逻辑焦点后");
                 currentSample = sample with { CurrentStep = "合成步骤已更新" };
                 window.RefreshImmediately();
                 TrackForeground("任务列表刷新后");
@@ -267,8 +265,6 @@ internal static class TaskHistoryWindowUiProbe
                     failures.Add("待办批准按钮没有提供明确的可访问名称。");
                 if (approveButton is not null)
                 {
-                    WpfFocusManager.SetFocusedElement(window, approveButton);
-                    TrackForeground("设置批准按钮逻辑焦点后");
                     approveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
                     TrackForeground("审批成功回调后");
                 }
