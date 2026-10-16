@@ -1,5 +1,7 @@
 # 小K项目：AI 协作者入门
 
+2026-10-16 10:56补充：`.200.0`的[Build 38842569106](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38842569106)仍在Release构建阶段失败：WPF/WinForms `Button`、`TextBox`歧义（CS0104），以及未导入`System.Windows.Input`导致`FocusManager`未定义（CS0103）；此前的`ListBox`歧义已被别名修复。现对焦点辅助区统一使用WPF控件及WPF焦点管理器别名，候选升为`.201.0`，待推送后验证。安全/桌面等后续检查未运行；未本机测试或触碰Host。
+
 2026-10-16 10:52补充：已修复`.199.0`首轮CI的WPF/WinForms `ListBox` 歧义；辅助函数统一使用WPF类型别名，包候选升为`.200.0`。该候选与CI失败记录一起推送，之前的`38842047136`只代表编译失败。现在等待新的Release/安全/UIA/桌面/worker完整CI；未在本机测试或安装，也未操作Host。
 
 2026-10-16 10:50补充：提交`55aa99d`推送后触发的GitHub Actions [Build 38842047136](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/38842047136)在Release构建失败，4处辅助函数参数未限定WPF `ListBox`，与WinForms类型重名（CS0104）；前置模型/长测/MSIX检查通过，后续完整安全、UIA、桌面和worker检查未运行。源码修正为显式WPF类型别名；`.199.0`仍未验证通过，待与本修正一同推送后再跑完整CI。没有本机编译/测试/安装，也没有操作Host、通知、模型或TTS。

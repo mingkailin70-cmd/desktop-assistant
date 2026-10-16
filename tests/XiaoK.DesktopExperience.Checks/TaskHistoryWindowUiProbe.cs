@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
 using System.Windows.Threading;
+using WpfFocusManager = System.Windows.Input.FocusManager;
 using XiaoK.Core;
 using XiaoK.Host;
 
@@ -120,7 +121,7 @@ internal static class TaskHistoryWindowUiProbe
                     || refreshStatusProbe is null
                     || AutomationProperties.GetLiveSetting(refreshStatusProbe) != AutomationLiveSetting.Polite)
                     failures.Add("任务列表或刷新状态缺少可访问名称、操作说明或礼貌级实时播报标记。");
-                if (!ReferenceEquals(FocusManager.GetFocusedElement(window), historyList))
+                if (!ReferenceEquals(WpfFocusManager.GetFocusedElement(window), historyList))
                     failures.Add("初次打开任务中心后，键盘逻辑焦点没有落在任务列表。");
 
                 historyList.UpdateLayout();
@@ -158,7 +159,7 @@ internal static class TaskHistoryWindowUiProbe
                 }
                 if (AutomationProperties.GetName(cancelButton) != "取消此任务")
                     failures.Add("任务取消按钮没有可访问名称。");
-                FocusManager.SetFocusedElement(window, cancelButton);
+                WpfFocusManager.SetFocusedElement(window, cancelButton);
                 currentSample = sample with { CurrentStep = "合成步骤已更新" };
                 window.RefreshImmediately();
                 window.UpdateLayout();
@@ -170,7 +171,7 @@ internal static class TaskHistoryWindowUiProbe
                     || refreshedTask.EntryKey != sample.EntryKey
                     || !string.Equals(refreshedTask.CurrentStep, "合成步骤已更新", StringComparison.Ordinal)
                     || refreshedCancelButton is null
-                    || !ReferenceEquals(FocusManager.GetFocusedElement(window), refreshedCancelButton))
+                    || !ReferenceEquals(WpfFocusManager.GetFocusedElement(window), refreshedCancelButton))
                     failures.Add("稳定任务条目刷新后没有保留选择并将键盘焦点还原到同一可用操作。");
                 if (refreshedCancelButton is not null) cancelButton = refreshedCancelButton;
                 cancelButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, cancelButton));
@@ -180,7 +181,7 @@ internal static class TaskHistoryWindowUiProbe
                     || refreshed.SingleOrDefault()?.State != "取消请求中"
                     || refreshed.SingleOrDefault()?.CanCancel != false)
                     failures.Add("取消回调后任务列表没有刷新到当前取消状态。");
-                if (!ReferenceEquals(FocusManager.GetFocusedElement(window), historyList))
+                if (!ReferenceEquals(WpfFocusManager.GetFocusedElement(window), historyList))
                     failures.Add("任务变为不可取消后，键盘焦点没有回到任务列表。");
                 var cancellationStatus = window.FindName("RefreshStatus") as TextBlock;
                 if (cancellationStatus is null
@@ -241,13 +242,13 @@ internal static class TaskHistoryWindowUiProbe
                     failures.Add("待办批准按钮没有提供明确的可访问名称。");
                 if (approveButton is not null)
                 {
-                    FocusManager.SetFocusedElement(window, approveButton);
+                    WpfFocusManager.SetFocusedElement(window, approveButton);
                     approveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, approveButton));
                 }
                 var emptyApprovals = window.FindName("EmptyApprovalsText") as TextBlock;
                 if (approvalCalls != 2 || approvalList?.Items.Count != 0
                     || emptyApprovals?.Visibility != Visibility.Visible
-                    || !ReferenceEquals(FocusManager.GetFocusedElement(window), approvalList)
+                    || !ReferenceEquals(WpfFocusManager.GetFocusedElement(window), approvalList)
                     || refreshStatus is null || !refreshStatus.Text.Contains("已处理待办", StringComparison.Ordinal))
                     failures.Add("待办处理后没有显示空状态、更新反馈并把键盘焦点送回列表。");
 

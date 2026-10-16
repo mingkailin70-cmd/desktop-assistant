@@ -4,7 +4,10 @@ using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Threading;
 using System.Windows.Automation.Peers;
+using WpfButton = System.Windows.Controls.Button;
+using WpfFocusManager = System.Windows.Input.FocusManager;
 using WpfListBox = System.Windows.Controls.ListBox;
+using WpfTextBox = System.Windows.Controls.TextBox;
 using XiaoK.Core;
 
 namespace XiaoK.Host;
@@ -211,16 +214,16 @@ public partial class TaskHistoryWindow : Window
         if (IsActive)
         {
             if (HistoryList.Focus()) return;
-            FocusManager.SetFocusedElement(this, HistoryList);
+            WpfFocusManager.SetFocusedElement(this, HistoryList);
             return;
         }
-        if (FocusManager.GetFocusedElement(this) is null)
-            FocusManager.SetFocusedElement(this, HistoryList);
+        if (WpfFocusManager.GetFocusedElement(this) is null)
+            WpfFocusManager.SetFocusedElement(this, HistoryList);
     }
 
     private FocusSnapshot? CaptureListFocus(WpfListBox list, Func<object, string?> getEntryKey)
     {
-        var focused = FocusManager.GetFocusedElement(this) as DependencyObject
+        var focused = WpfFocusManager.GetFocusedElement(this) as DependencyObject
             ?? (IsActive ? System.Windows.Input.Keyboard.FocusedElement as DependencyObject : null);
         if (focused is null || !IsInList(list, focused)) return null;
         var container = ItemsControl.ContainerFromElement(list, focused) as ListBoxItem;
@@ -251,19 +254,19 @@ public partial class TaskHistoryWindow : Window
             {
                 if (!target.Focus())
                 {
-                    FocusManager.SetFocusedElement(this, list);
+                    WpfFocusManager.SetFocusedElement(this, list);
                     _ = list.Focus();
                 }
             }
             else
             {
                 // Keep only WPF logical focus while inactive; a background refresh must not activate this window.
-                FocusManager.SetFocusedElement(this, target);
+                WpfFocusManager.SetFocusedElement(this, target);
             }
         }
         catch (InvalidOperationException)
         {
-            FocusManager.SetFocusedElement(this, list);
+            WpfFocusManager.SetFocusedElement(this, list);
             if (IsActive) _ = list.Focus();
         }
     }
@@ -272,19 +275,19 @@ public partial class TaskHistoryWindow : Window
     {
         if (focusRole == "list") return null;
         if (focusRole == "button:cancel")
-            return FindVisualDescendant<Button>(container, button => button.Tag is Guid);
+            return FindVisualDescendant<WpfButton>(container, button => button.Tag is Guid);
         if (focusRole.StartsWith("button:", StringComparison.Ordinal))
         {
             var tag = focusRole["button:".Length..];
-            return FindVisualDescendant<Button>(container, button =>
+            return FindVisualDescendant<WpfButton>(container, button =>
                 string.Equals(button.Tag as string, tag, StringComparison.Ordinal));
         }
         if (focusRole is "text:history-detail" or "text:approval-details")
         {
             var bindingPath = focusRole == "text:history-detail"
                 ? nameof(TaskHistoryEntry.Detail) : nameof(ApprovalInboxEntry.Details);
-            return FindVisualDescendant<TextBox>(container, textBox =>
-                BindingOperations.GetBindingExpression(textBox, TextBox.TextProperty)
+            return FindVisualDescendant<WpfTextBox>(container, textBox =>
+                BindingOperations.GetBindingExpression(textBox, WpfTextBox.TextProperty)
                     ?.ParentBinding.Path?.Path == bindingPath);
         }
         return null;
@@ -293,11 +296,11 @@ public partial class TaskHistoryWindow : Window
     private static string GetFocusRole(DependencyObject focused, WpfListBox list)
     {
         if (ReferenceEquals(focused, list)) return "list";
-        if (focused is Button { Tag: Guid }) return "button:cancel";
-        if (focused is Button { Tag: string tag }) return $"button:{tag}";
-        if (focused is TextBox textBox)
+        if (focused is WpfButton { Tag: Guid }) return "button:cancel";
+        if (focused is WpfButton { Tag: string tag }) return $"button:{tag}";
+        if (focused is WpfTextBox textBox)
         {
-            var bindingPath = BindingOperations.GetBindingExpression(textBox, TextBox.TextProperty)
+            var bindingPath = BindingOperations.GetBindingExpression(textBox, WpfTextBox.TextProperty)
                 ?.ParentBinding.Path?.Path;
             return bindingPath switch
             {
