@@ -90,6 +90,9 @@ if (args.Length > 0 && args[0] == "--restore-v7-migration-snapshot-for-rollback"
 if (args.Length == 1 && args[0] == "--browser-public-smoke")
     return await BrowserPublicPageCheck.RunAsync();
 
+if (args.Length == 1 && args[0] == "--windows-system-speech-synthesis-probe")
+    return await WindowsSystemSpeechSynthesisProbe.RunAsync();
+
 if (args.Length == 4 && args[0] == "--voice-host-roundtrip")
     return await VoiceHostRoundTrip.RunAsync(args[1], args[2], args[3]);
 
@@ -142,6 +145,7 @@ if (args.Length != 4 || args[0] != "--managed-qwen")
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --aishell3-contract");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --aishell3-cpu-roundtrip <仓库目录> <仓库外新报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --browser-public-smoke");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --windows-system-speech-synthesis-probe");
     return 2;
 }
 
