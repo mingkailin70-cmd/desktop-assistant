@@ -27,6 +27,12 @@
 
 安装脚本通过不带 `-Install` 的只读预检，并按固定 SHA-256 核验包；证书 `B96A02547ABA84523619E11EB7788AE9850A5C60` 已在 `LocalMachine\TrustedPeople`，本轮没有变更信任。系统当前仍安装 `0.1.189.0`；Host PID `51400` 活动。候选没有安装或启动，以免打断受保护的现有 Host。提交 `83d7dc8` 的 GitHub Actions [Build 39073010840](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/39073010840) 全流程通过。此记录只证明本机打包、签名、预检及远端源码/合成验证，不证明更新安装或首版端到端验收。
 
+## 0.1.213.0 回滚兼容候选（2026-10-18）
+
+提交`46bdeda`的GitHub Actions [Build 39077663124](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/39077663124)全流程通过。固定SDK `10.0.401`自包含签名包位于`artifacts\msix-validation\92f14dbf708a4411a0c6944202885209\XiaoK-signed-validation.msix`，142,128,930字节，SHA-256 `54F5F70DBED887120D5C789541991212D12F7D904E2425836A0E7CFE1A5ED8F7`；版本`0.1.213.0`，包内Host DLL散列与发布目录相同（`B312603F1724B93AF78A23D1735A5F18B8702CEC296647CAD4E4F33C336E19C6`）。SignTool `/pa /all /v`验证1个签名、0警告、0错误。安装器只读预检确认签名、包散列及身份有效；证书`B96A02547ABA84523619E11EB7788AE9850A5C60`原已受信，本轮未改动证书信任。
+
+截至此记录，当前账户仍安装`.189.0`，Host PID `51400`仍活动。`.213.0`尚未安装或启动；待用户明确回复“已退出”并再次只读确认Host消失后才执行安装。签名、CI和预检不等于安装或回滚演练通过。
+
 ## v0.1.163.0 通知事件读取更新（2026-10-14）
 
 按用户要求将最新CI通过候选更新到本机。固定SDK`10.0.401`锁定还原和自包含发布成功，发布目录为`artifacts\publish\desktop-update-0.1.163.0`；签名MSIX为`artifacts\msix-validation\4f6f0bf9022345619d96f2c765ed50d3\XiaoK-signed-validation.msix`，146,893,905字节，SHA-256 `F55F7C6B35FA984BF19467C0A40ABD3FFBD54C1B59B515D905186DFE297E6BB3`。SignTool验签0警告、0错误；证书`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已在`LocalMachine\TrustedPeople`，本次没有修改信任。
