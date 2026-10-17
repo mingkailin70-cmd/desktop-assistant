@@ -1,7 +1,91 @@
 using System.Diagnostics;
 using System.Net;
+using System.Security.Principal;
+using System.Threading;
 using System.Text.Json;
 using XiaoK.Inference;
+using XiaoK.Storage;
+
+if (args.Length > 0 && args[0] == "--restore-v7-migration-snapshot-for-rollback")
+{
+    if (args.Length != 4 || args[3] != "--confirm-restore-v7")
+    {
+        Console.Error.WriteLine("拒绝执行：离线恢复必须显式追加 --confirm-restore-v7。没有修改数据库。");
+        Console.Error.WriteLine("用法：XiaoK.RuntimeDiagnostics --restore-v7-migration-snapshot-for-rollback <活动tasks.sqlite3> <before-migration-v7.bak> --confirm-restore-v7");
+        return 2;
+    }
+    if (!OperatingSystem.IsWindows())
+    {
+        Console.Error.WriteLine("SQLite 回滚数据库恢复仅支持 Windows；没有修改数据库。");
+        return 2;
+    }
+
+    Process[] runningHosts;
+    try { runningHosts = Process.GetProcessesByName("XiaoK.Host"); }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"无法核验 XiaoK.Host 是否已退出：{ex.Message}。没有修改数据库。");
+        return 3;
+    }
+    try
+    {
+        if (runningHosts.Length != 0)
+        {
+            var processIds = string.Join(", ", runningHosts.Select(process => process.Id));
+            Console.Error.WriteLine($"检测到 XiaoK.Host 进程 PID {processIds}；请正常退出小K后重试。没有修改数据库。");
+            return 3;
+        }
+    }
+    finally
+    {
+        foreach (var process in runningHosts) process.Dispose();
+    }
+
+    Mutex instanceMutex;
+    try
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var userId = identity.User?.Value ?? Environment.UserName;
+        instanceMutex = new Mutex(initiallyOwned: false, $"Local\\XiaoK.DesktopAssistant.{userId}");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"无法锁定小K会话以防止恢复期间重新启动：{ex.Message}。没有修改数据库。");
+        return 3;
+    }
+
+    using (instanceMutex)
+    {
+        bool ownsInstanceMutex;
+        try { ownsInstanceMutex = instanceMutex.WaitOne(0); }
+        catch (AbandonedMutexException) { ownsInstanceMutex = true; }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"无法锁定小K会话以防止恢复期间重新启动：{ex.Message}。没有修改数据库。");
+            return 3;
+        }
+        if (!ownsInstanceMutex)
+        {
+            Console.Error.WriteLine("小K会话互斥锁已被占用；没有修改数据库。");
+            return 3;
+        }
+
+        try
+        {
+            var safetyBackupPath = SqliteTaskStore.RestoreV7MigrationSnapshotForRollback(args[1], args[2]);
+            Console.WriteLine("已将活动数据库恢复到已安装 0.1.189.0 可读取的 SQLite schema 7。");
+            Console.WriteLine($"恢复前 schema 10 的一致性安全副本保留在：{safetyBackupPath}");
+            Console.WriteLine("该命令没有安装或启动任何 XiaoK 版本；恢复期间持有小K单实例锁。");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"回滚数据库恢复失败：{ex.Message}");
+            return 1;
+        }
+        finally { instanceMutex.ReleaseMutex(); }
+    }
+}
 
 if (args.Length == 1 && args[0] == "--browser-public-smoke")
     return await BrowserPublicPageCheck.RunAsync();
@@ -54,6 +138,7 @@ if (args.Length != 4 || args[0] != "--managed-qwen")
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --installed-content-search-directory <小K已安装包目录> <已配置搜索根内的子目录> <搜索词> <预期文件名>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --installed-file-search <小K已安装包目录> <已配置搜索根内的子目录> <文件名查询> <预期根目录文件名>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --notification-baseline-policy");
+    Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --restore-v7-migration-snapshot-for-rollback <活动tasks.sqlite3> <before-migration-v7.bak> --confirm-restore-v7");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --aishell3-contract");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --aishell3-cpu-roundtrip <仓库目录> <仓库外新报告路径>");
     Console.Error.WriteLine("  XiaoK.RuntimeDiagnostics --browser-public-smoke");

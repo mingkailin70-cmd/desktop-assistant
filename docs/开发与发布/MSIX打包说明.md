@@ -8,6 +8,19 @@
 
 回滚必须保留应用原位，并使用`tools\install_xiaok_msix.ps1 -Install -Rollback -ExpectedSha256 <完整64位SHA-256>`。安装器要求当前账户恰有一个匹配包、目标严格低于当前版本、完整SHA-256相同，并在安装后核验精确目标版本；只有显式回滚分支使用`-ForceUpdateFromAnyVersion`。执行前还要确认旧版本兼容当前SQLite数据格式。不得运行卸载脚本来完成降级。回滚包路径和散列必须从当前保留包的现场核验结果填写，不复制过期示例。
 
+### `.189.0` 与 schema 10 之间的回滚
+
+已安装`.189.0`使用SQLite schema 7，新版首次运行后活动库会迁移到schema 10；此时只降级MSIX不兼容。正常退出Host后，从这次升级自动生成的同目录 `tasks.sqlite3.before-migration-*.bak` 中选取schema 7快照；显式离线恢复命令会验证活动schema 10与快照schema 7的已知结构及完整性，先保留一致性v10安全副本，再暂存并原子替换数据库。若新包尚未首次启动且数据库仍为v7，则无需迁移快照恢复。
+
+    $database = 'D:\XiaoK\Data\tasks.sqlite3'
+    Get-ChildItem -LiteralPath 'D:\XiaoK\Data' -Filter 'tasks.sqlite3.before-migration-*.bak' | Select-Object -ExpandProperty Name
+    $snapshot = 'D:\XiaoK\Data\tasks.sqlite3.before-migration-<本次升级快照文件名>.bak'
+    & .\.tools\dotnet\dotnet.exe tools\XiaoK.RuntimeDiagnostics\bin\Release\net10.0\XiaoK.RuntimeDiagnostics.dll --restore-v7-migration-snapshot-for-rollback $database $snapshot --confirm-restore-v7
+    if ($LASTEXITCODE -ne 0) { throw 'v7回滚数据库恢复失败；不要安装旧版。' }
+    .\tools\install_xiaok_msix.ps1 -PackagePath 'artifacts\msix-validation\9a9d59e9a05741278a1f46dcdd4e3407\XiaoK-signed-validation.msix' -Install -Rollback -ExpectedSha256 'E216D84CBCFED280F8DA4F7AC5228EE034D7D4916EEFE25C816D00F656518D0D'
+
+恢复工具只接受同数据目录自动生成的v7迁移快照；Host进程仍活动、同一用户Host互斥锁占用、快照无效或操作状态不明时都会拒绝。它不停止、不安装或启动Host。示例快照名须替换成当前升级实际产生的文件名；示例`.189.0`包路径和SHA-256已本机只读核验，但流程尚未用于用户真实数据库。恢复前的v10安全副本和迁移快照保留供人工核对，不自动清理；完整升级/回滚实机演练仍待通过。
+
 ## 0.1.212.0 本机签名包候选（2026-10-18）
 
 使用固定 SDK `10.0.401` 执行锁定还原和自包含发布，签名验证包位于 `artifacts\msix-validation\b7d76dfbe72347f884a3c333829fd60c\XiaoK-signed-validation.msix`，142,127,162 字节，SHA-256 `D0ADDE74A1602701FA51C55A08D98F856E88DF9572459AAB6BB22816CAB75957`。清单身份为 `MingKaiLin.XiaoK`、发布者 `CN=XiaoK Local Development`、版本 `0.1.212.0`。SignTool `/pa /all /v` 验签成功（1 个签名，0 警告、0 错误）；包内 `XiaoK.Host.dll` 与 `artifacts\publish\win-x64` 发布目录一致，SHA-256 `D50DCF17A36576C2EAADF77631E6869278E300C533452EF161BDC9C785558EF4`。

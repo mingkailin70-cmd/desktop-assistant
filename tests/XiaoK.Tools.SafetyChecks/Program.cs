@@ -785,6 +785,9 @@ try
     await CheckSqliteV7ToV9ApprovalAuditMigrationAsync(tempRoot);
     passed.Add("SQLite v7 到 v10 迁移保留既有审计并允许固定UIA审批结果");
 
+    await CheckSqliteV7RollbackSnapshotRestoreAsync(tempRoot);
+    passed.Add("SQLite v7 迁移前快照可离线恢复给0.1.189回滚并保留schema 10安全副本");
+
     await CheckSqliteV8ToV9ForegroundAuditMigrationAsync(tempRoot);
     passed.Add("SQLite v8 到 v10 迁移保留既有审计并允许前台文本/复选框审批结果");
 
@@ -3792,6 +3795,68 @@ static async Task CheckSqliteV7ToV9ApprovalAuditMigrationAsync(string root)
         && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiButtonInvokeAction) == 2
         && migratedAudit.Count(row => row.ActionId == ApprovalAuditCatalog.ApplicationUiForegroundToggleSetAction) == 2,
         "SQLite v7 到 v10 迁移没有先备份、保留原审计并持久化固定UIA批准/拒绝结果。");
+}
+
+static async Task CheckSqliteV7RollbackSnapshotRestoreAsync(string root)
+{
+    var directory = Path.Combine(root, "sqlite-v7-rollback-snapshot");
+    Directory.CreateDirectory(directory);
+    var databasePath = Path.Combine(directory, "tasks.sqlite3");
+    var now = DateTimeOffset.UtcNow;
+    var oldTaskId = Guid.NewGuid();
+    var currentTaskId = Guid.NewGuid();
+    var originalStore = new SqliteTaskStore(databasePath);
+    await originalStore.SaveAsync(new TaskRecord(oldTaskId, "app", "synthetic", TaskLifecycleState.Completed,
+        now.AddMinutes(-2), now.AddMinutes(-1)), CancellationToken.None);
+    await originalStore.AppendApprovalAuditAsync(ApprovalAuditCatalog.MessageSendAction,
+        ApprovalAuditCatalog.Confirmed, CancellationToken.None);
+
+    SqliteSchemaFixture.RevertToVersionSeven(databasePath);
+    _ = new SqliteTaskStore(databasePath);
+    var migrationSnapshots = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").ToArray();
+    Require(migrationSnapshots.Length == 1, "SQLite v7 迁移未保留唯一的回滚快照。");
+    using (var oldSnapshot = SqliteDatabase.OpenReadOnly(migrationSnapshots[0]))
+    {
+        var auditSql = oldSnapshot.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='approval_audit';");
+        Require(oldSnapshot.ScalarInt32("PRAGMA user_version;") == 7
+            && string.Equals(oldSnapshot.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal)
+            && auditSql is not null && !auditSql.Contains("'app.ui.", StringComparison.Ordinal),
+            "迁移前快照不是0.1.189实际使用的完整SQLite v7结构。");
+    }
+
+    var migratedStore = new SqliteTaskStore(databasePath);
+    await migratedStore.SaveAsync(new TaskRecord(currentTaskId, "file", "synthetic", TaskLifecycleState.Completed,
+        now, now), CancellationToken.None);
+
+    var invalidSnapshotPath = Path.Combine(directory, "tasks.sqlite3.before-migration-invalid.bak");
+    File.Copy(migrationSnapshots[0], invalidSnapshotPath);
+    using (var invalidSnapshot = SqliteDatabase.Open(invalidSnapshotPath, create: false))
+        invalidSnapshot.Execute("PRAGMA user_version=8;");
+    var invalidSnapshotRejected = false;
+    try { _ = SqliteTaskStore.RestoreV7MigrationSnapshotForRollback(databasePath, invalidSnapshotPath); }
+    catch (InvalidDataException) { invalidSnapshotRejected = true; }
+    using (var stillCurrent = SqliteDatabase.OpenReadOnly(databasePath))
+        Require(invalidSnapshotRejected
+            && stillCurrent.ScalarInt32("PRAGMA user_version;") == 10
+            && string.Equals(stillCurrent.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal),
+            "无效的迁移快照未被拒绝，或拒绝前改变了活动数据库。");
+
+    var safetyBackupPath = SqliteTaskStore.RestoreV7MigrationSnapshotForRollback(databasePath, migrationSnapshots[0]);
+    using (var restored = SqliteDatabase.OpenReadOnly(databasePath))
+        Require(restored.ScalarInt32("PRAGMA user_version;") == 7
+            && string.Equals(restored.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal),
+            "离线回滚没有将活动数据库恢复为完整SQLite v7。");
+
+    var safetyStore = new SqliteTaskStore(safetyBackupPath);
+    var safetyTasks = await safetyStore.GetRecentAsync(20, CancellationToken.None);
+    var reopenedAfterRollback = new SqliteTaskStore(databasePath);
+    var restoredTasks = await reopenedAfterRollback.GetRecentAsync(20, CancellationToken.None);
+    var rollbackSnapshotFiles = Directory.EnumerateFiles(directory, "tasks.sqlite3.before-migration-*.bak").ToArray();
+    Require(safetyTasks.Any(task => task.Id == oldTaskId) && safetyTasks.Any(task => task.Id == currentTaskId)
+        && restoredTasks.Any(task => task.Id == oldTaskId) && restoredTasks.All(task => task.Id != currentTaskId)
+        && rollbackSnapshotFiles.Length == 3
+        && File.Exists(safetyBackupPath),
+        "schema v10安全副本或v7回滚快照未保留迁移前后任务数据，或快照清单不完整。");
 }
 
 static async Task CheckSqliteV8ToV9ForegroundAuditMigrationAsync(string root)

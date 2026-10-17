@@ -13,6 +13,7 @@ namespace XiaoK.Storage;
 public sealed class SqliteTaskStore : ITaskStore
 {
     private const int CurrentSchemaVersion = 10;
+    private const int InstalledRollbackSchemaVersion = 7;
     private const int MaximumContactReplyStyles = 200;
     private const long MaximumLegacyJsonBytes = 10 * 1024 * 1024;
     private const string TasksJsonMigrationMarker = "tasks-json-v1";
@@ -142,6 +143,97 @@ public sealed class SqliteTaskStore : ITaskStore
             return await Task.Run(() => RestoreBackupCore(source, cancellationToken), cancellationToken);
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// Restores the pre-migration schema-v7 snapshot needed before rolling back to the installed 0.1.189.0 app.
+    /// The caller must ensure XiaoK.Host is stopped. A consistent current-schema safety backup is retained.
+    /// </summary>
+    internal static string RestoreV7MigrationSnapshotForRollback(string databasePath, string migrationBackupPath)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("小K v7 回滚数据库恢复仅支持 Windows。");
+
+        var activePath = ValidateDatabasePath(databasePath);
+        var snapshotPath = ValidateDatabasePath(migrationBackupPath);
+        if (string.Equals(activePath, snapshotPath, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("回滚快照不能与活动数据库相同。", nameof(migrationBackupPath));
+        if (!File.Exists(activePath) || !File.Exists(snapshotPath))
+            throw new FileNotFoundException("活动数据库或迁移前回滚快照不存在。");
+        if (!string.Equals(Path.GetFileName(activePath), "tasks.sqlite3", StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(snapshotPath).StartsWith("tasks.sqlite3.before-migration-", StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(snapshotPath).EndsWith(".bak", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetDirectoryName(activePath), Path.GetDirectoryName(snapshotPath), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("只允许从同一数据目录内自动生成的 tasks.sqlite3.before-migration-*.bak 恢复。",
+                nameof(migrationBackupPath));
+        if (IsReparsePoint(activePath) || IsReparsePoint(snapshotPath))
+            throw new IOException("活动数据库或回滚快照是重解析文件；没有修改数据库。");
+        foreach (var sidecarPath in new[] { snapshotPath + "-wal", snapshotPath + "-shm" })
+        {
+            if (File.Exists(sidecarPath) && IsReparsePoint(sidecarPath))
+                throw new IOException("回滚快照的SQLite sidecar是重解析文件；没有修改数据库。");
+        }
+
+        using (var current = SqliteDatabase.OpenReadOnly(activePath))
+            ValidateRestorableDatabase(current);
+        using (var snapshot = SqliteDatabase.OpenReadOnly(snapshotPath))
+            ValidateV7RollbackSnapshot(snapshot);
+
+        var suffix = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff") + "-" + Guid.NewGuid().ToString("N")[..8];
+        var safetyBackupPath = activePath + ".before-restore-" + suffix + ".bak";
+        var stagingPath = activePath + ".restore-rollback-" + Guid.NewGuid().ToString("N") + ".tmp";
+        var replaced = false;
+
+        BackupDatabase(activePath, safetyBackupPath, CancellationToken.None);
+        try
+        {
+            BackupDatabase(snapshotPath, stagingPath, CancellationToken.None);
+            CheckpointDatabaseForRestore(stagingPath);
+            RemoveCheckpointedSidecars(stagingPath);
+            using (var staged = SqliteDatabase.OpenReadOnly(stagingPath))
+                ValidateV7RollbackSnapshot(staged);
+
+            CheckpointDatabaseForRestore(activePath);
+            RemoveCheckpointedSidecars(activePath);
+            File.Replace(stagingPath, activePath, destinationBackupFileName: null);
+            replaced = true;
+
+            using (var restored = SqliteDatabase.OpenReadOnly(activePath))
+                ValidateV7RollbackSnapshot(restored);
+            return safetyBackupPath;
+        }
+        catch (Exception restoreError)
+        {
+            TryDeleteStagingFiles(stagingPath);
+            if (replaced)
+            {
+                var recoveryStagePath = activePath + ".restore-recovery-" + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    BackupDatabase(safetyBackupPath, recoveryStagePath, CancellationToken.None);
+                    CheckpointDatabaseForRestore(recoveryStagePath);
+                    RemoveCheckpointedSidecars(recoveryStagePath);
+                    using (var stagedRecovery = SqliteDatabase.OpenReadOnly(recoveryStagePath))
+                        ValidateRestorableDatabase(stagedRecovery);
+                    CheckpointDatabaseForRestore(activePath);
+                    RemoveCheckpointedSidecars(activePath);
+                    File.Replace(recoveryStagePath, activePath, destinationBackupFileName: null);
+                    using var recovered = SqliteDatabase.OpenReadOnly(activePath);
+                    ValidateRestorableDatabase(recovered);
+                }
+                catch (Exception recoveryError)
+                {
+                    throw new IOException(
+                        $"v7回滚恢复失败，自动恢复schema {CurrentSchemaVersion}也未能完成；一致性安全副本保留在：{safetyBackupPath}",
+                        new AggregateException(restoreError, recoveryError));
+                }
+                finally { TryDeleteStagingFiles(recoveryStagePath); }
+            }
+
+            throw new IOException(
+                $"v7回滚恢复未完成；活动数据库保持或已恢复为schema {CurrentSchemaVersion}，一致性安全副本保留在：{safetyBackupPath}",
+                restoreError);
+        }
     }
 
     public async Task<SqlitePersonalDataSummary> GetPersonalDataSummaryAsync(CancellationToken cancellationToken)
@@ -833,17 +925,13 @@ public sealed class SqliteTaskStore : ITaskStore
         {
             using (new FileStream(destination, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None)) { }
             reserved = true;
-            using var source = SqliteDatabase.Open(sourcePath, create: false);
+            using var source = SqliteDatabase.OpenReadOnly(sourcePath);
             using var backup = SqliteDatabase.Open(destination, create: true);
             CopyDatabase(source, backup, cancellationToken);
         }
         catch
         {
-            if (reserved)
-            {
-                try { File.Delete(destination); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            }
+            if (reserved) TryDeleteStagingFiles(destination);
             throw;
         }
     }
@@ -905,7 +993,7 @@ public sealed class SqliteTaskStore : ITaskStore
     {
         if (database.ScalarInt32("PRAGMA user_version;") != CurrentSchemaVersion
             || !string.Equals(database.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v9 备份；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件不是完整且受支持的 SQLite v10 备份；活动数据库未替换。");
 
         if (database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';") != 4
             || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger','view');") != 0
@@ -923,14 +1011,57 @@ public sealed class SqliteTaskStore : ITaskStore
         var taskSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='tasks';");
         if (taskSql is null || !taskSql.Contains(
                 $"checkpoint_stage BETWEEN 0 AND {(int)TaskCheckpointStage.Terminal}", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件的任务检查点约束与 SQLite v9 不匹配；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件的任务检查点约束与 SQLite v10 不匹配；活动数据库未替换。");
         var auditSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='approval_audit';");
         if (auditSql is null || !auditSql.Contains("'code.patch.apply.v1' AND outcome='confirmed'", StringComparison.Ordinal)
             || !auditSql.Contains("'file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
             || !auditSql.Contains("'app.ui.set-text.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
             || !auditSql.Contains("'app.ui.invoke-button.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
             || !auditSql.Contains("'app.ui.set-text-foreground.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal))
-            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v9 不匹配；活动数据库未替换。");
+            throw new InvalidDataException("恢复文件的审批审计约束与 SQLite v10 不匹配；活动数据库未替换。");
+    }
+
+    private static void ValidateV7RollbackSnapshot(SqliteDatabase database)
+    {
+        if (database.ScalarInt32("PRAGMA user_version;") != InstalledRollbackSchemaVersion
+            || !string.Equals(database.ScalarText("PRAGMA integrity_check;"), "ok", StringComparison.Ordinal))
+            throw new InvalidDataException("回滚快照不是完整的SQLite v7数据库；活动数据库未替换。");
+
+        if (database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%';") != 4
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type IN ('trigger','view');") != 0
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL;") != 2
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name IN "
+                + "('ix_tasks_updated','ix_approval_audit_created') AND sql IS NOT NULL;") != 2
+            || database.ScalarInt32("SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN "
+                + "('tasks','migration_state','contact_reply_styles','approval_audit');") != 4)
+            throw new InvalidDataException("回滚快照含有未知SQLite v7数据库结构；活动数据库未替换。");
+
+        ValidateColumnLayout(database, "tasks", "id,kind,summary,status,created_utc_ticks,updated_utc_ticks,error_code,host_session_id,checkpoint_stage");
+        ValidateColumnLayout(database, "migration_state", "name,completed_utc_ticks");
+        ValidateColumnLayout(database, "contact_reply_styles", "contact_name_key,contact_name,style_id,source,updated_utc_ticks");
+        ValidateColumnLayout(database, "approval_audit", "id,action_id,outcome,created_utc_ticks");
+        var taskSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='tasks';");
+        if (taskSql is null || !taskSql.Contains(
+                $"checkpoint_stage BETWEEN 0 AND {(int)TaskCheckpointStage.Terminal}", StringComparison.Ordinal))
+            throw new InvalidDataException("回滚快照的任务检查点结构与已安装的SQLite v7不匹配；活动数据库未替换。");
+        var auditSql = database.ScalarText("SELECT sql FROM sqlite_schema WHERE type='table' AND name='approval_audit';");
+        if (auditSql is null
+            || !auditSql.Contains("'message.send.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
+            || !auditSql.Contains("'code.task.create.v1' AND outcome='run_dotnet_tests'", StringComparison.Ordinal)
+            || !auditSql.Contains("'code.patch.apply.v1' AND outcome='confirmed'", StringComparison.Ordinal)
+            || !auditSql.Contains("'file.delete.recycle-bin.v1' AND outcome IN ('confirmed','declined')", StringComparison.Ordinal)
+            || auditSql.Contains("'app.ui.", StringComparison.Ordinal))
+            throw new InvalidDataException("回滚快照审批审计结构与已安装的SQLite v7不匹配；活动数据库未替换。");
+    }
+
+    private static bool IsReparsePoint(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+
+    private static void CheckpointDatabaseForRestore(string databasePath)
+    {
+        using var database = SqliteDatabase.Open(databasePath, create: false);
+        using var statement = database.Prepare("PRAGMA wal_checkpoint(TRUNCATE);");
+        if (!statement.StepRow() || statement.ColumnInt32(0) != 0 || statement.ColumnInt32(1) != 0)
+            throw new IOException("活动数据库仍有未检查点WAL内容；恢复已停止，现有数据库仍可用。");
     }
 
     private static void ValidateColumnLayout(SqliteDatabase database, string table, string expectedColumns)
@@ -1117,6 +1248,7 @@ public sealed record SqlitePersonalDataSummary(
 
 internal sealed class SqliteDatabase : IDisposable
 {
+    private const int OpenReadOnlyFlag = 0x00000001;
     private const int OpenReadWrite = 0x00000002;
     private const int OpenCreate = 0x00000004;
     private const int OpenFullMutex = 0x00010000;
@@ -1128,6 +1260,13 @@ internal sealed class SqliteDatabase : IDisposable
     public static SqliteDatabase Open(string path, bool create)
     {
         var flags = OpenReadWrite | OpenFullMutex | (create ? OpenCreate : 0);
+        return OpenWithFlags(path, flags);
+    }
+
+    public static SqliteDatabase OpenReadOnly(string path) => OpenWithFlags(path, OpenReadOnlyFlag | OpenFullMutex);
+
+    private static SqliteDatabase OpenWithFlags(string path, int flags)
+    {
         var result = NativeSqlite.sqlite3_open_v2(path, out var handle, flags, IntPtr.Zero);
         if (result != NativeSqlite.Ok)
         {
