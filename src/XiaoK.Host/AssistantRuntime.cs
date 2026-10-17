@@ -31,6 +31,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
     private string _activeWakeWordEngine;
     private readonly VoiceInferenceService? _voiceInference;
     private readonly string _voiceStatus;
+    private readonly WindowsInstalledChineseSpeech? _systemChineseSpeech;
+    private readonly string _systemChineseSpeechStatus;
+    private int _systemChineseSpeechFallbackUsed;
     private readonly ToolBroker _broker;
     private readonly ModelBroker _models;
     private readonly IIsolatedBrowserSessionManager _browserSessions;
@@ -87,6 +90,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         _models = new ModelBroker(managedRuntime);
         if (!XiaoKSettings.IsDiagnosticsMode)
         {
+            _systemChineseSpeech = WindowsInstalledChineseSpeech.TryCreate(out _systemChineseSpeechStatus);
             var bundledWorker = Path.Combine(AppContext.BaseDirectory, "voice_worker.py");
             if (workspaceRoot is not null)
             {
@@ -108,6 +112,7 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         else
         {
             _voiceStatus = "诊断模式：语音模型和麦克风均关闭。";
+            _systemChineseSpeechStatus = "诊断模式：Windows 系统语音和麦克风均关闭。";
         }
         var apps = _settings.Applications.Select(x => new DesktopApp(x.Id, x.Executable, x.WorkingDirectory, x.DisplayName));
         var roots = _settings.SearchRoots.Select(x => new KeyValuePair<string, string>(x.Id, x.Path));
@@ -137,7 +142,10 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         ? _voiceStatus
         : _microphone.IsActive ? "语音：正在采集麦克风（最长60秒）"
         : _settings.WakeWordEnabled && _wakeWordListener is not null ? _wakeWordListener.Status
-        : _voiceInference is null ? _voiceStatus : _voiceInference.Status;
+        : Volatile.Read(ref _systemChineseSpeechFallbackUsed) != 0
+            ? _systemChineseSpeechStatus + "（模型资源门槛未满足，本次使用系统语音。）"
+        : _voiceInference is not null ? _voiceInference.Status
+        : _systemChineseSpeech is not null ? _systemChineseSpeechStatus : _voiceStatus;
     public bool IsMicrophoneActive => _microphone.IsActive;
     public int PendingUserTaskCount => Volatile.Read(ref _pendingUserTaskCount);
     public bool HasActiveUserTask => Volatile.Read(ref _active) is not null;
@@ -933,9 +941,30 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         CancellationToken cancellationToken) => _voiceInference?.TranscribeWavAsync(wav, forceChinese, cancellationToken)
         ?? Task.FromException<SpeechRecognition>(new InvalidOperationException(_voiceStatus));
 
-    public Task<byte[]> SynthesizeChineseWavAsync(string text, CancellationToken cancellationToken) =>
-        _voiceInference?.SynthesizeChineseWavAsync(text, cancellationToken)
-        ?? Task.FromException<byte[]>(new InvalidOperationException(_voiceStatus));
+    public async Task<byte[]> SynthesizeChineseWavAsync(string text, CancellationToken cancellationToken)
+    {
+        if (_voiceInference is null)
+        {
+            if (_systemChineseSpeech is not null)
+                return await _systemChineseSpeech.SynthesizeWavAsync(text, cancellationToken).ConfigureAwait(true);
+            throw new InvalidOperationException(_voiceStatus);
+        }
+
+        Interlocked.Exchange(ref _systemChineseSpeechFallbackUsed, 0);
+        try
+        {
+            return await _voiceInference.SynthesizeChineseWavAsync(text, cancellationToken).ConfigureAwait(true);
+        }
+        catch (Exception ex) when (_systemChineseSpeech is not null
+                                   && IsSystemChineseSpeechFallbackEligible(ex))
+        {
+            Interlocked.Exchange(ref _systemChineseSpeechFallbackUsed, 1);
+            return await _systemChineseSpeech.SynthesizeWavAsync(text, cancellationToken).ConfigureAwait(true);
+        }
+    }
+
+    internal static bool IsSystemChineseSpeechFallbackEligible(Exception error) =>
+        error is LowGpuMemoryException or LowSystemMemoryException;
 
     public async ValueTask DisposeAsync()
     {

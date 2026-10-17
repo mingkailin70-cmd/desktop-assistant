@@ -270,6 +270,29 @@ Require(ToolInteractionPolicy.Check("arbitrary.shell", ToolExecutionAccess.Expli
     "未知工具被放行。");
 Require(ToolInteractionPolicy.Check("file.search.v1", (ToolExecutionAccess)999)?.ErrorCode == "INVALID_EXECUTION_CONTEXT",
     "无效执行上下文被放行。");
+Require(WindowsInstalledChineseSpeech.IsSupportedChineseVoiceLanguage("zh-CN")
+    && WindowsInstalledChineseSpeech.IsSupportedChineseVoiceLanguage("zh-Hans-CN")
+    && !WindowsInstalledChineseSpeech.IsSupportedChineseVoiceLanguage("en-US")
+    && !WindowsInstalledChineseSpeech.IsSupportedChineseVoiceLanguage("zh-TW")
+    && !WindowsInstalledChineseSpeech.IsSupportedChineseVoiceLanguage(null),
+    "系统播报必须限定为已安装的简体中文声音。");
+var validSystemSpeechWave = new byte[44];
+"RIFF"u8.CopyTo(validSystemSpeechWave);
+System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(validSystemSpeechWave.AsSpan(4, 4), 36);
+"WAVE"u8.CopyTo(validSystemSpeechWave.AsSpan(8));
+var malformedSystemSpeechWave = validSystemSpeechWave.ToArray();
+System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(malformedSystemSpeechWave.AsSpan(4, 4), 35);
+Require(WindowsInstalledChineseSpeech.IsValidWave(validSystemSpeechWave)
+    && !WindowsInstalledChineseSpeech.IsValidWave(validSystemSpeechWave.AsSpan(4))
+    && !WindowsInstalledChineseSpeech.IsValidWave(malformedSystemSpeechWave)
+    && WindowsInstalledChineseSpeech.MaximumTextLength == 1000
+    && WindowsInstalledChineseSpeech.MaximumAudioBytes == 12 * 1024 * 1024,
+    "系统播报 WAV 校验或输入/输出硬上限缺失。");
+Require(AssistantRuntime.IsSystemChineseSpeechFallbackEligible(new XiaoK.Inference.LowGpuMemoryException("test"))
+    && AssistantRuntime.IsSystemChineseSpeechFallbackEligible(new XiaoK.Inference.LowSystemMemoryException("test"))
+    && !AssistantRuntime.IsSystemChineseSpeechFallbackEligible(new OperationCanceledException())
+    && !AssistantRuntime.IsSystemChineseSpeechFallbackEligible(new IOException("test")),
+    "系统中文语音回退只能由明确的 RAM/显存准入失败触发。");
 
 var repositoryDirectory = new DirectoryInfo(AppContext.BaseDirectory);
 while (repositoryDirectory is not null && !File.Exists(Path.Combine(repositoryDirectory.FullName, "XiaoK.sln")))
