@@ -12,7 +12,7 @@
 
 使用固定 SDK `10.0.401` 执行锁定还原和自包含发布，签名验证包位于 `artifacts\msix-validation\b7d76dfbe72347f884a3c333829fd60c\XiaoK-signed-validation.msix`，142,127,162 字节，SHA-256 `D0ADDE74A1602701FA51C55A08D98F856E88DF9572459AAB6BB22816CAB75957`。清单身份为 `MingKaiLin.XiaoK`、发布者 `CN=XiaoK Local Development`、版本 `0.1.212.0`。SignTool `/pa /all /v` 验签成功（1 个签名，0 警告、0 错误）；包内 `XiaoK.Host.dll` 与 `artifacts\publish\win-x64` 发布目录一致，SHA-256 `D50DCF17A36576C2EAADF77631E6869278E300C533452EF161BDC9C785558EF4`。
 
-安装脚本通过不带 `-Install` 的只读预检，并按固定 SHA-256 核验包；证书 `B96A02547ABA84523619E11EB7788AE9850A5C60` 已在 `LocalMachine\TrustedPeople`，本轮没有变更信任。系统当前仍安装 `0.1.189.0`；Host PID `51400` 活动。候选没有安装或启动，以免打断受保护的现有 Host。此记录只证明本机打包、签名和预检，不证明更新安装或首版端到端验收。
+安装脚本通过不带 `-Install` 的只读预检，并按固定 SHA-256 核验包；证书 `B96A02547ABA84523619E11EB7788AE9850A5C60` 已在 `LocalMachine\TrustedPeople`，本轮没有变更信任。系统当前仍安装 `0.1.189.0`；Host PID `51400` 活动。候选没有安装或启动，以免打断受保护的现有 Host。提交 `83d7dc8` 的 GitHub Actions [Build 39073010840](https://github.com/mingkailin70-cmd/desktop-assistant/actions/runs/39073010840) 全流程通过。此记录只证明本机打包、签名、预检及远端源码/合成验证，不证明更新安装或首版端到端验收。
 
 ## v0.1.163.0 通知事件读取更新（2026-10-14）
 
