@@ -8,6 +8,12 @@
 
 回滚必须保留应用原位，并使用`tools\install_xiaok_msix.ps1 -Install -Rollback -ExpectedSha256 <完整64位SHA-256>`。安装器要求当前账户恰有一个匹配包、目标严格低于当前版本、完整SHA-256相同，并在安装后核验精确目标版本；只有显式回滚分支使用`-ForceUpdateFromAnyVersion`。执行前还要确认旧版本兼容当前SQLite数据格式。不得运行卸载脚本来完成降级。回滚包路径和散列必须从当前保留包的现场核验结果填写，不复制过期示例。
 
+## 0.1.212.0 本机签名包候选（2026-10-18）
+
+使用固定 SDK `10.0.401` 执行锁定还原和自包含发布，签名验证包位于 `artifacts\msix-validation\b7d76dfbe72347f884a3c333829fd60c\XiaoK-signed-validation.msix`，142,127,162 字节，SHA-256 `D0ADDE74A1602701FA51C55A08D98F856E88DF9572459AAB6BB22816CAB75957`。清单身份为 `MingKaiLin.XiaoK`、发布者 `CN=XiaoK Local Development`、版本 `0.1.212.0`。SignTool `/pa /all /v` 验签成功（1 个签名，0 警告、0 错误）；包内 `XiaoK.Host.dll` 与 `artifacts\publish\win-x64` 发布目录一致，SHA-256 `D50DCF17A36576C2EAADF77631E6869278E300C533452EF161BDC9C785558EF4`。
+
+安装脚本通过不带 `-Install` 的只读预检，并按固定 SHA-256 核验包；证书 `B96A02547ABA84523619E11EB7788AE9850A5C60` 已在 `LocalMachine\TrustedPeople`，本轮没有变更信任。系统当前仍安装 `0.1.189.0`；Host PID `51400` 活动。候选没有安装或启动，以免打断受保护的现有 Host。此记录只证明本机打包、签名和预检，不证明更新安装或首版端到端验收。
+
 ## v0.1.163.0 通知事件读取更新（2026-10-14）
 
 按用户要求将最新CI通过候选更新到本机。固定SDK`10.0.401`锁定还原和自包含发布成功，发布目录为`artifacts\publish\desktop-update-0.1.163.0`；签名MSIX为`artifacts\msix-validation\4f6f0bf9022345619d96f2c765ed50d3\XiaoK-signed-validation.msix`，146,893,905字节，SHA-256 `F55F7C6B35FA984BF19467C0A40ABD3FFBD54C1B59B515D905186DFE297E6BB3`。SignTool验签0警告、0错误；证书`B96A02547ABA84523619E11EB7788AE9850A5C60`此前已在`LocalMachine\TrustedPeople`，本次没有修改信任。
