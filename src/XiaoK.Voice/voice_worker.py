@@ -152,6 +152,9 @@ def main():
 
     try:
         model = load_model(args.task, args.model_dir, args.device)
+    except MemoryError:
+        emit({"type": "ready", "ok": False, "code": "LOW_SYSTEM_MEMORY"})
+        return 2
     except Exception:
         traceback.print_exc(file=sys.stderr)
         emit({"type": "ready", "ok": False, "code": "MODEL_LOAD_FAILED"})
@@ -174,12 +177,16 @@ def main():
                 response = synthesize(model, request)
             else:
                 response = {"ok": False, "code": "UNKNOWN_COMMAND"}
+        except MemoryError:
+            response = {"ok": False, "code": "LOW_SYSTEM_MEMORY"}
         except ValueError as exc:
             response = {"ok": False, "code": str(exc)[:64]}
         except Exception:
             traceback.print_exc(file=sys.stderr)
             response = {"ok": False, "code": "INFERENCE_FAILED"}
         emit(response)
+        if response.get("code") == "LOW_SYSTEM_MEMORY":
+            return 3
 
     return 0
 

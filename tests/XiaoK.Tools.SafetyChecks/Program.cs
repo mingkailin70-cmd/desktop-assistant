@@ -660,7 +660,7 @@ try
     passed.Add("模型目录允许仓库 models 子树，并拒绝仓库其他路径、UNC 和磁盘根目录");
 
     await CheckInstalledVoiceDeploymentLayoutAsync(tempRoot);
-    passed.Add("已安装语音工厂读取包内锁清单和外置 ASR/TTS 环境；缺少环境时关闭语音，初始化不启动工作进程");
+    passed.Add("已安装语音工厂读取包内锁清单和外置 ASR/TTS 环境；低于TTS准入门槛时以低RAM错误拒绝启动，初始化不启动工作进程");
 
     CheckLocalDesktopAppPathPolicy(tempRoot);
     passed.Add("桌面应用设置只接受存在的本机白名单程序文件名");
@@ -3428,6 +3428,7 @@ static async Task CheckInstalledVoiceDeploymentLayoutAsync(string root)
         revision,
         license = "apache-2.0",
         requiredForP0 = true,
+        minimumAvailableRamMiB = id == "qwen3-tts-12hz-0.6b-customvoice" ? 10_752L : (long?)null,
         localDirectory,
         files = new[]
         {
@@ -3459,6 +3460,29 @@ static async Task CheckInstalledVoiceDeploymentLayoutAsync(string root)
         "有效包内清单、外置模型与 ASR/TTS 环境应创建安装版语音服务。");
     Require(File.Exists(asrPython) && File.Exists(ttsPython), "语音工厂初始化时不应修改或启动外置 Python 文件。");
     await service!.DisposeAsync();
+
+    var lowMemoryProbeCalls = 0;
+    var lowMemoryService = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
+        packageRoot, packageIdentityVerified: true, new ModelBroker(), () =>
+        {
+            lowMemoryProbeCalls++;
+            return new SystemMemorySnapshot(10_751, 32_000);
+        }, out var lowMemoryStatus);
+    Require(lowMemoryService is not null && lowMemoryStatus.Contains("已配置", StringComparison.Ordinal),
+        "固定 TTS RAM 门槛不应导致语音服务在启动时预加载模型。");
+    LowSystemMemoryException? lowMemoryFailure = null;
+    try
+    {
+        _ = await lowMemoryService!.SynthesizeChineseWavAsync("合成测试", CancellationToken.None);
+    }
+    catch (LowSystemMemoryException exception)
+    {
+        lowMemoryFailure = exception;
+    }
+    Require(lowMemoryFailure is not null && lowMemoryProbeCalls == 1
+        && lowMemoryFailure.Message.Contains("未启动", StringComparison.Ordinal),
+        "TTS可用RAM低于固定门槛时必须在启动工作进程前抛出可触发系统语音回退的低内存错误。");
+    await lowMemoryService!.DisposeAsync();
 
     var trailingSeparatorService = VoiceInferenceService.TryCreateForInstallation(environmentRoot, modelsRoot,
         packageRoot + Path.DirectorySeparatorChar, packageIdentityVerified: true, new ModelBroker(), out var trailingStatus);
@@ -8334,6 +8358,12 @@ static void CheckSystemMemoryAdmissionRequiresReserve()
         && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(new SystemMemorySnapshot(4_095, 32_000))
         && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(null),
         "运行期间系统可用内存低于4 GiB或读数缺失时仍通过保护检查。");
+    Require(TtsModelMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(10_752, 32_000), true, 10_752).Allowed
+        && !TtsModelMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(10_751, 32_000), true, 10_752).Allowed
+        && TtsModelMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(4_096, 32_000), false, 10_752).Allowed
+        && !TtsModelMemoryAdmissionPolicy.Evaluate(new SystemMemorySnapshot(4_095, 32_000), false, 10_752).Allowed
+        && !TtsModelMemoryAdmissionPolicy.Evaluate(null, true, 10_752).Allowed,
+        "TTS启动门槛、已加载模型余量或缺失RAM读数的失败关闭合同错误。");
 }
 
 static async Task CheckGpuPreflightBlocksBeforeRuntimeLaunchAsync(string root)

@@ -581,7 +581,8 @@
       "status": "downloaded_and_verified",
       "notes": "官方 CustomVoice 0.6B / 12Hz 候选，支持中文内置音色；固定 revision 文件树列出11个推理必需文件。需完成本机速度、音频质量和显存/内存评估后再决定是否替换 Base 变体。",
       "localDirectory": "speech/tts/qwen3-tts-12hz-0.6b-customvoice/85e237c12c027371202489a0ec509ded67b5e4b5",
-      "requiredForP0": true
+      "requiredForP0": true,
+      "minimumAvailableRamMiB": 10752
     },
     {
       "id": "mimo-v2.6-distill-qwen-9b-gguf-q8-0",

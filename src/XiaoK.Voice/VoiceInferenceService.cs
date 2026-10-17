@@ -75,7 +75,8 @@ public sealed class VoiceInferenceService : IAsyncDisposable
         {
             var root = Path.GetFullPath(workspaceRoot);
             return TryCreateFromLayout(Path.Combine(root, "model-lock", "models.lock.json"), root,
-                Path.Combine(root, "models"), voiceEnvironmentRoot, workerScriptPath, root, broker, out status);
+                Path.Combine(root, "models"), voiceEnvironmentRoot, workerScriptPath, root, broker,
+                WindowsSystemMemoryProbe.Read, out status);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
                                    or ArgumentException or NotSupportedException)
@@ -87,8 +88,15 @@ public sealed class VoiceInferenceService : IAsyncDisposable
     /// <summary>Creates installed runtimes from the signed package manifest and configured external roots.</summary>
     public static VoiceInferenceService? TryCreateForInstallation(string voiceEnvironmentRoot, string modelsRoot,
         string packageRoot, bool packageIdentityVerified, ModelBroker broker, out string status)
+        => TryCreateForInstallation(voiceEnvironmentRoot, modelsRoot, packageRoot, packageIdentityVerified,
+            broker, WindowsSystemMemoryProbe.Read, out status);
+
+    internal static VoiceInferenceService? TryCreateForInstallation(string voiceEnvironmentRoot, string modelsRoot,
+        string packageRoot, bool packageIdentityVerified, ModelBroker broker,
+        Func<SystemMemorySnapshot?> systemMemoryProbe, out string status)
     {
         ArgumentNullException.ThrowIfNull(broker);
+        ArgumentNullException.ThrowIfNull(systemMemoryProbe);
         if (!packageIdentityVerified)
             return Missing("语音：未确认 MSIX 安装身份；语音请求已关闭，麦克风未采集。", out status);
         try
@@ -96,7 +104,7 @@ public sealed class VoiceInferenceService : IAsyncDisposable
             var package = Path.GetFullPath(packageRoot);
             return TryCreateFromLayout(Path.Combine(package, "model-lock", "models.lock.json"), package,
                 modelsRoot, voiceEnvironmentRoot, Path.Combine(package, "voice_worker.py"), package, broker,
-                out status, allowedPackageRootReparse: package);
+                systemMemoryProbe, out status, allowedPackageRootReparse: package);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
                                    or ArgumentException or NotSupportedException)
@@ -107,7 +115,8 @@ public sealed class VoiceInferenceService : IAsyncDisposable
 
     private static VoiceInferenceService? TryCreateFromLayout(string modelsLockPath, string manifestRoot,
         string modelsRoot, string voiceEnvironmentRoot, string workerScriptPath, string workerRoot,
-        ModelBroker broker, out string status, string? allowedPackageRootReparse = null)
+        ModelBroker broker, Func<SystemMemorySnapshot?> systemMemoryProbe, out string status,
+        string? allowedPackageRootReparse = null)
     {
         try
         {
@@ -140,8 +149,8 @@ public sealed class VoiceInferenceService : IAsyncDisposable
             var ttsDefinition = ReadDefinition(lockPath, lockRoot, modelRoot, environmentRoot,
                 ttsPython, allowedWorkerRoot, worker, "qwen3-tts-12hz-0.6b-customvoice",
                 "85e237c12c027371202489a0ec509ded67b5e4b5", packageRootReparse);
-            var asr = new PythonVoiceModelRuntime("asr", asrDefinition);
-            var tts = new PythonVoiceModelRuntime("tts", ttsDefinition);
+            var asr = new PythonVoiceModelRuntime("asr", asrDefinition, systemMemoryProbe);
+            var tts = new PythonVoiceModelRuntime("tts", ttsDefinition, systemMemoryProbe);
             status = "本地 ASR/TTS 工作进程已配置（CPU 按需加载，空闲两分钟卸载，切换模型时立即回收）；开发版冷/暖合成往返通过，麦克风未采集，设备与语音质量仍待验收。";
             return new VoiceInferenceService(broker, asr, tts);
         }
@@ -294,7 +303,17 @@ public sealed class VoiceInferenceService : IAsyncDisposable
         EnsureNoReparseComponents(pythonPath);
         EnsureNoReparseComponents(workerPath, allowedPackageRootReparse);
         if (!File.Exists(pythonPath) || !File.Exists(workerPath)) throw new FileNotFoundException("语音运行时文件缺失。");
-        return new VoiceModelDefinition(modelId, modelDirectory, pythonPath, workerPath, files);
+        var minimumAvailableRamMiB = 0L;
+        if (modelId == "qwen3-tts-12hz-0.6b-customvoice")
+        {
+            if (!selected.TryGetProperty("minimumAvailableRamMiB", out var minimumRam)
+                || minimumRam.ValueKind != JsonValueKind.Number || !minimumRam.TryGetInt64(out minimumAvailableRamMiB)
+                || minimumAvailableRamMiB < TtsModelMemoryAdmissionPolicy.MinimumStartupAvailableRamMiB)
+                throw new InvalidDataException("TTS模型锁缺少有效的启动RAM准入阈值。未启动模型。");
+        }
+
+        return new VoiceModelDefinition(modelId, modelDirectory, pythonPath, workerPath, files,
+            minimumAvailableRamMiB);
     }
 
     private static string GetString(JsonElement element, string name) =>
@@ -338,9 +357,23 @@ public sealed class VoiceInferenceService : IAsyncDisposable
 
 internal sealed record VoiceModelFile(string Name, long Size, string Sha256);
 internal sealed record VoiceModelDefinition(string ModelId, string ModelDirectory, string PythonPath,
-    string WorkerPath, IReadOnlyList<VoiceModelFile> Files);
+    string WorkerPath, IReadOnlyList<VoiceModelFile> Files, long MinimumAvailableRamMiB);
 
-internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition definition) : IIdleRetainedModelRuntime
+internal static class TtsModelMemoryAdmissionPolicy
+{
+    // Historical CPU runs observed up to 6,167 MiB system-RAM reduction while TTS was loaded;
+    // add the shared 4 GiB runtime reserve and a 489 MiB margin, rounded to 10.5 GiB.
+    public const long MinimumStartupAvailableRamMiB = 10_752;
+
+    public static SystemMemoryAdmission Evaluate(SystemMemorySnapshot? snapshot, bool modelStarting,
+        long configuredStartupMinimumMiB) =>
+        SystemMemoryAdmissionPolicy.Evaluate(snapshot, modelStarting
+            ? configuredStartupMinimumMiB
+            : SystemMemoryAdmissionPolicy.MinimumRuntimeReserveMiB);
+}
+
+internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition definition,
+    Func<SystemMemorySnapshot?> systemMemoryProbe) : IIdleRetainedModelRuntime
 {
     private const int MaximumProtocolLineCharacters = 20 * 1024 * 1024;
     private static readonly TimeSpan IdleUnloadDelay = TimeSpan.FromMinutes(2);
@@ -367,10 +400,21 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
             if (_disposed) throw new ObjectDisposedException(nameof(PythonVoiceModelRuntime));
             if (_leases != 0) throw new InvalidOperationException("语音模型租约不可重入。");
             CancelIdleUnload();
-            if (_process is null || _process.HasExited)
+            var needsStart = _process is null || _process.HasExited;
+            if (task == "tts")
+            {
+                try { EnsureTtsMemoryAdmission(modelStarting: needsStart); }
+                catch (LowSystemMemoryException) when (!needsStart)
+                {
+                    await StopProcessLockedAsync().ConfigureAwait(false);
+                    throw;
+                }
+            }
+            if (needsStart)
             {
                 await StopProcessLockedAsync().ConfigureAwait(false);
                 await VerifyFilesAsync(cancellationToken).ConfigureAwait(false);
+                EnsureTtsMemoryAdmission(modelStarting: true);
                 await StartProcessLockedAsync(cancellationToken).ConfigureAwait(false);
             }
             _leases = 1;
@@ -418,7 +462,7 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
             wavBase64 = Convert.ToBase64String(wav)
         }, cancellationToken).ConfigureAwait(false);
         if (!response.RootElement.GetProperty("ok").GetBoolean())
-            throw new VoiceWorkerException(ReadErrorCode(response.RootElement));
+            throw await CreateWorkerFailureAsync(response.RootElement).ConfigureAwait(false);
         return new SpeechRecognition(
             response.RootElement.GetProperty("text").GetString() ?? string.Empty,
             response.RootElement.GetProperty("language").GetString() ?? string.Empty);
@@ -428,7 +472,7 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
     {
         var response = await SendRequestAsync(new { command = "synthesize", text }, cancellationToken).ConfigureAwait(false);
         if (!response.RootElement.GetProperty("ok").GetBoolean())
-            throw new VoiceWorkerException(ReadErrorCode(response.RootElement));
+            throw await CreateWorkerFailureAsync(response.RootElement).ConfigureAwait(false);
         var encoded = response.RootElement.GetProperty("wavBase64").GetString() ?? string.Empty;
         byte[] wav;
         try { wav = Convert.FromBase64String(encoded); }
@@ -529,16 +573,33 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
                 throw new VoiceWorkerException("VOICE_WORKER_START_FAILED");
             using var ready = JsonDocument.Parse(readyLine, new JsonDocumentOptions { MaxDepth = 4 });
             if (!ready.RootElement.TryGetProperty("type", out var type) || type.GetString() != "ready"
-                || !ready.RootElement.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
+                || !ready.RootElement.TryGetProperty("ok", out var ok))
                 throw new VoiceWorkerException("VOICE_MODEL_LOAD_FAILED");
+            if (!ok.GetBoolean()) throw CreateWorkerFailure(ready.RootElement);
+            if (task == "tts" && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(systemMemoryProbe()))
+                throw new LowSystemMemoryException("TTS模型加载后系统可用内存低于4,096 MiB或读数不可用；工作进程已停止。");
         }
-        catch
+        catch (Exception exception)
         {
+            var translateLowMemory = task == "tts"
+                && exception is not (OperationCanceledException or LowSystemMemoryException)
+                && !SystemMemoryAdmissionPolicy.HasRuntimeReserve(systemMemoryProbe());
             if (_process is null) _process = process;
             if (_job is null) _job = job;
             await StopProcessLockedAsync().ConfigureAwait(false);
+            if (translateLowMemory)
+                throw new LowSystemMemoryException("TTS工作进程启动后系统可用内存低于4,096 MiB或读数不可用；工作进程已停止。");
             throw;
         }
+    }
+
+    private void EnsureTtsMemoryAdmission(bool modelStarting)
+    {
+        if (task != "tts") return;
+        var admission = TtsModelMemoryAdmissionPolicy.Evaluate(systemMemoryProbe(), modelStarting,
+            definition.MinimumAvailableRamMiB);
+        if (!admission.Allowed)
+            throw new LowSystemMemoryException($"TTS模型资源准入失败：{admission.Reason}未启动或继续使用本地模型。");
     }
 
     private async Task VerifyFilesAsync(CancellationToken cancellationToken)
@@ -620,6 +681,18 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
         await _gate.WaitAsync().ConfigureAwait(false);
         try { await StopProcessLockedAsync().ConfigureAwait(false); }
         finally { _gate.Release(); }
+    }
+
+    private async Task<Exception> CreateWorkerFailureAsync(JsonElement response)
+    {
+        var failure = CreateWorkerFailure(response);
+        if (failure is LowSystemMemoryException)
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try { await StopProcessLockedAsync().ConfigureAwait(false); }
+            finally { _gate.Release(); }
+        }
+        return failure;
     }
 
     private void ScheduleIdleUnload()
@@ -714,6 +787,14 @@ internal sealed class PythonVoiceModelRuntime(string task, VoiceModelDefinition 
             return "INFERENCE_FAILED";
         var value = code.GetString() ?? "INFERENCE_FAILED";
         return value.Length <= 64 ? value : value[..64];
+    }
+
+    private static Exception CreateWorkerFailure(JsonElement response)
+    {
+        var code = ReadErrorCode(response);
+        return code == "LOW_SYSTEM_MEMORY"
+            ? new LowSystemMemoryException("语音工作进程检测到系统内存不足；本次模型操作已停止。")
+            : new VoiceWorkerException(code);
     }
 
     private static KillOnCloseJobHandle CreateKillOnCloseJob()

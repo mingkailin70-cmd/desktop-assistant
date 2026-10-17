@@ -958,8 +958,9 @@ internal sealed class AssistantRuntime : IAsyncDisposable
         catch (Exception ex) when (_systemChineseSpeech is not null
                                    && IsSystemChineseSpeechFallbackEligible(ex))
         {
+            var fallbackWav = await _systemChineseSpeech.SynthesizeWavAsync(text, cancellationToken).ConfigureAwait(true);
             Interlocked.Exchange(ref _systemChineseSpeechFallbackUsed, 1);
-            return await _systemChineseSpeech.SynthesizeWavAsync(text, cancellationToken).ConfigureAwait(true);
+            return fallbackWav;
         }
     }
 
